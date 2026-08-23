@@ -22,13 +22,13 @@ mais o site antigo em Hugo, então algumas coisas mudaram de lugar.
 Dentro do Codespace (ou do seu terminal local), na raiz do projeto, rode:
 
 ```bash
-quarto preview --port 4848
+quarto preview --port 2222
 ```
 
 - No Codespaces, uma notificação vai aparecer no canto inferior direito
-  oferecendo para abrir a porta `4848` no navegador — clique em **Open in
+  oferecendo para abrir a porta `2222` no navegador — clique em **Open in
   Browser**. Se a notificação não aparecer, abra a aba **PORTS** no painel
-  inferior do VS Code e clique no ícone de globo ao lado da porta `4848`.
+  inferior do VS Code e clique no ícone de globo ao lado da porta `2222`.
 - Localmente, o próprio `quarto preview` já abre o navegador sozinho.
 - O preview atualiza automaticamente sempre que você salva um arquivo
   (`Ctrl+S` / `Cmd+S`) — não precisa parar e rodar de novo.

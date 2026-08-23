@@ -1,19 +1,23 @@
 #!/bin/bash
 #
 # Substitui o fluxo antigo (Hugo) por Quarto:
-#   --render  -> equivalente a `hugo` (build do site) -> `quarto render`
-#   --update  -> git add + commit + push, depois entra no servidor via SSH
-#                e faz `git pull` na pasta do site (antes "Hugo", agora
-#                "homepage")
+#   --render         -> equivalente a `hugo` (build do site) -> `quarto render`
+#   --preview        -> equivalente a `hugo server` -> `quarto preview`, na
+#                       porta 2222
+#   --update-server  -> entra no servidor via SSH e atualiza a pasta do site
+#                       (antes "Hugo", agora "homepage") com o que estiver na
+#                       branch main
+#
+# A main agora é protegida no GitHub: merges acontecem por Pull Request pela
+# própria interface do GitHub, não por push direto daqui. Este script não
+# faz mais commit/push — só builda localmente e/ou puxa a main já mesclada
+# no servidor.
 #
 # Uso:
 #   ./deploy.sh --render                  # só renderiza o site localmente
-#   ./deploy.sh --update                  # commit+push+pull remoto (usa uma
-#                                          # mensagem de commit padrão com a
-#                                          # data/hora)
-#   ./deploy.sh --update "mensagem"       # commit+push+pull remoto com
-#                                          # mensagem de commit específica
-#   ./deploy.sh --render --update         # renderiza e, se der certo, publica
+#   ./deploy.sh --preview                 # sobe o preview local na porta 2222
+#   ./deploy.sh --update-server           # atualiza o servidor com a main
+#   ./deploy.sh --render --update-server  # renderiza local e atualiza o servidor
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -39,36 +43,25 @@ do_render() {
   return 1
 }
 
-do_update() {
-  local message="${1:-"Update $(date '+%Y-%m-%d %H:%M')"}"
+do_preview() {
+  echo "👀 Subindo o preview local (porta 2222)..."
+  quarto preview --port 2222
+}
 
-  echo "📦 git add..."
-  git add -A
-
-  if git diff --cached --quiet; then
-    echo "ℹ️  Nada para commitar."
-  else
-    echo "📝 git commit -m \"$message\"..."
-    git commit -m "$message"
-  fi
-
-  echo "⬆️  git push..."
-  git push
-
-  echo "🌐 Atualizando o servidor ($SSH_HOST, pasta $REMOTE_DIR)..."
-  ssh "$SSH_HOST" -t "cd $REMOTE_DIR; git pull"
-
+do_update_server() {
+  echo "🌐 Atualizando o servidor ($SSH_HOST, pasta $REMOTE_DIR) com a main..."
+  ssh "$SSH_HOST" -t "cd $REMOTE_DIR && git checkout main && git pull origin main"
   echo "✅ Publicado."
 }
 
 if [[ $# -eq 0 ]]; then
-  echo "Uso: $0 [--render] [--update [\"mensagem de commit\"]]"
+  echo "Uso: $0 [--render] [--preview] [--update-server]"
   exit 1
 fi
 
 RENDER=false
-UPDATE=false
-COMMIT_MESSAGE=""
+PREVIEW=false
+UPDATE_SERVER=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -76,15 +69,13 @@ while [[ $# -gt 0 ]]; do
       RENDER=true
       shift
       ;;
-    --update)
-      UPDATE=true
+    --preview)
+      PREVIEW=true
       shift
-      # a mensagem de commit é opcional: só consome o próximo argumento se
-      # ele não for outra flag
-      if [[ $# -gt 0 && "$1" != --* ]]; then
-        COMMIT_MESSAGE="$1"
-        shift
-      fi
+      ;;
+    --update-server)
+      UPDATE_SERVER=true
+      shift
       ;;
     *)
       echo "Opção desconhecida: $1"
@@ -97,6 +88,12 @@ if [[ "$RENDER" == true ]]; then
   do_render
 fi
 
-if [[ "$UPDATE" == true ]]; then
-  do_update "$COMMIT_MESSAGE"
+if [[ "$UPDATE_SERVER" == true ]]; then
+  do_update_server
+fi
+
+# --preview por último e sempre em primeiro plano: fica bloqueado servindo
+# até Ctrl+C, então não faz sentido combinar com passos que viriam depois.
+if [[ "$PREVIEW" == true ]]; then
+  do_preview
 fi

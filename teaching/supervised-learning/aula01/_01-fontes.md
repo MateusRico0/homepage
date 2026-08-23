@@ -74,7 +74,7 @@
 ---
 
 ### Fonte 5: Bishop (2006, PRML), §1.5.2–1.5.3, pp. 41–42
-**Uso pretendido:** perda esperada com matriz de custo assimétrica; opção de rejeição (Bloco 6).
+**Uso pretendido:** perda esperada com matriz de custo assimétrica; opção de rejeição (Bloco 7).
 
 **Trecho:**
 > "We can formalize such issues through the introduction of a loss
@@ -89,7 +89,7 @@
 ---
 
 ### Fonte 6: Bishop & Bishop (2024), §5.2.1–5.2.3, pp. 139–143
-**Uso pretendido:** tratamento moderno da taxa de má-classificação e da perda esperada (Bloco 6).
+**Uso pretendido:** tratamento moderno da taxa de má-classificação e da perda esperada (Bloco 7).
 
 **Trecho:**
 > "Clearly, to minimize p(mistake) we should arrange that each x is
@@ -105,7 +105,7 @@
 ---
 
 ### Fonte 7: Bishop & Bishop (2024), §5.2.5, pp. 147–148
-**Uso pretendido:** matriz de confusão, precisão, recall, taxa de falso positivo (Bloco 6). *Resolvido e escrito: este conteúdo estava na leitura obrigatória mas não tinha sido escrito na aula — já está no `02-aula.qmd`, dentro do bloco "Custo e limiar" (seção "Matriz de confusão, precisão, recall e a curva ROC").*
+**Uso pretendido:** matriz de confusão, precisão, recall, taxa de falso positivo (Bloco 7). *Escrito em 2026-08-23 (achado numa auditoria do planejamento: tinha ficado de fora de todas as versões anteriores do arquivo, apesar de constar como "resolvido" aqui) — está no `index.qmd`, seção "Teoria da Decisão: Custo, Avaliação e Rejeição" § "Além da acurácia: matriz de confusão, precisão e recall".*
 
 **Trecho:**
 > "We can see that accuracy can be misleading if there are strongly
@@ -121,7 +121,7 @@
 ---
 
 ### Fonte 8: Bishop & Bishop (2024), §5.2.6, pp. 148–150
-**Uso pretendido:** curva ROC, replotada a partir do mesmo sweep de limiar do Bloco 1 (Bloco 6). Mesmo status de resolução da Fonte 7.
+**Uso pretendido:** curva ROC, replotada a partir do mesmo sweep de limiar do Bloco 1 (Bloco 7). Mesmo status de resolução da Fonte 7 — escrito em 2026-08-23, seção "A curva ROC: o mesmo sweep do Bloco 1, replotado".
 
 **Trecho:**
 > "As the decision boundary [...] is moved from −∞ to ∞, the ROC curve is

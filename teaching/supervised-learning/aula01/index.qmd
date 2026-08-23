@@ -1494,6 +1494,374 @@ plt.tight_layout()
 plt.show()
 ```
 
+# Teoria da Decisão: Custo, Avaliação e Rejeição
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltamos ao cenário de duas classes dos Blocos 1–4 — as populações A e B, a fronteira $T_{CONJ}$ que corta no cruzamento das conjuntas $\pi_A f_A(x)$ e $\pi_B f_B(x)$. Até aqui, cada erro contou como um ponto: um alarme falso e um escape pesavam exatamente o mesmo na conta. Essa suposição — chamada **perda 0-1** — foi conveniente para introduzir a ideia de fronteira ótima, mas raramente é verdadeira na prática. Deixar passar uma transação fraudulenta não custa o mesmo que investigar uma transação legítima por engano; deixar passar um tumor não custa o mesmo que pedir um exame extra. Esta seção trata do que muda quando os dois erros deixam de pesar igual, de como avaliar um classificador além da contagem bruta de acertos, e de uma terceira opção — não decidir — que a perda 0-1 nunca permitiu considerar.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+Voltamos às populações A e B dos Blocos 1–4. Até aqui, todo erro pesou o mesmo (**perda 0-1**).
+
+**Três perguntas que faltam:**
+
+1. E se um erro custar mais que o outro?
+2. "95% de acurácia" é sempre uma boa notícia?
+3. Por que decidir sempre, mesmo quando os dados não dão certeza nenhuma?
+
+:::
+
+## Custo assimétrico: nem todo erro pesa o mesmo
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A ideia central é substituir a contagem de erros por uma **função de perda** $L(\text{decisão}, \text{classe verdadeira})$, um número que resume o prejuízo de cada decisão possível (PRML §1.5.2, p. 41; DLFC §5.2.1–5.2.3, pp. 139–143). Com duas classes e duas decisões, a perda tem quatro entradas, mas só duas importam quando os acertos não custam nada: $C_I$, o custo de um alarme falso (decidir B quando a verdade é A), e $C_{II}$, o custo de um escape (decidir A quando a verdade é B).
+
+A perda esperada total, somada sobre a população inteira, é
+
+$$
+R(t) = C_I \int_t^{\infty} \pi_A f_A(x)\, dx \;+\; C_{II} \int_{-\infty}^{t} \pi_B f_B(x)\, dx .
+$$
+
+Minimizar $R(t)$ em relação ao corte $t$ leva à mesma lógica do Bloco 4, só que agora ponderada pelo custo: o corte ótimo cai exatamente onde as duas *perdas marginais* se equilibram,
+
+$$
+C_I\, \pi_A f_A(t) \;=\; C_{II}\, \pi_B f_B(t).
+$$
+
+Quando $C_I = C_{II}$, essa equação é idêntica à do Bloco 4 e devolve $T_{CONJ}$. A perda 0-1 não é um caso mais simples — é o caso particular em que os dois custos coincidem por suposição, quase nunca por justificativa.
+
+**Exemplo concreto**, o mesmo do Exercício 3: suponha que deixar passar uma anomalia real (escape, Tipo II) custe **10 vezes mais** que investigar um alarme falso (Tipo I) — $C_{II}/C_I = 10$. A figura abaixo mostra as duas curvas ponderadas pelo custo e o novo corte $T_{custo}$, ao lado do antigo $T_{CONJ}$.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Função de perda** $L(\text{decisão}, \text{verdade})$ — resume o prejuízo de cada erro.
+
+$$ C_I \pi_A f_A(t) = C_{II}\, \pi_B f_B(t) \quad\Leftarrow\quad \text{corte ótimo} $$
+
+::: {.fragment}
+$C_I = C_{II}$ $\Rightarrow$ recupera $T_{CONJ}$ do Bloco 4. Perda 0-1 é o caso particular, não o caso geral.
+:::
+
+::: {.fragment}
+**Exemplo:** escapar uma anomalia custa **10×** mais que um alarme falso.
+:::
+
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+LAMBDA = 10.0  # custo de um escape (Tipo II) é LAMBDA vezes o de um alarme falso (Tipo I)
+T_COST = cruzamento(
+    lambda x: PI_A * DIST_A.pdf(x) - LAMBDA * PI_B * DIST_B.pdf(x), 0.30, 0.70
+)
+
+fig, ax = plt.subplots(figsize=(6, 3.8))
+
+ax.plot(grade, PI_A * DIST_A.pdf(grade), color=COR_A, lw=2.6,
+        label=r"$\pi_A f_A(x)$  (peso de um alarme falso)")
+ax.plot(grade, LAMBDA * PI_B * DIST_B.pdf(grade), color=COR_B, lw=2.6,
+        label=fr"${LAMBDA:.0f}\times\pi_B f_B(x)$  (peso de um escape)")
+
+ax.axvline(T_CONJ, color=COR_NEU, lw=1.8, ls=":",
+           label=f"$T_{{CONJ}} = {T_CONJ:.2f}$  (custo 1:1)")
+ax.axvline(T_COST, color=COR_LIM, lw=2.4, ls="--",
+           label=f"$T_{{custo}} = {T_COST:.2f}$  (custo 1:10)")
+
+ax.set_xlabel("$x$")
+ax.set_ylabel("peso do erro")
+ax.set_title("Ponderar o escape 10× mais desloca o corte para a esquerda")
+ax.legend(loc="upper left", fontsize=8.2)
+ax.set_xlim(0, 1)
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O corte se move de $T_{CONJ} \approx 0{,}72$ para $T_{custo} \approx 0{,}53$ — mais à esquerda, mais perto do território de B. Isso é exatamente o que se espera: se um escape agora custa dez vezes mais, o modelo deve ficar mais disposto a arriscar um alarme falso para evitá-lo. Note que o custo puxou a fronteira de volta em direção a $T_{COND} \approx 0{,}47$ (o cruzamento ingênuo das condicionais do Bloco 1) — sem coincidir com ele: a assimetria de custo (fator 10) compensa parte da assimetria de frequência (fator 19), mas não toda.
+
+:::
+
+## Além da acurácia: matriz de confusão, precisão e recall
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Mudar o corte muda os números — mas "número de erros" já não é a métrica certa para comunicar o resultado, porque ela trata os dois tipos de erro como intercambiáveis (voltamos à perda 0-1 pela porta dos fundos se resumirmos tudo a "acurácia"). A ferramenta padrão é a **matriz de confusão** (DLFC §5.2.5, pp. 147–148), que separa os quatro desfechos possíveis. Convencionamos B como a classe **positiva** (é a classe rara, a "alternativa" já fixada no Bloco 1):
+
+| | previsto A | previsto B |
+|---|---|---|
+| **real A** | verdadeiro negativo (VN) | falso positivo (FP) — alarme falso |
+| **real B** | falso negativo (FN) — escape | verdadeiro positivo (VP) |
+
+Dela derivam três resumos, cada um respondendo uma pergunta diferente:
+
+$$
+\text{precisão} = \frac{VP}{VP+FP}, \qquad
+\text{recall} = \frac{VP}{VP+FN}, \qquad
+\text{FPR} = \frac{FP}{FP+VN}.
+$$
+
+**Precisão** responde "dos alarmes que o modelo disparou, quantos eram reais?". **Recall** responde "das anomalias reais, quantas o modelo pegou?" — é o mesmo complemento da taxa de escape (Tipo II) que já usamos desde o Bloco 1. Nenhuma das duas, sozinha, resume o desempenho; um modelo que nunca dispara alarme tem precisão indefinida e recall zero, e um modelo que dispara sempre tem recall $100\%$ e precisão igual à prevalência de B.
+
+**O paradoxo da acurácia.** Com $\pi_A=0{,}95$, um classificador **ingênuo** que sempre declara "A", sem olhar para $x$, já acerta $95\%$ das vezes (DLFC ilustra o mesmo ponto com um exemplo de triagem de câncer em que "não fazer nada" atinge $99{,}9\%$ de acurácia — §5.2.5, p. 148). Isso não é um classificador útil; é um classificador que nunca encontra uma única anomalia. A acurácia, sozinha, não distingue os dois casos.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Matriz de confusão** — positivo = classe B (a rara):
+
+| | previsto A | previsto B |
+|---|---|---|
+| real A | VN | FP (alarme falso) |
+| real B | FN (escape) | VP |
+
+$$ \text{precisão}=\frac{VP}{VP+FP} \qquad \text{recall}=\frac{VP}{VP+FN} $$
+
+::: {.fragment}
+**Paradoxo:** com $\pi_A=95\%$, um classificador que sempre diz "A" já acerta $95\%$ — e nunca encontra uma anomalia.
+:::
+
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+def confusao(t):
+    VP = int(np.sum(xB > t)); FN = int(np.sum(xB <= t))
+    FP = int(np.sum(xA > t)); VN = int(np.sum(xA <= t))
+    return VP, FN, FP, VN
+
+VP, FN, FP, VN = confusao(T_CONJ)
+acc = (VP + VN) / (VP + FN + FP + VN)
+prec = VP / (VP + FP)
+rec = VP / (VP + FN)
+acc_ingenua = N_A / (N_A + N_B)
+
+fig, axes = plt.subplots(1, 2, figsize=(8.4, 3.6))
+
+ax = axes[0]
+mat = np.array([[VN, FP], [FN, VP]])
+ax.imshow(mat, cmap="Blues", vmin=0, vmax=mat.max())
+for (i, j), v in np.ndenumerate(mat):
+    ax.text(j, i, str(v), ha="center", va="center", fontsize=13,
+            fontweight="bold", color="white" if v > mat.max() * 0.5 else "black")
+ax.set_xticks([0, 1]); ax.set_xticklabels(["previsto A", "previsto B"])
+ax.set_yticks([0, 1]); ax.set_yticklabels(["real A", "real B"])
+ax.set_title(f"Matriz de confusão em $t=T_{{CONJ}}={T_CONJ:.2f}$")
+
+ax = axes[1]
+rotulos = ["acurácia", "precisão", "recall", "sempre 'A'"]
+valores = [acc, prec, rec, acc_ingenua]
+cores = [COR_LIM, COR_B, COR_B, COR_NEU]
+ax.bar(rotulos, valores, color=cores, alpha=0.85)
+for i, v in enumerate(valores):
+    ax.text(i, v + 0.02, f"{v:.1%}", ha="center", fontweight="bold", fontsize=9)
+ax.set_ylim(0, 1.08)
+ax.set_title("Acurácia mal bate o classificador ingênuo")
+plt.setp(ax.get_xticklabels(), rotation=15, ha="right")
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Os números confirmam o paradoxo com a própria amostra da aula: em $t=T_{CONJ}$, a acurácia é $95{,}6\%$ — só $0{,}6$ ponto percentual acima do classificador ingênuo — mas o **recall é $34\%$**: duas em cada três anomalias reais escapam pela fronteira teoricamente ótima. Isso não é uma contradição com o Bloco 4 (a fronteira continua sendo a que minimiza o erro esperado *sob perda 0-1 e as priors corretas*); é uma evidência de que "minimizar o erro esperado" e "ter um bom detector de anomalias" são objetivos diferentes quando as classes são desbalanceadas, e de que a acurácia esconde essa diferença.
+
+:::
+
+::: {.callout-tip}
+## Se a acurácia de 95,6% mal supera o classificador ingênuo, a fronteira ótima do Bloco 4 está errada?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Acurácia, desbalanceamento e o paradoxo da acurácia
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Uma acurácia de $95\%$ garante que o classificador é útil para
+   detectar a classe rara.
+b. O recall e a taxa de erro Tipo II (escape) são complementares:
+   $\text{recall} = 1 - \text{Tipo II}$.
+c. Se o corte $T_{CONJ}$ minimiza o erro esperado sob perda 0-1 e
+   prioris corretas, ele necessariamente maximiza o recall também.
+d. Precisão e recall podem, ambos, cair ao mesmo tempo que a acurácia
+   sobe, quando as classes são muito desbalanceadas.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Acurácia, desbalanceamento e o paradoxo da acurácia — Resposta
+
+::: {.callout-tip}
+a. **Falso** — um classificador que sempre prevê a classe majoritária
+   também tem acurácia alta e recall zero.
+b. **Verdadeiro** — recall é a fração de B corretamente detectada;
+   Tipo II é a fração de B que escapa. Somam 1 por definição.
+c. **Falso** — $T_{CONJ}$ minimiza o erro *ponderado pela frequência
+   das classes*, não o recall; com $\pi_B$ pequeno, isso tolera um
+   recall baixo em troca de poucos alarmes falsos sobre a classe
+   majoritária.
+d. **Verdadeiro** — é exatamente o mecanismo do paradoxo: a classe
+   majoritária domina a contagem de acertos.
+:::
+
+:::
+
+## A curva ROC: o mesmo sweep do Bloco 1, replotado
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Precisão e recall descrevem **um** corte $t$. Para comparar cortes entre si — ou para escolher um sem se comprometer de antemão com um custo específico — varremos $t$ de $0$ a $1$ e plotamos a taxa de falso positivo (FPR, eixo $x$) contra o recall (TPR, eixo $y$) em cada ponto. O resultado é a **curva ROC** (DLFC §5.2.6, pp. 148–150), e ela não é um objeto novo: é o mesmo par de curvas Tipo I/Tipo II do Bloco 1 (`tipo1`, `tipo2` na figura daquele bloco), só que uma plotada contra a outra em vez de contra $t$.
+
+A diagonal $\text{FPR}=\text{TPR}$ é o desempenho de um classificador que decide por sorteio, ignorando $x$; qualquer curva acima dela discrimina melhor que o acaso. A **área sob a curva (AUC)** resume a curva inteira num número: $0{,}5$ é o acaso, $1{,}0$ é a separação perfeita. Uma propriedade importante, e contraintuitiva na primeira vez que se vê: a curva ROC **não depende da priori** $\pi_A,\pi_B$ — ela é construída inteiramente a partir das condicionais $f_A, f_B$. Mudar o desbalanceamento das classes move o ponto de operação ótimo *sobre* a curva, mas não muda a curva em si.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**ROC** = mesmo sweep de $t$ do Bloco 1, replotado: FPR (eixo $x$) vs. recall (eixo $y$).
+
+::: {.fragment}
+Diagonal = acaso (AUC $=0{,}5$). Separação perfeita = AUC $=1{,}0$.
+:::
+
+::: {.fragment}
+**Propriedade:** a curva ROC **não depende da priori** — só das condicionais $f_A,f_B$. A priori move o *ponto de operação*, não a curva.
+:::
+
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fpr_curva = tipo1          # já calculado no Bloco 1: 1 - DIST_A.cdf(ts)
+tpr_curva = 1 - tipo2       # tipo2 = DIST_B.cdf(ts)  =>  recall = 1 - tipo2
+ordem = np.argsort(fpr_curva)
+auc = np.trapezoid(tpr_curva[ordem], fpr_curva[ordem])
+
+VP2, FN2, FP2, VN2 = confusao(T_COST)
+fpr_conj_emp, tpr_conj_emp = FP / (FP + VN), rec
+fpr_cost_emp, tpr_cost_emp = FP2 / (FP2 + VN2), VP2 / (VP2 + FN2)
+
+fig, ax = plt.subplots(figsize=(4.8, 4.8))
+ax.plot(fpr_curva[ordem], tpr_curva[ordem], color=COR_LIM, lw=2.6,
+        label=f"ROC (AUC$={auc:.3f}$)")
+ax.plot([0, 1], [0, 1], color=COR_NEU, lw=1.2, ls=":", label="acaso (AUC$=0{,}5$)")
+ax.scatter([fpr_conj_emp], [tpr_conj_emp], color=COR_A, s=70, zorder=5,
+           label=f"$T_{{CONJ}}$ (recall={tpr_conj_emp:.0%})")
+ax.scatter([fpr_cost_emp], [tpr_cost_emp], color=COR_B, s=70, zorder=5,
+           label=f"$T_{{custo}}$ (recall={tpr_cost_emp:.0%})")
+
+ax.set_xlabel("taxa de falso positivo (FPR)")
+ax.set_ylabel("recall (TPR)")
+ax.set_title("A curva ROC: o mesmo sweep do Bloco 1")
+ax.legend(loc="lower right", fontsize=8)
+ax.set_xlim(-0.02, 1.02); ax.set_ylim(-0.02, 1.02)
+ax.set_aspect("equal")
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Os dois cortes já discutidos aparecem como dois pontos sobre a **mesma** curva: $T_{CONJ}$ (baixo FPR, recall baixo) e $T_{custo}$ (FPR maior, recall bem mais alto). Nenhum dos dois é "o ponto certo" da ROC em abstrato — a ROC só descreve o que é *possível*; qual ponto escolher depende do custo relativo dos dois erros, que é precisamente a pergunta da seção anterior. A AUC alta (${\approx}0{,}94$) diz que as duas classes são bem separáveis por $x$; ela não diz onde cortar.
+
+:::
+
+## Opção de rejeição: quando não decidir é a decisão certa
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Todas as regras de decisão até aqui — mesmo sob custo assimétrico — forçam uma escolha entre A e B para **todo** $x$, inclusive para o $x$ bem no meio da região de sobreposição, onde as duas posteriores estão quase empatadas. A **opção de rejeição** (PRML §1.5.3, p. 42) relaxa essa exigência: introduz uma terceira ação, "não decidir, encaminhar para revisão humana", disponível quando a posteriori vencedora não é convincente o suficiente.
+
+A regra, devida a Chow: fixe um limiar $\theta \in (0{,}5, 1]$ e rejeite sempre que $\max_k p(\mathcal{C}_k \mid x) < \theta$. Isso define uma **faixa** em torno da fronteira de decisão, não mais um único ponto de corte — a faixa é exatamente onde as duas posteriores ficam mais perto de $0{,}5$ do que $\theta$ permite. Rejeitar só compensa quando o custo de pedir revisão humana é menor que o custo esperado do erro que a revisão evita; caso contrário, a opção de rejeição, embora disponível, nunca deveria ser usada.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Toda regra até aqui decide sempre** — mesmo onde a posteriori está quase empatada.
+
+::: {.fragment}
+**Regra de Chow:** rejeite quando $\max_k p(\mathcal{C}_k\mid x) < \theta$.
+
+Define uma **faixa** de indecisão, não mais um ponto de corte.
+:::
+
+::: {.fragment}
+Só compensa se o custo da revisão humana for menor que o custo esperado do erro evitado.
+:::
+
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+def post_B(x):
+    return PI_B * DIST_B.pdf(x) / (PI_A * DIST_A.pdf(x) + PI_B * DIST_B.pdf(x))
+
+THETA = 0.6  # rejeita quando a posteriori vencedora é menor que THETA
+faixa_lo = optimize.brentq(lambda x: post_B(x) - (1 - THETA), 0.5, 0.9)
+faixa_hi = optimize.brentq(lambda x: post_B(x) - THETA, 0.5, 0.9)
+frac_rej = (np.mean((xA > faixa_lo) & (xA < faixa_hi)) * PI_A
+            + np.mean((xB > faixa_lo) & (xB < faixa_hi)) * PI_B)
+
+xs = np.linspace(0.4, 0.95, 400)
+
+fig, ax = plt.subplots(figsize=(6, 3.6))
+ax.plot(xs, post_B(xs), color=COR_LIM, lw=2.6, label=r"$p(\mathcal{C}_B\mid x)$")
+ax.axhline(THETA, color=COR_NEU, lw=1.1, ls=":")
+ax.axhline(1 - THETA, color=COR_NEU, lw=1.1, ls=":")
+ax.axvspan(faixa_lo, faixa_hi, color=COR_NEU, alpha=0.22, label="faixa de rejeição")
+ax.axvline(T_CONJ, color=COR_A, lw=1.8, ls="--", label=f"$T_{{CONJ}}={T_CONJ:.2f}$")
+
+ax.set_xlabel("$x$")
+ax.set_ylabel("posteriori")
+ax.set_title(f"Rejeitar quando a posteriori vencedora é < {THETA:.0%}  "
+             f"({frac_rej:.1%} da população)")
+ax.legend(loc="upper left", fontsize=8.5)
+ax.set_xlim(0.4, 0.95); ax.set_ylim(0, 1)
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Com $\theta = 0{,}6$, a faixa de rejeição cobre de $x\approx 0{,}69$ a $x\approx 0{,}75$ — estreita, porque as duas densidades só ficam de fato próximas numa vizinhança curta de $T_{CONJ}$ — e captura cerca de $2{,}1\%$ da população. Fora dessa faixa, decidir continua sendo a escolha certa: a posteriori já é convincente o bastante para não valer a pena o custo de uma revisão manual. A opção de rejeição não substitui a fronteira construída nos Blocos 2–4; ela reconhece que perto da fronteira, decidir com confiança baixa pode custar mais do que admitir a dúvida.
+
+Isso fecha o ferramental de decisão binária desta aula: custo assimétrico desloca **onde** cortar; matriz de confusão, precisão e recall dizem **como avaliar** o corte escolhido além de uma única taxa de acerto; a ROC compara **todos os cortes possíveis** de uma vez, sem se comprometer com um custo; e a rejeição introduz uma **terceira ação** para quando nenhum corte é confiável o suficiente. As quatro peças respondem à mesma pergunta original do Bloco 2 — "onde você corta?" — com um grau crescente de sofisticação sobre o que "corte" pode significar.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que aprendemos sobre teoria da decisão
+
+1. **Custo assimétrico** desloca onde cortar
+2. **Matriz de confusão / precisão / recall** avaliam um corte além da acurácia
+3. **ROC** compara todos os cortes de uma vez, sem se comprometer com um custo
+4. **Rejeição** — uma terceira ação, para quando nenhum corte é confiável
+
+:::
+
 # Conclusão
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}

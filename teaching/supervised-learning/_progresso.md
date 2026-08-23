@@ -154,6 +154,55 @@ nenhum id de slide duplicado ou vazio.
 
 ## Pendências gerais
 
+## Auditoria do planejamento (2026-08-23)
+
+Pedido do usuário: conferir se o `index.qmd` da disciplina (planejamento do
+semestre) bate com o que as Aulas 1–3 realmente entregam. Achados:
+
+- **Bug real, corrigido:** o `_00-plano-aula.md` da Aula 1 definia um
+  **Bloco 7 (~35 min, o maior bloco da aula)** — "Teoria da decisão: custo,
+  avaliação e rejeição" (matriz de perda sob custo assimétrico, matriz de
+  confusão, precisão/recall, curva ROC, opção de rejeição/regra de Chow) —
+  que **nunca chegou a ser escrito** no `aula01/index.qmd` final, apesar de
+  o arquivo constar como "validado" várias vezes nas rodadas anteriores
+  deste progresso. Os Exercícios já citavam "custo assimétrico" e "falso
+  positivo" (Questão discursiva 3) como se o conteúdo tivesse sido dado —
+  ficou órfão até agora. Reescrito nesta sessão como a seção
+  "Teoria da Decisão: Custo, Avaliação e Rejeição" (4 subblocos: custo
+  assimétrico, matriz de confusão/precisão/recall, curva ROC, rejeição),
+  reaproveitando a mesma população `xA`/`xB` e o mesmo `T_CONJ` dos Blocos
+  1–4 (nenhum dado novo, nenhuma suposição nova — só a ferramenta de
+  decisão fica mais rica). Números verificados por script Python
+  independente antes de escrever (kernel `sensibleml-moo`, seed
+  `20260806`): em $t=T_{CONJ}\approx0{,}72$, acurácia $95{,}6\%$ contra
+  $95\%$ do classificador ingênuo "sempre A" (o paradoxo da acurácia,
+  usado como pausa ativa), recall só $34\%$; com custo 10:1 (mesmo número
+  do Exercício 3), o corte desloca para $T_{custo}\approx0{,}53$, recall
+  sobe a $72\%$ às custas de acurácia menor ($89{,}4\%$) — usado para
+  mostrar que minimizar custo esperado não é o mesmo que minimizar erro
+  bruto. ROC reaproveita literalmente os arrays `ts`/`tipo1`/`tipo2` já
+  calculados no Bloco 1 (AUC${}\approx0{,}94$). Rejeição com $\theta=0{,}6$
+  cobre ${\approx}2{,}1\%$ da população. Um bug de mathtext do matplotlib
+  encontrado e corrigido durante a validação: `%` cru dentro de `$...$` em
+  título de figura quebra o parser (`ValueError: Expected end of text`) —
+  precisa ficar fora do modo matemático ou escapado como `\%`; diferente
+  de MathJax (usado no corpo do texto via `\%`), que aceita normalmente.
+  Revalidado com `quarto render --to html` e `--to revealjs` (kernel do
+  `.venv` em `~/Documents/Research/sensible-deep-moo/code/.venv`, não o
+  `.venv` da raiz do site, que não tem scipy) — sem erro, numeração de
+  seções e sequência de slides conferidas (nenhum heading duplicado ou
+  órfão).
+- **Achado leve, corrigido:** a entrada da **Lesson 2** no `index.qmd` da
+  disciplina não mencionava teoria da decisão geral (risco posterior,
+  regra de Bayes, opção de rejeição para $K$ classes), que é o Bloco 5 da
+  Aula 2 — o maior bloco dela (38 min). Descrição da Lesson 2 atualizada
+  (ML Concept/Statistical Concept/Objectives/Expected Competencies) para
+  refletir isso; trecho mostrado no chat antes de aplicar. Título da
+  Lesson 2 mantido como estava (não foi pedido trocar).
+- **Não verificado no mesmo nível para Aulas 2–3** — a auditoria focou no
+  que o usuário sinalizou; não foi feita uma varredura heading-a-heading
+  dessas duas aulas contra seus respectivos planos.
+
 ## Pendências gerais
 
 - **Resolvido:** Etapa 5 feita para as Aulas 1, 2 e 3 — `index.md` linka
