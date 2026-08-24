@@ -168,6 +168,32 @@ produz duas saídas (HTML e RevealJS) via blocos
   explicativo nos slides que têm nas notas — não vale simplificar a
   ponto de distorcer. Sai como `slides.html`.
 
+  **Não abuse de caixas (`callout-tip`/`note`/`important`/`warning`).**
+  Feedback explícito do usuário, depois de uma aula (Aula 3 de
+  `supervised-learning`) acumular slides com pouca informação e caixas
+  demais: virou hábito embrulhar toda frase de destaque — inclusive um
+  simples apontador para o próximo bloco, ou um resumo de uma linha —
+  numa caixa, às vezes uma dentro da outra (`.fragment` > `callout` >
+  frase). O padrão certo é o oposto: a maior parte do conteúdo de um
+  slide é fragmento de texto simples (`::: {.fragment}`); uma caixa só
+  se justifica para (a) o par pergunta/resposta de uma pausa ativa de
+  verdade, ou (b) um aviso de leitura genuíno (uma armadilha prática,
+  uma divergência de convenção entre fontes). Antes de embrulhar uma
+  frase numa caixa, pergunte: "isso é uma pausa ativa ou um aviso, ou é
+  só o conteúdo normal do slide?" — só o primeiro caso justifica a
+  caixa.
+
+**Os blocos `content-visible` de HTML e de RevealJS devem ficar
+intercalados ao longo do arquivo, seção por seção (ou bloco por
+bloco) — nunca todo o conteúdo HTML primeiro seguido de todos os
+slides RevealJS no fim do arquivo.** Feedback explícito do usuário:
+juntar todos os slides no final obrigou a retrabalhar aulas já prontas
+depois. A ordem certa, dentro de cada seção/bloco de conteúdo, é
+escrever a versão HTML daquele pedaço e, imediatamente em seguida, a
+versão RevealJS do mesmo pedaço, antes de passar para o próximo
+pedaço — não uma passada completa de notas e só depois uma passada
+completa de slides.
+
 ## Dados: prefira exemplos reais a sintéticos
 
 Feedback explícito do usuário: as aulas têm ficado teóricas demais para
@@ -267,7 +293,21 @@ ilustram tanto a versão HTML quanto a RevealJS.
   mesma paleta de `../lesson-theme.scss`, que estiliza a própria
   página — headings/links em azul, código/destaque em laranja, callouts
   de atenção em vermelho.)
-- Chunks com `#| echo: false` e `#| fig-align: center` para as figuras.
+- Chunks com `#| echo: false` e `#| fig-align: center` para as figuras
+  **cujo código é só plumbing de plot** (montar eixos, cores, layout) —
+  esse código não ensina nada sobre o conceito da aula, só sobre
+  matplotlib, e esconder é o padrão certo. Mas quando o chunk **é** a
+  demonstração — uma verificação numérica, uma função objetivo escrita
+  por extenso, um pequeno loop que testa candidatos e mostra por que um
+  deles vence — use `#| echo: true`: nesse caso o código *é* o conteúdo
+  pedagógico, não um detalhe de implementação a esconder. Exemplo de
+  referência já aprovado: a verificação de MLE gaussiano numa folha em
+  `supervised-learning/aula03/index.qmd` (a função `loglik_gauss` e o
+  loop que testa candidatos a $y_\tau$ ficam visíveis com `echo: true`;
+  o código do gráfico ao redor continua `echo: false`). Ao escrever uma
+  aula nova, para cada chunk pergunte: "se eu esconder este código, o
+  aluno perde uma explicação, ou só perde ruído de matplotlib?" — só o
+  primeiro caso justifica `echo: true`.
 - Numeração de blocos/seções consistente com a numeração usada no
   planejamento do semestre.
 - Avisos de leitura (`::: {.callout-warning}`, `::: {.callout-note}`,
@@ -300,7 +340,28 @@ em cada aula.
 
 ## Sugestão de fluxogramas e diagramas
 
-Ao montar o bloco, se o conteúdo tiver estrutura sequencial, uma árvore de decisão, um processo com ramificações, ou uma comparação de caminhos alternativos (ex: "três saídas honestas para um problema"), **proponha um diagrama TikZ** (` ```{.tikz} ` , com `%%| fig-align: center`), sem esperar o usuário pedir. O site já está configurado (`_quarto.yml` da raiz do projeto) com o filtro `pandoc-ext/diagram` e o *engine* TikZ (via `pdflatex`), renderizando nativamente nos dois formatos de saída (HTML e RevealJS). Use as cores preferenciais do IC (ver seção acima) nos elementos do diagrama quando fizer sentido. Só pergunte se não estiver claro que o diagrama ajuda mais do que texto.
+Ao montar o bloco, se o conteúdo tiver estrutura sequencial, uma árvore de decisão, um processo com ramificações, ou uma comparação de caminhos alternativos (ex: "três saídas honestas para um problema"), **proponha um diagrama TikZ** (` ```{.tikz} `), sem esperar o usuário pedir. O site já está configurado (`_quarto.yml` da raiz do projeto) com o filtro `pandoc-ext/diagram` e o *engine* TikZ (via `pdflatex`), renderizando nativamente nos dois formatos de saída (HTML e RevealJS). Use as cores preferenciais do IC (ver seção acima) nos elementos do diagrama quando fizer sentido. Só pergunte se não estiver claro que o diagrama ajuda mais do que texto.
+
+**Não use `%%| fig-align: center` nem `%%| out-width: ...` num bloco `{.tikz}` — não têm efeito nenhum.** Verificado lendo o próprio filtro (`_extensions/pandoc-ext/diagram/diagram.lua`): `fig-align` só é aplicado quando a imagem tem legenda (`fig-cap`), e sem legenda o filtro devolve um `<img>` solto, sem nenhuma classe de alinhamento/tamanho. Para centralizar e/ou redimensionar um diagrama TikZ (ou qualquer figura de chunk Python que precise de um tamanho diferente do padrão da aula), ver "Redimensionar figuras e diagramas" abaixo.
+
+### Redimensionar figuras e diagramas
+
+**`out-width`, `fig-width` e `fig-height` (chunk options) não funcionam nas aulas.** Essas três são implementadas só pelo engine `knitr` (R) — confirmado no schema oficial do Quarto (`tags: {engine: knitr}` em cada uma) e testado ao vivo (valores diferentes de `out-width`/`fig-width` num chunk Python não mudavam o tamanho da imagem gerada). Como toda aula usa `jupyter: <kernel>`, essas opções são silenciosamente ignoradas — não proponha nem use nenhuma delas.
+
+Pra mudar o tamanho de uma figura/diagrama numa aula, use uma das duas vias abaixo, dependendo do que se quer:
+
+- **Mudar o tamanho REAL da imagem gerada** (mais nítida/detalhada, ou com outra proporção): no matplotlib, `figsize=(w, h)` direto na chamada (`fig, ax = plt.subplots(figsize=(5, 5))`); no TikZ, ajuste o próprio código (`scale=` nas opções do `tikzpicture`, ou os `minimum width=`/`minimum height=` dos nós).
+- **Mudar só como a figura APARECE na página** (sem re-gerar nada — útil pra um diagrama já pronto que só está grande/pequeno demais no slide, ou pra centralizar quando não há legenda): envolva o bloco com a classe `.fig-resize` (definida em `../lesson-theme.scss`), que faz a imagem preencher 100% de uma `div` com `width` explícito:
+
+  ```
+  ::: {.fig-resize style="width: 25%; margin: 0 auto;"}
+  ```{python}
+  ...
+  ```
+  :::
+  ```
+
+  Pra ENCOLHER (`width` menor que 100%), `margin: 0 auto` já centraliza sozinho. Pra AUMENTAR além de 100% (ex.: `width: 150%`), use `margin-left` negativo igual à metade do excesso (150% → `-25%`) — `auto` não centraliza uma caixa mais larga que o próprio pai. Esta é também a forma correta de centralizar um diagrama TikZ sem legenda (já que `fig-align` não funciona nesse caso — ver acima), e evita o auto-stretch do RevealJS (que estica pra tela cheia qualquer slide com uma única imagem solta) — o wrapper `.fig-resize` não bate no padrão que o RevealJS procura pra ativar esse comportamento.
 
 ## Exercícios (obrigatório em toda aula)
 
@@ -309,6 +370,73 @@ Toda aula precisa de exercícios — em dois formatos distintos, um por saída, 
 - **Notas (HTML):** terminar o arquivo com uma seção de **Exercícios** (dentro do bloco `content-visible` exclusivo de HTML), com **exatamente 3 questões discursivas/conceituais** e **12 questões de V/F** (não 12 itens — **12 blocos de 4 itens cada**, ou seja, 48 itens ao todo, cada bloco num tema diferente da aula, cobrindo o conteúdo da aula de ponta a ponta) — quotas fixas, por aula. Pode reaproveitar questões de fim de capítulo das próprias fontes bibliográficas (citando de onde vieram, como já se faz com trechos citados) ou propor questões originais — nesse caso, sinalizar que são originais, não da fonte. Ficam sem solução no arquivo (é trabalho para o aluno resolver por conta, fora da aula). Cada questão de V/F tem 4 itens do mesmo tema, e só é considerada correta se todos os 4 forem acertados (na avaliação, o aluno pode deixar a questão em branco com punição de 20% da nota da questão). Cada uma das 12 questões (os 4 itens de um mesmo tema) fica dentro de um `::: {.callout-tip}` cujo título é o **tema** daquela questão (não um rótulo genérico) — deixa explícito que aquilo é uma unidade de questão.
 
 - **Slides (RevealJS):** intercalar, **no meio** da sequência de slides (não só ao final), pequenos exercícios de checagem/acompanhamento — uma pergunta objetiva e rápida sobre o que acabou de ser apresentado, para o aluno testar se acompanhou o conteúdo em tempo real. **No mínimo 3 desses exercícios de checagem por aula**, espalhados ao longo dos slides (não concentrados num só bloco). Cada um é um V/F de 4 itens (mesmo tema, mesma lógica das notas), com os 4 itens juntos em **um único slide**, dentro de um `::: {.callout-tip}` cujo título é o **tema** do bloco — seguido **imediatamente** (no slide seguinte) por **um único slide de resposta**, com a solução dos 4 itens junta, também em caixa (`::: {.callout-tip}`, título "*tema* — Resposta"). Não deixar nenhum desses três para o fim da aula.
+
+### Metodologia de criação de cada item de V/F (notas e slides)
+
+Feedback explícito do usuário: as quotas acima (12 blocos de 4 itens nas
+notas, ≥3 blocos nos slides) definem **quanto** produzir; esta seção
+define **como** cada item deve ser pensado, e vale igualmente para os
+itens das notas e para os dos slides — um item de checagem de slide não
+tem um padrão de qualidade mais baixo que um item das notas.
+
+**Objetivo:** cada item deve testar compreensão estrutural, capacidade
+de síntese e aplicação do conhecimento — não memorização rasa. Um aluno
+que decorou a aula sem entender a mecânica por trás dela deve errar; um
+aluno que entendeu deve acertar mesmo nunca tendo visto aquela frase
+exata antes.
+
+**Toda afirmação precisa nascer de uma das heurísticas abaixo** (a
+lista não é exaustiva — o importante é a avaliação profunda, não a
+lista em si):
+
+1. **Cenário contrafactual** — inverta uma premissa fundamental ou
+   altere uma condição essencial do conceito, e afirme algo sobre a
+   consequência lógica dessa alteração.
+2. **Caso limite/extremo** — teste o comportamento do conceito num
+   extremo absoluto (uma variável indo a infinito ou a zero, a ausência
+   total de um fator limitante, $N\to\infty$, $\lambda\to 0$, etc.).
+3. **Transferência de domínio** — descreva um cenário prático ou
+   analítico que **não** apareceu na aula, e afirme que o conceito se
+   aplica (ou falha) ali de um jeito específico.
+4. **Falsa dicotomia/falsa equivalência** — construa uma afirmação que
+   soe plausível por usar o jargão certo da aula, mas que erre a
+   relação de causa e efeito de forma sutil e estrutural.
+
+**Proibido:**
+- Perguntas do tipo "o que é X" ou "X é definido como Y".
+- Paráfrase literal de uma frase da aula.
+- Afirmações cuja falsidade dependa só de trocar uma palavra (ex:
+  "sempre" por "nunca", "positivo" por "negativo") sem alterar a
+  mecânica do conceito por trás.
+
+**Registro da justificativa — só para as notas, em arquivo separado.**
+As notas continuam saindo **sem solução no `index.qmd` publicado** (é
+trabalho do aluno resolver por conta — isso não muda). Mas a
+justificativa de cada item — por que é V ou F, apontando exatamente
+qual falha conceitual o aluno cometeria ao errar — deve ser escrita num
+arquivo novo e não publicado, `aulaNN/_02-solucoes.md` (mesmo prefixo
+`_` dos demais arquivos de apoio, pelo mesmo motivo: nunca deve
+aparecer no site). Formato, por item:
+
+```markdown
+### [Tema do bloco] — item (a)
+
+**Heurística:** Contrafactual | Limite | Transferência | Falsa dicotomia
+
+**Afirmação:** [ ] (o texto exato do item, como aparece no `index.qmd`)
+
+**Resposta:** Verdadeiro / Falso
+
+**Justificativa:** [explicação analítica e direta de por que é V/F —
+sem meio-termo, apontando o erro conceitual específico que o aluno
+cometeria ao marcar a resposta errada]
+```
+
+Nos **slides**, a lógica de criação dos itens é a mesma (mesmas quatro
+heurísticas, mesmas proibições), mas **sem justificativa** — a resposta
+de cada V/F continua no slide imediatamente seguinte, só com o
+julgamento (V/F) de cada item, exatamente como já estruturado acima;
+não é necessário nenhum arquivo extra para os slides.
 
 ---
 

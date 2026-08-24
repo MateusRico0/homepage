@@ -1,0 +1,704 @@
+---
+title: "Herança: DNA, Fragilidade e Template Method"
+subtitle: "Aula 8 — Programação Orientada a Objetos"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: _lesson-nav.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    output-file: notas.html
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides →](slides.html){.see-all}
+:::
+
+# Proposta da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Até aqui, tratamos de como objetos se comunicam através de interfaces — um papel social, o que o objeto *faz*. Existe outro mecanismo de compartilhamento em Orientação a Objetos, mais antigo e mais poderoso: a **Herança**, que define o que um objeto *é*. É o acoplamento mais forte da OO — e, por isso, também o mais perigoso quando mal utilizado.
+
+**O roteiro, em quatro perguntas:**
+
+1. O que muda quando um filho não apenas assina o contrato do pai, mas incorpora fisicamente sua estrutura?
+2. Por que uma alteração "inocente" na classe base pode quebrar um filho que nunca foi tocado?
+3. Como saber se uma herança é uma especialização legítima, ou apenas reuso de código disfarçado?
+4. Como uma classe pode garantir que todos os seus filhos sigam a mesma sequência de passos, sem abrir mão da especialização?
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Interface define o que o objeto faz.** Herança define o que ele **é**.
+
+::: {.fragment}
+É o acoplamento **mais forte** da Orientação a Objetos — e, por isso, o mais perigoso mal utilizado.
+:::
+
+::: {.fragment}
+**Roteiro:** mecânica → fragilidade → quando herdar → classes abstratas → Template Method.
+:::
+
+:::
+
+# Herança: do Contrato à Identidade
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Se dizemos que `Cartao` estende `MeioPagamentoBase`, afirmamos para o compilador e para a arquitetura que qualquer operação válida para a base é válida para o cartão — a relação **"É-UM"**. É o **acoplamento vitalício**: o filho não apenas assina o contrato do pai, ele assume sua história e estrutura.
+
+```java
+public abstract class MeioPagamentoBase implements Pagavel {
+    protected String idCobranca; // Estado compartilhado
+
+    public boolean pagamentoConfirmado(String id) {
+        return id.equals(this.idCobranca);
+    }
+}
+
+// O Cartao agora "E UM" MeioPagamentoBase
+public class Cartao extends MeioPagamentoBase {
+    private double limite;
+
+    @Override
+    public String criarCobranca(double valor) {
+        this.idCobranca = "CARD-" + UUID.randomUUID();
+        return this.idCobranca;
+    }
+}
+```
+
+O `protected` permite que os filhos manipulem o estado herdado sem expô-lo ao resto do sistema — mas é apenas um "encapsulamento de linhagem": ainda é um vazamento de detalhes de implementação, só que restrito à família. Herança de atributos é **incorporação física**: quando um `Cartao` é instanciado, a Heap contém tanto os atributos definidos localmente (`limite`) quanto os herdados (`idCobranca`). O `Cartao` não "usa" o pai por associação externa — ele o **incorporou**.
+
+**A fragilidade sem `final`.** Se o pai não fechar as portas de escape, sua invariante vira ilusão:
+
+```java
+public abstract class MeioPagamentoBase {
+    protected String status = "CRIADO";
+
+    // Sem 'final', este metodo e uma mera "sugestao"
+    public void alterarStatus(String novoStatus) {
+        if (this.status.equals("CONFIRMADO") && novoStatus.equals("CRIADO")) {
+            throw new IllegalStateException("Violacao de invariante!");
+        }
+        this.status = novoStatus;
+    }
+}
+
+public class Cartao extends MeioPagamentoBase {
+    @Override
+    public void alterarStatus(String novoStatus) {
+        this.status = novoStatus; // ignora a validacao do pai
+    }
+}
+```
+
+O `Cartao` tira vantagem do design aberto e burla a regra. Para blindar a linhagem, o estado deve ser `private` no pai, e o método de transição, `final`.
+
+**O Problema da Classe Base Frágil.** O perigo mais sutil: a subclasse quebra sem violar nada explicitamente, só confiando demais na mecânica interna do pai.
+
+```java
+public abstract class MeioPagamentoBase {
+    public void processarPagamento(double valor) { /* captura do pagamento */ }
+    public void processarLote(List<Double> valores) {
+        for (double valor : valores) processarPagamento(valor); // pai chama o proprio metodo
+    }
+}
+
+public class Cartao extends MeioPagamentoBase {
+    private int totalTransacoes = 0;
+    @Override
+    public void processarPagamento(double valor) {
+        super.processarPagamento(valor);
+        this.totalTransacoes++;
+    }
+    @Override
+    public void processarLote(List<Double> valores) {
+        super.processarLote(valores);
+        this.totalTransacoes += valores.size();
+    }
+}
+```
+
+Uma lista de 3 valores deveria resultar em `totalTransacoes = 3`. Mas `super.processarLote()` chama `processarPagamento()` internamente — e, por polimorfismo, o fluxo desvia para a versão sobrescrita do filho, que incrementa de novo. Resultado: `6`, contagem duplicada. Se o pai um dia remover essa chamada interna para otimizar, o filho passará a contar `3` de repente — sem que nenhuma linha do próprio código tenha mudado.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## `extends`: a Relação "É-UM"
+
+```java
+public abstract class MeioPagamentoBase implements Pagavel {
+    protected String idCobranca; // estado compartilhado
+}
+public class Cartao extends MeioPagamentoBase { private double limite; }
+```
+
+::: {.fragment}
+Herança de atributos é **incorporação física** — não associação externa.
+:::
+
+## A Fragilidade sem `final`
+
+```java
+public void alterarStatus(String novoStatus) { this.status = novoStatus; } // ignora o pai!
+```
+
+::: {.fragment}
+Sem `private` + `final`, a invariante do pai é apenas uma "sugestão".
+:::
+
+## O Problema da Classe Base Frágil
+
+```java
+public void processarLote(List<Double> v) {
+    for (double x : v) processarPagamento(x); // polimorfismo desvia para o FILHO
+}
+```
+
+::: {.fragment}
+Resultado esperado: 3. Resultado real: **6** — contagem duplicada por confiar na mecânica interna do pai.
+:::
+
+:::
+
+# Quando Herdar, e Quando Não
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**O erro da herança por conveniência.** Se `GerenciadorDeCobrancas` estende `ListaDeContatos` só para herdar métodos de array já prontos, isso é um erro grave — o gerenciador não *é uma* lista, ele apenas *usa* uma lista. Dois problemas nascem daí: métodos públicos do pai (limpar, remover) vazam automaticamente para o filho; e o compilador aceita o gerenciador em qualquer lugar que espere uma lista, uma incoerência conceitual. A correção é **composição**: o gerenciador guarda uma referência privada à lista.
+
+**Especialização legítima** exige dois requisitos simultâneos: compartilhar o DNA essencial do pai, **e** precisar ser tratada polimorficamente como o tipo base. `Pix`, `Cartao` e `Boleto` são especializações legítimas de `MeioPagamentoBase` — herdam a maquinaria de auditoria e controle, e estendem com conhecimento próprio (gerar chaves Pix, calcular multa de boleto). Se uma subclasse não adiciona nada — nem comportamento, nem refinamento de invariante —, ela é um "objeto zumbi": polui a taxonomia sem gerar valor.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Herança por Conveniência: o Erro
+
+::: {.fragment}
+`GerenciadorDeCobrancas extends ListaDeContatos` — o gerenciador **usa** uma lista, não **é** uma lista.
+:::
+
+::: {.fragment}
+Vaza métodos do pai (limpar, remover) + poluição de tipo. A cura: **composição**.
+:::
+
+## Especialização Legítima: os Dois Requisitos
+
+::: {.fragment}
+1. Compartilha o **DNA** essencial do pai
+:::
+::: {.fragment}
+2. Precisa ser tratada **polimorficamente** como o tipo base
+:::
+
+::: {.fragment}
+Sem adicionar nada: "objeto zumbi" — polui a taxonomia sem valor.
+:::
+
+:::
+
+::: {.callout-tip}
+## Por que "o gerenciador usa uma lista, não é uma lista" é o critério certo para decidir entre herança e composição?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Quando Herdar
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Herdar apenas para reaproveitar métodos, sem uma relação "É-UM" real, é um design frágil.
+b. `GerenciadorDeCobrancas extends ListaDeContatos` expõe métodos do pai que talvez nunca devessem ser públicos no filho.
+c. Uma especialização legítima precisa compartilhar o DNA do pai e ser tratada polimorficamente como ele.
+d. Uma subclasse que não adiciona comportamento nem refina invariantes ainda agrega valor arquitetural por existir.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Quando Herdar — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é o "erro da herança por conveniência".
+b. **Verdadeiro** — é a quebra de encapsulamento citada no exemplo.
+c. **Verdadeiro** — são os dois requisitos cumulativos da especialização legítima.
+d. **Falso** — sem adicionar nada, é um "objeto zumbi" que só polui a taxonomia.
+:::
+
+:::
+
+# O Vínculo de Sangue: Acoplamento e Invariantes Invisíveis
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A herança é o acoplamento mais íntimo da OO: o filho conhece e depende das entranhas do pai. Se a base treme, toda a árvore balança — o **efeito cascata**.
+
+**A alteração "inocente".** Imagine reforçar a segurança do `idCobranca` na base:
+
+```java
+public abstract class MeioPagamentoBase {
+    protected String idCobranca;
+    // Novo requisito: o ID deve sempre ter prefixo "PUB-"
+    public void setId(String id) {
+        if (!id.startsWith("PUB-")) throw new IllegalArgumentException();
+        this.idCobranca = id;
+    }
+}
+
+public class Pix extends MeioPagamentoBase {
+    @Override
+    public String criarCobranca(double valor) {
+        this.idCobranca = "PIX-" + UUID.randomUUID(); // agora quebra em runtime!
+        return this.idCobranca;
+    }
+}
+```
+
+`Pix` já existia acessando `idCobranca` diretamente (via `protected`), driblando o novo `setId()`. Ele violou uma regra que nem sabia que existia — a mudança parecia retrocompatível, mas não foi. Este é o **Problema da Classe Base Frágil**: a base se torna quase impossível de evoluir com segurança.
+
+Três armadilhas de **invariante invisível** — regras que vivem só na lógica do pai, nunca na assinatura:
+
+- **Pressupostos de ordem:** o pai assume que o método $A$ roda antes do $B$; o filho sobrescreve $B$ sem saber disso.
+- **Semântica de retorno:** o pai espera que um método nunca retorne `null`; o filho sobrescreve e retorna `null`, gerando `NullPointerException` longe da causa.
+- **O problema do `super`:** esquecer `super.metodo()` deixa o objeto numa "máquina de estado zumbi" — viva na memória, mas com o ciclo de vida lógico quebrado.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Alteração "Inocente"
+
+```java
+public void setId(String id) {
+    if (!id.startsWith("PUB-")) throw new IllegalArgumentException();
+    this.idCobranca = id;
+}
+```
+
+::: {.fragment}
+`Pix` já escrevia `idCobranca` direto (via `protected`) — quebra em runtime, sem aviso em compilação.
+:::
+
+## Invariantes Invisíveis: Três Armadilhas
+
+1. **Ordem:** pai espera $A$ antes de $B$
+2. **Retorno:** pai espera "nunca `null`"
+3. **`super` esquecido:** máquina de estado "zumbi"
+
+:::
+
+# A Base como Guardiã, e a Classe Abstrata
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Para mitigar a fragilidade, o pai assume o controle total: atributos críticos `private` (não `protected`), métodos de transição `final`, e "ganchos" (*hooks*) `protected abstract` para os detalhes que só o filho sabe.
+
+```java
+public abstract class MeioPagamentoBase implements Pagavel {
+    private double valor; // privado: o filho nao pode corromper
+
+    public final void setValor(double v) { // final: filho nao pode subverter
+        if (v <= 0) throw new ValorInvalidoException("Invariante violada");
+        this.valor = v;
+    }
+
+    protected abstract String executarProcessamento(); // o gancho
+}
+```
+
+**Classes Abstratas como máquina semi-acabada.** Uma classe abstrata não é só "uma classe que não pode ser instanciada" — é um compromisso arquitetural. Pense num chassi de carro: tem rodas, bancos, suspensão, mas não tem motor. Você não dirige um chassi; a fábrica decide se ele vira `CarroEletrico` ou `Combustao`.
+
+```java
+public abstract class MeioPagamentoBase implements Pagavel {
+    protected double valorOriginal;
+    public MeioPagamentoBase(double valor) { this.valorOriginal = valor; }
+
+    public boolean validarValor() { return this.valorOriginal > 0; } // metodo concreto
+    public abstract String processar(); // o "motor faltante"
+}
+
+public class Pix extends MeioPagamentoBase {
+    public Pix(double valor) { super(valor); }
+    @Override
+    public String processar() { return "PIX-QRCODE-" + this.valorOriginal; }
+}
+```
+
+O compilador age como "inspetor de fábrica": `new MeioPagamentoBase(100.0)` nem compila — a máquina está incompleta, seria perigoso operá-la.
+
+**Herança de estado vs. comportamento.** Herdar comportamento (via interface) é fluido — o filho decide livremente como representar o dado:
+
+```java
+public interface Pagavel { String getIdCobranca(); }
+public class Pix implements Pagavel {
+    public String getIdCobranca() { return "PIX-" + UUID.randomUUID(); } // nem precisa guardar!
+}
+```
+
+Herdar **estado** (atributos) é uma alocação física compulsória — o filho carrega os campos do pai, precise ou não:
+
+```java
+public abstract class MeioPagamentoBase {
+    protected String idCobranca;
+    protected LocalDateTime dataCriacao;
+    protected String logsInternos; // e se o Pix nao precisar de logs?
+}
+```
+
+Não existe sintaxe para "deserdar" um campo em Java. Se a base carrega `logsInternos`, todo `Pix`, `Boleto` e `Cartao` carrega esse peso, use ou não. E se um dia descobrirmos que o tipo de `idCobranca` deveria ser `UUID`, não `String`, cada subclasse que o acessa diretamente (via `protected`) precisa ser revista.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Base como Guardiã
+
+```java
+private double valor;                          // privado, nao protected
+public final void setValor(double v) { ... }    // final, nao pode subverter
+protected abstract String executarProcessamento(); // o gancho
+```
+
+## Classe Abstrata: a Máquina Semi-Acabada
+
+::: {.fragment}
+Como um chassi de carro: rodas, bancos, suspensão — sem motor. `new MeioPagamentoBase()` nem compila.
+:::
+
+## Estado (Rígido) vs. Comportamento (Fluido)
+
+```java
+public interface Pagavel { String getIdCobranca(); } // Pix decide como representar
+```
+
+```java
+protected String logsInternos; // TODO filho carrega isso, use ou nao
+```
+
+::: {.fragment}
+Não existe "deserdar" um campo em Java. Herdar estado é compulsório.
+:::
+
+:::
+
+::: {.callout-tip}
+## Por que não existe uma forma de um filho "recusar" um atributo herdado, mas existe `@Override` para recusar/substituir um método herdado?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Classes Abstratas e Herança de Estado
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Uma classe abstrata pode ter métodos concretos e métodos abstratos ao mesmo tempo.
+b. O compilador permite instanciar diretamente uma classe abstrata com `new`, desde que todos os métodos existam.
+c. Herdar um atributo é uma alocação de memória física compulsória em cada instância do filho.
+d. Não existe, em Java, uma sintaxe para um filho "recusar" um campo herdado do pai.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Classes Abstratas e Herança de Estado — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é a definição de "protocolo de estado parcial".
+b. **Falso** — o compilador proíbe `new` numa classe abstrata, completa ou não.
+c. **Verdadeiro** — é o custo da "herança de estado" descrito nesta aula.
+d. **Verdadeiro** — diferente de métodos (que aceitam `@Override`), atributos são herdados sem opção de recusa.
+:::
+
+:::
+
+# Template Method
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Como garantir que todo pagamento siga a mesma sequência de segurança, deixando cada tipo variar só o detalhe técnico?
+
+```java
+public abstract class MeioPagamentoBase implements Pagavel {
+    // O ESQUELETO: metodo final, ninguem muda esta ordem
+    public final String realizarPagamento(double valor) {
+        if (!validar(valor)) throw new RuntimeException("Valor invalido");
+        String id = criarCobrancaEspecifica(valor); // o "buraco" do especialista
+        registrarLog(id);                            // passo comum a todos
+        return id;
+    }
+
+    private boolean validar(double v) { return v > 0; }
+    private void registrarLog(String id) { System.out.println("Pagamento registrado: " + id); }
+
+    protected abstract String criarCobrancaEspecifica(double v); // especializacao obrigatoria
+}
+```
+
+O pai dita a ordem imutável dos passos; o filho preenche só a lacuna que exige conhecimento especializado. Se cada subclasse implementasse seu próprio `realizarPagamento` público, nada impediria o `Pix` de esquecer o log, ou o `Boleto` de pular a validação — o Template Method centraliza essa responsabilidade no chassi.
+
+Este é o conceito de **Inversão de Controle** (IoC), resumido no **Princípio de Hollywood**: *"Não nos ligue, nós ligamos para você."* No procedural tradicional, o código do desenvolvedor retém o fluxo e chama bibliotecas quando precisa. No Template Method, é o contrário: o fluxo pertence à superclasse, que decide o momento exato de desviar para o detalhe do filho, retomando o controle logo depois.
+
+Vantagens: previsibilidade (log e validação sempre acontecem, seja Pix ou Cartão); manutenibilidade (mudar a regra de log é mexer num único lugar); limitação do erro (o desenvolvedor da subclasse só precisa saber sua especialidade). O risco: se o esqueleto for mal projetado, vira uma "camisa de força" para os filhos.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Esqueleto do Algoritmo
+
+```java
+public final String realizarPagamento(double valor) {
+    if (!validar(valor)) throw new RuntimeException("...");
+    String id = criarCobrancaEspecifica(valor); // o buraco do especialista
+    registrarLog(id);
+    return id;
+}
+```
+
+::: {.fragment}
+`final`: ninguém muda a ordem. `abstract`: cada filho preenche só seu detalhe.
+:::
+
+## Inversão de Controle: o Princípio de Hollywood
+
+::: {.fragment}
+*"Não nos ligue, nós ligamos para você."* O fluxo pertence ao pai — não ao filho.
+:::
+
+::: {.fragment}
+**Ganho:** previsibilidade, manutenibilidade, menos chance de erro do especialista.
+**Risco:** esqueleto mal projetado vira camisa de força.
+:::
+
+:::
+
+::: {.callout-tip}
+## Se o `Pix` pudesse sobrescrever `realizarPagamento()` inteiro (em vez de só `criarCobrancaEspecifica()`), o que exatamente o sistema perderia?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Template Method e Inversão de Controle
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Se `realizarPagamento()` não fosse `final`, uma subclasse poderia pular a validação ou o registro de log.
+b. O gancho `criarCobrancaEspecifica()` é o único ponto que cada subclasse precisa conhecer para se especializar.
+c. No Template Method, é o filho quem decide a ordem em que validação, especialização e log acontecem.
+d. A Inversão de Controle aqui significa que a base chama o filho, e não o contrário.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Template Method e Inversão de Controle — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é exatamente o risco de não travar o método com `final`.
+b. **Verdadeiro** — é o propósito do gancho: isolar o detalhe técnico.
+c. **Falso** — é o pai quem dita a ordem; o filho só preenche a lacuna.
+d. **Verdadeiro** — é a essência do Princípio de Hollywood aplicado aqui.
+:::
+
+:::
+
+# Conclusão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando às quatro perguntas da abertura:
+
+1. **Incorporar em vez de assinar:** herança de estado é alocação física compulsória — o filho carrega o pai na memória, não só na promessa.
+2. **A alteração inocente:** invariantes invisíveis (ordem, retorno, `super`) vivem só na lógica do pai, e o compilador não as protege.
+3. **Herdar ou compor:** só herde quando há DNA compartilhado *e* necessidade de tratamento polimórfico — nunca por conveniência de reuso.
+4. **Mesma sequência, filhos diferentes:** Template Method, com o fluxo travado (`final`) na base e ganchos (`abstract`) para o filho.
+
+### Ponte para a Aula 9 {.unnumbered}
+
+Herança nos dá reuso de estrutura, mas levanta uma pergunta que o "É-UM" sozinho não responde: quando é realmente seguro substituir o pai por um filho em qualquer lugar do sistema? A Aula 9 formaliza essa pergunta com o **Princípio da Substituição de Liskov**, e trata do outro lado da herança: como lidar, de forma estruturada, com as falhas que a especialização pode introduzir.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos
+
+1. Herança = "É-UM", incorporação física, o acoplamento mais forte da OO
+2. Classe Base Frágil: alterações inocentes quebram filhos por invariantes invisíveis
+3. Herdar exige DNA compartilhado **e** necessidade polimórfica — nunca só reuso
+4. Template Method: fluxo travado no pai, ganchos abstratos para o filho
+
+::: {.fragment}
+**Próxima aula:** o Princípio da Substituição de Liskov — quando um filho pode substituir o pai com segurança.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. Explique o Problema da Classe Base Frágil usando o exemplo de `processarLote`/`processarPagamento`. Por que o bug de contagem dupla surge sem que nenhum código tenha sido escrito "errado" isoladamente?
+
+2. Um desenvolvedor faz `GerenciadorDeCobrancas extends ListaDeContatos` só para reaproveitar métodos de manipulação de array. Explique por que isso é um erro de design, e como a composição resolveria o mesmo problema sem os riscos.
+
+3. Explique o padrão Template Method usando o exemplo de `realizarPagamento`. Por que o método principal precisa ser `final`, e o que aconteceria se cada subclasse pudesse sobrescrevê-lo livremente?
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-tip}
+## Herança como Identidade ("É-UM")
+
+a. ( ) A herança estabelece uma relação de identidade mais profunda que a associação — a relação "É-UM".
+b. ( ) O filho, ao herdar, assina apenas o contrato do pai, sem incorporar sua estrutura interna.
+c. ( ) A herança é considerada o acoplamento mais forte disponível na Orientação a Objetos.
+d. ( ) Herança de atributos significa que o filho fisicamente possui, na memória, os campos definidos no pai.
+:::
+
+::: {.callout-tip}
+## O Modificador `protected`
+
+a. ( ) `protected` permite que subclasses manipulem o estado herdado sem expô-lo ao resto do sistema.
+b. ( ) `protected` é equivalente, em termos de encapsulamento, a `private`.
+c. ( ) `protected` cria um "encapsulamento de linhagem" — ainda vaza detalhes de implementação, só que para a família.
+d. ( ) Sem `final` no método de transição, uma subclasse pode ignorar a validação do pai livremente.
+:::
+
+::: {.callout-tip}
+## O Problema da Classe Base Frágil
+
+a. ( ) Ocorre quando uma alteração aparentemente segura na base quebra silenciosamente subclasses existentes.
+b. ( ) O bug de contagem dupla em `processarLote` surge porque o polimorfismo desvia a chamada interna para o método sobrescrito do filho.
+c. ( ) Esse tipo de erro costuma ser detectado pelo compilador antes da execução.
+d. ( ) Invariantes que vivem apenas na lógica implícita do pai são as mais perigosas de se violar sem perceber.
+:::
+
+::: {.callout-tip}
+## Herança por Conveniência vs. Especialização Legítima
+
+a. ( ) Herdar apenas para reaproveitar métodos, sem relação "É-UM" real, é um sinal de design frágil.
+b. ( ) `GerenciadorDeCobrancas extends ListaDeContatos` é um exemplo de especialização legítima.
+c. ( ) Uma especialização legítima precisa compartilhar o DNA do pai e ser tratada polimorficamente como ele.
+d. ( ) A composição é a alternativa correta quando a relação real é "usa um", não "é um".
+:::
+
+::: {.callout-tip}
+## Invariantes Invisíveis
+
+a. ( ) Um pressuposto de ordem entre métodos do pai pode ser quebrado silenciosamente por uma subclasse.
+b. ( ) Se o pai espera que um método nunca retorne `null`, uma subclasse pode alterar essa semântica livremente sem risco.
+c. ( ) Esquecer de chamar `super.metodo()` pode deixar o objeto numa "máquina de estado zumbi".
+d. ( ) Invariantes invisíveis não aparecem na assinatura dos métodos, só na lógica interna do pai.
+:::
+
+::: {.callout-tip}
+## A Base como Guardiã
+
+a. ( ) Atributos que regem invariantes críticos devem ser `private` na classe base, não `protected`.
+b. ( ) Métodos `final` impedem que subclasses sobrescrevam e subvertam a validação da base.
+c. ( ) Métodos-gancho (`protected abstract`) delegam ao filho só o detalhe técnico, sem expor o fluxo inteiro.
+d. ( ) Blindar a base dessa forma tona a integridade do sistema dependente do acerto individual de cada subclasse.
+:::
+
+::: {.callout-tip}
+## Classes Abstratas
+
+a. ( ) Uma classe abstrata pode ter métodos concretos, resolvendo parte do comportamento do objeto.
+b. ( ) O compilador impede a instanciação direta de uma classe abstrata via `new`.
+c. ( ) Uma classe abstrata é uma limitação técnica sem nenhum propósito arquitetural além de "não poder instanciar".
+d. ( ) O método `abstract` de uma classe abstrata representa a parte "sem motor" da máquina semi-acabada.
+:::
+
+::: {.callout-tip}
+## Herança de Estado vs. Comportamento
+
+a. ( ) Herdar apenas comportamento (via interface) preserva a liberdade do filho sobre como representar seus dados.
+b. ( ) Herdar atributos é uma alocação de memória compulsória — o filho carrega o campo, precise ou não.
+c. ( ) Existe uma sintaxe padrão em Java para um filho "recusar" um atributo herdado que ele não usa.
+d. ( ) Mudar o tipo de um atributo herdado (de `String` para `UUID`, por exemplo) pode exigir revisar todas as subclasses.
+:::
+
+::: {.callout-tip}
+## Template Method: o Esqueleto
+
+a. ( ) O método principal do Template Method costuma ser marcado como `final` para travar a ordem dos passos.
+b. ( ) Os métodos-gancho abstratos são preenchidos individualmente por cada subclasse especializada.
+c. ( ) Se cada subclasse pudesse sobrescrever o método principal livremente, a ordem de validação e log deixaria de ser garantida.
+d. ( ) O Template Method reduz a previsibilidade do sistema, pois cada filho decide sua própria sequência de passos.
+:::
+
+::: {.callout-tip}
+## Inversão de Controle e o Princípio de Hollywood
+
+a. ( ) "Não nos ligue, nós ligamos para você" resume a ideia de que o fluxo principal pertence à superclasse.
+b. ( ) No paradigma procedural clássico, o código do desenvolvedor tipicamente retém o fluxo principal.
+c. ( ) No Template Method, é o filho quem decide quando delegar a execução de volta para o pai.
+d. ( ) Um esqueleto de Template Method mal projetado pode se tornar uma "camisa de força" para as subclasses.
+:::
+
+::: {.callout-tip}
+## Vantagens e Riscos do Template Method
+
+a. ( ) Garante previsibilidade: passos como validação e log sempre acontecem, independente da subclasse.
+b. ( ) Facilita a manutenção: mudar a regra de log exige alterar um único lugar (a base).
+c. ( ) Exige que o desenvolvedor de cada subclasse conheça o fluxo inteiro do algoritmo, não só seu gancho.
+d. ( ) É um mecanismo de Inversão de Controle: a base chama o filho, não o contrário.
+:::
+
+::: {.callout-tip}
+## Síntese: Herança como Ferramenta de Especialização
+
+a. ( ) Herança bem usada exige DNA compartilhado real, não apenas o desejo de reaproveitar código.
+b. ( ) Uma subclasse que não adiciona comportamento nem refina invariantes é um "objeto zumbi" na taxonomia.
+c. ( ) Blindar a base (atributos `private`, métodos `final`, ganchos `abstract`) reduz o risco de Classe Base Frágil.
+d. ( ) O acoplamento gerado pela herança é, em geral, mais fraco do que o gerado por composição simples.
+:::
+
+:::

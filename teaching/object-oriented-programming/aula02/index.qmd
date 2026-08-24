@@ -1,0 +1,860 @@
+---
+title: "O Objeto como Máquina de Estados"
+subtitle: "Aula 2 — Programação Orientada a Objetos"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: _lesson-nav.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    output-file: notas.html
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides →](slides.html){.see-all}
+:::
+
+# Proposta da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Na Aula 1, o construtor de `Produto` chamou `setPreco()` para validar o preço inicial. Deixamos uma pergunta em aberto: e se o preço vier negativo — o construtor deve "consertar" o valor silenciosamente, ou recusar a existência do objeto? Esta aula responde a essa pergunta formalizando uma ideia que já rondava a Aula 1: **todo objeto bem projetado é a implementação física de uma máquina de estados finita, protegida por um construtor que age como guardião e por métodos que agem como transições validadas.**
+
+**O roteiro, em quatro perguntas:**
+
+1. O que muda quando paramos de ver uma classe como um "saco de variáveis com getters e setters" e passamos a vê-la como uma máquina de estados?
+2. O que é uma invariante, e por que ela é o verdadeiro motivo de existir do encapsulamento?
+3. Por que o construtor é matematicamente diferente dos outros métodos — e o que acontece quando ele falha em proteger essa diferença?
+4. Quando um objeto deve recusar uma operação lançando uma exceção, e como o Java distingue "argumento errado" de "momento errado"?
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Aula 1 deixou uma pergunta em aberto:** o construtor deve consertar um preço negativo, ou recusar o objeto?
+
+::: {.fragment}
+Esta aula responde formalizando: **um objeto bem projetado é uma máquina de estados finita, protegida pelo construtor e por métodos-transição.**
+:::
+
+::: {.fragment}
+**Roteiro:** máquina de estados → invariantes → construtor (Fail-Fast) → exceções e identidade.
+:::
+
+:::
+
+# Do Saco de Variáveis ao Agente Ativo
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Em C, uma `struct` agrupa dados, mas é inteiramente passiva — as funções que operam sobre ela vivem em outro lugar, e a responsabilidade de manter a consistência recai sobre quem escreve essas funções externas:
+
+```c
+struct Pedido {
+    int status;
+};
+
+// A funcao externa dita a regra
+void pagar(struct Pedido* p) {
+    p->status = 1; // Mutacao direta!
+}
+```
+
+Em Java, a classe agrupa os dados **e** as funções que têm o direito de alterá-los. O objeto deixa de ser memória passiva e se torna um agente ativo: você não altera o estado diretamente, você faz um pedido, e o objeto decide se a transição é legal.
+
+```java
+public class Pedido {
+    private Estado status;
+
+    // O objeto controla a propria mutacao
+    public void pagar() {
+        if (this.status.podePagar()) {
+            this.status = Estado.PAGO;
+        }
+    }
+}
+```
+
+Essa união indissociável entre dados e as regras que os governam é o que chamamos de **encapsulamento forte**.
+
+**O anti-padrão do Modelo Anêmico.** Um dos maiores desserviços do ensino básico de Java é reduzir o encapsulamento a "deixar os atributos `private`" sem se importar com o resto. Se todo atributo `private` ganha automaticamente um *getter* e um *setter* cegos, a inteligência vazou de volta para fora da classe — é apenas uma `struct` glorificada:
+
+```java
+public class PedidoAnemico {
+    private String status;
+
+    // Setter cego: permite qualquer absurdo!
+    public void setStatus(String s) { this.status = s; }
+    public String getStatus() { return this.status; }
+}
+
+// O erro ocorre externamente:
+pedido.setStatus("ENTREGUE"); // E o pagamento?
+```
+
+A regra de ouro: **se você precisa inspecionar os dados de um objeto (`get`) para decidir por fora e depois alterar seu estado (`set`), o design falhou.** O objeto deve tomar as próprias decisões.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Procedural: o Dado Passivo
+
+```c
+struct Pedido { int status; };
+void pagar(struct Pedido* p) { p->status = 1; } // mutacao direta!
+```
+
+## Orientado a Objetos: o Agente Ativo
+
+```java
+public class Pedido {
+    private Estado status;
+    public void pagar() {
+        if (this.status.podePagar()) this.status = Estado.PAGO;
+    }
+}
+```
+
+## O Anti-Padrão do Modelo Anêmico
+
+```java
+public void setStatus(String s) { this.status = s; } // permite qualquer absurdo!
+pedido.setStatus("ENTREGUE"); // e o pagamento?
+```
+
+::: {.fragment}
+**Regra de ouro:** precisar de `get` para decidir por fora e depois `set` = o design falhou.
+:::
+
+:::
+
+# A Máquina de Estados Finita e o Objeto
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Um **Autômato Finito Determinístico** (DFA) é um modelo matemático clássico da Ciência da Computação: um sistema com um número limitado de **estados**, que muda de um estado para outro através de **transições** disparadas por eventos, de forma **determinística** — para cada estado e cada evento, existe exatamente um próximo estado.
+
+O mapeamento para Java é direto: os **atributos privados** (em conjunto) definem em qual estado o objeto se encontra; os **métodos públicos** são as únicas transições autorizadas. O encapsulamento, sob esta luz, ganha um propósito mais profundo do que "esconder": ele impede que o código externo "teletransporte" o objeto para um estado ilegal, pulando as transições validadas.
+
+Considere um `Produto` com três estados lógicos, definidos pelo seu estoque:
+
+```{.tikz .nostretch .center width="75%"}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=3.4cm,
+  st/.style={draw, circle, align=center, font=\small, minimum size=2.1cm},
+  >=Stealth
+]
+  \node[st, draw=icblue, fill=icblue!10] (cad) {CADASTRADO\\(estoque = 0)};
+  \node[st, draw=icorange, fill=icorange!10, right=of cad] (disp) {DISPONÍVEL\\(estoque $>$ 0)};
+  \node[st, draw=icred, fill=icred!10, right=of disp] (esg) {ESGOTADO\\(estoque = 0)};
+  \draw[->, thick, bend left=20] (cad) to node[above] {\texttt{repor(n)}} (disp);
+  \draw[->, thick, bend left=20] (disp) to node[above] {\texttt{vender(all)}} (esg);
+  \draw[->, thick, bend left=20] (esg) to node[below] {\texttt{repor(n)}} (disp);
+  \draw[->, thick, loop above] (disp) to node[above] {\texttt{vender(x<all)}} (disp);
+\end{tikzpicture}
+```
+
+A **invariante** que a máquina inteira existe para proteger é simples e inegociável: $\text{estoque} \ge 0$. O objeto nasce em `CADASTRADO` (via `new Produto()`), transita para `DISPONÍVEL` ao repor estoque, e só aceita `vender()` nesse estado. A defesa é feita em código, dentro do próprio método de transição:
+
+```java
+public class Produto {
+    private int estoque; // O Estado Oculto
+
+    // A Transicao (Metodo)
+    public void vender(int quantidade) {
+        // 1. Verificacao da legalidade da transicao (Guarda da Invariante)
+        if (quantidade <= 0) {
+            throw new IllegalArgumentException("Quantidade deve ser positiva.");
+        }
+        if (this.estoque < quantidade) {
+            throw new IllegalStateException("Transicao invalida: Estoque insuficiente.");
+        }
+        // 2. Execucao da mudanca de estado
+        this.estoque -= quantidade;
+    }
+}
+```
+
+Se o estoque tem 2 unidades e uma falha no carrinho tenta `vender(5)`, a máquina não processa a requisição e assume um estado impossível de $-3$: o método interroga o estado atual antes de mudar qualquer byte, e aborta a operação — o padrão **Fail-Fast**, que voltará com mais rigor ainda no Bloco do construtor.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Um DFA: Estados, Transições, Determinismo
+
+- Número **limitado** de estados
+- **Transições**, disparadas por eventos
+- **Determinismo:** para cada (estado, evento), um único próximo estado
+
+## O Mapeamento para Java
+
+::: {.fragment}
+Atributos `private` (em conjunto) = **o estado**
+:::
+::: {.fragment}
+Métodos públicos = **as transições** — as únicas autorizadas
+:::
+
+## O `Produto` como Máquina de Estados
+
+```{.tikz .nostretch .center width="90%"}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=3.4cm,
+  st/.style={draw, circle, align=center, font=\small, minimum size=2.1cm},
+  >=Stealth
+]
+  \node[st, draw=icblue, fill=icblue!10] (cad) {CADASTRADO\\(estoque = 0)};
+  \node[st, draw=icorange, fill=icorange!10, right=of cad] (disp) {DISPONÍVEL\\(estoque $>$ 0)};
+  \node[st, draw=icred, fill=icred!10, right=of disp] (esg) {ESGOTADO\\(estoque = 0)};
+  \draw[->, thick, bend left=20] (cad) to node[above] {\texttt{repor(n)}} (disp);
+  \draw[->, thick, bend left=20] (disp) to node[above] {\texttt{vender(all)}} (esg);
+  \draw[->, thick, bend left=20] (esg) to node[below] {\texttt{repor(n)}} (disp);
+  \draw[->, thick, loop above] (disp) to node[above] {\texttt{vender(x<all)}} (disp);
+\end{tikzpicture}
+```
+
+::: {.fragment}
+**Invariante:** estoque $\ge 0$, sempre. É o único motivo de a máquina existir.
+:::
+
+## Defendendo a Transição em Código
+
+```java
+public void vender(int quantidade) {
+    if (quantidade <= 0) throw new IllegalArgumentException("...");
+    if (this.estoque < quantidade) throw new IllegalStateException("...");
+    this.estoque -= quantidade;
+}
+```
+
+:::
+
+::: {.callout-tip}
+## Se os atributos de um objeto fossem todos `public`, a máquina de estados continuaria funcionando — só ficaria "mais rápida"? Por quê?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Máquina de Estados Encapsulada
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Os atributos privados materializam os "nós" do grafo de estados do objeto.
+b. Os métodos públicos são os únicos gatilhos autorizados a processar uma mudança de estado.
+c. Tornar o atributo `estoque` público tornaria as transições mais rápidas, sem custo arquitetural.
+d. Um DFA bem definido garante que, para cada estado e evento, exista exatamente uma transição válida.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Máquina de Estados Encapsulada — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — o conjunto de valores dos atributos privados é o estado atual da máquina.
+b. **Verdadeiro** — é exatamente essa a garantia que o encapsulamento protege.
+c. **Falso** — tornaria o atributo público, permitindo que qualquer código "teletransporte" o objeto para um estado ilegal, pulando a validação.
+d. **Verdadeiro** — é a definição de determinismo de um DFA.
+:::
+
+:::
+
+# Invariantes: do Laço à Classe
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O conceito de invariante não nasceu na Orientação a Objetos — vem da análise de algoritmos. Uma **invariante de laço** é uma propriedade que se mantém verdadeira antes da primeira iteração (inicialização), permanece verdadeira a cada volta (manutenção), e no fim do laço prova que o algoritmo alcançou seu objetivo (término). No *Insertion Sort*, por exemplo, a invariante é: "no início de cada iteração $i$, o subvetor de índices $0$ a $i-1$ contém os elementos originais, já ordenados". Essa garantia é o que permite provar a corretude do algoritmo sem precisar "torcer" para que dê certo no final.
+
+A **invariante de classe** eleva essa mesma ideia da execução de um laço para toda a vida de um objeto na Heap: é uma regra que deve continuar verdadeira do nascimento (construtor) até qualquer ponto depois de qualquer método. Exemplos concretos:
+
+- `ContaBancaria`: "o saldo mais o limite de crédito aprovado deve ser sempre $\ge 0$".
+- `Triangulo`: "a soma de dois lados deve ser sempre maior que o terceiro" ($a+b>c$, e as outras duas permutações).
+- `Carrinho`: "o total deve ser sempre igual à soma dos preços dos itens" — uma **propriedade derivada**, que não deveria ter um `setTotal(valor)` — o total é resultado, não entrada.
+
+```java
+public class Carrinho {
+    private double total = 0.0; // Estado Oculto
+
+    // A transicao oficial garante a Invariante automaticamente
+    public void adicionarItem(Item i) {
+        if (i != null && i.getPreco() > 0) {
+            this.total += i.getPreco();
+        }
+    }
+}
+```
+
+Se você expõe `saldo` como `public` numa `ContaBancaria` usada por 50 módulos diferentes, cada um dos 50 precisaria lembrar de checar o limite antes de alterar o saldo — e basta um esquecimento para quebrar a invariante e criar um risco financeiro real. Encapsulando o atributo, a regra existe em **um único lugar**: dentro do método que a protege.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Invariante de Laço (Insertion Sort)
+
+::: {.fragment}
+"No início da iteração $i$, o subvetor $[0, i-1]$ contém os elementos originais, já ordenados."
+:::
+
+::: {.fragment}
+Inicialização → Manutenção → Término: a prova de corretude do algoritmo.
+:::
+
+## Invariante de Classe: a Mesma Ideia, Outra Escala
+
+- `ContaBancaria`: saldo + limite $\ge 0$
+- `Triangulo`: $a+b>c$ (e permutações)
+- `Carrinho`: total = soma dos itens (propriedade **derivada**)
+
+## Por Que Não um `setTotal(valor)`?
+
+```java
+public void adicionarItem(Item i) {
+    if (i != null && i.getPreco() > 0) this.total += i.getPreco();
+}
+```
+
+::: {.fragment}
+O total é **resultado** de adicionar itens, não uma entrada livre — se fosse `public`, 50 módulos teriam que lembrar de mantê-lo coerente.
+:::
+
+:::
+
+# O Construtor como Base da Indução
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Para quem gosta de rigor matemático: a corretude de uma classe pode ser vista como uma prova por **indução finita**. Seja $S$ o conjunto de todos os estados possíveis de um objeto, e $V \subset S$ o subconjunto que respeita todas as invariantes.
+
+- **Base ($n=0$):** o construtor tem o dever de garantir que o objeto recém-criado $o$ satisfaça $o \in V$ desde o primeiro milissegundo de vida na Heap. Se os argumentos levariam a $o \notin V$, o construtor deve falhar ativamente.
+- **Passo indutivo ($n \Rightarrow n+1$):** dado um objeto em estado válido $s_n \in V$, qualquer método público invocado sobre ele deve obrigatoriamente resultar em $s_{n+1} \in V$.
+
+Se o construtor falha em estabelecer a base, todo o resto do sistema desmorona — os métodos assumem, sem verificar de novo, que o objeto já nasceu válido. Um construtor permissivo cria o que se chama de **Objeto Zumbi**: uma instância que ocupa espaço na Heap, mas cujos dados não fazem sentido, produzindo erros distantes e difíceis de rastrear.
+
+```java
+public class Produto {
+    private String nome;
+    private double preco;
+
+    /** Constructor: A Base da Inducao */
+    public Produto(String nome, double preco) {
+        // FAIL-FAST: Validacao agressiva das Invariantes Iniciais
+        if (nome == null || nome.trim().isEmpty()) {
+            throw new IllegalArgumentException("Nome obrigatorio.");
+        }
+        if (preco <= 0) {
+            throw new IllegalArgumentException("Preco deve ser positivo.");
+        }
+        // Se sobreviveu as validacoes, o estado V nasce.
+        this.nome = nome;
+        this.preco = preco;
+    }
+}
+```
+
+Um erro comum de quem está aprendendo: "consertar" o dado ruim silenciosamente (`if (preco < 0) this.preco = 0.0;`). Isso é um erro de design grave — mascarar dados inválidos cria uma falsa sensação de segurança e esconde uma falha de validação que deveria ter sido pega antes, na interface ou na camada de serviço. O construtor deve ser um guardião honesto: se a entrada está errada, a responsabilidade é de quem tentou criar o objeto, e o sistema deve recusar imediatamente.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Analogia da Indução
+
+- **Base** ($n=0$): o construtor garante $o \in V$ desde o nascimento
+- **Passo** ($n \Rightarrow n+1$): todo método preserva $V$
+
+::: {.fragment}
+Construtor permissivo → **Objeto Zumbi**: ocupa memória, dados sem sentido, bugs distantes.
+:::
+
+## Fail-Fast no Construtor
+
+```java
+public Produto(String nome, double preco) {
+    if (nome == null || nome.trim().isEmpty())
+        throw new IllegalArgumentException("Nome obrigatorio.");
+    if (preco <= 0)
+        throw new IllegalArgumentException("Preco deve ser positivo.");
+    this.nome = nome; this.preco = preco;
+}
+```
+
+::: {.fragment}
+**Erro comum:** `if (preco < 0) this.preco = 0.0;` — mascarar, não corrigir. O construtor deve recusar, não consertar.
+:::
+
+:::
+
+# Engenharia de Métodos: CQS e Design by Contract
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Depois que o construtor garante um nascimento íntegro, a responsabilidade de manter a máquina segura passa para os métodos. O princípio **CQS** (*Command-Query Separation*) exige que todo método público pertença a exatamente um destes dois papéis:
+
+- **Comando** (*Command*): executa uma transição e altera o estado observável. Deve retornar `void`. Ex.: `pedido.cancelar()`.
+- **Consulta** (*Query*): devolve um dado ao chamador. É proibido ter efeito colateral — uma pergunta não pode alterar a resposta. Ex.: `produto.getPrecoLiquido()`.
+
+O perigo de misturar os dois: imagine `verificarSaldo()` que, a cada chamada, secretamente cobra R\$ 0,50 de taxa. Um desenvolvedor que só queria *mostrar* o saldo na tela acaba drenando a conta do usuário sem querer. Separar Comandos de Consultas garante que perguntar é sempre uma operação segura e idempotente.
+
+O **Design by Contract** formaliza essa mesma disciplina em termos de pré e pós-condições:
+
+```java
+public void processarSaque(double valor) {
+    // PRE-CONDICAO: Protegendo a transicao contra chamadas invalidas
+    if (valor <= 0) throw new IllegalArgumentException("Valor negativo.");
+    if (this.saldo < valor) throw new IllegalStateException("Saldo insuficiente.");
+
+    this.saldo -= valor; // EXECUCAO DA TRANSICAO (Comando)
+
+    // POS-CONDICAO e INVARIANTE (Garantida pelo design do codigo acima)
+    assert this.saldo >= 0 : "Invariante violada apos o saque!";
+}
+```
+
+**Pré-condições** são barreiras de entrada: se falham, a culpa é de quem chamou o método fora de hora ou com dado inválido. **Pós-condições** atestam que, cumpridas as pré-condições, o método devolve o objeto num estado onde todas as invariantes seguem válidas — se isso falhar, o bug é do autor da classe, não de quem a chamou.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## CQS: Comandos vs. Consultas
+
+::: columns
+::: {.column width="48%"}
+**Comando**
+
+- Muda o estado
+- Retorna `void`
+:::
+::: {.column width="48%"}
+**Consulta**
+
+- Devolve um dado
+- **Zero** efeito colateral
+:::
+:::
+
+::: {.fragment}
+Misturar os dois: `verificarSaldo()` que cobra taxa a cada chamada — "perguntar" deixa de ser seguro.
+:::
+
+## Design by Contract
+
+```java
+public void processarSaque(double valor) {
+    if (valor <= 0) throw new IllegalArgumentException("...");        // PRE
+    if (this.saldo < valor) throw new IllegalStateException("...");   // PRE
+    this.saldo -= valor;                                              // COMANDO
+    assert this.saldo >= 0 : "Invariante violada!";                   // POS
+}
+```
+
+::: {.fragment}
+Pré-condição falha → **culpa do chamador**. Pós-condição falha → **culpa do autor da classe**.
+:::
+
+:::
+
+::: {.callout-tip}
+## Um método `getSaldoLiquido()` calcula um imposto e, de quebra, atualiza um contador interno de "quantas vezes o saldo foi consultado". Isso viola algum princípio desta aula?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## CQS e Design by Contract
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Um Comando deve, em geral, retornar `void`, sinalizando que sua função é mutar o estado, não devolver dado.
+b. Uma Consulta pode alterar o estado interno do objeto, desde que devolva o valor correto ao chamador.
+c. Se uma pré-condição falha, a responsabilidade recai sobre quem chamou o método fora de hora ou com dado inválido.
+d. Se uma pós-condição falha após pré-condições válidas, o bug é do autor da classe, não de quem a chamou.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## CQS e Design by Contract — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é a convenção que sinaliza "isto muda o mundo".
+b. **Falso** — é exatamente a violação de CQS; uma consulta deve ser idempotente.
+c. **Verdadeiro** — pré-condição é o contrato de entrada, sob responsabilidade do chamador.
+d. **Verdadeiro** — pós-condição é o contrato de saída, sob responsabilidade de quem escreveu o método.
+:::
+
+:::
+
+# Fail-Fast: Exceções como Defesa
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Em C, uma função de saque devolveria `1` (sucesso) ou `-1` (falha). O perigo estrutural: códigos de erro podem ser ignorados silenciosamente — se o chamador esquecer o `if (resultado == -1)`, o programa segue rodando como se nada tivesse acontecido, e os dados começam a se corromper sem aviso.
+
+**Fail-Fast** propõe o oposto: ao detectar uma pré-condição violada, o método lança uma exceção, interrompendo o fluxo imediatamente, na mesma linha da infração — impossível de ignorar.
+
+Para blindar uma máquina de estados, você não precisa (ainda) criar suas próprias exceções — o kit padrão do Java já cobre os casos comuns:
+
+- **`IllegalArgumentException`** — a culpa é da carga: um argumento passado não faz sentido no domínio (ex.: idade negativa).
+- **`IllegalStateException`** — a culpa é do momento: o dado está correto, mas o objeto não está no estado certo para a operação (ex.: `carrinho.finalizarCompra()` num carrinho vazio).
+- **`NullPointerException`** — usada proativamente via `Objects.requireNonNull(cliente, "...")`, para recusar um `null` já na porta de entrada, em vez de deixar o erro estourar linhas abaixo.
+
+```java
+public class Elevador {
+    private boolean portaAberta = false;
+    private boolean emMovimento = false;
+
+    public void subir() {
+        // 1. Protegendo contra transicao em Estado Invalido
+        if (this.portaAberta) {
+            throw new IllegalStateException("Nao pode subir com porta aberta.");
+        }
+        if (this.emMovimento) {
+            throw new IllegalStateException("O elevador ja esta em movimento.");
+        }
+        // 2. Mutacao Segura (Comando)
+        this.emMovimento = true;
+    }
+}
+```
+
+Essas três exceções são subclasses de `RuntimeException` (não-checadas) — não exigem `throws` na assinatura nem `try-catch` do lado de quem chama. A filosofia é: um erro de contrato (argumento ruim, chamada fora de hora) é **bug de quem chamou**, e bugs devem falhar de forma visível para serem corrigidos antes de produção, não silenciados com `try-catch`.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Códigos de Erro: o Perigo do Silêncio
+
+::: {.fragment}
+`-1` pode ser ignorado. O programa segue rodando com dados já corrompidos.
+:::
+
+## Fail-Fast: o Kit de Exceções
+
+- **`IllegalArgumentException`** — culpa da **carga** (argumento ruim)
+- **`IllegalStateException`** — culpa do **momento** (objeto no estado errado)
+- **`NullPointerException`** — via `Objects.requireNonNull(...)`, proativo
+
+## `Elevador`: Defendendo a Transição
+
+```java
+public void subir() {
+    if (this.portaAberta) throw new IllegalStateException("...");
+    if (this.emMovimento) throw new IllegalStateException("...");
+    this.emMovimento = true;
+}
+```
+
+::: {.fragment}
+`RuntimeException` (não-checada): erro de contrato é bug de quem chamou — deve **quebrar visivelmente**, não ser engolido por `try-catch`.
+:::
+
+:::
+
+# Identidade Física vs. Identidade Lógica
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Se criarmos duas instâncias idênticas de `Produto` na Heap, elas são o mesmo objeto? Para a JVM, não — `==` compara endereços físicos. Para o negócio, muitas vezes sim: dois objetos com o mesmo SKU deveriam ser tratados como "o mesmo produto".
+
+```java
+Produto p1 = new Produto(1, "Teclado");
+Produto p2 = new Produto(1, "Teclado");
+
+System.out.println(p1 == p2);      // false (enderecos fisicos diferentes)
+System.out.println(p1.equals(p2)); // false! (Java nao sabe que o ID 1 importa)
+```
+
+O `equals()` herdado de `Object` usa `==` por padrão — ele não conhece o seu domínio de negócio. Se seu sistema tenta usar um `HashSet<Produto>` para evitar duplicatas no carrinho, e dois `Produto` com o mesmo SKU foram instanciados em requisições diferentes, o `Set` vai aceitar os dois como distintos — e o cliente é cobrado duas vezes pelo mesmo item.
+
+A correção: sobrescrever `equals()` para comparar o atributo que **de fato** define identidade de negócio (o SKU), **e** `hashCode()` em conjunto — nunca um sem o outro:
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (this == o) return true;                                  // 1. mesma identidade fisica?
+    if (o == null || getClass() != o.getClass()) return false;    // 2. protecao de tipo
+    Produto produto = (Produto) o;
+    return this.sku == produto.sku;                               // 3. regra de negocio: SKU define identidade
+}
+
+@Override
+public int hashCode() {
+    return Objects.hash(sku); // o hash deve olhar APENAS para os campos do equals
+}
+```
+
+**Analogia do armazém:** `hashCode()` é o número do corredor (busca rápida); `equals()` é a checagem da etiqueta quando você chega lá. Se `equals()` compara o SKU mas `hashCode()` usa outra coisa (a cor da embalagem, digamos), caixas iguais acabam em corredores diferentes — o sistema procura no corredor errado e afirma, silenciosamente, que o item não existe. É por isso que os dois métodos formam um contrato indissociável.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Paradoxo da Igualdade
+
+```java
+Produto p1 = new Produto(1, "Teclado");
+Produto p2 = new Produto(1, "Teclado");
+p1 == p2;       // false — enderecos diferentes
+p1.equals(p2);  // false! — equals herdado usa ==
+```
+
+::: {.fragment}
+Para a JVM: objetos diferentes. Para o negócio: **mesmo produto** (mesmo SKU).
+:::
+
+## Corrigindo: `equals()` + `hashCode()`
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    return this.sku == ((Produto) o).sku;
+}
+@Override
+public int hashCode() { return Objects.hash(sku); }
+```
+
+::: {.fragment}
+**Armazém:** `hashCode` = corredor; `equals` = etiqueta. Um sem o outro coerente → item "some" num `HashSet`/`HashMap`.
+:::
+
+:::
+
+::: {.callout-tip}
+## Por que reescrever `equals()` sem reescrever `hashCode()` junto é mais perigoso do que não reescrever nenhum dos dois?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Identidade Física e Lógica
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. O operador `==` em Java compara sempre a identidade física — o endereço na Heap.
+b. O `equals()` herdado de `Object`, sem sobrescrita, já entende qual atributo define a igualdade de negócio.
+c. Se dois objetos são iguais por `equals()`, seus `hashCode()` devem obrigatoriamente coincidir.
+d. Um `HashSet` pode aceitar "duplicatas" de negócio se `equals()` não foi sobrescrito para refletir a identidade lógica correta.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Identidade Física e Lógica — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — `==` nunca considera conteúdo, só endereço.
+b. **Falso** — o `equals()` padrão de `Object` também usa `==` por baixo; não conhece o domínio.
+c. **Verdadeiro** — é o contrato inseparável de `equals`/`hashCode`.
+d. **Verdadeiro** — sem `equals()` correto, dois objetos "iguais" para o negócio são tratados como distintos.
+:::
+
+:::
+
+# Conclusão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando às quatro perguntas da abertura:
+
+1. **Saco de variáveis vs. máquina de estados:** uma classe deixa de ser um `struct` glorificado quando os métodos, não o mundo externo, decidem se uma mudança de estado é legal.
+2. **Invariante e o motivo do encapsulamento:** a invariante é a regra que nunca pode ser violada; o encapsulamento existe precisamente para que só o próprio objeto possa proteger essa regra.
+3. **O construtor é diferente:** ele é a base de uma indução — se falha em recusar dados ruins, todo o resto do sistema herda a corrupção sob a forma de "objetos zumbis".
+4. **Quando lançar exceção:** `IllegalArgumentException` quando o dado está errado, `IllegalStateException` quando o momento está errado — e ambas devem interromper o fluxo imediatamente, não ser mascaradas.
+
+### Ponte para a Aula 3 {.unnumbered}
+
+Falamos da máquina de estados por dentro — invariantes, construtor, transições. A Aula 3 olha para as **bordas** dessa máquina: o contrato entre interface e implementação visto com mais rigor filosófico, a diferença entre o escopo de uma variável e o ciclo de vida de um objeto (o que já apareceu na Aula 1 com a Heap e o GC), e a identidade revisitada sob a ótica da imutabilidade.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos
+
+1. Objeto = máquina de estados: atributos = estado, métodos = transições
+2. **Invariante:** a regra que o encapsulamento existe para proteger
+3. Construtor = base da indução; Fail-Fast recusa "objetos zumbis"
+4. `IllegalArgumentException` (dado errado) vs. `IllegalStateException` (momento errado)
+
+::: {.fragment}
+**Próxima aula:** as bordas da máquina — contrato, escopo, ciclo de vida e identidade.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. Numa auditoria de um sistema de pagamentos, encontrou-se a classe `Transferencia` com *getters* e *setters* cegos para todas as propriedades, sem lógica interna alguma. Usando a teoria de máquinas de estado e proteção de invariantes, explique por que o Modelo Anêmico é um risco inaceitável em software financeiro.
+
+2. Um estagiário validou salários no construtor de `Funcionario` assim: `if (salario < 0) this.salario = 0;`. Usando o conceito de Fail-Fast e a analogia da base da indução, critique esse mecanismo e reescreva o construtor de forma robusta.
+
+3. Dois usuários preenchem os mesmos dados num formulário e o sistema cria dois objetos `Passaporte` distintos, com dados idênticos. Explique por que `p1.equals(p2)` retorna `false` por padrão, e como corrigir esse comportamento para refletir a identidade lógica correta do domínio.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-tip}
+## Estado, Comportamento e Identidade (revisitados)
+
+a. ( ) O Estado de um objeto é definido pelo conjunto de valores de seus atributos num dado instante.
+b. ( ) O Comportamento é a única via autorizada a alterar o Estado de um objeto bem projetado.
+c. ( ) Dois objetos com Estado idêntico são sempre a mesma Identidade física na Heap.
+d. ( ) A Identidade é garantida pela JVM no momento em que o objeto é instanciado via `new`.
+:::
+
+::: {.callout-tip}
+## Struct Passivo vs. Agente Ativo
+
+a. ( ) Em C, uma `struct` agrupa dados e as funções que operam sobre eles na mesma unidade.
+b. ( ) Numa `struct`, a responsabilidade de manter a consistência do dado recai sobre a função externa que o manipula.
+c. ( ) Em Java, o objeto pode recusar uma mutação que viole suas próprias regras internas.
+d. ( ) A união entre dados e as regras que os protegem é o que caracteriza o encapsulamento forte.
+:::
+
+::: {.callout-tip}
+## O Modelo de Domínio Anêmico
+
+a. ( ) Ocorre quando todos os atributos privados recebem getters e setters cegos, sem validação.
+b. ( ) É considerado um design rico, pois maximiza a flexibilidade de quem consome a classe.
+c. ( ) Esvazia o objeto de regra de negócio, reduzindo-o a uma estrutura de dados passiva.
+d. ( ) O design correto prefere métodos verbais de intenção (`pagar()`, `cancelar()`) a setters genéricos.
+:::
+
+::: {.callout-tip}
+## A Máquina de Estados Finita (DFA)
+
+a. ( ) Um DFA tem um número limitado e conhecido de estados possíveis.
+b. ( ) Para cada par (estado, evento), existe exatamente um próximo estado, por definição de determinismo.
+c. ( ) Um DFA bem definido permite comportamentos "mágicos" e imprevisíveis em casos de borda.
+d. ( ) O determinismo de um DFA facilita a prova formal da corretude de um sistema.
+:::
+
+::: {.callout-tip}
+## A Máquina de Estados Encapsulada em Java
+
+a. ( ) Atributos privados materializam, em conjunto, o "nó" atual da máquina de estados do objeto.
+b. ( ) Métodos públicos atuam como as transições — os únicos eventos autorizados a mudar o estado.
+c. ( ) Tornar os atributos públicos tornaria as transições mais eficientes, sem custo arquitetural.
+d. ( ) O encapsulamento impede que código externo "pule" transições e alcance um estado ilegal.
+:::
+
+::: {.callout-tip}
+## Invariantes de Classe
+
+a. ( ) Uma invariante de classe deve permanecer verdadeira após a execução de qualquer método público.
+b. ( ) Uma propriedade derivada, como o total de um carrinho, dispensa proteção por invariante.
+c. ( ) Expor o estado publicamente distribui a responsabilidade de manter a invariante por todo o sistema.
+d. ( ) Centralizar a regra dentro do próprio objeto reduz o risco de um módulo externo esquecer de aplicá-la.
+:::
+
+::: {.callout-tip}
+## O Construtor como Base da Indução
+
+a. ( ) O construtor corresponde à etapa "base" de uma prova por indução sobre a validade do objeto.
+b. ( ) Um construtor permissivo, que aceita qualquer dado, é uma boa prática para evitar exceções.
+c. ( ) Lançar uma exceção no construtor impede que um "Objeto Zumbi" passe a existir na Heap.
+d. ( ) Se a base da indução falha, os métodos subsequentes não podem mais confiar na validade do objeto.
+:::
+
+::: {.callout-tip}
+## CQS: Comandos vs. Consultas
+
+a. ( ) Comandos são os únicos métodos autorizados a provocar mutação de estado.
+b. ( ) O CQS recomenda que Comandos retornem `void`, sinalizando ausência de dado de retorno.
+c. ( ) Uma Consulta pode alterar o estado interno, desde que devolva o dado correto ao chamador.
+d. ( ) Consultas idempotentes evitam efeitos colaterais acidentais ao simplesmente inspecionar um objeto.
+:::
+
+::: {.callout-tip}
+## Design by Contract
+
+a. ( ) Pré-condições avaliam se o pedido faz sentido antes da execução do método.
+b. ( ) Se uma pré-condição falha, a responsabilidade recai sobre quem escreveu a classe, não sobre o chamador.
+c. ( ) Pós-condições atestam que as invariantes permanecem válidas depois da transição.
+d. ( ) Uma pós-condição violada, após pré-condições satisfeitas, indica um bug no próprio método.
+:::
+
+::: {.callout-tip}
+## Fail-Fast e Exceções Padrão
+
+a. ( ) Códigos de erro como `-1` podem ser silenciosamente ignorados por quem chama a função.
+b. ( ) `IllegalArgumentException` deve ser usada quando o objeto está no estado errado para a operação.
+c. ( ) `IllegalStateException` sinaliza que o dado é válido, mas o momento da chamada não é.
+d. ( ) `Objects.requireNonNull(...)` permite disparar `NullPointerException` proativamente, na entrada do método.
+:::
+
+::: {.callout-tip}
+## Identidade Física vs. Lógica
+
+a. ( ) O operador `==` compara sempre o endereço físico na Heap, nunca o conteúdo do objeto.
+b. ( ) O `equals()` herdado de `Object`, sem sobrescrita, já reflete a identidade lógica de negócio.
+c. ( ) Dois objetos podem ser fisicamente distintos (`==` falso) e ainda assim logicamente iguais para o negócio.
+d. ( ) Um `HashSet` pode aceitar duplicatas lógicas se `equals()` não foi corretamente sobrescrito.
+:::
+
+::: {.callout-tip}
+## O Contrato equals()/hashCode()
+
+a. ( ) Se dois objetos são iguais por `equals()`, seus `hashCode()` devem obrigatoriamente coincidir.
+b. ( ) O `hashCode()` pode usar atributos completamente diferentes dos usados pelo `equals()`, sem risco.
+c. ( ) Violar o contrato `equals()`/`hashCode()` pode causar o desaparecimento silencioso de itens num `HashMap`.
+d. ( ) IDEs modernas geram os dois métodos juntos justamente para preservar essa coerência.
+:::
+
+:::

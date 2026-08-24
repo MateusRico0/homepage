@@ -1,0 +1,656 @@
+---
+title: "Interfaces e o Contrato de Comportamento"
+subtitle: "Aula 6 — Programação Orientada a Objetos"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: _lesson-nav.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    output-file: notas.html
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides →](slides.html){.see-all}
+:::
+
+# Proposta da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A Aula 5 terminou com uma pergunta em aberto: aplicamos o Princípio da Inversão de Dependência e decidimos que `Cliente` deveria depender de uma abstração chamada `Pagavel`, não de `Cartao` diretamente. Mas o Java é fortemente tipado — como o compilador aceita uma variável `Pagavel` que ora recebe um `Pix`, ora um `Cartao`, sem que essas classes tenham nada em comum? Esta aula responde com o mecanismo de linguagem que torna essa abstração real: a **Interface**.
+
+**O roteiro, em quatro perguntas:**
+
+1. O que exatamente uma interface promete — e o que ela deliberadamente não promete?
+2. Como uma interface, proibida de ter estado, ainda consegue ditar uma regra de negócio?
+3. O que separa uma interface de uma classe abstrata?
+4. Quando o compilador não consegue mais proteger uma regra de negócio, quem assume essa responsabilidade?
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**A pergunta da Aula 5:** como o compilador aceita `Pagavel p = new Pix()` e depois `p = new Cartao()`?
+
+::: {.fragment}
+**A resposta começa aqui:** a Interface — o mecanismo de linguagem que torna a abstração `Pagavel` real.
+:::
+
+::: {.fragment}
+**Roteiro:** contrato → interfaces modernas → tipos como comportamento → exceções como guardas.
+:::
+
+:::
+
+# Interfaces: o Contrato de Comportamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Uma interface não é uma classe — é um **Contrato de Comportamento**. Uma classe define o que um objeto *é* (seu estado); a interface define o que ele *faz*.
+
+```java
+package br.com.loja.model;
+
+public interface Pagavel {
+    // Garante que qualquer pagamento saiba verificar o status
+    boolean pagamentoConfirmado(String idString);
+    // Garante que qualquer pagamento saiba gerar uma cobranca
+    String criarCobranca(double valor);
+}
+```
+
+Note a ausência de corpos (métodos terminam em `;`) e de atributos — a interface é abstração pura, dizendo **o quê**, nunca **como**. Em Java, seus métodos são implicitamente `public` e `abstract`.
+
+Para que `Pix` seja do tipo `Pagavel`, ela precisa implementar todos os métodos do contrato:
+
+```java
+public class Pix implements Pagavel {
+    @Override
+    public boolean pagamentoConfirmado(String idString) {
+        // Detalhe tecnico: consulta API do Banco Central.
+        // O Pedido nao precisa saber que isso acontece aqui.
+        return true;
+    }
+
+    @Override
+    public String criarCobranca(double valor) {
+        return "BR.GOV.BCB.PIX/QRCODE-RANDOM-ID";
+    }
+}
+```
+
+O `@Override` sinaliza que estamos cumprindo uma promessa — e se um método do contrato for esquecido, o Java simplesmente não compila. Pense numa **tomada elétrica**: ela define um contrato (formato dos pinos, voltagem). O sistema elétrico da casa não sabe se o que está plugado é um liquidificador ou uma TV — desde que o aparelho tenha o plugue certo, recebe energia. Um novo aparelho não exige refazer a fiação da casa; ele só precisa se encaixar no contrato já existente.
+
+Diferente da herança de classes (que compartilha "DNA" — estrutura, estado, implementação da classe-mãe), a interface é um "crachá": qualquer classe, de qualquer origem, pode se tornar `Pagavel` bastando assinar o contrato. Isso permite que objetos totalmente díspares — uma `VendaOnline` e uma `AssinaturaMensal` — sejam tratados de forma idêntica pelo sistema de pagamentos, com uma flexibilidade que a composição simples nunca alcançaria sozinha.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Interface `Pagavel`
+
+```java
+public interface Pagavel {
+    boolean pagamentoConfirmado(String idString); // sem corpo!
+    String criarCobranca(double valor);           // sem estado!
+}
+```
+
+::: {.fragment}
+Diz **o quê**, nunca **como**. Métodos são implicitamente `public abstract`.
+:::
+
+## Cumprindo o Contrato: `Pix`
+
+```java
+public class Pix implements Pagavel {
+    @Override
+    public boolean pagamentoConfirmado(String idString) { return true; }
+    @Override
+    public String criarCobranca(double valor) { return "PIX-..."; }
+}
+```
+
+::: {.fragment}
+Esquecer um método do contrato = **erro de compilação**, não bug em produção.
+:::
+
+## A Analogia da Tomada Elétrica
+
+::: {.fragment}
+A tomada não sabe se é liquidificador ou TV — só exige o plugue certo. Um aparelho novo não exige refazer a fiação da casa.
+:::
+
+:::
+
+# Interfaces Modernas: Default, Static, Private
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Até o Java 7, interfaces eram 100% abstratas. Desde o Java 8, podem conter comportamento — permitindo evoluir APIs ricas sem quebrar implementações legadas:
+
+```java
+public interface Pagavel {
+    String criarCobranca(double valor); // abstrato
+
+    // static: utilitario que pertence ao tipo, nao a instancia
+    static boolean isValorValido(double v) { return v > 0; }
+
+    // default: comportamento herdavel, nao quebra Pix.java existente
+    default void processarComLog(double v) {
+        validar(v);
+        System.out.println("Processando: " + criarCobranca(v));
+    }
+
+    // private (Java 9+): auxiliar interno, organiza o codigo da interface
+    private void validar(double v) {
+        if (!isValorValido(v)) throw new IllegalArgumentException();
+    }
+}
+```
+
+O `CheckoutController` pode usar `processarComLog()` sem que `Pix.java` precise ser alterado ou recompilado.
+
+**O paradoxo do "Mutador Cego".** Como uma interface, proibida de ter atributos, consegue *mudar* o estado de um objeto?
+
+```java
+public interface Pagavel {
+    double getSaldo();                 // a interface "pergunta" o dado
+    void setSaldo(double novoSaldo);   // a interface "entrega" o dado
+
+    // a regra reside na abstracao (centralizacao e consistencia)
+    default void aplicarJuros(double taxa) {
+        if (taxa < 0) throw new IllegalArgumentException();
+        double saldoAtual = getSaldo();
+        setSaldo(saldoAtual * (1 + taxa)); // muta sem saber onde o dado mora
+    }
+}
+
+public class Pix implements Pagavel {
+    private double saldoReal; // o estado real esta aqui
+    @Override public double getSaldo() { return saldoReal; }
+    @Override public void setSaldo(double n) { saldoReal = n; }
+}
+```
+
+A interface é o "cérebro" (detém a fórmula de juros e a validação); a classe concreta é os "músculos" (armazena e devolve o dado). A interface não sabe se o saldo mora numa variável privada, num banco de dados ou num serviço remoto — só confia que `getSaldo()`/`setSaldo()` funcionam. O ganho: todas as implementações (`Pix`, `Boleto`, `Cartao`) seguem exatamente a mesma regra de juros, sem duplicação (DRY).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Default, Static, Private
+
+```java
+static boolean isValorValido(double v) { return v > 0; }      // utilitario do tipo
+default void processarComLog(double v) { validar(v); ... }    // herdavel
+private void validar(double v) { ... }                        // interno (Java 9+)
+```
+
+::: {.fragment}
+Evolução sem ruptura: `Pix.java` nem precisa saber que `processarComLog` existe.
+:::
+
+## O "Mutador Cego"
+
+```java
+default void aplicarJuros(double taxa) {
+    double saldoAtual = getSaldo();
+    setSaldo(saldoAtual * (1 + taxa)); // muta sem saber ONDE o dado mora
+}
+```
+
+::: {.fragment}
+Interface = cérebro (regra); classe concreta = músculos (armazenamento). Mesma regra, zero duplicação.
+:::
+
+:::
+
+::: {.callout-tip}
+## O método `default aplicarJuros` muda o saldo do objeto. Isso significa que a interface passou a ter estado próprio?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Interfaces Modernas e o Mutador Cego
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Um método `default` pode chamar outros métodos abstratos da mesma interface, confiando que a classe concreta os implementa.
+b. O método `aplicarJuros` armazena o novo saldo dentro da própria interface, num atributo privado.
+c. O padrão Mutador Cego funciona porque a interface conhece o "cérebro" (regra) e delega o armazenamento aos "músculos" (classe concreta).
+d. Um método `static` de interface pode ser chamado sem nenhuma instância de uma classe concreta.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Interfaces Modernas e o Mutador Cego — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é assim que `aplicarJuros` chama `getSaldo()`/`setSaldo()`.
+b. **Falso** — a interface continua sem nenhum atributo de instância; o estado mora na classe concreta.
+c. **Verdadeiro** — é a definição do Mutador Cego.
+d. **Verdadeiro** — métodos `static` pertencem ao tipo, não a uma instância.
+:::
+
+:::
+
+# Interface vs. Classe Abstrata
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Mesmo com comportamento, a interface não vira uma "classe disfarçada" — a fronteira é o **estado**:
+
+| Característica | Interface Moderna | Classe Abstrata |
+|---|---|---|
+| Estado | Proibido (só `public static final`) | Permitido (atributos de instância) |
+| Herança | Uma classe implementa várias | Uma classe estende só uma |
+| Propósito | Definir um **papel/capacidade** (o que faz) | Definir uma **identidade** (o que é) |
+
+**Diretriz de design:** se você precisa compartilhar estrutura de dados e proteger estado interno, use uma classe abstrata. Se precisa compartilhar comportamento entre famílias de classes diferentes, e permitir que uma mesma classe assuma vários papéis, a interface é a escolha certa.
+
+**Tipos são comportamento, não DNA.** Ao declarar `Pagavel p`, não estamos dizendo o que `p` *é* — estamos dizendo o que `p` *pode fazer*. `Pix` pode ter métodos complexos de QR Code; `CartaoDeCredito` pode ter lógica de criptografia de chip — em termos de dados, podem não ter nada em comum. Mas para o `CheckoutController`, ambos são do mesmo tipo, porque ambos "sabem pagar":
+
+```java
+List<Pagavel> opcoesReais = clienteLogado.consultaMeiosPagamento();
+Pagavel formaEscolhida = opcoesReais.get(escolha - 1); // Pix, Boleto ou Cartao — tanto faz
+String id = formaEscolhida.criarCobranca(total);
+```
+
+O código é escrito para a abstração, não para a implementação — se amanhã surgir `Cripto implements Pagavel`, o controlador não muda uma linha.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Fronteira: o Estado
+
+| | Interface | Classe Abstrata |
+|---|---|---|
+| Estado | Proibido | Permitido |
+| Herança | Múltipla (`implements`) | Única (`extends`) |
+| Propósito | O que **faz** | O que **é** |
+
+## Tipo = Comportamento, Não DNA
+
+```java
+List<Pagavel> opcoes = clienteLogado.consultaMeiosPagamento();
+Pagavel forma = opcoes.get(escolha - 1); // Pix, Boleto, Cartao — tanto faz
+String id = forma.criarCobranca(total);  // escrito para a abstracao
+```
+
+::: {.fragment}
+`Pix` e `Cartao` sem nada em comum em dados — mesmo tipo `Pagavel`, porque ambos "sabem pagar".
+:::
+
+:::
+
+::: {.callout-tip}
+## Uma interface pode ter métodos `default` com lógica de negócio real. Isso a transforma numa "classe disfarçada"? O que exatamente impede isso?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Interfaces e o Contrato de Tipo
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Uma interface define o que um objeto faz, sem exigir compartilhamento de estrutura interna ("DNA").
+b. Métodos `default` e `static` tornam a interface equivalente a uma classe comum, incluindo suporte a atributos de instância.
+c. Duas classes sem nenhum atributo em comum podem, ainda assim, ser do mesmo tipo se implementarem a mesma interface.
+d. Esquecer de implementar um método do contrato de uma interface é um erro detectado em tempo de compilação.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Interfaces e o Contrato de Tipo — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é a definição de Tipo Puro desta aula.
+b. **Falso** — mesmo com `default`/`static`, a interface continua proibida de ter atributos de instância.
+c. **Verdadeiro** — é exatamente o caso de `Pix` e `CartaoDeCredito`.
+d. **Verdadeiro** — o compilador impede a compilação se o contrato não for cumprido.
+:::
+
+:::
+
+# Exceções como Guardas de Contrato
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O compilador garante que você passe um `double` — mas não sabe que um preço de $-\$50{,}00$ é um erro conceitual. Quando a assinatura do método (o tipo) não consegue expressar uma regra de negócio, a **exceção** assume o papel de fiscalizar o contrato.
+
+```java
+@Override
+public String criarCobranca(double valor) {
+    if (valor <= 0) {
+        // Falhe o mais rapido possivel
+        throw new IllegalArgumentException("Valor invalido: " + valor);
+    }
+    // So executa se o contrato for respeitado
+    return "PIX-ID-" + (long)(Math.random() * 100000000L);
+}
+```
+
+**O erro de silenciar.** O maior pecado em Orientação a Objetos é "ajudar" o erro retornando `null`, `0` ou `false`. Isso só empurra o problema para frente — o sistema eventualmente trava com um `NullPointerException` numa linha que não tem nada a ver com o erro original. A exceção interrompe o fluxo no exato momento da violação, preservando um *stack trace* útil.
+
+Quem consome o contrato deve estar preparado para a eventual quebra:
+
+```java
+try {
+    String idTransacao = formaEscolhida.criarCobranca(total);
+    view.exibirSucesso(idTransacao);
+} catch (IllegalArgumentException e) {
+    view.exibirErro("Erro no pagamento: " + e.getMessage());
+    log.registrar(e);
+}
+```
+
+O `try-catch` no `CheckoutController` age como barreira de contenção — o sistema não morre, se recupera. A diretriz de design: **objetos de baixo nível (como `Pix`) lançam exceções; objetos de alto nível (como o Controller) decidem como reagir a elas.**
+
+**Aplicando o padrão em três novos contratos.** A mesma lógica — interface definindo o "o quê", exceção guardando os limites — resolve três pontos ainda rígidos do sistema:
+
+```java
+// Notificacoes: o canal (SMS, e-mail, WhatsApp) deixa de importar
+public interface Notificavel {
+    void enviar(String destino, String msg) throws NotificationException;
+}
+
+// Descontos: um double sozinho aceita valores absurdos; a interface protege a regra
+public interface EstrategiaDesconto {
+    double aplicar(double valorOriginal);
+}
+public class DescontoBlackFriday implements EstrategiaDesconto {
+    public double aplicar(double valor) {
+        if (valor < 0) throw new IllegalArgumentException("Valor base negativo");
+        return valor * 0.50;
+    }
+}
+
+// Logistica: o Pedido para de gerar seu proprio codigo de rastreio
+public interface ServicoLogistico {
+    String solicitarRastreio(Pedido pedido) throws CarrierUnavailableException;
+}
+```
+
+Em cada caso, a exceção não é só um erro — é uma **cláusula do contrato**: "prometo tentar, mas dependo de algo externo, e aviso formalmente que posso falhar". O `Pedido` deixa de saber como notificar, como calcular descontos complexos ou como falar com transportadoras — ele só conhece os contratos, e confia que os especialistas cumprem a promessa ou avisam da falha.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Fail-Fast no Contrato
+
+```java
+public String criarCobranca(double valor) {
+    if (valor <= 0) throw new IllegalArgumentException("Valor invalido: " + valor);
+    return "PIX-ID-...";
+}
+```
+
+::: {.fragment}
+O compilador aceita qualquer `double`. A exceção protege o que o tipo não consegue expressar.
+:::
+
+## O Erro de Silenciar
+
+::: {.fragment}
+Retornar `null`/`0`/`false` só empurra o erro para uma linha distante — um `NullPointerException` sem relação óbvia com a causa real.
+:::
+
+## O Try-Catch como Contenção
+
+```java
+try {
+    String id = formaEscolhida.criarCobranca(total);
+} catch (IllegalArgumentException e) {
+    view.exibirErro("Erro no pagamento: " + e.getMessage());
+}
+```
+
+::: {.fragment}
+Baixo nível **lança**; alto nível **decide como reagir**.
+:::
+
+## Três Novos Contratos, Mesmo Padrão
+
+```java
+public interface Notificavel { void enviar(String d, String m) throws NotificationException; }
+public interface EstrategiaDesconto { double aplicar(double valorOriginal); }
+public interface ServicoLogistico { String solicitarRastreio(Pedido p) throws CarrierUnavailableException; }
+```
+
+::: {.fragment}
+Exceção = cláusula do contrato: "prometo tentar, mas posso falhar — e aviso formalmente".
+:::
+
+:::
+
+::: {.callout-tip}
+## Por que "lançar uma exceção" é descrito nesta aula como um ato de honestidade do objeto, e "tratá-la" como um ato de resiliência do sistema?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Exceções como Guardas de Contrato
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. O compilador é suficiente para impedir que um preço negativo seja aceito por um método que recebe `double`.
+b. Retornar `null` ou `0` para sinalizar um erro é uma prática que só adia a descoberta do problema real.
+c. Segundo a diretriz desta aula, componentes de baixo nível devem lançar exceções, e componentes de alto nível devem decidir como reagir.
+d. Um `throws NotificationException` na assinatura de um método é uma forma de tornar explícita uma possível falha do contrato.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Exceções como Guardas de Contrato — Resposta
+
+::: {.callout-tip}
+a. **Falso** — o compilador só garante o tipo sintático (`double`), não a validade semântica do valor.
+b. **Verdadeiro** — é o "erro de silenciar" descrito nesta aula.
+c. **Verdadeiro** — é a diretriz explícita de responsabilidade.
+d. **Verdadeiro** — é exatamente a ideia de "exceção como cláusula do contrato".
+:::
+
+:::
+
+# Conclusão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando às quatro perguntas da abertura:
+
+1. **O que a interface promete:** o comportamento (o quê), nunca a implementação (o como) — e deliberadamente nada sobre estado.
+2. **Ditar regra sem estado:** o padrão Mutador Cego — a interface é o cérebro, a classe concreta são os músculos.
+3. **Interface vs. classe abstrata:** a fronteira é o estado — proibido numa, permitido na outra.
+4. **Quando o compilador não basta:** a exceção assume o papel de guardar a regra de negócio que o sistema de tipos não consegue expressar.
+
+### Ponte para a Aula 7 {.unnumbered}
+
+Resolvemos o "o quê" (o contrato) e o "quando falha" (a exceção). Falta o "como o compilador aceita múltiplas formas": a Aula 7 explica o mecanismo de **Polimorfismo** — em particular o *Late Binding* — que permite que a mesma variável `Pagavel` receba, em momentos diferentes, um `Pix` ou um `Cartao`, e execute o código certo em cada caso.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos
+
+1. Interface = contrato de comportamento, nunca implementação ou estado
+2. `default`/`static`/`private` trazem comportamento sem quebrar retrocompatibilidade
+3. Interface (papel) vs. Classe Abstrata (identidade): a fronteira é o estado
+4. Exceção guarda a regra de negócio que o tipo sozinho não expressa
+
+::: {.fragment}
+**Próxima aula:** Polimorfismo — como o compilador aceita múltiplas formas por trás do mesmo contrato.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. Explique o conceito de Interface como um "Contrato de Comportamento" e comente por que ela representa a materialização máxima do paradigma da Caixa Preta. O que diferencia a tipagem pura de uma interface da tipagem baseada em herança de classes?
+
+2. Analise a técnica do "Mutador Cego". Como uma interface moderna consegue orquestrar a alteração do saldo de uma conta (aplicar juros), se ela é estritamente proibida de possuir atributos de instância? Explique usando a ideia de inversão de conhecimento (cérebro vs. músculos).
+
+3. Explique por que o sistema de tipos estáticos do Java (garantir que um parâmetro seja `double`) é insuficiente para proteger a integridade das regras de negócio. Como o lançamento de exceções atua como fiscalizador do contrato quando os limites da tipagem são atingidos?
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-tip}
+## Interface como Contrato de Comportamento
+
+a. ( ) Uma interface define o que um objeto faz, não como ele faz ou o que ele guarda internamente.
+b. ( ) Métodos de interface, em Java, terminam com corpo de implementação obrigatório.
+c. ( ) Uma classe torna-se do tipo da interface ao usar a palavra-chave `implements` e implementar seus métodos.
+d. ( ) `@Override` sinaliza que a classe está cumprindo uma promessa feita à interface.
+:::
+
+::: {.callout-tip}
+## Interface como Tipo Puro
+
+a. ( ) A interface é chamada de "Tipo Puro" porque não impõe hierarquia de herança de estrutura.
+b. ( ) Duas classes de famílias completamente diferentes podem compartilhar o mesmo tipo, desde que implementem a mesma interface.
+c. ( ) A interface, ao contrário da herança, funciona como um "crachá" independente da origem da classe.
+d. ( ) Herança de classe e implementação de interface são exatamente o mesmo mecanismo em Java.
+:::
+
+::: {.callout-tip}
+## Interfaces Modernas: Default, Static, Private
+
+a. ( ) Métodos `default` permitem adicionar comportamento a uma interface sem quebrar implementações legadas.
+b. ( ) Métodos `static` em interfaces pertencem ao espaço de nomes do tipo, não a uma instância específica.
+c. ( ) Métodos `private` em interfaces (Java 9+) servem para compartilhar lógica auxiliar entre métodos `default`.
+d. ( ) A introdução de `default methods` obriga todas as classes legadas a serem recompiladas e alteradas manualmente.
+:::
+
+::: {.callout-tip}
+## O Paradoxo do Mutador Cego
+
+a. ( ) Uma interface pode orquestrar transições de estado, mesmo sem possuir atributos de instância próprios.
+b. ( ) A interface detém a regra de negócio (o "cérebro"); a classe concreta detém o armazenamento (os "músculos").
+c. ( ) O método `default aplicarJuros` sabe exatamente onde e como o saldo está fisicamente armazenado.
+d. ( ) Centralizar a regra de juros na interface evita duplicação de código entre `Pix`, `Boleto` e `Cartao`.
+:::
+
+::: {.callout-tip}
+## Interface vs. Classe Abstrata
+
+a. ( ) Interfaces modernas são proibidas de manter atributos de instância; classes abstratas podem tê-los.
+b. ( ) Uma classe pode implementar múltiplas interfaces, mas só pode estender uma única classe abstrata.
+c. ( ) Interfaces definem uma identidade ("o que é"); classes abstratas definem um papel ("o que faz").
+d. ( ) Se a solução exige compartilhar e proteger uma estrutura de dados comum, a classe abstrata é a ferramenta mais adequada.
+:::
+
+::: {.callout-tip}
+## Tipos como Comportamento
+
+a. ( ) O tipo de um objeto orientado a objetos é definido pelas mensagens às quais ele responde, não pelo que ele guarda.
+b. ( ) Duas classes sem nenhum atributo em comum podem, ainda assim, ser tratadas como do mesmo tipo pelo sistema.
+c. ( ) Declarar uma variável como `Pagavel` informa ao compilador exatamente qual classe concreta ela contém.
+d. ( ) Programar para o tipo `Pagavel`, em vez de `Pix` ou `Cartao`, é um exemplo de programação para a abstração.
+:::
+
+::: {.callout-tip}
+## Os Limites do Sistema de Tipos
+
+a. ( ) O compilador garante que um parâmetro `double` seja numérico, mas não garante que seu valor faça sentido no domínio.
+b. ( ) Um preço negativo passado para `criarCobranca(double valor)` é rejeitado automaticamente pelo compilador.
+c. ( ) Regras de negócio que o tipo não consegue expressar precisam ser fiscalizadas em tempo de execução.
+d. ( ) Uma exceção é uma forma de o objeto dizer "recebi o tipo certo, mas os dados violam minhas regras".
+:::
+
+::: {.callout-tip}
+## Fail-Fast e o Erro de Silenciar
+
+a. ( ) Retornar `null`, `0` ou `false` para sinalizar erro é uma boa prática recomendada nesta aula.
+b. ( ) A filosofia Fail-Fast recomenda interromper o fluxo imediatamente ao detectar uma violação de contrato.
+c. ( ) Falhas silenciosas tendem a se manifestar mais tarde, em pontos distantes da causa raiz do problema.
+d. ( ) Lançar uma exceção no ponto exato da violação facilita o rastreamento via *stack trace*.
+:::
+
+::: {.callout-tip}
+## Try-Catch como Barreira de Contenção
+
+a. ( ) O bloco `try-catch` no `CheckoutController` protege a experiência do usuário contra falhas de baixo nível.
+b. ( ) Segundo a diretriz desta aula, componentes de baixo nível devem capturar e silenciar suas próprias exceções.
+c. ( ) Componentes de alto nível são responsáveis por decidir como o sistema reage a uma exceção lançada abaixo.
+d. ( ) Um `catch` bem posicionado evita que uma falha externa (rede, banco) derrube o fluxo principal do sistema.
+:::
+
+::: {.callout-tip}
+## Novos Contratos: Notificação, Desconto, Logística
+
+a. ( ) A interface `Notificavel` permite trocar o canal de comunicação (e-mail, SMS, WhatsApp) sem alterar `Pedido`.
+b. ( ) Um `double desconto` isolado, sem uma interface `EstrategiaDesconto`, já protege contra valores absurdos como 500%.
+c. ( ) `ServicoLogistico` abstrai a comunicação com transportadoras, deixando o `Pedido` livre de gerar seu próprio rastreio.
+d. ( ) Uma exceção declarada com `throws` numa interface é uma cláusula explícita de que aquele contrato pode falhar.
+:::
+
+::: {.callout-tip}
+## Exceção como Cláusula de Contrato
+
+a. ( ) Declarar `throws NotificationException` avisa formalmente que o método pode falhar por razões externas.
+b. ( ) Lançar uma exceção é descrito nesta aula como um ato de honestidade do objeto que a lança.
+c. ( ) Tratar uma exceção corretamente é descrito como um ato de resiliência do sistema como um todo.
+d. ( ) Uma vez capturada, uma exceção deve sempre ser ignorada silenciosamente para não incomodar o usuário.
+:::
+
+::: {.callout-tip}
+## Síntese: Contratos e Responsabilidade
+
+a. ( ) Depois da refatoração, `Pedido` não sabe como enviar e-mails, calcular descontos complexos, ou falar com transportadoras.
+b. ( ) `Pedido` confia que os especialistas (`Notificavel`, `EstrategiaDesconto`, `ServicoLogistico`) cumprem o contrato ou avisam da falha.
+c. ( ) Programar contra interfaces e proteger regras com exceções são práticas independentes, sem relação entre si.
+d. ( ) Esse design permite trocar implementações concretas em tempo de execução sem alterar o núcleo do sistema.
+:::
+
+:::

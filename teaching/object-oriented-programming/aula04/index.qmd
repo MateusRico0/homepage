@@ -1,0 +1,788 @@
+---
+title: "Decomposição e Responsabilidade"
+subtitle: "Aula 4 — Programação Orientada a Objetos"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: _lesson-nav.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    output-file: notas.html
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides →](slides.html){.see-all}
+:::
+
+# Proposta da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Nas aulas anteriores, protegemos o objeto: encapsulamento e invariantes garantem que o estado não se corrompa; a Lei de Demeter garante que um objeto não dependa fragilmente das entranhas de seus vizinhos. Mas essas regras respondem só a uma parte do bom design — elas dizem *como* um objeto deve interagir, não *o que* ele deve fazer. Um objeto pode respeitar Demeter à risca, ter o estado perfeitamente encapsulado, e ainda assim ser responsável por absolutamente tudo.
+
+**O roteiro, em quatro perguntas:**
+
+1. Como reconhecer, no próprio código, uma classe que "sabe demais" ou "faz demais"?
+2. O que exatamente medem coesão e acoplamento, e por que quase sempre andam juntos?
+3. Quando a solução — dividir responsabilidades — vira ela mesma um problema?
+4. Como a linguagem já distingue, semanticamente, entre "usar", "ter" e "ser parte de" outro objeto?
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Até aqui:** o objeto protegido (encapsulamento) e bem-comportado (Demeter).
+
+::: {.fragment}
+**O problema que sobra:** um objeto pode ser tudo isso e ainda fazer coisas demais.
+:::
+
+::: {.fragment}
+**Roteiro:** Classe Deus → SRP → o lado sombrio do SRP → tipos de associação → delegação.
+:::
+
+:::
+
+# A Classe Deus
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+*God Class* (Classe Deus, ou Objeto Onisciente) é uma classe que sabe demais ou faz demais. É comum, no início do aprendizado, confundir "modelar um objeto do mundo real" com "criar um gerente que centraliza tudo":
+
+```java
+public class Pedido {
+    private List<Item> itens;
+    private Cliente cliente;
+
+    // Responsabilidade 1: Regra de Negocio (Core)
+    public double calcularTotal() { /* soma itens... */ }
+
+    // Responsabilidade 2: Logica de Impostos (Externo)
+    public double calcularICMS() {
+        if (cliente.getEstado().equals("SP")) return calcularTotal() * 0.18;
+        return calcularTotal() * 0.12;
+    }
+
+    // Responsabilidade 3: Formatacao e UI (Apresentacao)
+    public String gerarReciboTexto() {
+        return "Cliente: " + cliente.getNome() + " Total: " + calcularTotal();
+    }
+
+    // Responsabilidade 4: Persistencia (Infraestrutura)
+    public void salvarNoBanco() { /* JDBC, conexao, transacao... */ }
+
+    // Responsabilidade 5: Comunicacao (Rede)
+    public void enviarConfirmacaoEmail() { /* SMTP, credenciais... */ }
+}
+```
+
+Quatro razões pelas quais esse design é ruim:
+
+1. **Fragilidade extrema:** se a regra de imposto muda, altera-se `Pedido`; se o banco muda de MySQL para MongoDB, altera-se `Pedido`; se o layout do recibo muda, altera-se `Pedido`. Cada alteração arrisca introduzir bugs em partes não relacionadas.
+2. **Acoplamento rígido com infraestrutura:** `Pedido` está "sujo" com SQL e SMTP — impossível testar o cálculo do total sem um banco de dados ativo.
+3. **Dificuldade de reuso:** a lógica de e-mail, enterrada dentro de `Pedido`, não pode ser reaproveitada em outro lugar (o cadastro de usuários, por exemplo).
+4. **Carga cognitiva alta:** entender o que um `Pedido` faz exige ler centenas de linhas de infraestrutura que nada têm a ver com o domínio.
+
+Em suma, a Classe Deus viola a **Separação de Preocupações**: concentra todas as razões de mudança num único ponto, tornando o sistema rígido.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## `Pedido`: Cinco Responsabilidades, Uma Classe
+
+```java
+public class Pedido {
+    public double calcularTotal() { ... }        // 1. Negocio
+    public double calcularICMS() { ... }          // 2. Impostos
+    public String gerarReciboTexto() { ... }      // 3. Apresentacao
+    public void salvarNoBanco() { ... }           // 4. Persistencia
+    public void enviarConfirmacaoEmail() { ... }  // 5. Rede
+}
+```
+
+::: {.fragment}
+Mudar imposto, banco **ou** layout do recibo — em todos os casos, mexe-se em `Pedido`.
+:::
+
+::: {.fragment}
+**4 problemas:** fragilidade, acoplamento com infraestrutura, difícil reuso, carga cognitiva alta.
+:::
+
+:::
+
+# Coesão e Acoplamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Duas métricas de qualidade caminham de mãos dadas — aumentar a coesão de uma classe costuma reduzir o acoplamento do sistema.
+
+**Coesão** mede o foco interno: o quanto as responsabilidades de uma classe pertencem juntas. Uma caixa de ferramentas só com chaves de fenda é altamente coesa; a mesma caixa com um sanduíche, um sapato e um controle remoto tem baixa coesão — ela tenta ser várias coisas ao mesmo tempo.
+
+**Acoplamento** mede o vínculo externo: o quanto uma classe conhece ou depende das entranhas de outra. Se, para ligar a TV da sala, você precisasse primeiro abrir a geladeira e apertar um botão lá dentro, isso seria alto acoplamento — dois sistemas independentes amarrados sem necessidade.
+
+> "Alta coesão nos diz que o objeto é uma unidade lógica sólida; baixo acoplamento nos diz que esse objeto é livre para evoluir sem quebrar o mundo ao seu redor."
+
+O objetivo do design modular é sempre **alta coesão** e **baixo acoplamento** — e a ferramenta para chegar lá é o assunto do próximo bloco.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Coesão: O Foco Interno
+
+::: {.fragment}
+Caixa só com chaves de fenda = alta coesão. Caixa com sanduíche + sapato + controle remoto = baixa coesão.
+:::
+
+## Acoplamento: O Vínculo Externo
+
+::: {.fragment}
+Ligar a TV exigindo abrir a geladeira primeiro = alto acoplamento — dois sistemas amarrados sem necessidade.
+:::
+
+::: {.fragment}
+**O santo graal:** alta coesão + baixo acoplamento.
+:::
+
+:::
+
+# SRP e o Teste do "E"
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O **Princípio da Responsabilidade Única** (SRP): uma classe deve ter uma, e apenas uma, razão para mudar. Uma heurística simples e poderosa para diagnosticar violações: descreva o que a classe faz numa única frase. Se você precisar de um "E" (ou "OU"), a classe tem responsabilidades demais.
+
+- "A classe `Usuario` valida a senha **E** salva os dados no banco."
+- "A classe `Relatorio` formata os dados em PDF **E** envia por FTP."
+- "A classe `Pedido` calcula o total **E** processa o pagamento **E** notifica o cliente."
+
+```java
+public class Pedido {
+    private Carrinho carrinho;
+    // Faz o calculo E processa o pagamento E envia e-mail
+    public void finalizarPedido() {
+        double total = carrinho.getTotal();                            // 1. Calculo
+        System.out.println("Processando R$ " + total + " no cartao..."); // 2. Pagamento (misturado)
+        System.out.println("Enviando e-mail para o cliente...");         // 3. Notificacao (misturado)
+    }
+}
+```
+
+Imagine tentar testar só o cálculo do total: seria impossível sem acidentalmente disparar um e-mail ou tentar cobrar um cartão de verdade — as três lógicas estão fortemente acopladas no mesmo método.
+
+**A solução: extrair especialistas e delegar.** Já temos `Pagavel` (Aula 3); criamos `ServicoEmail`:
+
+```java
+public class Pedido {
+    private Carrinho carrinho;
+    private Pagavel metodoPagamento;   // Abstracao de Pagamento
+    private ServicoEmail emailService; // Nova classe especialista
+
+    // Inversao de Controle: injetamos as dependencias no construtor
+    public Pedido(Carrinho carrinho, Pagavel pagavel, ServicoEmail email) {
+        this.carrinho = carrinho;
+        this.metodoPagamento = pagavel;
+        this.emailService = email;
+    }
+
+    public void finalizar() { // sempre melhor delegar
+        metodoPagamento.processar(carrinho.getTotal());
+        emailService.enviarConfirmacao(carrinho.getCliente());
+    }
+}
+```
+
+O `Pedido` deixa de ser "faz-tudo" e vira "gerente" — não executa a tarefa, delega para quem sabe. Essa **Injeção de Dependência** (DI) via construtor traz três ganhos imediatos:
+
+1. **Testabilidade:** um teste pode injetar um `PagavelMock` e um `EmailMock` — a lógica de `finalizar()` é verificada sem cobrar cartão de verdade nem enviar spam.
+2. **Reuso:** `ServicoEmail` pode ser usado por outras classes (`RecuperarSenha`, por exemplo), já que não está mais preso dentro de `Pedido`.
+3. **Manutenibilidade:** um bug no pagamento fica isolado nas classes de pagamento, sem risco de quebrar o envio de e-mails.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Teste do "E"
+
+::: {.fragment}
+"A classe `Pedido` calcula o total **E** processa o pagamento **E** notifica o cliente." → responsabilidades demais.
+:::
+
+## Antes: Tudo Misturado
+
+```java
+public void finalizarPedido() {
+    double total = carrinho.getTotal();                              // calculo
+    System.out.println("Processando R$ " + total + " no cartao...");  // pagamento
+    System.out.println("Enviando e-mail...");                          // notificacao
+}
+```
+
+## Depois: DI + Delegação
+
+```java
+public Pedido(Carrinho c, Pagavel p, ServicoEmail e) {
+    this.carrinho = c; this.metodoPagamento = p; this.emailService = e;
+}
+public void finalizar() {
+    metodoPagamento.processar(carrinho.getTotal());
+    emailService.enviarConfirmacao(carrinho.getCliente());
+}
+```
+
+::: {.fragment}
+Ganhos: **testabilidade** (mocks), **reuso**, **manutenibilidade**.
+:::
+
+:::
+
+::: {.callout-tip}
+## Por que testar `Pedido.finalizar()` sem Injeção de Dependência exigiria cobrar um cartão de crédito de verdade?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## SRP, DI e Testabilidade
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Uma classe que exige "E" para ser descrita numa frase provavelmente viola o SRP.
+b. Injeção de Dependência via construtor garante que o objeto nunca nasça sem suas colaborações essenciais.
+c. Sem DI, testar a lógica de `Pedido` exigiria disparar um e-mail real ou cobrar um cartão de verdade.
+d. Usar um "Mock" no lugar de `Pagavel` real é uma violação do princípio de Injeção de Dependência.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## SRP, DI e Testabilidade — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é o próprio Teste do "E".
+b. **Verdadeiro** — é o ganho central da injeção via construtor.
+c. **Verdadeiro** — é exatamente o problema resolvido pela DI.
+d. **Falso** — usar um Mock é a aplicação correta de DI, não uma violação.
+:::
+
+:::
+
+# SRP Avançado: a Teoria do Ator e a Métrica LCOM
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Robert C. Martin refinou o SRP: "uma razão para mudar" era frequentemente mal interpretada. A verdadeira fonte de mudança não são algoritmos, são **pessoas** — os *atores* ou departamentos que pedem a alteração. Se uma classe atende dois departamentos diferentes, ela tem duas razões para mudar:
+
+```java
+public class Funcionario {
+    private double salarioBase;
+    private int horasExtras;
+
+    // O CFO solicita e altera esta logica
+    public double calcularPagamento() { return salarioBase + (horasExtras * 50); }
+
+    // O RH solicita alteracoes no formato do relatorio
+    public String gerarRelatorioHoras() { return "Total de Horas: " + horasExtras + "h"; }
+}
+```
+
+Misturar essas lógicas acopla os ciclos de lançamento do financeiro e do RH — uma mudança de layout de relatório força recompilar e re-testar a folha de pagamento.
+
+Existe até uma prova matemática de falta de coesão: o **LCOM** (*Lack of Cohesion in Methods*), que analisa a interseção de uso de atributos pelos métodos:
+
+```java
+public class GestorDeUsuario {
+    private String nome;        // usado APENAS por salvarNome()
+    private String ipConexao;   // usado APENAS por logAcesso()
+
+    public void salvarNome(String n) { this.nome = n; /* persistencia */ }
+    public void logAcesso(String ip) { this.ipConexao = ip; /* auditoria */ }
+}
+```
+
+Os métodos não compartilham estado algum — a interseção de uso é vazia. Isso é o código implorando para virar duas classes: `RepositorioUsuario` e `AuditoriaAcesso`.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Teoria do Ator
+
+```java
+public double calcularPagamento() { ... }     // ator: CFO
+public String gerarRelatorioHoras() { ... }   // ator: RH
+```
+
+::: {.fragment}
+Dois atores, uma classe → mudança de layout do RH força re-testar a folha de pagamento.
+:::
+
+## LCOM: a Prova Matemática
+
+```java
+private String nome;       // so em salvarNome()
+private String ipConexao;  // so em logAcesso()
+```
+
+::: {.fragment}
+Interseção de uso vazia = duas classes disfarçadas de uma (`RepositorioUsuario` + `AuditoriaAcesso`).
+:::
+
+:::
+
+# O Lado Sombrio do SRP
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O SRP aplicado sem pragmatismo pode destruir a legibilidade do sistema. Dois riscos:
+
+- **Cirurgia de Espingarda** (*Shotgun Surgery*): a separação é tão excessiva que implementar uma única regra de negócio exige abrir e modificar 15 classes minúsculas diferentes.
+- **Modelo Anêmico** (revisitado da Aula 2, agora em escala arquitetural): retirar toda a responsabilidade do objeto, reduzindo-o a um contentor passivo:
+
+```java
+// RUIM: fragmentacao excessiva (Modelo Anemico)
+public class Conta {
+    public double saldo; // estado exposto, sem comportamento
+}
+public class TransferenciaService {
+    public void transferir(Conta origem, Conta destino, double valor) {
+        origem.saldo -= valor;
+        destino.saldo += valor;
+    }
+}
+
+// BOM: SRP equilibrado (Modelo Rico)
+public class Conta {
+    private double saldo;
+    public void debitar(double valor) { /* valida e deduz */ }
+    public void creditar(double valor) { /* adiciona */ }
+}
+```
+
+O SRP não proíbe que `Conta` gerencie seu próprio saldo — pelo contrário, assegurar essa integridade é a responsabilidade primária dela. A regra de equilíbrio: **agrupe o que muda junto e pelos mesmos motivos; separe apenas o que muda em ritmos ou por atores diferentes.**
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Cirurgia de Espingarda
+
+::: {.fragment}
+Fragmentação excessiva: uma regra de negócio exige tocar em **15 classes minúsculas**.
+:::
+
+## Modelo Anêmico (Revisitado)
+
+```java
+public class Conta { public double saldo; }              // RUIM: sem comportamento
+public class TransferenciaService {
+    public void transferir(Conta o, Conta d, double v) { o.saldo -= v; d.saldo += v; }
+}
+```
+
+::: {.fragment}
+**Correto:** `Conta` gerencia o próprio saldo (`debitar()`/`creditar()`) — SRP não é fragmentar tudo.
+:::
+
+:::
+
+# Tipos de Associação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Proteger o estado e aplicar SRP não basta — é preciso conectar as peças. Três níveis de força estrutural definem quem instancia e quem é coletado junto com quem:
+
+**Dependência ("Usa um")** — o vínculo mais fraco: um objeto usa outro temporariamente, sem guardar sua referência.
+
+```java
+public class Carrinho {
+    // O Carrinho DEPENDE da lista temporaria para conferir,
+    // mas nao a "guarda" para si (nao ha this.lista = ...)
+    public boolean confereTotal(ArrayList<Produto> itensVerificacao) {
+        double soma = 0.0;
+        for (Produto p : itensVerificacao) soma += p.precoFinal();
+        return soma == this.total;
+    }
+}
+```
+
+**Agregação ("Tem um")** — vínculo todo-parte, mas com ciclos de vida independentes: a parte sobrevive à destruição do todo.
+
+```java
+public class Carrinho {
+    private ArrayList<Produto> itens; // o Carrinho "tem" Produtos
+    public void adicionarItem(Produto p) { this.itens.add(p); }
+}
+// Se o carrinho for destruido, o Smartphone ainda existe no catalogo!
+carrinho = null; // Carrinho morre; Produto sobrevive.
+```
+
+**Composição ("É parte de")** — a forma mais forte: a parte pertence unicamente ao todo, e morre com ele (como um documento e suas páginas).
+
+```java
+public class Cliente {
+    private Cartao cartao;
+    // Cliente nasce e gera seu proprio cartao; ninguem mais tem acesso direto a ele
+    public Cliente(String nome, double limiteInicial) {
+        this.nome = nome;
+        this.cartao = new Cartao(limiteInicial); // ciclo de vida atrelado
+    }
+}
+```
+
+A escolha entre Agregação e Composição é, muitas vezes, uma decisão de **domínio de negócio**, não só mecânica: se a conta de um cliente é excluída, os dados do cartão de crédito privado devem sumir junto (Composição), não flutuar soltos no sistema (o que uma Agregação permitiria).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Dependência ("Usa um")
+
+```java
+public boolean confereTotal(ArrayList<Produto> itens) { ... } // parametro, nao atributo
+```
+
+::: {.fragment}
+Vínculo mais fraco — como usar a caneta do balcão e devolver.
+:::
+
+## Agregação ("Tem um")
+
+```java
+private ArrayList<Produto> itens; // Carrinho "tem" Produtos
+carrinho = null; // Carrinho morre; Produto sobrevive no catalogo!
+```
+
+## Composição ("É parte de")
+
+```java
+public Cliente(String nome, double limite) {
+    this.cartao = new Cartao(limite); // nasce e morre com o Cliente
+}
+```
+
+::: {.fragment}
+Domínio decide: dados de cartão devem sumir com a conta → **Composição**, não Agregação.
+:::
+
+:::
+
+::: {.callout-tip}
+## Por que a escolha entre Agregação e Composição para `Cliente`/`Cartao` depende de uma decisão de negócio, e não só de como o código é escrito?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Tipos de Associação
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Na Dependência, o objeto usado costuma ser recebido como parâmetro de método, não guardado como atributo.
+b. Na Agregação, destruir o "todo" implica destruir automaticamente a "parte".
+c. Na Composição, a "parte" não tem sentido de existir fora do "todo" — nasce e morre com ele.
+d. A escolha entre Agregação e Composição pode depender de uma regra de negócio, não só da sintaxe do código.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Tipos de Associação — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é a natureza passageira da Dependência.
+b. **Falso** — na Agregação, a parte sobrevive à destruição do todo; isso é característica da Composição.
+c. **Verdadeiro** — é a definição central de Composição.
+d. **Verdadeiro** — o exemplo do cartão de crédito privado do `Cliente` mostra exatamente isso.
+:::
+
+:::
+
+# Delegação: o Motor da Composição
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Associação define a **estrutura** (quem contém quem); Delegação define o **comportamento** (quem faz o quê com o que contém). Relembrando a violação de Demeter da Aula 3:
+
+```java
+Cliente joao = new Cliente("Joao");
+joao.cadastrarCartao(new Cartao(1000.0));
+// O Principal sabe demais! Ele "rouba" o cartao do cliente
+// para processar o pagamento por conta propria.
+joao.getCartao().processar(500.0);
+```
+
+A cura não é esconder o `Cartao` atrás de um *getter* mais discreto — é impedir que qualquer um precise dele diretamente:
+
+```java
+public class Cliente {
+    private String nome;
+    private Cartao cartao;
+
+    public void pagar(double valor) {
+        // 1. Defesa da maquina de estados (Fail-Fast)
+        if (this.cartao == null) {
+            throw new IllegalStateException("Cliente sem cartao.");
+        }
+        // 2. DELEGACAO: o Cliente nao faz operacoes matematicas.
+        // Ele repassa o comando ao especialista financeiro.
+        this.cartao.processar(valor);
+    }
+}
+```
+
+Antes: `joao.getCartao().processar(500.0);` — depois: `joao.pagar(500.0);`. O chamador agora **desconhece completamente** a existência de `Cartao`. Associação (ter um objeto) mais Delegação (usar o objeto) é a base para trocar componentes sem impacto no sistema — e é o mecanismo que torna a composição, segundo o princípio "favoreça composição em vez de herança", tão poderosa quanto a herança, porém muito mais flexível.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Antes: o Naufrágio de Código
+
+```java
+joao.getCartao().processar(500.0); // Principal "rouba" o cartao do Cliente
+```
+
+## Depois: Delegação
+
+```java
+public void pagar(double valor) {
+    if (this.cartao == null) throw new IllegalStateException("Cliente sem cartao.");
+    this.cartao.processar(valor); // delega ao especialista
+}
+```
+
+::: {.fragment}
+`joao.pagar(500.0);` — o chamador nem sabe que `Cartao` existe.
+:::
+
+::: {.fragment}
+Associação (ter) + Delegação (usar) = a composição fica tão poderosa quanto a herança, mais flexível.
+:::
+
+:::
+
+::: {.callout-tip}
+## `joao.pagar(500.0)` esconde a existência de `Cartao` de quem chama. Isso é o mesmo mecanismo da Lei de Demeter (Aula 3) ou algo diferente?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Delegação e Tell, Don't Ask
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. `joao.getCartao().processar(500.0)` respeita a Lei de Demeter, pois `Cartao` é um atributo de `Cliente`.
+b. `joao.pagar(500.0)` é um exemplo de "Tell": o chamador diz o que quer, sem saber como é feito.
+c. Depois da refatoração, o código que chama `pagar()` desconhece completamente a existência de `Cartao`.
+d. Associação (ter um objeto) e Delegação (usar esse objeto) juntas permitem trocar o `Cartao` sem afetar quem chama `pagar()`.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Delegação e Tell, Don't Ask — Resposta
+
+::: {.callout-tip}
+a. **Falso** — `Cartao` ser atributo de `Cliente` não autoriza um objeto externo a navegar até ele; isso é o "naufrágio de código".
+b. **Verdadeiro** — é a definição de "Tell" nesta aula.
+c. **Verdadeiro** — é o ganho central da delegação.
+d. **Verdadeiro** — é a síntese de Associação + Delegação apresentada nesta seção.
+:::
+
+:::
+
+# Conclusão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando às quatro perguntas da abertura:
+
+1. **Reconhecer uma Classe Deus:** ela precisa de "E" para ser descrita numa frase, ou mistura razões de mudança de atores diferentes.
+2. **Coesão e acoplamento:** coesão é o quanto uma classe é uma unidade lógica sólida; acoplamento é o quanto ela depende de vizinhos — as duas costumam melhorar juntas.
+3. **Quando dividir vira problema:** quando a fragmentação exige tocar em muitas classes para uma única regra (Cirurgia de Espingarda), ou esvazia objetos de comportamento (Modelo Anêmico).
+4. **Usar, ter, ser parte de:** Dependência (temporário), Agregação (ciclos de vida independentes), Composição (ciclos de vida atrelados) — e a Delegação é o que torna essas estruturas vivas.
+
+### Ponte para a Aula 5 {.unnumbered}
+
+A delegação de hoje usou uma interface já pronta (`Pagavel`, da Aula 1). A Aula 5 formaliza a interface como contrato de verdade, e introduz uma ferramenta que temos usado implicitamente — testes automatizados com mocks — de forma explícita, com JUnit.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos
+
+1. Classe Deus: sabe/faz demais — sintoma do "Teste do E"
+2. Coesão (foco interno) + baixo acoplamento (vínculo externo) = objetivo
+3. SRP tem limite: fragmentar demais gera Cirurgia de Espingarda e Anemia
+4. Dependência, Agregação, Composição + Delegação = a arquitetura viva
+
+::: {.fragment}
+**Próxima aula:** interfaces como contrato formal, e testes automatizados com JUnit.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. A classe `Pedido` do início desta aula tinha cinco responsabilidades (cálculo, imposto, formatação, persistência, e-mail). Escolha duas delas e explique, para cada uma, qual "ator" (departamento ou stakeholder) provavelmente solicitaria mudanças nela — e por que isso já é evidência de violação do SRP.
+
+2. Um colega decide aplicar o SRP "ao pé da letra" e separa a classe `Pedido` em 12 classes de uma linha cada, uma para cada campo. Explique, usando os conceitos de Cirurgia de Espingarda e Modelo Anêmico, por que essa fragmentação pode ser pior do que a Classe Deus original.
+
+3. Explique a diferença entre Agregação e Composição usando o exemplo de `Cliente` e `Cartao`. Por que essa escolha de design depende de uma decisão sobre o domínio de negócio (o que acontece com o cartão quando a conta é excluída), e não apenas de como o atributo é declarado em código?
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-tip}
+## A Classe Deus (God Class)
+
+a. ( ) É identificada por centralizar lógicas de múltiplos atores (financeiro, infraestrutura, UI) num único arquivo.
+b. ( ) O "Teste do E" ajuda a diagnosticá-la: se a classe faz X E Y, provavelmente tem responsabilidades demais.
+c. ( ) Uma Classe Deus facilita a manutenção, pois toda a lógica fica concentrada num só lugar.
+d. ( ) Testar isoladamente uma responsabilidade de uma Classe Deus costuma exigir efeitos colaterais indesejados (e-mail, banco).
+:::
+
+::: {.callout-tip}
+## Coesão e Acoplamento
+
+a. ( ) Coesão mede o quão focadas e inter-relacionadas são as responsabilidades internas de uma classe.
+b. ( ) O objetivo de um bom design é alto acoplamento e baixa coesão.
+c. ( ) Uma classe de baixa coesão tenta ser várias coisas ao mesmo tempo.
+d. ( ) Aumentar a coesão de uma classe costuma facilitar a redução do acoplamento do sistema.
+:::
+
+::: {.callout-tip}
+## SRP e o Teste do "E"
+
+a. ( ) O SRP afirma que uma classe deve ter uma, e apenas uma, razão para mudar.
+b. ( ) Se a descrição de uma classe exige a conjunção "E", ela provavelmente viola o SRP.
+c. ( ) Aplicar o SRP significa que uma classe só pode ter um único método público.
+d. ( ) `Pedido` que calcula total, processa pagamento e envia e-mail no mesmo método viola o SRP.
+:::
+
+::: {.callout-tip}
+## Injeção de Dependência
+
+a. ( ) Ocorre quando um objeto recebe seus colaboradores de fora, em vez de criá-los internamente com `new`.
+b. ( ) A injeção via construtor garante que o objeto nunca exista sem suas dependências essenciais.
+c. ( ) A DI aumenta o acoplamento, pois obriga o objeto a conhecer quem o instanciou.
+d. ( ) Sem DI, testar `Pedido.finalizar()` isoladamente, sem efeitos colaterais reais, é muito mais difícil.
+:::
+
+::: {.callout-tip}
+## A Teoria do Ator no SRP
+
+a. ( ) Segundo Robert Martin, um módulo deve ser responsável perante um, e apenas um, ator.
+b. ( ) Misturar lógica solicitada pelo RH e pelo Financeiro na mesma classe é seguro, pois são setores diferentes.
+c. ( ) O conflito de atores é uma fonte comum de "quebras colaterais" em classes com múltiplas razões de mudança.
+d. ( ) A verdadeira fonte de mudança em software costuma ser as pessoas ou departamentos que a solicitam.
+:::
+
+::: {.callout-tip}
+## A Métrica LCOM
+
+a. ( ) LCOM avalia a falta de coesão observando se os métodos de uma classe compartilham os mesmos atributos.
+b. ( ) Um LCOM alto indica uma classe muito coesa e bem projetada.
+c. ( ) Se metade dos métodos usa o atributo A e a outra metade usa só o atributo B, a classe deveria ser dividida.
+d. ( ) LCOM é uma forma de provar matematicamente que uma classe é, na prática, duas classes disfarçadas.
+:::
+
+::: {.callout-tip}
+## O Lado Sombrio do SRP
+
+a. ( ) A Cirurgia de Espingarda ocorre quando uma única mudança de negócio exige tocar em muitas classes minúsculas.
+b. ( ) O Modelo Anêmico é uma consequência possível da aplicação fanática e sem pragmatismo do SRP.
+c. ( ) O SRP proíbe que uma classe como `Conta` gerencie seu próprio saldo internamente.
+d. ( ) A regra de equilíbrio é agrupar o que muda junto e pelos mesmos motivos.
+:::
+
+::: {.callout-tip}
+## Associação: Dependência ("Usa um")
+
+a. ( ) É o vínculo mais fraco entre dois objetos.
+b. ( ) O objeto usado numa dependência costuma ser guardado como atributo de longo prazo.
+c. ( ) É análoga a usar uma caneta emprestada do balcão e devolvê-la.
+d. ( ) `Carrinho.confereTotal(ArrayList<Produto> itens)` recebendo a lista como parâmetro é um exemplo de dependência.
+:::
+
+::: {.callout-tip}
+## Associação: Agregação ("Tem um")
+
+a. ( ) É uma relação todo-parte em que a parte pode existir independentemente da destruição do todo.
+b. ( ) Se um `Carrinho` for destruído, os `Produto` que ele referenciava também são destruídos.
+c. ( ) Vários objetos "todo" diferentes podem referenciar o mesmo objeto "parte" simultaneamente.
+d. ( ) É uma forma de posse mais fraca do que a Composição.
+:::
+
+::: {.callout-tip}
+## Associação: Composição ("É parte de")
+
+a. ( ) É a forma mais forte de associação, com posse exclusiva do todo sobre a parte.
+b. ( ) A parte não tem sentido lógico de existir fora do todo — nasce e morre com ele.
+c. ( ) Um `Documento` e suas `Pagina` são um exemplo clássico de Composição.
+d. ( ) A escolha entre Agregação e Composição é sempre puramente sintática, nunca uma decisão de negócio.
+:::
+
+::: {.callout-tip}
+## Delegação
+
+a. ( ) Ocorre quando um objeto orquestrador repassa o trabalho a um objeto especialista associado.
+b. ( ) `joao.getCartao().processar(500.0)` é um exemplo correto de delegação.
+c. ( ) `joao.pagar(500.0)`, delegando internamente ao `Cartao`, corrige a violação de Demeter do exemplo anterior.
+d. ( ) A delegação é o mecanismo que torna a composição uma alternativa flexível à herança.
+:::
+
+::: {.callout-tip}
+## Tell, Don't Ask e a Síntese da Aula
+
+a. ( ) "Tell, Don't Ask" propõe emitir comandos aos objetos, em vez de sondar seu estado interno para decidir por fora.
+b. ( ) Associação, SRP e Delegação são princípios independentes, sem nenhuma relação entre si.
+c. ( ) Um sistema bem decomposto reduz a carga cognitiva ao permitir raciocinar sobre uma responsabilidade por vez.
+d. ( ) Delegar ao especialista certo permite trocar sua implementação sem que o orquestrador precise mudar.
+:::
+
+:::

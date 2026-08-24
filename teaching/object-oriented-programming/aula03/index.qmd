@@ -1,0 +1,669 @@
+---
+title: "Composição de Sistemas: Contratos e Estabilidade"
+subtitle: "Aula 3 — Programação Orientada a Objetos"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: _lesson-nav.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    output-file: notas.html
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides →](slides.html){.see-all}
+:::
+
+# Proposta da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Nas Aulas 1 e 2, a preocupação foi quase puramente anatômica: como um objeto nasce, como se diferencia de outro na Heap, como protege seus próprios atributos. Aprendemos a fabricar peças de alta qualidade, cada uma funcionando isoladamente. Mas peças perfeitas que não se encaixam são o caminho mais rápido para o fracasso.
+
+O salto desta aula é o de **fabricante de peças** para **arquiteto de sistemas**. Um arquiteto não se importa, neste nível, com a liga metálica de um parafuso — importa o encaixe e o torque que ele suporta para conectar a viga ao pilar. Um sistema orientado a objetos é uma **rede de colaboradores**: o design não trata só do que um objeto sabe ou faz internamente, mas de **com quem ele fala** e **de que forma**. Se um objeto sabe demais sobre a estrutura interna do vizinho, qualquer mudança nesse vizinho o quebra — é o que chamamos de acoplamento por "intimidade técnica". O objetivo desta aula é substituir essa intimidade por um acoplamento baseado em **contratos**.
+
+**O roteiro, em quatro perguntas:**
+
+1. Como várias classes especialistas colaboram sem que uma precise conhecer os detalhes internos da outra?
+2. O que exatamente separa a interface (o contrato) da implementação (o detalhe), e por que essa fronteira é a mais importante da Orientação a Objetos?
+3. Como reconhecer, no próprio código, quando um objeto está "fofocando" demais sobre os vizinhos dos seus vizinhos?
+4. O que muda quando um sistema é escrito para aceitar qualquer objeto que cumpra um contrato, em vez de uma classe específica?
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Até aqui:** anatomia de uma peça isolada (Aulas 1–2).
+
+::: {.fragment}
+**A partir de agora:** como as peças se conectam — a Orientação a Objetos como design de **comunicações**.
+:::
+
+::: {.fragment}
+**Roteiro:** colaboração → interface vs. implementação → Lei de Demeter → Plug-and-Play.
+:::
+
+:::
+
+# Especialistas Colaborando: `Produto`, `ItemCarrinho`, `Carrinho`
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O erro de um programador iniciante ao projetar um sistema é concentrar toda a inteligência numa única classe "gerente", reduzindo as demais a repositórios de dados — o Modelo Anêmico da Aula 2, agora em escala de sistema. A alternativa: cada classe é um especialista autônomo.
+
+```java
+public class Produto {
+    private String nome;
+    private double precoBase;
+    public Produto(String n, double p) { this.nome = n; this.precoBase = p; }
+    public double getPreco() { return this.precoBase; }
+}
+
+public class ItemCarrinho {
+    private Produto produto;
+    private int quantidade;
+    public ItemCarrinho(Produto p, int q) { this.produto = p; this.quantidade = q; }
+    public double subtotal() {
+        // MENSAGEM: "Produto, quanto voce custa?"
+        return produto.getPreco() * quantidade;
+    }
+}
+```
+
+`Produto` é inteiramente autônomo — não conhece o `Carrinho` nem nenhuma interface de usuário. Isso é **baixo acoplamento**: o mesmo `Produto` serve numa vitrine de e-commerce, num sistema de estoque ou num relatório fiscal, sem qualquer alteração. `ItemCarrinho` não acessa `precoBase` diretamente (o que seria violação de encapsulamento); ele "pergunta" ao produto, via `getPreco()`.
+
+```java
+public class Carrinho {
+    private List<ItemCarrinho> itens = new ArrayList<>();
+    public void adicionar(Produto p, int qtd) { this.itens.add(new ItemCarrinho(p, qtd)); }
+    public double calcularTotal() {
+        double total = 0;
+        for (ItemCarrinho item : itens) {
+            // DELEGACAO: "Item, quanto voce vale no total?"
+            total += item.subtotal();
+        }
+        return total;
+    }
+}
+```
+
+O `Carrinho` não calcula nada sozinho — ele **orquestra**, usando **delegação**: percorre a lista e diz a cada item "calcule seu valor". Ele não conhece preços nem regras de imposto; confia apenas no contrato de que `ItemCarrinho` tem um método `subtotal()`. Dividir responsabilidades assim evita os **Objetos Deus** (*God Objects*), que crescem sem limite e se tornam impossíveis de manter — e permite testar `subtotal()` isoladamente, sem montar um carrinho inteiro.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Cada Classe, um Especialista
+
+```java
+public class Produto {
+    private double precoBase;
+    public double getPreco() { return this.precoBase; }
+}
+
+public class ItemCarrinho {
+    private Produto produto;
+    public double subtotal() { return produto.getPreco() * quantidade; } // pergunta, nao acessa
+}
+```
+
+## O Carrinho: Orquestrador, Não Calculador
+
+```java
+public double calcularTotal() {
+    double total = 0;
+    for (ItemCarrinho item : itens) total += item.subtotal(); // delegacao
+    return total;
+}
+```
+
+::: {.fragment}
+`Carrinho` não sabe de preço nem imposto — só confia no contrato `subtotal()`.
+:::
+
+::: {.fragment}
+Dividir em especialistas evita **Objetos Deus** e permite testar cada peça isolada.
+:::
+
+:::
+
+# Interface vs. Implementação: a Fronteira da Estabilidade
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A distinção entre **Interface** (o contrato: o "O Quê") e **Implementação** (o detalhe técnico: o "Como") é talvez o pilar mais transformador da Orientação a Objetos. A falha de design mais recorrente em sistemas complexos é o **acoplamento físico** — uma classe que conhece detalhes excessivos das entranhas de outra. Quando essa fronteira é rompida, uma mudança de baixo nível (trocar uma consulta SQL por uma chamada de API) provoca falhas em cascata em módulos que não deveriam nem saber que essa troca aconteceu.
+
+```java
+// O CLIENTE (Quem usa) so enxerga a promessa do contrato
+public class Compra {
+    public void processar(CartaoDeCredito cartao) {
+        ValidadorFinanceiro validador = new ValidadorFinanceiro();
+        // Confiamos no contrato: se retornar true, o cartao e valido.
+        // Nao perguntamos COMO ele valida, apenas o resultado.
+        if (validador.isValido(cartao)) {
+            System.out.println("Compra processada com sucesso!");
+        }
+    }
+}
+```
+
+```java
+public class ValidadorFinanceiro {
+    // A INTERFACE publica: simples e direta (O "QUE")
+    public boolean isValido(CartaoDeCredito c) {
+        return verificarAlgoritmoLuhn(c.getNumero()) && consultarGatewayExterno(c);
+    }
+    // A IMPLEMENTACAO: detalhes privados (O "COMO") — o mundo externo nem sabe que existem
+    private boolean verificarAlgoritmoLuhn(String numero) { /* ... */ return true; }
+    private boolean consultarGatewayExterno(CartaoDeCredito c) { /* ... */ return true; }
+}
+```
+
+`Compra` é agnóstica quanto à complexidade da validação — não sabe se há consulta a banco de dados, cálculo de checksum, ou chamada de rede. Essa separação permite que `ValidadorFinanceiro` evolua (passar a usar IA antifraude, por exemplo) sem que `Compra` precise sequer ser recompilada. A interface funciona como o painel de controle de uma máquina complexa: você opera os botões (o "Quê"), a fiação interna (o "Como") fica atrás da parede.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Cliente Confia na Caixa Preta
+
+```java
+public class Compra {
+    public void processar(CartaoDeCredito cartao) {
+        ValidadorFinanceiro v = new ValidadorFinanceiro();
+        if (v.isValido(cartao)) { /* ... */ } // nao pergunta COMO
+    }
+}
+```
+
+## O "Como" Fica Escondido
+
+```java
+public class ValidadorFinanceiro {
+    public boolean isValido(CartaoDeCredito c) {         // O QUE (publico)
+        return verificarLuhn(c) && consultarGateway(c);
+    }
+    private boolean verificarLuhn(CartaoDeCredito c) {...}   // COMO (privado)
+    private boolean consultarGateway(CartaoDeCredito c) {...}
+}
+```
+
+::: {.fragment}
+Trocar o gateway por REST ou gRPC: `Compra` **nem percebe**.
+:::
+
+:::
+
+# Encapsulamento e Evolução sem Regressão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A prova real de um bom design aparece quando a regra de negócio muda. Se `Produto` expõe a intenção, não o dado:
+
+```java
+public class Produto {
+    private double precoCusto;
+    // A INTERFACE: expressa uma INTENCAO (o que), nao o acesso ao dado (como)
+    public double calcularPrecoDeVenda() {
+        double margemLucro = 1.8;
+        return this.precoCusto * margemLucro;
+    }
+}
+```
+
+`Carrinho` não "pega" o custo para calcular por fora — ele pede o serviço `calcularPrecoDeVenda()`. Quando a loja decide que produtos acima de R\$ 1000 têm margem menor, a mudança fica inteiramente contida:
+
+```java
+// VERSAO 2: a regra de negocio ficou mais complexa
+public double calcularPrecoDeVenda() {
+    // a logica mudou drasticamente, mas o contrato (assinatura) e o mesmo!
+    if (this.precoCusto > 1000.0) return this.precoCusto * 1.75;
+    return this.precoCusto * 1.90;
+}
+```
+
+Se tivéssemos usado um *getter* de `precoCusto` e feito a conta no `Carrinho`, seria preciso alterar toda classe que exibe preços. Com o design de caixa preta, só a implementação interna do `Produto` muda — a assinatura pública é a mesma, então o impacto no resto do sistema é **zero**.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## V1: A Regra Simples
+
+```java
+public double calcularPrecoDeVenda() {
+    return this.precoCusto * 1.8;
+}
+```
+
+## V2: A Regra Ficou Complexa — Contrato Igual
+
+```java
+public double calcularPrecoDeVenda() {
+    if (this.precoCusto > 1000.0) return this.precoCusto * 1.75;
+    return this.precoCusto * 1.90;
+}
+```
+
+::: {.fragment}
+Mesma assinatura pública → **zero impacto** em quem chama `calcularPrecoDeVenda()`.
+:::
+
+:::
+
+::: {.callout-tip}
+## Se `Carrinho` tivesse um `getter` para `precoCusto` e calculasse a margem por fora, o que exatamente quebraria quando a regra de margem mudasse?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Interface, Implementação e Evolução
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. A interface define o "O Quê" um objeto promete fazer; a implementação é o "Como", escondido do cliente.
+b. Trocar a implementação interna de um método, mantendo sua assinatura, não deveria exigir mudanças no código cliente.
+c. `ItemCarrinho.subtotal()` deveria ler diretamente o atributo `precoBase` de `Produto` para ser mais eficiente.
+d. Encapsular `calcularPrecoDeVenda()` dentro de `Produto` centraliza a política de margem num único lugar do sistema.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Interface, Implementação e Evolução — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é a definição central desta aula.
+b. **Verdadeiro** — é exatamente o benefício da estabilidade de contrato.
+c. **Falso** — isso violaria o encapsulamento; `subtotal()` deve perguntar via `getPreco()`.
+d. **Verdadeiro** — é o mesmo argumento do Bloco 3, mudança de regra sem efeito cascata.
+:::
+
+:::
+
+# A Lei de Demeter
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A **Lei de Demeter** (Princípio do Menor Conhecimento) não é uma lei da natureza — é uma regra de etiqueta: um método de um objeto $O$ deve invocar apenas métodos do próprio $O$, de argumentos recebidos, de objetos criados dentro do método, ou de componentes diretos de $O$. Fale só com **amigos próximos**, nunca com estranhos.
+
+A violação é visualmente reconhecível pelo "naufrágio de código" (*train wreck*):
+
+```java
+double saldo = pedido.getCliente().getCarteira().getSaldo(); // VIOLACAO
+```
+
+O problema não é a quantidade de pontos — é a invasão de fronteiras. É como um caixa de supermercado que, em vez de pedir o pagamento ao cliente, abre a mochila dele, procura a carteira e conta as notas. Se o cliente decidir carregar dinheiro num aplicativo em vez de uma carteira física, o caixa não sabe mais operar. Cada ponto extra na cadeia é uma promessa de que o código vai quebrar quando a estrutura intermediária mudar.
+
+**A cura é a delegação em cadeia**, guiada por *Tell, Don't Ask* (Diga, não Pergunte):
+
+```java
+// CORRETO: o Checkout fala apenas com o Pedido (amigo proximo)
+if (pedido.clientePodePagar()) { ... }
+
+// Dentro da classe Pedido: delega a decisao para o proximo
+public boolean clientePodePagar() {
+    return this.cliente.temSaldoSuficiente(this.total);
+}
+```
+
+`Checkout` agora é cego para a existência de uma `Carteira` — se o `Cliente` trocar a carteira por um ApplePay, `Checkout` permanece intocado. Essa é a solução técnica para o que a literatura chama de ***Feature Envy*** (inveja de funcionalidade): uma classe interessada demais nos dados de outra, em vez das suas próprias responsabilidades. A cura é sempre a mesma — mover o comportamento para onde os dados residem.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Naufrágio de Código (*Train Wreck*)
+
+```java
+double saldo = pedido.getCliente().getCarteira().getSaldo(); // violacao
+```
+
+::: {.fragment}
+Não é o número de pontos — é a **fronteira invadida**. Se `Carteira` mudar, `Checkout` quebra, mesmo sem relação direta com ela.
+:::
+
+## A Cura: Delegação em Cadeia
+
+```java
+if (pedido.clientePodePagar()) { ... }               // Checkout fala so com Pedido
+
+public boolean clientePodePagar() {                  // Pedido delega ao Cliente
+    return this.cliente.temSaldoSuficiente(this.total);
+}
+```
+
+::: {.fragment}
+`Checkout` fica **cego** para a existência de uma `Carteira`. Trocar por ApplePay: zero impacto.
+:::
+
+:::
+
+::: {.callout-tip}
+## Por que "número de pontos na linha" é um jeito ruim de explicar a Lei de Demeter, e "fronteira invadida" é melhor?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Lei de Demeter e Tell, Don't Ask
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. A Lei de Demeter recomenda que um objeto interaja apenas com seus "amigos próximos".
+b. `pedido.getCliente().getCarteira().getSaldo()` é um exemplo saudável de reuso de getters.
+c. *Feature Envy* é o sintoma de uma classe mais interessada nos dados de outra do que nos próprios.
+d. A cura técnica para o naufrágio de código é criar métodos de delegação, como `pedido.clientePodePagar()`.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Lei de Demeter e Tell, Don't Ask — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é a própria definição da lei.
+b. **Falso** — é o exemplo clássico de violação (*train wreck*).
+c. **Verdadeiro** — é a definição do *code smell*.
+d. **Verdadeiro** — delegação em cadeia é exatamente a solução apresentada.
+:::
+
+:::
+
+# Programando para Abstrações: Sistemas *Plug-and-Play*
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O estágio final desta aula é programar para o tipo genérico, não para a classe concreta:
+
+```java
+public interface Pagavel {
+    boolean isPagamentoValido(); // a promessa abstrata
+}
+
+public class Boleto implements Pagavel {
+    public boolean isPagamentoValido() { /* logica de codigo de barras */ return true; }
+}
+
+public class CartaoDeCredito implements Pagavel {
+    public boolean isPagamentoValido() { /* comunicacao com operadora */ return true; }
+}
+
+public class Checkout {
+    // FLEXIBILIDADE: aceito qualquer um que assine o contrato!
+    public void finalizar(Pagavel metodo) {
+        if (metodo.isPagamentoValido()) System.out.println("Transacao concluida!");
+    }
+}
+```
+
+Se amanhã surgir o Pix, basta criar `Pix implements Pagavel` — `Checkout` não precisa ser alterado nem recompilado. Compare com o código rígido:
+
+```java
+public void processar(CartaoDeCredito cartao) { ... }
+processar(meuBoleto); // ERRO DE COMPILACAO: Boleto cannot be converted to Cartao
+```
+
+Esse erro de compilação não é só uma falha sintática — é um **diagnóstico de acoplamento forte**: o sistema exige uma identidade específica em vez de uma capacidade funcional. A cura é elevar o nível de abstração: em vez de pedir um objeto de uma classe específica, pedir um objeto que saiba responder à mensagem certa. A interface é o "padrão USB-C" do software — um encaixe universal, indiferente ao que está do outro lado, desde que o contrato seja respeitado.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Contrato `Pagavel`
+
+```java
+public interface Pagavel { boolean isPagamentoValido(); }
+public class Boleto implements Pagavel { ... }
+public class CartaoDeCredito implements Pagavel { ... }
+```
+
+## `Checkout` Aceita Qualquer `Pagavel`
+
+```java
+public void finalizar(Pagavel metodo) {
+    if (metodo.isPagamentoValido()) System.out.println("Transacao concluida!");
+}
+```
+
+::: {.fragment}
+Amanhã surge o Pix → só `Pix implements Pagavel`. **`Checkout` não muda.**
+:::
+
+## O Erro de Tipagem como Diagnóstico
+
+```java
+public void processar(CartaoDeCredito cartao) { ... }
+processar(meuBoleto); // erro: "Boleto cannot be converted to Cartao"
+```
+
+::: {.fragment}
+O erro revela que o sistema "sabe demais": exige identidade específica, não capacidade funcional.
+:::
+
+:::
+
+::: {.callout-tip}
+## Se `Checkout.finalizar` recebesse `CartaoDeCredito` em vez de `Pagavel`, o que exatamente o erro de compilação de um novo `Pix` estaria diagnosticando sobre o design?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Programando para Abstrações
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. `Checkout.finalizar(Pagavel metodo)` aceita qualquer classe futura que implemente `Pagavel`, sem recompilação.
+b. Um erro de compilação ao tentar passar `Boleto` onde se espera `CartaoDeCredito` é sempre culpa do compilador, não do design.
+c. Programar para o tipo concreto (`CartaoDeCredito`) em vez da interface (`Pagavel`) aumenta o acoplamento do sistema.
+d. Uma interface bem desenhada funciona como um "encaixe universal", indiferente à identidade concreta de quem a implementa.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Programando para Abstrações — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é o próprio benefício do Plug-and-Play.
+b. **Falso** — é um diagnóstico de acoplamento forte no design, não um bug do compilador.
+c. **Verdadeiro** — exigir a classe concreta é o próprio sintoma de acoplamento forte.
+d. **Verdadeiro** — é a analogia do "padrão USB-C" desta seção.
+:::
+
+:::
+
+# Conclusão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando às quatro perguntas da abertura:
+
+1. **Como especialistas colaboram sem intimidade?** Delegando: cada objeto pergunta ao outro só o que precisa, nunca acessa o interior dele.
+2. **Interface vs. implementação:** o contrato é estável e público; o detalhe é volátil e pode mudar livremente por trás dele.
+3. **Reconhecer a fofoca:** qualquer cadeia de `.get().get().get()` que atravessa fronteiras de objetos que não são amigos diretos.
+4. **Programar para abstrações:** o sistema aceita qualquer objeto que cumpra o contrato — e cresce por adição de novas classes, não por modificação das antigas.
+
+### Ponte para a Aula 4 {.unnumbered}
+
+Esta aula tratou de como classes **diferentes** se conectam sem se conhecer intimamente. A Aula 4 volta um nível de abstração para dentro de uma única classe: como saber quando uma classe está fazendo coisas demais, e como decompô-la em unidades menores e mais coesas (o Princípio da Responsabilidade Única).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos
+
+1. Sistemas são redes de colaboradores, não amontoados de classes
+2. Interface (O Quê, estável) vs. Implementação (Como, volátil)
+3. Lei de Demeter: fale só com amigos próximos
+4. Programar para interfaces → sistemas *Plug-and-Play*
+
+::: {.fragment}
+**Próxima aula:** decompor uma única classe que faz coisas demais — o Princípio da Responsabilidade Única.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. Explique a metáfora "Fabricante de Peças vs. Arquiteto de Sistemas". Por que a preocupação puramente anatômica (sintaxe, `this`, `private`) é insuficiente para construir sistemas sustentáveis a longo prazo?
+
+2. O código `pedido.getCliente().getEndereco().getCEP()` é um "Naufrágio de Código" (*train wreck*). Explique tecnicamente por que essa linha representa um risco arquitetural, e como um método de delegação resolveria o problema.
+
+3. Explique como a interface atua como um "escudo" para quem usa um objeto, usando a analogia do controle remoto ou do padrão USB-C para justificar por que não é preciso conhecer a "fiação interna" de um colaborador.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-tip}
+## Do Fabricante ao Arquiteto
+
+a. ( ) O foco do "arquiteto" está na composição e na rede de colaboradores, não só na sintaxe isolada da classe.
+b. ( ) Um sistema robusto pode ser visto como um amontoado de classes que expõem seus dados livremente.
+c. ( ) Projetar por "encaixes" (interfaces) permite ignorar o "como" interno de cada peça no rascunho do sistema.
+d. ( ) A maturidade de design é atingida ao definir as mensagens entre objetos antes de escrever a lógica interna dos métodos.
+:::
+
+::: {.callout-tip}
+## Colaboração e Baixo Acoplamento
+
+a. ( ) Um objeto especialista deve, preferencialmente, não conhecer a existência de seu orquestrador.
+b. ( ) `ItemCarrinho.subtotal()` deve acessar diretamente o atributo `precoBase` de `Produto`.
+c. ( ) `Carrinho.calcularTotal()` usa delegação, sem conhecer a lógica interna de `ItemCarrinho`.
+d. ( ) Dividir responsabilidades entre especialistas evita a criação de "Objetos Deus".
+:::
+
+::: {.callout-tip}
+## Interface como Contrato
+
+a. ( ) A interface define o "O Quê" um objeto faz, ocultando o "Como".
+b. ( ) Alterar a implementação de um método, mantendo sua assinatura, não deveria exigir recompilar o cliente.
+c. ( ) O acoplamento físico — conhecer as entranhas de outra classe — é uma das maiores causas de fragilidade.
+d. ( ) Uma interface bem desenhada deve expor o máximo possível da estrutura interna, para facilitar o reuso.
+:::
+
+::: {.callout-tip}
+## Design de Caixa Preta
+
+a. ( ) Atributos privados garantem que a interface pública seja a única via de interação com o objeto.
+b. ( ) Ocultar a implementação permite que regras de negócio voláteis mudem sem efeito cascata.
+c. ( ) Proteger o estado interno é dispensável se o programador garantir que ninguém chamará os métodos errado.
+d. ( ) `calcularPrecoDeVenda()` pode mudar de fórmula internamente sem afetar quem já chama esse método.
+:::
+
+::: {.callout-tip}
+## A Lei de Demeter
+
+a. ( ) Estabelece que um objeto deve interagir apenas com seus "amigos próximos" (atributos e argumentos diretos).
+b. ( ) O objetivo é impedir que o conhecimento sobre a hierarquia interna do sistema se espalhe sem controle.
+c. ( ) "Falar com estranhos" (objetos obtidos navegando por outros objetos) aumenta a resiliência do código.
+d. ( ) Um método de delegação, como `getCEPDeEntrega()`, é uma forma correta de respeitar a lei.
+:::
+
+::: {.callout-tip}
+## O Naufrágio de Código (*Train Wreck*)
+
+a. ( ) É identificado por longas cadeias de chamadas, como `a.getB().getC().getD()`.
+b. ( ) O problema real é puramente estético — o excesso de pontos polui a leitura do código.
+c. ( ) Cada nível de navegação profunda é uma fronteira de objeto invadida.
+d. ( ) Se a estrutura intermediária (ex.: `Carteira`) mudar, o código que a navegou diretamente quebra.
+:::
+
+::: {.callout-tip}
+## Tell, Don't Ask na Prática
+
+a. ( ) Em vez de investigar o saldo do cliente para autorizar a venda, o sistema deve pedir ao `Pedido` que se valide.
+b. ( ) "Perguntar" por dados para decidir por fora é uma prática que fortalece o encapsulamento.
+c. ( ) Mover a lógica para onde os dados residem evita que classes se tornem "fofoqueiras".
+d. ( ) `pedido.clientePodePagar()` é um exemplo de "Tell": o `Pedido` decide internamente como verificar isso.
+:::
+
+::: {.callout-tip}
+## Delegação e *Feature Envy*
+
+a. ( ) A delegação ocorre quando um objeto repassa uma mensagem a um colaborador, sem expor a identidade dele.
+b. ( ) Um "orquestrador" como `Carrinho` deve calcular pessoalmente o subtotal de cada item, para garantir precisão.
+c. ( ) *Feature Envy* é o sintoma de uma classe mais interessada nos dados de outra do que nos próprios.
+d. ( ) A cura para *Feature Envy* é mover o método para a classe que de fato detém os dados necessários.
+:::
+
+::: {.callout-tip}
+## Programar para Abstrações
+
+a. ( ) Programar para um tipo genérico (`Pagavel`) em vez de uma classe concreta (`Boleto`) aumenta a rigidez.
+b. ( ) O uso de tipos genéricos permite que o sistema aceite novos componentes sem alterar o código já existente.
+c. ( ) Referenciar objetos por suas interfaces é uma recomendação central para promover flexibilidade.
+d. ( ) Um `Checkout` que recebe `Pagavel` funciona com qualquer classe futura que implemente esse contrato.
+:::
+
+::: {.callout-tip}
+## O Erro de Tipagem como Diagnóstico
+
+a. ( ) Um erro de compilação ao passar `Boleto` onde se espera `CartaoDeCredito` é sempre um bug do compilador.
+b. ( ) Esse erro pode revelar que o sistema exige uma identidade específica em vez de uma capacidade funcional.
+c. ( ) A solução típica é generalizar o parâmetro para uma interface que ambas as classes implementem.
+d. ( ) Elevar o nível de abstração do parâmetro reduz o acoplamento entre `Checkout` e os métodos de pagamento.
+:::
+
+::: {.callout-tip}
+## Custo de Mudança e o Princípio TRUE
+
+a. ( ) O design deve ser Transparente, Razoável, Usável e Exemplar (TRUE).
+b. ( ) Um código é "Razoável" quando o custo de uma mudança é proporcional ao benefício que ela traz.
+c. ( ) O design de caixa preta aumenta o custo de mudança, pois esconde erros atrás de interfaces.
+d. ( ) Contratos estáveis e baixo acoplamento evitam que o custo de uma nova funcionalidade cresça exponencialmente.
+:::
+
+::: {.callout-tip}
+## O Papel do Orquestrador
+
+a. ( ) `Carrinho` atua como "maestro": coordena especialistas em vez de fazer o trabalho de cada um.
+b. ( ) A fronteira entre `Carrinho` e `ItemCarrinho` é respeitada quando o `Carrinho` soma subtotais já calculados.
+c. ( ) Se `ItemCarrinho` mudar sua fórmula de subtotal, `Carrinho` precisa ser reescrito para acompanhar.
+d. ( ) Um bom orquestrador permanece estável mesmo quando a lógica interna de um especialista evolui.
+:::
+
+:::

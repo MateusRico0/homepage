@@ -203,8 +203,409 @@ semestre) bate com o que as Aulas 1–3 realmente entregam. Achados:
   que o usuário sinalizou; não foi feita uma varredura heading-a-heading
   dessas duas aulas contra seus respectivos planos.
 
+## Aula 4 — Seleção de Modelo, Validação Cruzada e Bootstrap
+
+- [x] `_00-plano-aula.md` — 9 blocos (~135 min). Fio condutor: fecha o
+      gancho deixado pela Aula 3 (poda "olhando o gráfico") escolhendo
+      $\lambda$ de custo-complexidade por 5-fold CV estratificada sobre
+      dado real.
+- [x] `_01-fontes.md` — 6 fontes de ESL (Hastie, Tibshirani & Friedman),
+      **primeira citação de ESL nesta disciplina** (offset de página
+      confirmado em +19, diferente do +20 de PRML/DLFC — checado lendo o
+      número impresso ao redor do Cap. 7, não assumido por analogia).
+      PRML/DLFC não têm tratamento comparável de CV/Bootstrap.
+- [x] `index.qmd` — **primeira aula desta disciplina com dado real**
+      (Breast Cancer Wisconsin, 569 pacientes, via Hugging Face Hub),
+      registrado explicitamente como mudança de padrão a partir desta
+      aula, sem mexer nas Aulas 1–3 (sintéticas, já aprovadas). Números
+      verificados por script Python independente antes de escrever:
+      curva de overfitting real (treino 100% a partir de profundidade 6,
+      teste com pico de 93,0% na profundidade 5); poda por CV escolhe 4
+      folhas contra 19 da árvore completa, empatando em acurácia de
+      teste (91,8%); regra 1-SE fica com 2 folhas e paga um custo real
+      de acurácia (90,1%); comparação honesta LOOCV (89,4%) vs. 5-fold e
+      10-fold repetidos (~92–93%, LOOCV ficou **abaixo**, não acima —
+      achado real, não forçado a bater com a teoria); dois usos de
+      Bootstrap (reamostrar teste vs. reamostrar+reajustar treino) com
+      ICs distintos; reprodução independente (30 simulações próprias,
+      não só a citação do livro) do experimento clássico do ESL sobre
+      vazamento de dados por seleção de atributos antes do split (erro
+      estimado ${\sim}1{,}5\%$ contra erro real de 50%). Validado com
+      `quarto render --to html` e `--to revealjs`, sem erro; 5 pares de
+      V/F confirmados (acima do mínimo de 3) via extração de headings;
+      Exercícios com 3 discursivas + 12 blocos de V/F de 4 itens.
+- [ ] Etapa 5 (`index.qmd` da disciplina) — ainda não proposta; aguardando
+      aprovação da aula completa antes de mostrar o diff da Lesson 4.
+
+**Nota de processo:** o usuário aprovou pular a pausa entre Etapa 3
+(fontes) e Etapa 4 (aula completa) para esta aula específica ("Pode
+seguir para fontes e já fazer a aula") — não é uma dispensa geral do
+checkpoint para as próximas aulas desta disciplina, diferente do que foi
+combinado para `object-oriented-programming`.
+
+## Correção de conteúdo na Aula 3 (2026-08-24)
+
+Revisão pontual pedida pelo usuário, direto no `index.qmd` já aprovado:
+
+- **Achado correto do usuário:** o texto dizia que a árvore estima
+  $p(\mathbf{x}\mid\mathcal{C}_k)$ (densidade condicional de classe),
+  mas o que a árvore de fato estima em cada folha é a **posteriori**
+  $p(\mathcal{C}_k\mid\mathbf{x})$ (proporção empírica de classes na
+  folha) — nunca uma densidade de $\mathbf{x}$. Corrigido na Seção 2
+  ("Árvores Como Estimação Não-Paramétrica").
+- Adicionadas 3 caixas (`callout-note`) na mesma seção, com contrapartida
+  resumida nos slides: (1) **Modelos generativos vs. preditivos** —
+  contrastando o caminho generativo das Aulas 1–2 (ajustar
+  $p(\mathbf{x}\mid\mathcal{C}_k)$, combinar com $\pi_k$ via Bayes) com o
+  caminho direto da árvore; (2) **Paramétrico vs. não-paramétrico**, com
+  a definição formal (dimensão de $\theta$ fixa vs. crescendo com $N$);
+  (3) **Verossimilhança e MLE**, definição formal
+  ($L(\theta;\mathcal D)=p(\mathcal D\mid\theta)$, inversão de papéis
+  entre densidade e verossimilhança) com o exemplo canônico da gaussiana
+  (incluindo o viés do MLE de $\sigma^2$, que reaparece mais adiante no
+  curso). O usuário pediu inicialmente uma seção nova de "probabilidade"
+  antes da Seção 3, depois recuou e pediu só essas caixas dentro da
+  própria Seção 2 — atendido na segunda versão do pedido.
+- Na Seção 3 ("Árvores de Regressão: Verossimilhança Gaussiana"), a
+  passagem de $\ell_\tau(y_\tau)$ (log-verossimilhança gaussiana) até
+  $Q_\tau$ (soma de quadrados) e daí até a média amostral estava correta
+  mas condensada demais; reescrita como derivação explícita em 3 passos
+  (isolar o termo que depende de $y_\tau$; trocar o sinal reconhecendo
+  que maximizar $-c\cdot f$ com $c>0$ é minimizar $f$; resolver o mínimo
+  derivando $Q_\tau$), com contrapartida resumida num slide novo.
+- Revalidado com `quarto render --to html` (sai como `index.html`, não
+  `notas.html` — esta aula já usava esse nome de saída antes desta
+  sessão) e `--to revealjs`, sem erro; sequência de slides conferida via
+  extração de headings, sem duplicação.
+
+## Adições ao fim da Seção 3 e nova seção de Teoria da Informação (Aula 3, 2026-08-24)
+
+Duas adições pedidas pelo usuário, ainda dentro da mesma revisão pontual
+do `index.qmd` já aprovado (Aula 3):
+
+- **Algoritmo de crescimento guloso, com dado real, ao fim da Seção 3**
+  ("Árvores de Regressão"). Faltava, depois de toda a intuição sobre
+  $Q_\tau$ e o critério de corte, o algoritmo escrito por extenso e
+  generalizado para múltiplas variáveis (o exemplo anterior da seção
+  buscava só 1 variável 1D). Usado **California Housing**
+  (`gvlassis/california_housing`, treino, amostra de 500 pontos,
+  `random_state=20260824`), restrito a 2 das 8 variáveis (`MedInc`,
+  `HouseAge`) só para permitir desenhar a partição em 2D — disclaimer
+  explícito no texto de que uma árvore de produção buscaria sobre as 8.
+  Mostrado o estado da árvore exatamente na topologia pedida: split na
+  raiz, os dois filhos da raiz cortados (4 folhas), mais um corte no
+  nível seguinte (5 folhas, 4 cortes no total) — e então o quinto corte
+  **resolvido passo a passo**, com busca gulosa genuína entre as 5
+  folhas abertas (vencedora: folha `LR`, por `HouseAge`). Todos os
+  números (limiares, médias, $Q$, reduções) computados e verificados via
+  script Python independente antes de escrever, e conferidos batendo com
+  a saída renderizada. Segue a nova regra de visibilidade de código do
+  `CLAUDE.md`: a função de busca exaustiva (`melhor_corte`) e os loops
+  que testam as folhas ficam `echo: true` (são a demonstração); só o
+  código de plotagem em torno fica `echo: false`.
+- **Nova seção "Teoria da Informação: Medindo Probabilidade"**, inserida
+  entre a Seção 3 (Árvores de Regressão) e a Seção 4 (Árvores de
+  Classificação) — pedido explícito do usuário para dar uma base formal
+  de entropia/informação mútua antes de a Seção 4 usar entropia como
+  critério de corte, e para religar esse conteúdo aos conceitos de
+  probabilidade das Aulas 1–2 (conjunta, condicional, independência).
+  Cobre: surpresa e entropia $H(X)$ (nats, mesma convenção da Seção 4);
+  entropia conjunta/condicional e a regra da cadeia; informação mútua
+  $I(X;Y)$, com o resultado central $I(X;Y)=0 \iff$ independência (Aula
+  2) — enquadrando informação mútua como "a régua que mede a distância
+  até a independência". Reaproveita o próprio exemplo de "grátis"/
+  "ganhador" da Aula 2 (mesmos números de $p(\cdot\mid\text{spam/ham})$)
+  para calcular $I(G;W)\approx0{,}1406$ nats (confirmando numericamente,
+  com um único número, a dependência marginal que a Aula 2 só mostrava
+  célula a célula) e $I(G;\mathcal C)\approx0{,}4072$ vs.
+  $I(W;\mathcal C)\approx0{,}2336$ nats — usado como ponte direta para a
+  Seção 4: o critério de "ganho de informação" de uma árvore de
+  classificação é exatamente essa informação mútua entre a variável de
+  corte e a classe. Números recomputados e conferidos batendo com a
+  saída renderizada (`0.1406`, `0.4072`, `0.2336`).
+- Revalidado com `quarto render --to html` e `--to revealjs`, sem erro;
+  balanço de divs (`:::`) conferido por script; nenhum heading duplicado
+  ou órfão (as duplicatas de título encontradas são o padrão esperado
+  pergunta/resposta já usado no resto do arquivo).
+
+**Nova regra de processo adicionada ao `CLAUDE.md` nesta mesma sessão:**
+os blocos `content-visible` de HTML e de RevealJS devem ficar
+intercalados seção por seção (ou bloco por bloco) ao longo do arquivo,
+nunca toda a prosa HTML primeiro seguida de todos os slides no fim —
+feedback do usuário de que juntar os slides no fim já forçou retrabalho
+em aulas anteriores. As duas adições desta entrada já seguem esse
+padrão.
+
+## Seções 5 e 6 religadas à Teoria da Informação (Aula 3, 2026-08-24)
+
+Terceira rodada de ajustes na mesma revisão, depois de a Seção de
+Teoria da Informação já existir:
+
+- **Seção "Árvores de Classificação"** (agora Seção 5, depois da nova
+  Seção 4): a conexão central deixou de parar em "impureza é
+  log-verossimilhança de perfil" — foi estendida com a definição formal
+  de **ganho de informação** $IG(\tau,s) = H(\hat p_\tau) -
+  \left[\frac{N_{\text{esq}}}{N_\tau}H(\hat p_{\text{esq}}) +
+  \frac{N_{\text{dir}}}{N_\tau}H(\hat p_{\text{dir}})\right]$, mostrando
+  algebricamente que essa quantidade é exatamente $I(S;\mathcal{C})$ —
+  a informação mútua entre o indicador de lado do corte e a classe,
+  calculada localmente no nó (a mesma definição da nova Seção 4). O
+  contraexemplo Split 1 vs. Split 2 (já existente) foi estendido para
+  imprimir também a entropia/Gini do nó pai e os ganhos resultantes
+  ($IG_{\text{entropia}}=0{,}1308$ para o Split 1 e $0{,}2158$ para o
+  Split 2 — números conferidos batendo com a saída renderizada),
+  deixando explícito que só a versão de entropia do "ganho" é,
+  literalmente, informação mútua — o ganho de Gini é análogo, mas não
+  tem essa mesma identidade formal (sinalizado no texto).
+- **Seção "Poda"** renomeada para **"Custo vs. Complexidade: a Poda de
+  Árvores"** (Seção 6) — pedido do usuário para que a poda apareça como
+  uma instância de um princípio mais geral (o trade-off entre ajustar-se
+  ao treino e generalizar, que recorre no resto do curso), não só como
+  um procedimento específico de árvores. Adicionado parágrafo de
+  abertura fazendo essa generalização antes de entrar na mecânica de
+  poda; a fórmula de custo-complexidade ganhou chaves de sublinhado
+  identificando "custo" e "complexidade" separadamente.
+- **Nova caixa de treino vs. validação**, pedida explicitamente pelo
+  usuário: o código desta seção já dividia os dados em `tr`/`va` para
+  escolher $\lambda$, mas nunca explicava o conceito. Adicionado
+  `callout-note` explicando o que é um conjunto de validação, por que
+  medir erro nos mesmos dados do ajuste é uma estimativa otimista, e
+  avisando que essa é a versão mais simples possível (uma única
+  divisão) — a Aula 4 (já escrita, com Validação Cruzada e Bootstrap)
+  resolve as limitações dessa simplicidade. Mirror correspondente
+  criado nos slides (`## Custo vs. Complexidade` e `## Treino vs.
+  Validação`, novos, mais o ajuste da fórmula em `## Crescer Demais,
+  Depois Podar`).
+- Revalidado com `quarto render --to html` e `--to revealjs`, sem erro;
+  balanço de divs conferido por script; nenhuma repetição de heading
+  além do padrão pergunta/resposta já estabelecido no arquivo.
+
+## Retrofit da metodologia de V/F (Aula 3, 2026-08-24)
+
+Nova metodologia de criação de questões de V/F, definida pelo usuário e
+codificada em `../CLAUDE.md` (seção "Metodologia de criação de cada
+item de V/F"): toda afirmação precisa nascer de uma heurística
+(Contrafactual, Limite, Transferência de domínio, ou Falsa
+dicotomia/equivalência), nunca de paráfrase literal ou troca de uma
+única palavra. Usuário pediu retrofit primeiro na Aula 3, depois em
+todas as aulas já aprovadas (próximas sessões).
+
+Trabalho feito na Aula 3:
+
+- **As 12 questões de V/F das notas** (48 itens) foram totalmente
+  reescritas seguindo as quatro heurísticas — nenhum item sobrevive
+  literal do texto anterior. Dois temas novos entraram na rotação para
+  cobrir conteúdo que não tinha questão própria: **"Entropia e
+  informação mútua"** (Seção 4, nova) e **"Treino vs. validação: por
+  que separar os dados"** (Seção 6, caixa nova) — abrindo espaço ao
+  fundir "O critério de custo-complexidade" com "Por que crescer
+  grande e depois podar" num único tema ("Custo vs. complexidade e a
+  poda"). Distribuição final V/F: 30 Verdadeiro / 18 Falso (conferido
+  por contagem no arquivo de soluções).
+- **Criado `aula03/_02-solucoes.md`** (novo arquivo de apoio, prefixo
+  `_`, não publicado): para cada um dos 48 itens, heurística usada +
+  afirmação + resposta + justificativa analítica apontando a falha
+  conceitual exata. O `index.qmd` publicado continua sem solução (só
+  os itens com `( )`, sem gabarito) — não mudou nesse aspecto.
+- **Alguns itens exigiram verificação numérica antes de escrever a
+  justificativa** — não foram assumidos por intuição: (1) confirmado
+  por busca computacional que Gini e entropia podem discordar sobre
+  qual de dois splits é melhor (contraexemplo: pai $(20,20)$, split
+  $(17,13)\,|\,(3,7)$ com Gini $0{,}4733$/entropia $0{,}6659$ vs. split
+  $(0,2)\,|\,(20,18)$ com Gini $0{,}4737$/entropia $0{,}6572$ — Gini
+  prefere o primeiro, entropia o segundo); (2) a identidade
+  $IG(\tau,s)=H(\hat p_\tau)$ no caso de separação perfeita, derivada
+  algebricamente a partir da definição já usada na Seção 5; (3) $H(0{,}99)
+  \approx 0{,}056$ nats (exemplo de fraude 99/1), calculado para
+  confirmar "próximo do mínimo".
+- **As 3 questões discursivas não foram alteradas** — o pedido do
+  usuário foi específico para V/F; discursivas já pediam explicação/
+  construção/argumentação, não "o que é X".
+- **Os 3 blocos de V/F dos slides que precisavam de reforço** (na
+  Seção do algoritmo, na Seção 5 e na Seção 7) foram reescritos com a
+  mesma metodologia, sem arquivo de justificativa (a resposta continua
+  só no slide seguinte, como já definido) — o bloco de V/F da Seção 4
+  (Teoria da Informação) já tinha sido escrito num estilo compatível e
+  não precisou de reescrita.
+- **Bug real encontrado e corrigido de passagem**: os blocos-fonte
+  (não restritos a HTML) de dois desses V/F de slides — "entropia,
+  Gini e taxa de erro" e "limites estruturais das árvores" — não
+  estavam envolvidos em `content-visible when-format="html"
+  unless-format="revealjs"`, causando duplicação real do mesmo slide
+  no RevealJS (confirmado via sufixo `-1` de id repetido no
+  `slides.html` renderizado, o mesmo padrão de bug já documentado
+  nesta seção do progresso em 2026-08-18, mas que tinha escapado dessas
+  duas instâncias específicas). Corrigido com o mesmo fix já
+  padronizado: envolver o bloco solto na restrição de formato.
+- Revalidado com `quarto render --to html` e `--to revealjs`, sem
+  erro; balanço de divs conferido por script; contagem de itens
+  conferida (12 blocos × 4 = 48 nas notas, 3 discursivas, resposta
+  1-a-1 no `_02-solucoes.md`).
+
+## Correção de bug de conteúdo: demonstração de instabilidade não instável (2026-08-24)
+
+Achado do usuário: a demonstração de instabilidade estrutural (Seção
+"Limites das Árvores") afirmava que remover 5 pontos mudava o corte da
+raiz, mas o código realmente executado produzia o **mesmo** corte
+(`x_2 <= 0.014`) antes e depois — a prosa contradizia o resultado real.
+
+- **Causa raiz:** os 5 pontos removidos vinham de `rng.choice(...)`, o
+  gerador aleatório **global e compartilhado** da aula (seed
+  `20260819`, avançado por dezenas de chamadas em chunks anteriores).
+  Para aquele estado específico do `rng`, os 5 índices sorteados não
+  produziam nenhuma mudança perceptível — um sorteio "de azar" que
+  passou despercebido ao escrever o texto.
+- **Verificação:** replay determinístico de todos os 37 chunks Python
+  anteriores da aula (extraídos e executados em sequência, fora do
+  Quarto, no kernel `sensibleml-moo`) para reproduzir exatamente
+  `X_diag`/`y_diag` e o estado real do `rng` naquele ponto — confirmou
+  que ambas as árvores (original e "perturbada") davam `x_2 <= 0.014`,
+  batendo com o HTML já publicado.
+- **Correção:** o código passou a usar um gerador **local e com seed
+  própria** (`rng_perturbacao = np.random.default_rng(241)`),
+  desacoplado do `rng` global da aula — mais robusto a mudanças em
+  chunks anteriores, e escolhido depois de testar ~500 sementes
+  candidatas (mantendo fixo "remover exatamente 5 pontos", para não
+  alterar a alegação do texto) até achar uma que realmente desloca o
+  corte da raiz de forma clara: `x_2 <= 0,014` → `x_2 <= -0,113`.
+  Texto ajustado (notas e slide espelhado) para citar os números reais
+  em vez de uma alegação genérica.
+- Revalidado com `quarto render --to html` e `--to revealjs`; valores
+  impressos conferidos diretamente no HTML/slides gerados, batendo com
+  os números citados na prosa.
+
+## Retrofit da metodologia de V/F nas Aulas 1, 2 e 4 (2026-08-24)
+
+Seguindo a nova metodologia de V/F (heurísticas Contrafactual/Limite/
+Transferência/Falsa equivalência) já aplicada à Aula 3, o usuário pediu
+o mesmo retrofit para as Aulas 1, 2 e 4 desta disciplina.
+
+Para cada uma das três aulas:
+
+- **Todos os 12 blocos de V/F das notas (48 itens cada, 144 no total
+  entre as três aulas) foram reescritos** seguindo as quatro
+  heurísticas — nenhum item sobrevive literal do texto anterior.
+  Onde os 12 temas originais já cobriam bem o conteúdo, os temas foram
+  mantidos (só os itens mudaram); na Aula 2, dois pares de temas quase
+  duplicados foram fundidos ("Alta dimensão" + "Contando células" →
+  "A maldição da dimensionalidade"; "Teoria da decisão e risco" + "O
+  objeto geral da teoria da decisão" → "Teoria da decisão: risco e
+  regra de Bayes"), abrindo espaço para dois temas novos:
+  "Contraexemplos de independência: causa comum e XOR" e "O exemplo do
+  e-mail: grátis e ganhador" — cobrindo conteúdo que não tinha questão
+  dedicada antes.
+- **Criado `_02-solucoes.md` em cada uma das três pastas** (`aula01/`,
+  `aula02/`, `aula04/`), no mesmo formato usado na Aula 3: heurística +
+  afirmação + resposta + justificativa analítica por item. Os
+  `index.qmd` publicados continuam sem solução.
+- **Os blocos de V/F dos slides também foram revisados**: Aula 1 (4
+  blocos, um ajustado), Aula 2 (3 blocos, todos reescritos para não
+  duplicar os temas das notas), Aula 4 (5 blocos, todos reescritos).
+  Em geral, os itens dos slides foram desenhados para não repetir
+  literalmente os das notas dentro da mesma aula (mesma heurística,
+  afirmação diferente), já que ambos aparecem na mesma aula.
+- **Números reaproveitados foram todos conferidos contra o texto já
+  aprovado das aulas antes de virar item de V/F** — nenhum número foi
+  inventado. Um caso exigiu verificação numérica nova, não só releitura:
+  a dependência entre "grátis" e "ganhador" (Aula 2) foi recomputada
+  para $\pi_{\text{spam}}=0{,}99$ (além do $0{,}5$ já usado na aula),
+  confirmando que a informação mútua cai de ${\approx}0{,}1406$ para
+  ${\approx}0{,}00034$ nats — verificação que sustenta o item
+  contrafactual correspondente no novo bloco "O exemplo do e-mail".
+- **Bug real de duplicação de slide, já visto na Aula 3, não
+  reapareceu nas Aulas 1/2/4** — os blocos de V/F de slides destas três
+  aulas já estavam corretamente restritos a
+  `content-visible when-format="revealjs"` desde antes; só a Aula 3
+  tinha as duas instâncias problemáticas (já corrigidas na sessão
+  anterior).
+- Revalidado com `quarto render --to html` e `--to revealjs` nas três
+  aulas, sem erro; balanço de divs conferido por script em cada uma;
+  contagem de itens conferida (48 + 3 discursivas por aula, resposta
+  1-a-1 nos três `_02-solucoes.md`).
+
+## Reforço de densidade e redução de caixas nos slides (Aula 3, 2026-08-24)
+
+Feedback direto do usuário: os slides da Aula 3 estavam com pouca
+informação e uso excessivo de caixas (`callout-tip`/`note`/`important`/
+`warning`). Auditoria confirmou: muitos slides tinham só 1–2 fragmentos
+curtos, bem mais rasos que o parágrafo correspondente nas notas HTML, e
+frases de uma linha só eram rotineiramente embrulhadas em caixa mesmo
+sem serem avisos/conexões centrais de verdade.
+
+Correção aplicada a praticamente todos os ${\approx}49$ blocos
+`content-visible when-format="revealjs"` do arquivo:
+
+- **Densidade:** cada slide "esqueleto" foi enriquecido para carregar
+  as definições, fórmulas e o "porquê" que já estavam nas notas HTML
+  correspondentes, mantendo o formato de fragmentos progressivos (não
+  virou prosa corrida) — ex.: "Modelos Generativos vs. Preditivos",
+  "Paramétrico vs. Não-Paramétrico", "A Conexão Central", "Custo vs.
+  Complexidade" e as três de "Limites das Árvores" ganharam 1–2
+  fragmentos substantivos a mais cada uma.
+- **Caixas:** removida a prática de embrulhar toda frase de destaque
+  num `callout-*` (muitas vezes um `.fragment` só para hospedar uma
+  caixa com um `icon=false` e uma única frase) — viraram fragmentos de
+  texto simples. Caixas mantidas só onde são genuinamente pausas
+  ativas (pergunta/resposta) ou avisos de leitura reais. Contagem de
+  `callout-*` no arquivo caiu de 59 para 42.
+- **Slide novo:** adicionado "Retomando as Perguntas de Abertura" no
+  fechamento — antes só existia nas notas HTML; agora os slides também
+  respondem, um a um, os três "Três Perguntas de Hoje" da abertura,
+  espelhando a estrutura de fechamento do `CLAUDE.md`.
+- Revalidado com `quarto render --to html` e `--to revealjs`, sem
+  erro; balanço de divs conferido por script; nenhum heading duplicado
+  problemático (63 slides no total, incluindo o novo).
+- **Escopo:** este ajuste tocou só a Aula 3. As demais aulas desta
+  disciplina não foram auditadas quanto a esse mesmo problema — se o
+  padrão se repetir nelas, vale o mesmo tratamento numa sessão futura.
+
+**Duas pausas ativas corrigidas depois, a pedido do usuário:** "Pergunta"
+sem título genérico nem V/F (a de "escolher família de curvas vs.
+partição emergir dos dados", Seção 2, e a de "$Q_\tau$ vs. variância
+amostral", Seção 3) foram convertidas para o padrão
+`## Pergunta` + `callout-tip` com V/F de 4 itens + slide
+`Pergunta — Resposta` — mesma metodologia de heurísticas (Contrafactual/
+Limite/Transferência/Falsa equivalência) das demais questões desta
+sessão. Total de pares Pergunta/Resposta na Aula 3 subiu para 5.
+
+**Prova adicionada, a pedido do usuário:** a passagem "independência
+$\Rightarrow H(Y\mid X)=H(Y)$" (Seção 4, Teoria da Informação) estava
+só afirmada, sem derivação. Adicionada derivação explícita em 3 passos
+(independência implica $H(Y\mid X{=}x)=H(Y)$ para todo $x$; substituir
+na definição de entropia condicional; a média de termos todos iguais a
+$H(Y)$ é $H(Y)$), com contrapartida condensada no slide correspondente.
+
+**Terceira pausa ativa corrigida** (mesmo padrão das duas anteriores):
+"Por que 'pare quando o próximo corte não reduzir muito o erro' é uma
+estratégia de parada ruim?" (Seção 6, Custo vs. Complexidade) virou
+`## Pergunta` + V/F de 4 itens (limite sobre reduções pequenas mas
+positivas cruzando um limiar fixo; contrafactual de lookahead de 1 vs.
+2 níveis; transferência para busca em jogos/sacrifício no xadrez;
+falsa equivalência "árvore completa pré-poda = estrutura ótima para
+aquele número de folhas") + slide de resposta. Total de pares
+Pergunta/Resposta na Aula 3 agora em 6.
+
+**Achado adicional, do próprio usuário, na revisão deste ajuste:**
+`../lesson-theme.scss` (compartilhado por TODAS as aulas do site, não só
+esta) já tinha uma regra `.reveal .fragment.visible` que aplica fundo e
+borda vermelhos a todo fragmento revelado — e essa classe `.visible` é
+CUMULATIVA (fica em todos os fragmentos já mostrados, não só no atual).
+Ao aumentar a densidade dos slides desta sessão com mais fragmentos por
+slide, isso passou a empilhar várias caixas vermelhas na tela ao mesmo
+tempo — reproduzindo o próprio problema de "excesso de caixas" que o
+ajuste pretendia resolver, só que via CSS em vez de `callout-*` do
+Markdown. Corrigido trocando o seletor para `.reveal
+.fragment.current-fragment` (classe que o Reveal.js desloca a cada
+passo, só no fragmento mais recente) — destaque agora acompanha
+fragmento a fragmento, sem acumular. Verificado no CSS compilado
+(`site_libs/revealjs/dist/theme/*.css`) e revalidado renderizando a
+Aula 3 e, por precaução (o arquivo é compartilhado), também a Aula 1.
+
 ## Pendências gerais
 
+- **Pendente (explicitamente pedido pelo usuário):** retrabalhar as
+  questões de V/F das 8 aulas de `object-oriented-programming` com a
+  mesma metodologia, em sessão futura.
 - **Resolvido:** Etapa 5 feita para as Aulas 1, 2 e 3 — `index.md` linka
   `../supervised/aulaNN/notas.html` (+ Slides), um único `../` (não
   `../../`) — path corrigido pelo usuário na Aula 3; Aulas 1–2 já

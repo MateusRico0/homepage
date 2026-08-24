@@ -1,0 +1,566 @@
+---
+title: "Polimorfismo, Binding e Generics"
+subtitle: "Aula 7 — Programação Orientada a Objetos"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: _lesson-nav.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    output-file: notas.html
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides →](slides.html){.see-all}
+:::
+
+# Proposta da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A Aula 6 nos deu o contrato (`Pagavel`) e o vocabulário de defesa (exceções). Falta explicar como o compilador aceita que a mesma variável `Pagavel forma` receba, em momentos diferentes, um `Pix` ou um `Cartao` — duas classes sem nada em comum em dados. A resposta é o **Polimorfismo**.
+
+**O roteiro, em quatro perguntas:**
+
+1. Quem decide qual código realmente roda quando chamamos `forma.criarCobranca()` — o compilador ou a máquina virtual?
+2. Existe só um tipo de polimorfismo, ou a sobrecarga de métodos conta como um também?
+3. Como o polimorfismo elimina, de vez, as longas cadeias de `if/else` baseadas em tipo?
+4. Por que uma lista "aceita-tudo" é um risco, e como Generics resolve isso sem perder flexibilidade?
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**A pergunta da Aula 6:** como `Pagavel forma` aceita ora `Pix`, ora `Cartao`?
+
+::: {.fragment}
+**A resposta:** Polimorfismo — múltiplas formas atrás do mesmo contrato.
+:::
+
+::: {.fragment}
+**Roteiro:** Late Binding → taxonomia → fim do "Mar de IFs" → Generics.
+:::
+
+:::
+
+# Polimorfismo e o Mecanismo de Late Binding
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Polimorfismo** (do grego, "muitas formas"): a capacidade de uma variável ou método assumir diferentes comportamentos dependendo do objeto real que manipula. Se a interface deu o contrato, o polimorfismo é o mecanismo que permite que diferentes classes cumpram esse contrato de maneiras distintas, sem que o sistema precise ser reescrito para cada uma.
+
+O mecanismo central é o ***Late Binding*** (ou *Dynamic Dispatch*). Ao declarar `Pagavel forma`, o compilador faz uma checagem estática: só garante que `criarCobranca()` existe na interface `Pagavel`. Ele não sabe — e não precisa saber — qual código roda de fato. Essa decisão só acontece em tempo de execução: a JVM olha o objeto real na Heap e desvia o fluxo para a implementação certa.
+
+```java
+List<Pagavel> opcoes = clienteLogado.consultaMeiosPagamento();
+Pagavel forma = opcoes.get(escolha - 1); // Pix, Boleto ou Cartao — tanto faz
+String id = forma.criarCobranca(total);  // o comportamento real emerge em RUNTIME
+```
+
+O que praticamos aqui é o **Polimorfismo de Inclusão**: um subtipo (`Pix`) pode ser usado em qualquer lugar em que seu supertipo (`Pagavel`) é esperado. Se adicionarmos `Cripto implements Pagavel` amanhã, nenhuma linha do controlador muda — o sistema fica "Aberto para Extensão, Fechado para Modificação" (OCP).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que é Polimorfismo?
+
+::: {.fragment}
+"Muitas formas": a mesma chamada, comportamentos diferentes, dependendo do objeto real.
+:::
+
+## Late Binding: Quem Decide, e Quando
+
+```java
+Pagavel forma = opcoes.get(escolha - 1); // compilador so sabe: e um Pagavel
+String id = forma.criarCobranca(total);  // JVM decide o codigo real, EM RUNTIME
+```
+
+::: {.fragment}
+Compilador: checa que o método existe. JVM: decide qual implementação roda.
+:::
+
+:::
+
+# A Taxonomia de Cardelli-Wegner
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Polimorfismo não é um conceito único. Cardelli e Wegner organizam-no em dois eixos:
+
+**Universal** — funciona para um número infinito de tipos:
+
+- **Inclusão (Subtipagem):** o pilar da OO — qualquer classe que implemente `Pagavel` serve.
+- **Paramétrico (Generics):** `List<T>` funciona da mesma forma para `Produto` ou `Cliente`, sem exigir hierarquia de herança.
+
+**Ad-hoc** — funciona só para um conjunto finito e específico de tipos, resolvido cedo pelo compilador:
+
+- **Sobrecarga (*Overloading*):**
+
+```java
+public class Notificador {
+    public void enviar(String email) { ... }                  // versao 1
+    public void enviar(String email, String assunto) { ... }   // versao 2 (sobrecarga)
+}
+```
+
+  Crítica arquitetural: a sobrecarga é um "polimorfismo aparente". Se surgir um novo tipo de contato, é preciso voltar a `Notificador` e escrever uma nova versão — não resolve extensibilidade, viola o OCP.
+
+- **Coerção:** conversão implícita feita pela linguagem —
+
+```java
+double preco = 100;       // int vira double
+double total = preco + 5; // literal 5 vira double
+String msg = "Total: " + total; // double vira String
+```
+
+  É um comportamento embutido e rígido, sem troca de comportamento baseada em lógica de negócio.
+
+**A tabela que resume tudo:**
+
+| Característica | Static (Early) Binding | Dynamic (Late) Binding |
+|---|---|---|
+| Quando ocorre | Tempo de compilação | Tempo de execução |
+| Quem decide | O compilador (tipo da variável) | A JVM (objeto real na memória) |
+| Exemplos | Sobrecarga, Coerção, métodos `static`/`private` | Polimorfismo de Inclusão (interfaces, herança) |
+| Vantagem | Performance levemente superior | Desacoplamento total e extensibilidade |
+
+A OO aposta no Dynamic Binding porque é ele que permite trocar o "motor" de uma aplicação inteira — alterando uma linha de configuração — sem que o código cliente jamais saiba da mudança.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Universal: Inclusão e Paramétrico
+
+::: {.fragment}
+**Inclusão:** qualquer implementação de `Pagavel` serve — pilar da OO.
+:::
+::: {.fragment}
+**Paramétrico:** `List<T>` funciona igual para qualquer tipo, sem herança.
+:::
+
+## Ad-hoc: Sobrecarga e Coerção
+
+```java
+public void enviar(String email) { ... }
+public void enviar(String email, String assunto) { ... } // sobrecarga
+```
+
+::: {.fragment}
+"Polimorfismo aparente": um tipo novo exige voltar e reescrever `Notificador` — viola OCP.
+:::
+
+## Estático vs. Dinâmico
+
+| | Static Binding | Dynamic Binding |
+|---|---|---|
+| Quando | Compilação | Execução |
+| Quem decide | Compilador | JVM |
+| Vantagem | Performance | Desacoplamento total |
+
+:::
+
+::: {.callout-tip}
+## Por que a sobrecarga de métodos é chamada de "polimorfismo aparente", mesmo permitindo múltiplas versões do mesmo nome de método?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Taxonomia do Polimorfismo
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. O polimorfismo ad-hoc funciona apenas sobre um conjunto finito e delimitado de tipos.
+b. A sobrecarga (overloading) é resolvida pelo compilador em tempo de compilação, com base nos argumentos passados.
+c. O polimorfismo de inclusão é resolvido em tempo de execução, olhando o objeto real na memória.
+d. A sobrecarga de métodos resolve completamente o problema da extensibilidade prevista pelo OCP.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Taxonomia do Polimorfismo — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é a definição de ad-hoc.
+b. **Verdadeiro** — é *Early Binding*.
+c. **Verdadeiro** — é *Late Binding*, o pilar do desacoplamento em OO.
+d. **Falso** — pelo contrário, é considerada "polimorfismo aparente", que não resolve extensibilidade.
+:::
+
+:::
+
+# O Fim do "Mar de IFs" e o Princípio Aberto/Fechado
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Sem polimorfismo, cada novo tipo de pagamento exige mais um `else if`:
+
+```java
+// Codigo SEM polimorfismo: rigido e fragil
+public void processarPagamento(String tipo, double valor) {
+    if (tipo.equals("PIX")) {
+        pixService.gerarQR(valor);
+    } else if (tipo.equals("BOLETO")) {
+        boletoService.gerarLinhaDigitavel(valor);
+    } else if (tipo.equals("CARTAO")) {
+        cartaoService.autorizar(valor);
+    }
+    // Toda vez que um novo metodo surge, voce precisa "abrir" este codigo!
+}
+```
+
+Com polimorfismo, o fluxo vira uma linha:
+
+```java
+// Nao importa o que 'formaEscolhida' e, desde que seja Pagavel
+String id = formaEscolhida.criarCobranca(total);
+```
+
+Se `CriptoPayment implements Pagavel` surgir amanhã, esse código **não muda**. É exatamente o **Princípio Aberto/Fechado** (OCP): entidades de software devem estar abertas para extensão (novas classes) e fechadas para modificação (o código que já funciona continua intocado).
+
+| Conceito | Aberto para Extensão | Fechado para Modificação |
+|---|---|---|
+| Aplicação | Nova classe implementa `Pagavel` | `Checkout` não precisa ser alterado |
+| Mecanismo | Novas classes concretas | Programação para interfaces (Dynamic Binding) |
+
+**A meta-regra prática:** se você precisa de um `if` (ou `switch`, ou `instanceof`) para verificar o *tipo* de um objeto de negócio, você provavelmente está violando o OCP e perdendo a chance de deixar o polimorfismo fazer esse trabalho.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Antes: o "Mar de IFs"
+
+```java
+if (tipo.equals("PIX")) pixService.gerarQR(valor);
+else if (tipo.equals("BOLETO")) boletoService.gerarLinhaDigitavel(valor);
+else if (tipo.equals("CARTAO")) cartaoService.autorizar(valor);
+// novo tipo = mais um else if
+```
+
+## Depois: Uma Linha, Fechada para Modificação
+
+```java
+String id = formaEscolhida.criarCobranca(total); // nao muda nunca
+```
+
+::: {.fragment}
+**Meta-regra:** precisar de `if`/`switch`/`instanceof` sobre tipo de negócio = sintoma de OCP violado.
+:::
+
+:::
+
+::: {.callout-tip}
+## Se amanhã surgir um novo meio de pagamento, o que exatamente muda no `CheckoutController` — e o que isso diz sobre o OCP?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## OCP e Substitutibilidade
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Adicionar `Cripto implements Pagavel` exige alterar o código do `CheckoutController`.
+b. "Aberto para extensão" significa que novos comportamentos entram por novas classes, não por edição das antigas.
+c. Precisar de `instanceof` para decidir o que fazer com um objeto de negócio é sinal de que o polimorfismo não foi bem aproveitado.
+d. A substitutibilidade é o que permite ao `CheckoutController` tratar `Pix`, `Boleto` e `Cripto` de forma idêntica.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## OCP e Substitutibilidade — Resposta
+
+::: {.callout-tip}
+a. **Falso** — é exatamente o ponto: nenhuma linha do controlador muda.
+b. **Verdadeiro** — é a definição de "aberto para extensão".
+c. **Verdadeiro** — é a meta-regra prática desta aula.
+d. **Verdadeiro** — é a substitutibilidade via `Pagavel`.
+:::
+
+:::
+
+# Generics: da Lista "Aceita-Tudo" à Etiqueta de Tipo
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Antes do Java 5, uma coleção era um saco de `Object` — qualquer coisa podia entrar:
+
+```java
+// Sem Generics: nada impede um erro de lógica
+opcoesReais.add("Nao sou um pagamento"); // compila! Bomba-relogio.
+```
+
+O problema é a **detecção tardia**: o erro de lógica acontece na inserção, mas o programa só "explode" muito depois, quando o código tenta usar o objeto como se fosse `Pagavel` — um `ClassCastException` em tempo de execução, longe da causa real.
+
+Generics resolvem isso com uma "etiqueta de tipo":
+
+```java
+// O compilador garante que esta lista SO tera Pagaveis
+List<Pagavel> opcoesReais = clienteLogado.consultaMeiosPagamento();
+// opcoesReais.add("Nao sou um pagamento"); // ERRO DE COMPILACAO, agora!
+```
+
+Quatro vantagens práticas:
+
+1. **Robustez:** move a detecção de erro do tempo de execução para o tempo de compilação.
+2. **Legibilidade:** `List<Pagavel>` já diz muito mais do que `List` sozinho.
+3. **Reutilização:** algoritmos genéricos continuam seguros para qualquer tipo (uma lista que ordena qualquer `Comparable`, por exemplo).
+4. **Performance:** evita *casts* repetidos e desnecessários no código.
+
+Generics são, na prática, o **Polimorfismo Paramétrico** da taxonomia de Cardelli-Wegner em ação: o mesmo algoritmo de lista funciona para `Pagavel`, `Produto` ou `Cliente`, sem que nenhuma dessas classes precise pertencer à mesma hierarquia de herança.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Problema dos *Raw Types*
+
+```java
+opcoesReais.add("Nao sou um pagamento"); // compila; falha so depois
+```
+
+::: {.fragment}
+Erro de lógica na inserção → `ClassCastException` bem mais tarde, longe da causa.
+:::
+
+## A Solução: Generics como Etiqueta
+
+```java
+List<Pagavel> opcoesReais = ...;
+// opcoesReais.add("string"); // ERRO DE COMPILACAO, agora
+```
+
+::: {.fragment}
+**4 vantagens:** robustez, legibilidade, reutilização, performance (menos *casts*).
+:::
+
+:::
+
+::: {.callout-tip}
+## Generics é uma instância de qual tipo de polimorfismo na taxonomia de Cardelli-Wegner — e por que ele não exige que os tipos usados pertençam à mesma hierarquia de herança?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Generics e o Fim do Mar de IFs
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Sem Generics, um erro de tipo numa coleção só é detectado quando o item incompatível é efetivamente usado, não quando é inserido.
+b. `List<Pagavel>` impede, em tempo de compilação, que um objeto incompatível seja adicionado à lista.
+c. Generics é uma forma de Polimorfismo Ad-hoc, resolvida da mesma forma que a sobrecarga de métodos.
+d. Precisar de um `if` para verificar o tipo concreto de um objeto de negócio é um sintoma de violação do OCP.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Generics e o Fim do Mar de IFs — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é a "detecção tardia" descrita nesta aula.
+b. **Verdadeiro** — é o ganho central de Generics.
+c. **Falso** — Generics é Polimorfismo Universal Paramétrico, resolvido de forma bem diferente da sobrecarga.
+d. **Verdadeiro** — é a meta-regra do bloco anterior.
+:::
+
+:::
+
+# Conclusão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando às quatro perguntas da abertura:
+
+1. **Quem decide o código real:** a JVM, em tempo de execução, olhando o objeto na Heap — não o compilador.
+2. **Um só tipo de polimorfismo?** Não — Universal (Inclusão, Paramétrico) e Ad-hoc (Sobrecarga, Coerção), com garantias bem diferentes de extensibilidade.
+3. **O fim do "Mar de IFs":** delegar a decisão para o próprio objeto, em vez de perguntar "qual é o seu tipo?" a cada chamada.
+4. **A lista "aceita-tudo":** Generics move o erro do tempo de execução para o tempo de compilação, sem custo de flexibilidade.
+
+### Ponte para a Aula 8 {.unnumbered}
+
+Interfaces e Polimorfismo de Inclusão resolveram contratos entre classes sem parentesco algum. Existe outro mecanismo de polimorfismo — mais antigo, mais poderoso e mais perigoso — que compartilha estrutura, não só comportamento: a **Herança**. A Aula 8 explora esse mecanismo e o Princípio da Substituição de Liskov, a regra que decide quando herdar é seguro.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos
+
+1. Late Binding: a JVM decide, em runtime, qual código roda
+2. Universal (Inclusão, Paramétrico) vs. Ad-hoc (Sobrecarga, Coerção)
+3. Polimorfismo elimina o "Mar de IFs" — a essência prática do OCP
+4. Generics: a mesma robustez de tipo, sem abrir mão da flexibilidade
+
+::: {.fragment}
+**Próxima aula:** Herança — o outro mecanismo de polimorfismo, e o Princípio da Substituição de Liskov.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. Defina *Static (Early) Binding* e *Dynamic (Late) Binding*, explicitando em qual momento do ciclo de vida do software cada um atua e qual agente (compilador ou JVM) toma a decisão. Por que o desacoplamento em Orientação a Objetos depende criticamente do Late Binding?
+
+2. Um desenvolvedor júnior escreve um método `efetuarCobranca` que inspeciona uma `String tipoPagamento` numa cadeia de `if/else` para disparar `PixService` ou `BoletoService`. Critique esse design com base no Princípio Aberto/Fechado e mostre, em texto, como o Polimorfismo de Inclusão elimina esse sintoma.
+
+3. Explique o cenário de "Heterogeneidade Acidental" numa lista sem Generics num sistema de checkout, e como `List<Pagavel>` protege o usuário final de um `ClassCastException` em produção.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-tip}
+## O que é Polimorfismo
+
+a. ( ) Polimorfismo é a capacidade de uma variável ou método assumir comportamentos diferentes conforme o objeto real manipulado.
+b. ( ) O objetivo prático do polimorfismo é reduzir o acoplamento e aumentar a extensibilidade do sistema.
+c. ( ) `pagamentoConfirmado()` pode se comportar como consulta de API no `Pix` e como verificação de data no `Boleto`.
+d. ( ) O código que chama a operação precisa conhecer os detalhes de implementação de quem a executa.
+:::
+
+::: {.callout-tip}
+## Late Binding (Dynamic Dispatch)
+
+a. ( ) O compilador, ao ver `Pagavel forma`, verifica apenas que o método chamado existe na interface.
+b. ( ) A decisão de qual implementação executar ocorre em tempo de execução, pela JVM.
+c. ( ) A JVM decide olhando o tipo declarado da variável, não o objeto real na memória.
+d. ( ) Late Binding é o que permite trocar a implementação injetada sem que o código cliente perceba.
+:::
+
+::: {.callout-tip}
+## Polimorfismo Universal
+
+a. ( ) O Polimorfismo de Inclusão permite que qualquer implementação de uma interface seja usada no lugar do tipo mais genérico.
+b. ( ) O Polimorfismo Paramétrico exige que todos os tipos usados pertençam à mesma hierarquia de herança.
+c. ( ) `List<T>` funciona da mesma forma para `Produto` ou `Cliente`, sem exigir parentesco entre as classes.
+d. ( ) O Polimorfismo Universal é chamado assim porque funciona sobre um número, em princípio, infinito de tipos.
+:::
+
+::: {.callout-tip}
+## Polimorfismo Ad-hoc
+
+a. ( ) A sobrecarga (overloading) permite vários métodos com o mesmo nome e assinaturas distintas na mesma classe.
+b. ( ) A sobrecarga é considerada um polimorfismo verdadeiramente dinâmico e extensível.
+c. ( ) A escolha de qual método sobrecarregado roda é feita pelo compilador, com base nos tipos dos argumentos.
+d. ( ) A coerção é a conversão implícita de tipos, como `int` para `double`, embutida na linguagem.
+:::
+
+::: {.callout-tip}
+## Binding Estático vs. Dinâmico
+
+a. ( ) O Static Binding ocorre em tempo de compilação; o Dynamic Binding, em tempo de execução.
+b. ( ) Métodos `static` e `private` em Java são resolvidos via Dynamic Binding.
+c. ( ) O Dynamic Binding é o que sustenta o desacoplamento e a extensibilidade típicos da Orientação a Objetos.
+d. ( ) A Injeção de Dependência se apoia no Dynamic Binding para trocar implementações sem alterar o código cliente.
+:::
+
+::: {.callout-tip}
+## O Fim do "Mar de IFs"
+
+a. ( ) Uma cadeia de `if/else` verificando o tipo de um objeto de negócio é um sintoma clássico de violação do OCP.
+b. ( ) Com polimorfismo, adicionar um novo meio de pagamento não exige alterar o código do controlador.
+c. ( ) O uso de `instanceof` para decidir o comportamento com base no tipo concreto é incentivado pelo polimorfismo.
+d. ( ) Delegar a decisão para o próprio objeto substitui a necessidade de perguntar "qual é o seu tipo?".
+:::
+
+::: {.callout-tip}
+## O Princípio Aberto/Fechado (OCP)
+
+a. ( ) Um sistema está "aberto para extensão" quando comportamentos novos entram via novas classes, não via edição das antigas.
+b. ( ) Estar "fechado para modificação" significa que o código cliente não precisa ser retestado ao aceitar um novo ator.
+c. ( ) Programar para interfaces, em vez de classes concretas, é o mecanismo que viabiliza o cumprimento do OCP.
+d. ( ) O OCP recomenda revisar e reescrever o código cliente a cada novo comportamento adicionado ao sistema.
+:::
+
+::: {.callout-tip}
+## Substitutibilidade
+
+a. ( ) A substitutibilidade é a capacidade de trocar implementações concretas por uma abstração comum sem impacto perceptível.
+b. ( ) `CheckoutController` trata `Pix`, `Boleto` e `Cartao` de forma uniforme através da "lente" do tipo `Pagavel`.
+c. ( ) Para usar `criarCobranca()`, o controlador precisa saber qual classe concreta está por trás da referência.
+d. ( ) A substitutibilidade é o que permite ao sistema aceitar novos meios de pagamento sem alterar o núcleo.
+:::
+
+::: {.callout-tip}
+## O Problema dos *Raw Types*
+
+a. ( ) Sem Generics, uma coleção Java podia armazenar referências genéricas do tipo `Object`.
+b. ( ) O risco de inserir um objeto incompatível numa lista sem Generics é detectado imediatamente pelo compilador.
+c. ( ) Recuperar dados de uma coleção não parametrizada exigia *casting* manual, sujeito a `ClassCastException`.
+d. ( ) A detecção tardia de um erro de tipo é o principal risco prático dos *raw types*.
+:::
+
+::: {.callout-tip}
+## Generics como Etiqueta de Segurança
+
+a. ( ) `List<Pagavel>` desloca a detecção de erros de tipo do tempo de execução para o tempo de compilação.
+b. ( ) Generics elimina a necessidade de *casting* manual na leitura de itens de uma coleção parametrizada.
+c. ( ) Generics reduz a legibilidade do código, pois exige mais caracteres na declaração de tipos.
+d. ( ) Proibir a inserção de tipos incompatíveis é uma das formas como Generics aumenta a robustez do sistema.
+:::
+
+::: {.callout-tip}
+## Polimorfismo Paramétrico e Identidade
+
+a. ( ) O Polimorfismo Paramétrico usa variáveis de tipo (como `<T>`) mantendo a segurança de tipos estáticos.
+b. ( ) Diferente do Polimorfismo de Inclusão, o Paramétrico não exige que os tipos usados pertençam à mesma árvore de herança.
+c. ( ) Um `Repositorio<T>` genérico centraliza a lógica de infraestrutura sem duplicar código para cada entidade.
+d. ( ) Recuperar um item de um `Repositorio<T>` obriga o desenvolvedor a fazer um *cast* manual para o tipo concreto.
+:::
+
+::: {.callout-tip}
+## Síntese: Contrato, Polimorfismo e Segurança de Tipo
+
+a. ( ) Interfaces definem o contrato; Polimorfismo de Inclusão o torna substituível; Generics protege coleções desses contratos.
+b. ( ) O uso conjunto de interfaces, polimorfismo e Generics é o que sustenta sistemas verdadeiramente *Plug-and-Play*.
+c. ( ) Um sistema bem desenhado com essas três ferramentas ainda pode exigir `if`s de tipo em pontos centrais do fluxo.
+d. ( ) A meta comum às três ferramentas é mover decisões e erros para o momento mais cedo e mais seguro possível do ciclo de vida do software.
+:::
+
+:::

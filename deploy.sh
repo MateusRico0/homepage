@@ -4,6 +4,11 @@
 #   --render         -> equivalente a `hugo` (build do site) -> `quarto render`
 #   --preview        -> equivalente a `hugo server` -> `quarto preview`, na
 #                       porta 2222
+#   --watch          -> mesma porta 2222, mas SEM live-reload nem navegação
+#                       automática (ver preview-watch.py) — usar quando um
+#                       agente estiver editando/renderizando páginas nos
+#                       bastidores, pra não ficar levando a aba do navegador
+#                       pra outra página sozinho a cada render
 #   --update-server  -> entra no servidor via SSH e atualiza a pasta do site
 #                       (antes "Hugo", agora "homepage") com o que estiver na
 #                       branch main
@@ -16,6 +21,7 @@
 # Uso:
 #   ./deploy.sh --render                  # só renderiza o site localmente
 #   ./deploy.sh --preview                 # sobe o preview local na porta 2222
+#   ./deploy.sh --watch                   # servidor estático + auto-rebuild, sem navegar a aba
 #   ./deploy.sh --update-server           # atualiza o servidor com a main
 #   ./deploy.sh --render --update-server  # renderiza local e atualiza o servidor
 
@@ -45,7 +51,12 @@ do_render() {
 
 do_preview() {
   echo "👀 Subindo o preview local (porta 2222)..."
-  quarto preview --port 2222
+  quarto preview --port 2222 --no-browser
+}
+
+do_watch() {
+  echo "👀 Subindo o preview desacoplado (porta 2222, sem live-reload/navegação automática)..."
+  python3 preview-watch.py
 }
 
 do_update_server() {
@@ -61,6 +72,7 @@ fi
 
 RENDER=false
 PREVIEW=false
+WATCH=false
 UPDATE_SERVER=false
 
 while [[ $# -gt 0 ]]; do
@@ -71,6 +83,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --preview)
       PREVIEW=true
+      shift
+      ;;
+    --watch)
+      WATCH=true
       shift
       ;;
     --update-server)
@@ -92,8 +108,12 @@ if [[ "$UPDATE_SERVER" == true ]]; then
   do_update_server
 fi
 
-# --preview por último e sempre em primeiro plano: fica bloqueado servindo
-# até Ctrl+C, então não faz sentido combinar com passos que viriam depois.
+# --preview/--watch por último e sempre em primeiro plano: ficam
+# bloqueados servindo até Ctrl+C, então não faz sentido combinar com
+# passos que viriam depois (e os dois juntos não fazem sentido: disputariam
+# a mesma porta 2222).
 if [[ "$PREVIEW" == true ]]; then
   do_preview
+elif [[ "$WATCH" == true ]]; then
+  do_watch
 fi

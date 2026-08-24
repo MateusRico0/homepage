@@ -1,0 +1,1294 @@
+---
+title: "Seleção de Modelo, Validação Cruzada e Bootstrap"
+subtitle: "Aula 4 — Fundamentos Estatísticos do Aprendizado Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: _lesson-nav.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    fig-width: 6
+    fig-height: 3.5
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+jupyter: sensibleml-moo
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides →](slides.html){.see-all}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.model_selection import (
+    train_test_split, StratifiedKFold, cross_val_score, LeaveOneOut
+)
+
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()  # evita o aviso "unauthenticated requests"
+from datasets import disable_progress_bar
+disable_progress_bar()  # evita a barra de progresso do download
+from datasets import load_dataset
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({
+    "figure.dpi": 130,
+    "font.size": 11,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "legend.frameon": True,
+    "legend.framealpha": 0.9,
+})
+
+rng = np.random.default_rng(20260824)
+
+# --- Paleta única, consistente com as Aulas 1-3 --------------------
+COR_A   = "#C0392B"
+COR_B   = "#2471A3"
+COR_LIM = "#117A65"
+COR_NEU = "#5D6D7E"
+COR_ALT = "#B9770E"
+
+# --- Dataset-fio: Breast Cancer Wisconsin (dado real) ---------------
+_bc = load_dataset("scikit-learn/breast-cancer-wisconsin")["train"].to_pandas()
+_bc = _bc.drop(columns=["id", "Unnamed: 32"])  # artefatos do CSV original
+y_bc = (_bc["diagnosis"] == "M").astype(int).values  # 1 = maligno, 0 = benigno
+X_bc = _bc.drop(columns=["diagnosis"]).values
+
+Xtr, Xte, ytr, yte = train_test_split(
+    X_bc, y_bc, test_size=0.3, stratify=y_bc, random_state=20260824
+)
+```
+
+# Proposta da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A Aula 3 podou uma árvore de decisão "olhando o gráfico": a acurácia de validação subia, atingia um pico e depois caía, e escolhemos visualmente o ponto de virada. Isso funciona num quadro didático, mas esconde uma pergunta que qualquer projeto real precisa responder de forma sistemática: **como escolher a complexidade certa sem espiar os dados que vão medir o sucesso final?**
+
+Esta aula muda o objeto de estudo. Em vez de um modelo específico, o assunto é o *procedimento* de avaliar e escolher entre modelos. A tese central: o erro medido nos próprios dados de treino é uma estimativa **otimista** — não porque o modelo trapaceia, mas porque ele foi ajustado exatamente para minimizar esse número.
+
+> Nota: esta é a primeira aula do curso a usar um conjunto de dados **real** — o *Breast Cancer Wisconsin* (569 pacientes, diagnóstico benigno ou maligno a partir de medidas do núcleo celular) — em vez de dados sintéticos como nas Aulas 1–3.
+
+**O roteiro, em quatro perguntas:**
+
+1. Por que o erro de treino engana, e por quanto?
+2. O que, exatamente, a validação cruzada estima?
+3. Como escolher o número de partições (*folds*)?
+4. O que o Bootstrap estima que a validação cruzada não estima?
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**A Aula 3 podou uma árvore "olhando o gráfico".** Como fazer isso de forma sistemática?
+
+::: {.fragment}
+Hoje muda o objeto de estudo: não um modelo, mas o **procedimento** de escolher entre modelos.
+:::
+
+::: {.fragment}
+**Pela primeira vez no curso: dado real** — Breast Cancer Wisconsin, 569 pacientes.
+:::
+
+::: {.fragment}
+**Roteiro:** erro de treino → validação cruzada → escolha de $k$ → Bootstrap.
+:::
+
+:::
+
+# O Erro de Treino é uma Estimativa Otimista
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Vamos treinar árvores de decisão de profundidade crescente no Breast Cancer Wisconsin, medindo a acurácia tanto nos dados usados para treinar quanto numa fatia de 30% nunca vista durante o ajuste.
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+profundidades = list(range(1, 16))
+acc_treino, acc_teste = [], []
+for d in profundidades:
+    arv = DecisionTreeClassifier(max_depth=d, random_state=0)
+    arv.fit(Xtr, ytr)
+    acc_treino.append(arv.score(Xtr, ytr))
+    acc_teste.append(arv.score(Xte, yte))
+
+fig, ax = plt.subplots(figsize=(6.2, 3.8))
+ax.plot(profundidades, acc_treino, color=COR_A, lw=2.4, marker="o", ms=4, label="acurácia de treino")
+ax.plot(profundidades, acc_teste, color=COR_B, lw=2.4, marker="o", ms=4, label="acurácia de teste")
+ax.set_xlabel("profundidade máxima da árvore")
+ax.set_ylabel("acurácia")
+ax.set_title("O treino sempre melhora. O teste, não.")
+ax.legend(loc="lower right")
+plt.tight_layout()
+plt.show()
+
+print(f"Profundidade 1: treino={acc_treino[0]:.4f}  teste={acc_teste[0]:.4f}")
+print(f"Profundidade 5: treino={acc_treino[4]:.4f}  teste={acc_teste[4]:.4f}  <- melhor teste")
+print(f"Profundidade 6+: treino={acc_treino[5]:.4f}  teste={acc_teste[5]:.4f}")
+```
+
+O padrão é sistemático, não um acidente desta amostra: a acurácia de **treino** cresce monotonicamente e atinge 100% a partir da profundidade 6 (a árvore memoriza completamente as 398 pacientes de treino). A acurácia de **teste** sobe até a profundidade 5 (92,98%) e depois estabiliza um pouco abaixo (91,81%) — a árvore memorizada não generaliza melhor que uma moderadamente podada.
+
+Formalizando: seja $\hat{R}(\theta) = \frac{1}{N}\sum_i \mathcal{L}(y_i, f_\theta(x_i))$ o erro empírico medido nos mesmos dados usados para ajustar $\theta$, e $R(\theta) = \mathbb{E}_{(X,Y)\sim P}[\mathcal{L}(Y, f_\theta(X))]$ o risco esperado sob a distribuição populacional. $\hat{R}(\theta)$ é um estimador **enviesado para baixo** de $R(\theta)$ precisamente porque $\theta$ foi escolhido *observando* os mesmos pontos usados para calcular $\hat{R}$ — o modelo tem, literalmente, a resposta da prova antes de fazer a prova.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Treino Sempre Melhora — o Teste, Não
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(6.2, 3.8))
+ax.plot(profundidades, acc_treino, color=COR_A, lw=2.4, marker="o", ms=4, label="treino")
+ax.plot(profundidades, acc_teste, color=COR_B, lw=2.4, marker="o", ms=4, label="teste")
+ax.set_xlabel("profundidade máxima")
+ax.set_ylabel("acurácia")
+ax.legend(loc="lower right")
+plt.tight_layout()
+plt.show()
+```
+
+::: {.fragment}
+Treino: 100% a partir da profundidade 6. Teste: pico em 93,0% na profundidade 5, depois estagna.
+:::
+
+## Por Que o Erro de Treino Engana
+
+::: {.fragment}
+$\hat{R}(\theta)$ é calculado nos **mesmos dados** que escolheram $\theta$.
+:::
+
+::: {.fragment}
+$\hat{R}(\theta)$ é enviesado para baixo como estimador do risco esperado $R(\theta) = \mathbb{E}_{(X,Y)\sim P}[\mathcal{L}(Y,f_\theta(X))]$.
+:::
+
+:::
+
+::: {.callout-tip}
+## Se a árvore de profundidade 15 tem a mesma acurácia de teste da árvore de profundidade 6, por que ainda preferimos uma árvore mais rasa?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Erro de Treino vs. Erro de Generalização
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. No limite em que o número de folhas permitido é igual ao número de
+   pontos de treino, a acurácia de treino atinge exatamente $100\%$,
+   mas isso não impede que a acurácia de teste seja pior do que a de
+   uma árvore bem mais rasa.
+b. Se, por coincidência, um modelo simples (profundidade 1) tivesse a
+   mesma acurácia de TREINO que um modelo complexo (profundidade 15)
+   num dataset específico, isso provaria que os dois generalizam
+   igualmente bem.
+c. Num modelo de crédito treinado com 10 anos de histórico e testado
+   nos últimos 6 meses, uma acurácia de treino de 99% mas de teste de
+   70% seria um sinal claro de overfitting, análogo ao padrão desta
+   aula.
+d. Como aumentar a profundidade eventualmente para de melhorar a
+   acurácia de teste, conclui-se que profundidades menores sempre
+   produzem acurácia de teste maior do que profundidades muito altas.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Erro de Treino vs. Erro de Generalização — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é o extremo de memorização total: treino perfeito, sem qualquer garantia sobre o teste.
+b. **Falso** — acurácia de TREINO igual nada diz sobre generalização; é preciso olhar o desempenho no teste.
+c. **Verdadeiro** — mesma assinatura do overfitting desta aula, num domínio diferente.
+d. **Falso** — no nosso experimento, o teste sobe até a profundidade 5 e depois só **estagna**, não piora sempre.
+:::
+
+:::
+
+# Train/Validation/Test, e o Pecado de Espiar
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Se o erro de treino é otimista, a solução óbvia é reservar uma fatia dos dados que o ajuste nunca vê. Mas um único split levanta um problema sutil: se usarmos essa mesma fatia repetidas vezes para escolher entre profundidade 3, 5, 8, 12... — cada escolha "espia" um pouco mais esse conjunto, e a estimativa final de desempenho fica ela mesma otimista, só que num grau mais discreto do que o erro de treino puro.
+
+A prática correta separa três papéis:
+
+- **Treino:** ajusta os parâmetros do modelo (os cortes da árvore).
+- **Validação:** compara candidatos e escolhe hiperparâmetros (profundidade, ou o $\lambda$ de custo-complexidade da Aula 3) — pode ser espiado várias vezes, mas cada espiada contamina um pouco a estimativa.
+- **Teste:** usado **uma única vez**, ao final, para reportar o número que vai para o relatório. Se ele for consultado durante o desenvolvimento, deixa de significar o que deveria significar.
+
+O restante desta aula formaliza a etapa de **validação** — e o problema prático de que, com dados escassos, "reservar uma fatia" para validação é caro. A validação cruzada existe para usar os dados de forma mais eficiente sem abrir mão do princípio de nunca avaliar um modelo nos mesmos pontos usados para ajustá-lo.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Três Papéis, Não Dois
+
+- **Treino** — ajusta os parâmetros do modelo
+- **Validação** — escolhe hiperparâmetros (pode ser consultada várias vezes)
+- **Teste** — usado **uma única vez**, no final
+
+::: {.fragment}
+Consultar o teste repetidamente durante o desenvolvimento contamina o que ele deveria significar.
+:::
+
+:::
+
+# Validação Cruzada como Simulação de Amostragem
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A validação cruzada em $k$ partes (*k-fold*) resolve o problema de "dados escassos para validação" reciclando a amostra inteira, tanto para treino quanto para validação — só que nunca ao mesmo tempo. O livro-texto desta aula (Hastie, Tibshirani & Friedman, *ESL*) define o objetivo com precisão:
+
+> Tradução livre: "Esse método estima diretamente o erro esperado fora da amostra $\text{Err} = \mathbb{E}[\mathcal{L}(Y, \hat{f}(X))]$, o erro médio de generalização quando o método $\hat{f}(X)$ é aplicado a uma amostra de teste independente, vinda da distribuição conjunta de $X$ e $Y$" (ESL, §7.10, p. 241).
+
+Este é o elo que dá nome ao bloco: **cada fold de validação é, sob a suposição de amostra i.i.d. de $P(X,Y)$, uma aproximação de "coletar uma nova amostra de teste"**. O procedimento:
+
+1. Particione os dados em $k$ blocos de tamanho aproximadamente igual.
+2. Para cada bloco $j = 1, \dots, k$: treine usando os outros $k-1$ blocos, avalie no bloco $j$ (nunca visto no ajuste).
+3. A estimativa final é a média das $k$ avaliações:
+$$
+\text{CV}(\hat f) = \frac{1}{N}\sum_{i=1}^{N} \mathcal{L}\bigl(y_i,\, \hat f^{-\kappa(i)}(x_i)\bigr),
+$$
+onde $\kappa(i)$ indica em qual bloco a observação $i$ caiu, e $\hat f^{-\kappa(i)}$ é o modelo ajustado sem esse bloco.
+
+Cada uma das $k$ rodadas simula o que aconteceria se, de fato, tivéssemos coletado uma amostra de teste nova e independente — e a média sobre $k$ rodadas reduz a variância dessa simulação em relação a um único split de validação.
+
+**Estratificação.** No nosso dataset, 62,7% das pacientes são benignas e 37,3% malignas — um desbalanceamento moderado, o mesmo tipo de cuidado já visto na Aula 1. Um particionamento aleatório *ingênuo* pode, por azar, concentrar a maioria dos casos malignos num único fold. `StratifiedKFold` corrige isso, preservando a proporção de diagnóstico em cada partição:
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=20260824)
+prop_malig = []
+for _, va in skf.split(Xtr, ytr):
+    prop_malig.append(ytr[va].mean())
+
+print("Proporção de malignos em cada fold (estratificado):")
+for i, p in enumerate(prop_malig, 1):
+    print(f"  fold {i}: {p:.3f}")
+print(f"Proporção no conjunto de treino inteiro: {ytr.mean():.3f}")
+```
+
+Cada fold preserva a proporção original (~37%) dentro de uma margem pequena — sem estratificação, essa variação poderia ser bem maior em folds pequenos.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Argumento Central
+
+::: {.fragment}
+"Estima diretamente o erro esperado fora da amostra [...] quando o método é aplicado a uma amostra de teste independente, vinda da distribuição conjunta de $X$ e $Y$" (ESL, §7.10).
+:::
+
+::: {.fragment}
+Cada fold = uma aproximação de "coletar uma nova amostra de teste".
+:::
+
+## O Procedimento k-fold
+
+$$
+\text{CV}(\hat f) = \frac{1}{N}\sum_{i=1}^{N} \mathcal{L}\bigl(y_i,\, \hat f^{-\kappa(i)}(x_i)\bigr)
+$$
+
+::: {.fragment}
+$k$ rodadas, cada uma treinando sem um bloco e avaliando nele. A média estima $\mathbb{E}_{(X,Y)\sim P}[\mathcal{L}]$.
+:::
+
+## Por Que Estratificar
+
+```{python}
+#| echo: false
+#| fig-align: center
+print("Proporção de malignos por fold (estratificado):")
+for i, p in enumerate(prop_malig, 1):
+    print(f"  fold {i}: {p:.3f}  (treino inteiro: {ytr.mean():.3f})")
+```
+
+::: {.fragment}
+Sem estratificação, um fold pequeno pode, por azar, concentrar poucos ou muitos casos malignos.
+:::
+
+:::
+
+::: {.callout-tip}
+## Por que a média de k avaliações de validação é uma estimativa melhor do erro esperado do que um único split treino/validação?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Validação Cruzada
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. No limite em que $k=2$, cada fold de treino usa exatamente metade
+   dos dados disponíveis — a menor fração de dados de treino possível
+   dentro do esquema de k-fold (para $k\ge2$).
+b. Se, em vez de folds disjuntos, k-fold CV permitisse que o mesmo
+   ponto aparecesse na validação de mais de um fold, isso deixaria de
+   simular corretamente uma amostra de teste independente para cada
+   fold.
+c. Num teste A/B de um site de e-commerce, o princípio da validação
+   cruzada (simular repetidamente uma amostra de teste independente)
+   poderia inspirar repetir o teste em múltiplos períodos de tempo, em
+   vez de confiar num único período.
+d. Como a validação cruzada usa todos os pontos tanto para treino
+   quanto para validação (em folds diferentes), o valor final de CV
+   independe de qual partição aleatória específica em $k$ folds foi
+   sorteada.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Validação Cruzada — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — com $k=2$, cada metade dos dados serve de treino uma vez; é o caso mais "econômico" em dados de treino por fold.
+b. **Verdadeiro** — folds disjuntos garantem que cada ponto seja validado exatamente uma vez; sobreposição quebraria essa contabilidade.
+c. **Verdadeiro** — mesma lógica de "não confiar numa única amostra", transferida para testes A/B.
+d. **Falso** — o valor de CV varia (pouco, mas varia) conforme a partição aleatória escolhida, como veremos a seguir.
+:::
+
+:::
+
+# Escolhendo k: Viés e Variância do Próprio Estimador
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+$k$ não é um detalhe de implementação — é uma escolha estatística. No caso extremo $k=N$ (**leave-one-out**, LOOCV), cada modelo é treinado com $N-1$ pontos — quase a amostra inteira — então o viés desse estimador é mínimo. Mas o ESL alerta:
+
+> Tradução livre: "Com $K=N$, o estimador de validação cruzada é aproximadamente não-enviesado para o erro de predição esperado (verdadeiro), mas pode ter alta variância, porque os $N$ 'conjuntos de treino' são tão parecidos uns com os outros" (ESL, §7.10.1, pp. 242–243). O texto recomenda $K=5$ ou $10$ como escolha prática padrão.
+
+Vamos comparar isso empiricamente na nossa árvore podada (do bloco seguinte). Repetimos 5-fold e 10-fold dez vezes cada, variando apenas a partição aleatória, e comparamos com o LOOCV (que é determinístico — não há aleatoriedade de partição a repetir):
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+ALPHA_ESCOLHIDO = 0.015917924609821586  # calculado no bloco seguinte
+arv_k = DecisionTreeClassifier(random_state=0, ccp_alpha=ALPHA_ESCOLHIDO)
+
+medias_5, medias_10 = [], []
+for semente in range(10):
+    skf5 = StratifiedKFold(n_splits=5, shuffle=True, random_state=semente)
+    medias_5.append(cross_val_score(arv_k, Xtr, ytr, cv=skf5).mean())
+    skf10 = StratifiedKFold(n_splits=10, shuffle=True, random_state=semente)
+    medias_10.append(cross_val_score(arv_k, Xtr, ytr, cv=skf10).mean())
+
+loo_scores = cross_val_score(arv_k, Xtr, ytr, cv=LeaveOneOut())
+loo_media = loo_scores.mean()
+
+fig, ax = plt.subplots(figsize=(6.5, 3.8))
+ax.scatter(np.full(10, "5-fold"), medias_5, color=COR_A, alpha=0.75, s=40, label="repetições (partição varia)")
+ax.scatter(np.full(10, "10-fold"), medias_10, color=COR_B, alpha=0.75, s=40)
+ax.axhline(loo_media, color=COR_LIM, lw=2.0, ls="--", label=f"LOOCV (determinístico) = {loo_media:.4f}")
+ax.set_ylabel("acurácia média estimada")
+ax.set_title("k-fold varia com a partição; LOOCV não")
+ax.legend(fontsize=8, loc="lower left")
+plt.tight_layout()
+plt.show()
+
+print(f"5-fold:  média das 10 repetições = {np.mean(medias_5):.4f}, desvio-padrão entre repetições = {np.std(medias_5):.4f}")
+print(f"10-fold: média das 10 repetições = {np.mean(medias_10):.4f}, desvio-padrão entre repetições = {np.std(medias_10):.4f}")
+print(f"LOOCV (398 ajustes, um por paciente): {loo_media:.4f}")
+```
+
+Três achados honestos, não forçados para bater com a teoria:
+
+- O 5-fold e o 10-fold variam de partição para partição — a estimativa depende de quais pacientes caem em qual bloco. O LOOCV, sendo determinístico (cada paciente é seu próprio fold, sem sorteio), não tem essa fonte de variação.
+- Neste dataset específico, o LOOCV (89,4%) ficou **abaixo** da média repetida do 5-fold e do 10-fold (ambas por volta de 92–93%) — um lembrete de que "menos viesado" não é sinônimo de "número mais alto"; são estimativas de quantidades diferentes, e ambas carregam ruído de amostra finita.
+- O 10-fold, apesar de teoricamente mais próximo do LOOCV, teve *mais* variação entre repetições do que o 5-fold nesta amostra particular — o comportamento teórico ("mais $k$ → menos viés, geralmente mais variância de estimação com folds menores") é uma tendência média, não uma garantia caso a caso.
+
+$k=5$ ou $k=10$ seguem sendo a escolha prática padrão: bem mais baratos que LOOCV (uma única árvore grande tem $N=398$ ajustes no LOOCV contra apenas 5 ou 10 no k-fold) e, na prática, competitivos em qualidade de estimativa.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## LOOCV: Quase Sem Viés, Mas...
+
+::: {.fragment}
+"[Com K=N] pode ter alta variância, porque os N 'conjuntos de treino' são tão parecidos uns com os outros" (ESL).
+:::
+
+## k-fold Varia com a Partição — LOOCV Não
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(6.2, 3.8))
+ax.scatter(np.full(10, "5-fold"), medias_5, color=COR_A, alpha=0.75, s=40)
+ax.scatter(np.full(10, "10-fold"), medias_10, color=COR_B, alpha=0.75, s=40)
+ax.axhline(loo_media, color=COR_LIM, lw=2.0, ls="--", label=f"LOOCV = {loo_media:.4f}")
+ax.set_ylabel("acurácia estimada")
+ax.legend(fontsize=8)
+plt.tight_layout()
+plt.show()
+```
+
+::: {.fragment}
+Achado honesto: aqui, LOOCV (89,4%) ficou **abaixo** de 5-fold e 10-fold (~92–93%) — estimativas diferentes, ambas com ruído.
+:::
+
+::: {.fragment}
+$k=5$ ou $10$: escolha prática padrão — muito mais barato que LOOCV ($N$ ajustes), qualidade competitiva.
+:::
+
+:::
+
+# Aplicação: Escolhendo a Poda da Aula 3 por Validação Cruzada
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A Aula 3 introduziu o critério de custo-complexidade $C(T) = \sum_\tau Q_\tau(T) + \lambda|T|$ e podou "olhando o gráfico" de um único split treino/validação. Fechamos aquele gancho agora, usando `cost_complexity_pruning_path` (a mesma ferramenta da Aula 3) e escolhendo $\lambda$ (`ccp_alpha`) por 5-fold CV estratificada:
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+arvore_completa = DecisionTreeClassifier(random_state=0)
+arvore_completa.fit(Xtr, ytr)
+caminho = arvore_completa.cost_complexity_pruning_path(Xtr, ytr)
+alphas = caminho.ccp_alphas[:-1]
+alphas = alphas[alphas >= 0]
+
+skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=20260824)
+cv_medias, cv_desvios, n_folhas = [], [], []
+for a in alphas:
+    arv = DecisionTreeClassifier(random_state=0, ccp_alpha=a)
+    scores = cross_val_score(arv, Xtr, ytr, cv=skf)
+    cv_medias.append(scores.mean())
+    cv_desvios.append(scores.std())
+    arv.fit(Xtr, ytr)
+    n_folhas.append(arv.get_n_leaves())
+
+cv_medias = np.array(cv_medias); cv_desvios = np.array(cv_desvios)
+melhor_i = int(np.argmax(cv_medias))
+
+fig, axes = plt.subplots(1, 2, figsize=(9.5, 3.8))
+ax = axes[0]
+ax.plot(alphas, n_folhas, color=COR_NEU, lw=2.2, marker="o", ms=3)
+ax.axvline(alphas[melhor_i], color=COR_LIM, lw=2.0, ls="--")
+ax.set_xlabel(r"$\lambda$ (ccp\_alpha)")
+ax.set_ylabel("número de folhas")
+ax.set_title(r"Mais $\lambda$, menos folhas")
+
+ax = axes[1]
+ax.errorbar(alphas, cv_medias, yerr=cv_desvios, color=COR_B, lw=2.0, marker="o", ms=3,
+            capsize=2, label="acurácia CV (média ± dp)")
+ax.axvline(alphas[melhor_i], color=COR_LIM, lw=2.0, ls="--", label=r"melhor $\lambda$ (CV)")
+ax.set_xlabel(r"$\lambda$ (ccp\_alpha)")
+ax.set_ylabel("acurácia (5-fold CV)")
+ax.legend(fontsize=8)
+ax.set_title("A curva de CV tem um ótimo, com incerteza")
+
+plt.tight_layout()
+plt.show()
+
+melhor_alpha = alphas[melhor_i]
+arv_final = DecisionTreeClassifier(random_state=0, ccp_alpha=melhor_alpha)
+arv_final.fit(Xtr, ytr)
+
+print(f"Árvore completa (sem poda): {arvore_completa.get_n_leaves()} folhas, acurácia de teste = {arvore_completa.score(Xte, yte):.4f}")
+print(f"Melhor lambda por CV: {melhor_alpha:.5f} -> {arv_final.get_n_leaves()} folhas")
+print(f"  CV: {cv_medias[melhor_i]:.4f} ± {cv_desvios[melhor_i]:.4f}   Teste: {arv_final.score(Xte, yte):.4f}")
+```
+
+O resultado é um argumento direto a favor da parcimônia: a árvore escolhida por CV tem **4 folhas**, contra **19 na árvore completa** — e as duas atingem a **mesma acurácia de teste** (91,8%). Nenhuma das 15 folhas extras da árvore completa contribuiu para generalização; elas só memorizaram ruído específico do conjunto de treino.
+
+**Um refinamento: a regra de 1 desvio-padrão.** Em vez de escolher o $\lambda$ que maximiza a média de CV, a regra "1-SE" escolhe o **modelo mais simples** cuja acurácia de CV esteja a até um erro-padrão do melhor valor observado — reconhecendo explicitamente que a própria estimativa de CV tem incerteza, e que não vale a pena pagar complexidade extra por uma diferença de acurácia que pode ser só ruído de amostragem.
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+erro_padrao = cv_desvios[melhor_i] / np.sqrt(5)
+limiar = cv_medias[melhor_i] - erro_padrao
+candidatos = np.where(cv_medias >= limiar)[0]
+i_1se = candidatos[np.argmax(alphas[candidatos])]  # o mais simples entre os "empatados"
+
+arv_1se = DecisionTreeClassifier(random_state=0, ccp_alpha=alphas[i_1se])
+arv_1se.fit(Xtr, ytr)
+print(f"Regra 1-SE: lambda={alphas[i_1se]:.5f} -> {arv_1se.get_n_leaves()} folhas")
+print(f"  CV: {cv_medias[i_1se]:.4f}   Teste: {arv_1se.score(Xte, yte):.4f}")
+```
+
+A árvore "1-SE" fica ainda mais simples (2 folhas) e paga um preço real de acurácia de teste (90,1% contra 91,8%) — um lembrete honesto de que a regra de parcimônia não é gratuita neste caso específico; ela é uma escolha deliberada de trocar um pouco de desempenho por uma árvore muito mais interpretável (2 folhas cabem numa frase; 4 já exigem um parágrafo).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Reaproveitando a Ferramenta da Aula 3
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 2, figsize=(9, 3.6))
+ax = axes[0]
+ax.plot(alphas, n_folhas, color=COR_NEU, lw=2.0, marker="o", ms=3)
+ax.axvline(alphas[melhor_i], color=COR_LIM, lw=2.0, ls="--")
+ax.set_xlabel(r"$\lambda$"); ax.set_ylabel("folhas")
+ax = axes[1]
+ax.errorbar(alphas, cv_medias, yerr=cv_desvios, color=COR_B, lw=1.8, marker="o", ms=3, capsize=2)
+ax.axvline(alphas[melhor_i], color=COR_LIM, lw=2.0, ls="--")
+ax.set_xlabel(r"$\lambda$"); ax.set_ylabel("acurácia CV")
+plt.tight_layout()
+plt.show()
+```
+
+::: {.fragment}
+Completa: 19 folhas, teste 91,8%. Escolhida por CV: **4 folhas**, teste **91,8%** — igual, mais simples.
+:::
+
+## A Regra de 1 Desvio-Padrão
+
+::: {.fragment}
+Escolhe o modelo **mais simples** dentro de 1 erro-padrão do melhor CV — aqui, 2 folhas.
+:::
+
+::: {.fragment}
+Custo real: acurácia de teste cai para 90,1%. Parcimônia não é sempre de graça.
+:::
+
+:::
+
+::: {.callout-tip}
+## Se a árvore de 4 folhas e a árvore de 19 folhas empatam na acurácia de teste, o que exatamente a validação cruzada "comprou" ao escolher a mais simples?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Seleção de Modelo por CV
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. No limite em que a árvore completa (sem poda) tem exatamente o
+   mesmo número de folhas que a árvore escolhida por CV, a poda por
+   custo-complexidade não teria feito diferença alguma neste
+   experimento.
+b. Se a árvore completa (19 folhas) tivesse tido acurácia de teste
+   MELHOR do que a árvore de 4 folhas escolhida por CV, isso seria
+   evidência de que a escolha de $\lambda$ por CV falhou em capturar o
+   ponto ótimo de complexidade neste dataset.
+c. Num sistema de manutenção preditiva industrial que roda num sensor
+   embarcado com memória limitada, preferir uma árvore de poucas
+   folhas (mesmo empatando em acurácia) seria ainda mais crítico do
+   que no experimento médico desta aula.
+d. Como a regra de 1-SE tende a escolher modelos mais simples que a de
+   máxima média de CV, conclui-se que a árvore escolhida pela 1-SE
+   neste experimento teve acurácia de teste igual ou melhor do que a
+   árvore de máxima média de CV.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Seleção de Modelo por CV — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — se não há diferença de folhas, não há nada para a poda ter mudado.
+b. **Verdadeiro** — seria um sinal de que o $\lambda$ escolhido podou demais, sacrificando desempenho real.
+c. **Verdadeiro** — restrição de hardware some às vantagens de simplicidade que, no experimento médico, eram "de graça".
+d. **Falso** — no experimento real, a árvore 1-SE teve acurácia de teste MENOR (90,1% contra 91,8%) — simplicidade custou desempenho aqui.
+:::
+
+:::
+
+# O Bootstrap: Incerteza de um Estimador
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A validação cruzada responde "qual é o erro esperado deste procedimento?". O Bootstrap responde uma pergunta diferente e complementar: "**quão incerta** é uma estatística que já calculei a partir da minha amostra?" O ESL define a ideia de forma geral:
+
+> Tradução livre: "O Bootstrap é uma ferramenta geral para avaliar a precisão estatística. [...] A ideia básica é sortear, com reposição, conjuntos de dados a partir dos dados de treino, cada amostra do mesmo tamanho que o conjunto de treino original. Isso é feito $B$ vezes [...], produzindo $B$ conjuntos de dados *bootstrap*" (ESL, §7.11, pp. 249–250).
+
+A acurácia de teste da nossa árvore de 4 folhas foi 91,8% — mas esse número, sozinho, esconde quanta confiança devemos depositar nele. Duas perguntas distintas, duas formas de usar o Bootstrap:
+
+**1. Quão incerta é a acurácia medida, dado que o conjunto de teste tem só 171 pacientes?** Reamostramos, com reposição, os **acertos e erros já observados** no teste:
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+preds = arv_final.predict(Xte)
+acertos = (preds == yte).astype(float)
+n_teste = len(yte)
+B = 2000
+rng_boot = np.random.default_rng(20260824)
+acc_boot = np.empty(B)
+for b in range(B):
+    idx = rng_boot.integers(0, n_teste, size=n_teste)
+    acc_boot[b] = acertos[idx].mean()
+
+ci_lo, ci_hi = np.percentile(acc_boot, [2.5, 97.5])
+
+fig, ax = plt.subplots(figsize=(6, 3.6))
+ax.hist(acc_boot, bins=40, color=COR_B, alpha=0.75, edgecolor="white", linewidth=0.4)
+ax.axvline(acertos.mean(), color=COR_LIM, lw=2.2, label=f"estimativa pontual = {acertos.mean():.3f}")
+ax.axvline(ci_lo, color=COR_ALT, lw=1.8, ls="--")
+ax.axvline(ci_hi, color=COR_ALT, lw=1.8, ls="--", label=f"IC 95% = [{ci_lo:.3f}, {ci_hi:.3f}]")
+ax.set_xlabel("acurácia (réplica bootstrap do conjunto de teste)")
+ax.set_ylabel("frequência")
+ax.legend(fontsize=8)
+plt.tight_layout()
+plt.show()
+
+print(f"Acurácia pontual: {acertos.mean():.4f}")
+print(f"Bootstrap (B={B}): média={acc_boot.mean():.4f}, desvio-padrão={acc_boot.std():.4f}")
+print(f"Intervalo de confiança 95% (percentílico): [{ci_lo:.4f}, {ci_hi:.4f}]")
+```
+
+O intervalo [87,7%, 95,9%] é largo — com apenas 171 pacientes de teste, a acurácia pontual de 91,8% poderia facilmente ter saído entre 88% e 96% por puro acaso da amostragem.
+
+**2. Quão instável é o próprio modelo ajustado, dado que a amostra de treino também é finita?** Aqui reamostramos o **conjunto de treino** (com reposição), reajustamos a árvore em cada réplica, e avaliamos sempre no mesmo conjunto de teste — mais próximo da formalização $S(Z)$ do ESL, em que $Z$ é a amostra de treino inteira:
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+n_treino = len(ytr)
+B2 = 200
+acc_boot_refit = np.empty(B2)
+for b in range(B2):
+    idx = rng_boot.integers(0, n_treino, size=n_treino)
+    Xb, yb = Xtr[idx], ytr[idx]
+    modelo_b = DecisionTreeClassifier(random_state=0, ccp_alpha=melhor_alpha)
+    modelo_b.fit(Xb, yb)
+    acc_boot_refit[b] = modelo_b.score(Xte, yte)
+
+ci_lo2, ci_hi2 = np.percentile(acc_boot_refit, [2.5, 97.5])
+print(f"Bootstrap com reajuste (B={B2}): média={acc_boot_refit.mean():.4f}, "
+      f"desvio-padrão={acc_boot_refit.std():.4f}")
+print(f"Intervalo de confiança 95%: [{ci_lo2:.4f}, {ci_hi2:.4f}]")
+```
+
+O intervalo aqui é um pouco mais estreito ([88,9%, 93,6%]) — reflete a instabilidade do *procedimento de ajuste* (qual árvore de 4 folhas sai de cada amostra de treino reamostrada), uma quantidade conceitualmente diferente da incerteza de medir a acurácia num teste fixo.
+
+**A diferença que fica desta seção:** CV estima o **risco esperado** de um procedimento (uma média sobre folds, cada um vindo de uma partição diferente); Bootstrap estima a **variabilidade amostral** de uma estatística já calculada (uma distribuição inteira de valores plausíveis, não só uma média).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Bootstrap: a Ideia
+
+::: {.fragment}
+"Sortear, com reposição, conjuntos de dados a partir dos dados de treino [...] $B$ vezes" (ESL, §7.11).
+:::
+
+## Quão Incerta é a Acurácia de Teste?
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(6, 3.6))
+ax.hist(acc_boot, bins=40, color=COR_B, alpha=0.75, edgecolor="white", linewidth=0.4)
+ax.axvline(acertos.mean(), color=COR_LIM, lw=2.2)
+ax.axvline(ci_lo, color=COR_ALT, lw=1.8, ls="--")
+ax.axvline(ci_hi, color=COR_ALT, lw=1.8, ls="--")
+ax.set_xlabel("acurácia (réplica bootstrap)")
+plt.tight_layout()
+plt.show()
+```
+
+::: {.fragment}
+Ponto: 91,8%. IC 95%: [87,7%, 95,9%] — largo, com só 171 pacientes de teste.
+:::
+
+## Duas Perguntas Diferentes
+
+::: {.fragment}
+**Reamostrar o teste:** incerteza de *medir* a acurácia com uma amostra de teste finita.
+:::
+::: {.fragment}
+**Reamostrar o treino + reajustar:** instabilidade do *procedimento de ajuste* em si.
+:::
+::: {.fragment}
+**CV estima risco esperado. Bootstrap estima variabilidade amostral.** Perguntas complementares, não concorrentes.
+:::
+
+:::
+
+::: {.callout-tip}
+## Por que reamostrar o conjunto de teste e reamostrar+reajustar no conjunto de treino respondem perguntas diferentes, mesmo usando a mesma técnica de reamostragem com reposição?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Bootstrap
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. No limite em que $N$ (o tamanho da amostra original) é muito
+   pequeno (por exemplo, $N=5$), o Bootstrap ainda pode ser aplicado
+   mecanicamente, mas as réplicas terão pouquíssima diversidade
+   possível, tornando a estimativa de incerteza pouco confiável.
+b. Se, em vez de $B=1000$ réplicas, usássemos $B=10$, o intervalo de
+   confiança resultante ainda seria válido em teoria, mas sua
+   estimativa dos percentis seria muito mais ruidosa do que com
+   $B=1000$.
+c. Numa pesquisa eleitoral com 1000 entrevistados, o Bootstrap poderia
+   estimar um intervalo de confiança para a margem de vitória de um
+   candidato sobre outro, mesmo essa margem sendo uma diferença entre
+   duas proporções, mais complexa que uma média simples.
+d. Como o Bootstrap e a validação cruzada usam a mesma técnica de
+   reamostragem e ambos produzem uma medida numérica de
+   incerteza/desempenho, reportar os dois juntos seria redundante,
+   bastando escolher um dos dois para qualquer análise.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Bootstrap — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — com poucos pontos, há poucas reamostragens distintas possíveis; a aproximação fica grosseira.
+b. **Verdadeiro** — $B$ controla a precisão *Monte Carlo* da aproximação, não a validade do método em si.
+c. **Verdadeiro** — o Bootstrap não se limita a médias; qualquer estatística (inclusive diferenças de proporções) pode ser reamostrada.
+d. **Falso** — CV estima o risco esperado; Bootstrap estima a variabilidade amostral — perguntas diferentes, tipicamente complementares, não redundantes.
+:::
+
+:::
+
+# Armadilhas Comuns
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**O jeito errado de fazer validação cruzada.** O ESL descreve um cenário revelador: um conjunto com $N=50$ amostras e $p=5\,000$ atributos, todos estatisticamente **independentes** do rótulo (ruído puro) — o erro real de qualquer classificador é, portanto, 50%. Uma prática comum, e sutilmente errada: (1) selecionar os 100 atributos mais correlacionados com o rótulo usando **toda** a amostra; (2) treinar um classificador só com esses atributos; (3) validar por CV. Reproduzimos o experimento de forma independente:
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+def top_k_corr(Xs, ys, k=100):
+    ys_c = ys - ys.mean()
+    Xs_c = Xs - Xs.mean(axis=0)
+    corrs = Xs_c.T @ ys_c / (np.linalg.norm(Xs_c, axis=0) * np.linalg.norm(ys_c) + 1e-12)
+    return np.argsort(-np.abs(corrs))[:k]
+
+rng_sim = np.random.default_rng(20260824)
+N_sim, p_sim = 50, 5000
+n_simulacoes = 30
+erros_errado, erros_certo = [], []
+
+for sim in range(n_simulacoes):
+    Xs = rng_sim.standard_normal((N_sim, p_sim))
+    ys = rng_sim.integers(0, 2, size=N_sim)  # rotulo SEM relacao com Xs: erro real = 50%
+    skf_sim = StratifiedKFold(n_splits=5, shuffle=True, random_state=sim)
+
+    # JEITO ERRADO: seleciona atributos usando TODOS os dados, antes do CV
+    sel_errado = top_k_corr(Xs, ys, 100)
+    acc_e = []
+    for tr, va in skf_sim.split(Xs, ys):
+        clf = KNeighborsClassifier(n_neighbors=1)
+        clf.fit(Xs[tr][:, sel_errado], ys[tr])
+        acc_e.append(clf.score(Xs[va][:, sel_errado], ys[va]))
+    erros_errado.append(1 - np.mean(acc_e))
+
+    # JEITO CERTO: seleciona atributos DENTRO de cada fold, só com dados de treino
+    acc_c = []
+    for tr, va in skf_sim.split(Xs, ys):
+        sel_certo = top_k_corr(Xs[tr], ys[tr], 100)
+        clf = KNeighborsClassifier(n_neighbors=1)
+        clf.fit(Xs[tr][:, sel_certo], ys[tr])
+        acc_c.append(clf.score(Xs[va][:, sel_certo], ys[va]))
+    erros_certo.append(1 - np.mean(acc_c))
+
+fig, ax = plt.subplots(figsize=(5.5, 3.8))
+ax.boxplot([erros_errado, erros_certo], tick_labels=["seleciona ANTES\ndo split (errado)", "seleciona DENTRO\nde cada fold (certo)"],
+           patch_artist=True,
+           boxprops=dict(facecolor=COR_A + "40"), medianprops=dict(color=COR_LIM, lw=2))
+ax.axhline(0.5, color=COR_NEU, lw=1.5, ls=":", label="erro real (50%) — rótulo é ruído puro")
+ax.set_ylabel("erro estimado por CV")
+ax.set_title(f"{n_simulacoes} simulações independentes")
+ax.legend(fontsize=8)
+plt.tight_layout()
+plt.show()
+
+print(f"Jeito ERRADO — erro médio de CV: {np.mean(erros_errado):.3f} (erro real: 0.50)")
+print(f"Jeito CERTO  — erro médio de CV: {np.mean(erros_certo):.3f} (erro real: 0.50)")
+```
+
+O resultado é dramático: selecionar atributos usando a amostra inteira **antes** de particionar em folds produz um erro estimado de CV de ${\sim}1{,}5\%$ — quando o erro verdadeiro é 50%. Fazer a seleção **dentro** de cada fold, usando só os dados de treino daquele fold, recupera uma estimativa honesta (${\sim}48\%$, muito perto do valor real). O problema: no jeito errado, os atributos "já viram" os rótulos do fold de validação durante a etapa de seleção — a validação deixa de ser independente do ajuste, mesmo que o classificador final pareça respeitar a partição.
+
+**A regra prática:** qualquer transformação que "aprenda" algo dos dados — seleção de atributos, normalização, imputação de valores faltantes, redução de dimensionalidade — precisa ser recalculada **dentro** de cada fold de treino, nunca na amostra inteira antes do split.
+
+**Reportar só a média é enganoso.** O próprio ESL observa, sobre um experimento de CV real:
+
+> Tradução livre: "A acurácia média de validação cruzada gira em torno do valor esperado real [...] Por outro lado, existe uma variabilidade considerável no erro, o que reforça a importância de reportar o erro-padrão estimado da estimativa de CV" (ESL, §7.10.3, p. 249).
+
+Vimos isso diretamente na nossa curva de poda: a acurácia de CV do melhor $\lambda$ foi $92{,}97\%$, mas com um desvio-padrão de $2{,}43\%$ entre os 5 folds — um número sozinho, sem essa segunda informação, sugere mais precisão do que a validação cruzada realmente entrega.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Experimento do ESL: Rótulo é Ruído Puro
+
+::: {.fragment}
+$N=50$, $p=5\,000$ atributos **independentes** do rótulo. Erro real de qualquer classificador: **50%**.
+:::
+
+## Selecionar Antes vs. Dentro do Fold
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(5.5, 3.8))
+ax.boxplot([erros_errado, erros_certo], tick_labels=["antes do split", "dentro do fold"],
+           patch_artist=True, boxprops=dict(facecolor=COR_A + "40"),
+           medianprops=dict(color=COR_LIM, lw=2))
+ax.axhline(0.5, color=COR_NEU, lw=1.5, ls=":")
+ax.set_ylabel("erro estimado por CV")
+plt.tight_layout()
+plt.show()
+```
+
+::: {.fragment}
+Selecionar **antes**: erro estimado ${\sim}1{,}5\%$ (real: 50%!). Selecionar **dentro** do fold: ${\sim}48\%$, honesto.
+:::
+
+## Média Sem Desvio-Padrão é Meia Informação
+
+::: {.fragment}
+Nossa poda: CV = 92,97% ± **2,43%**. O número sozinho, sem o desvio, sugere precisão que não existe.
+:::
+
+:::
+
+::: {.callout-tip}
+## Por que selecionar os atributos mais correlacionados usando a amostra inteira, antes do split de CV, é uma forma de vazamento de dados mesmo que o classificador final só veja os dados de treino de cada fold?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Vazamento de Dados
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. No limite em que o número de atributos candidatos tende a zero (não
+   há nada para selecionar), o vazamento por seleção de atributos
+   deixa de ser possível, por definição.
+b. Se, em vez de selecionar os 100 atributos mais correlacionados
+   usando toda a amostra, apenas NORMALIZÁSSEMOS todos os atributos
+   usando a amostra inteira antes do split, isso não constituiria
+   vazamento de dados, pois normalização não usa os rótulos.
+c. Num projeto de detecção de fraude que usa a média e o desvio-padrão
+   de toda a base de transações (incluindo as de validação) para
+   normalizar antes de treinar, esse projeto sofre de vazamento de
+   dados, mesmo sem usar rótulos de fraude/não-fraude na normalização.
+d. Como o vazamento desta aula foi causado especificamente por
+   selecionar atributos com base nos RÓTULOS antes do split,
+   conclui-se que qualquer pré-processamento que não use os rótulos
+   está automaticamente livre de vazamento de dados.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Vazamento de Dados — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — sem atributos candidatos, não há seleção possível, e portanto não há esse mecanismo de vazamento.
+b. **Falso** — normalizar com estatísticas da amostra inteira (incluindo validação) também é vazamento, mesmo sem tocar nos rótulos — é exatamente o cenário da Questão Discursiva 2 desta aula.
+c. **Verdadeiro** — a informação da própria distribuição dos dados de validação vaza para o treino através da normalização compartilhada.
+d. **Falso** — vazamento pode ocorrer sem nunca usar rótulos, como os itens (b) e (c) acabaram de mostrar.
+:::
+
+:::
+
+# Conclusão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando às quatro perguntas da abertura:
+
+1. **Por que o erro de treino engana:** ele é calculado nos mesmos dados que escolheram o modelo — otimista por construção, não por acidente.
+2. **O que a validação cruzada estima:** o erro esperado de generalização, simulando repetidas amostras de teste a partir da própria amostra disponível.
+3. **Como escolher $k$:** $5$ ou $10$ é a escolha prática padrão — LOOCV tem menos viés teórico, mas é caro e, como vimos, não é automaticamente "melhor" numa amostra real.
+4. **O que o Bootstrap estima:** a variabilidade amostral de uma estatística já calculada — uma pergunta complementar à da validação cruzada, não uma alternativa a ela.
+
+O fio que une os quatro blocos centrais: nenhuma estimativa de desempenho é um número exato. Ela vem com um viés (o erro de treino) ou com uma variância (a estimativa de CV, o intervalo do Bootstrap) que precisa ser levada em conta — e ignorá-la é o erro estatístico mais caro e mais comum na prática de aprendizado de máquina.
+
+### Ponte para a Aula 5 {.unnumbered}
+
+A intuição desta aula — "um modelo mais flexível se ajusta melhor ao treino, mas isso não garante melhor generalização" — reaparecerá na Aula 8 formalizada como a **decomposição viés-variância**, decompondo matematicamente o erro esperado em viés ao quadrado, variância do estimador e ruído irredutível. Antes disso, porém, a Aula 5 constrói o primeiro modelo paramétrico do curso — regressão linear — e mostra que ajustá-lo por mínimos quadrados é, sob um modelo de ruído gaussiano, exatamente o mesmo que ajustá-lo por máxima verossimilhança: o mesmo princípio unificador que já apareceu em cada aula até aqui, agora aplicado a alvos contínuos.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos
+
+1. Erro de treino é otimista **por construção** — não por acidente
+2. CV simula amostragem repetida de $P(X,Y)$; $k=5$ ou $10$ é o padrão prático
+3. Bootstrap estima **variabilidade**, não risco esperado — pergunta complementar à CV
+4. Vazamento de dados: qualquer transformação aprendida deve viver **dentro** do fold
+
+::: {.fragment}
+**Próxima aula:** Regressão Linear — mínimos quadrados como máxima verossimilhança sob ruído gaussiano.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. Explique por que $\hat{R}(\theta)$, o erro medido nos mesmos dados usados para ajustar $\theta$, é um estimador enviesado do risco esperado $R(\theta)$. Por que esse viés tende a crescer com a flexibilidade do modelo (compare uma árvore de profundidade 1 com uma de profundidade 15 no nosso experimento)?
+
+2. Um colega decide normalizar todos os atributos (subtrair a média, dividir pelo desvio-padrão) usando a base de dados inteira, e só depois faz uma validação cruzada de 5 folds. Explique por que isso é uma forma de vazamento de dados, análoga ao experimento de seleção de atributos desta aula, e descreva como corrigir o procedimento.
+
+3. A árvore escolhida pela regra de 1 desvio-padrão teve acurácia de teste pior do que a árvore de máxima acurácia de CV, mas com metade das folhas. Discuta em que cenários essa troca (menos acurácia por mais simplicidade) pode ser a escolha certa, e em quais não seria.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-tip}
+## O Viés do Erro de Treino
+
+a. ( ) No limite em que a profundidade da árvore não é limitada e há um
+   ponto de treino distinto por folha, o erro de treino tende a $0\%$,
+   independentemente de quão complexa seja a fronteira real entre as
+   classes.
+
+b. ( ) Se a árvore de profundidade 15 tem a mesma acurácia de teste
+   que a árvore de profundidade 6, isso prova que a árvore mais
+   profunda é necessariamente pior no teste do que uma menos profunda.
+
+c. ( ) Num modelo de previsão de preços de imóveis ajustado com um
+   polinômio de grau muito alto (que passa exatamente por todos os
+   pontos de treino), o erro de treino seria próximo de zero, mas isso
+   não garante nada sobre o erro em imóveis não vistos.
+
+d. ( ) Como o erro de treino tende a subestimar o erro de
+   generalização, conclui-se que um modelo com erro de treino alto
+   necessariamente generaliza melhor do que um com erro de treino
+   baixo.
+:::
+
+::: {.callout-tip}
+## Train/Validation/Test
+
+a. ( ) No limite em que o conjunto de teste é consultado repetidas
+   vezes durante o ajuste de hiperparâmetros, a estimativa final de
+   desempenho no teste se torna tão otimista quanto medir no próprio
+   conjunto de treino.
+
+b. ( ) Se o conjunto de validação, em vez do de teste, fosse
+   consultado repetidamente para escolher hiperparâmetros, isso não
+   teria custo estatístico algum, pois validação existe exatamente
+   para ser consultada quantas vezes for preciso.
+
+c. ( ) Numa competição de ciência de dados, o "*leaderboard* público"
+   funciona como um conjunto de validação consultável repetidamente;
+   competidores que otimizam demais para ele costumam piorar no
+   *leaderboard* privado (o teste verdadeiro) — o *overfitting ao
+   leaderboard*.
+
+d. ( ) Como o conjunto de treino é usado para ajustar os parâmetros do
+   modelo, conclui-se que o conjunto de validação é usado para ajustar
+   os dados do modelo (limpá-los ou transformá-los), não seus
+   hiperparâmetros.
+:::
+
+::: {.callout-tip}
+## O Procedimento k-fold
+
+a. ( ) No limite em que $k=N$ (LOOCV), cada fold de validação contém
+   exatamente um único ponto.
+
+b. ( ) Se, em vez de treinar $k$ modelos diferentes, k-fold CV usasse
+   um único modelo treinado com todos os dados para avaliar cada fold
+   de validação, a estimativa resultante deixaria de simular uma
+   amostra de teste verdadeiramente independente do ajuste.
+
+c. ( ) Num estudo médico com pacientes de 10 hospitais diferentes, se
+   cada fold de uma 5-fold CV misturar aleatoriamente pacientes de
+   todos os hospitais (em vez de manter hospitais inteiros em folds
+   separados), a CV pode superestimar o desempenho num hospital
+   totalmente novo.
+
+d. ( ) Como cada fold de treino em k-fold usa quase os mesmos dados
+   que o treino completo, o modelo ajustado em cada fold é
+   praticamente idêntico ao ajustado com a amostra inteira, então CV
+   mede essencialmente a mesma coisa que o erro de treino.
+:::
+
+::: {.callout-tip}
+## Estratificação
+
+a. ( ) No limite em que uma das classes representa menos de $1\%$ da
+   amostra, a ausência de estratificação aumenta substancialmente o
+   risco de algum fold não conter nenhum exemplo dessa classe rara.
+
+b. ( ) Se as classes já estivessem perfeitamente balanceadas
+   ($50\%/50\%$) na amostra completa, usar `StratifiedKFold` em vez de
+   `KFold` comum produziria sempre exatamente os mesmos folds, sem
+   nenhuma diferença possível.
+
+c. ( ) Num problema de imagens médicas com 3 classes muito
+   desbalanceadas ($90\%/9\%/1\%$), a estratificação se torna
+   proporcionalmente mais importante do que num problema balanceado de
+   2 classes.
+
+d. ( ) Como a estratificação muda quais pontos específicos caem em
+   cada fold, ela também altera o valor esperado da estimativa de CV,
+   tornando-a enviesada.
+:::
+
+::: {.callout-tip}
+## LOOCV vs. k-fold Pequeno
+
+a. ( ) No limite em que $k\to N$ (o maior valor possível de $k$), cada
+   modelo de LOOCV é treinado com $N-1$ pontos — o máximo de dados de
+   treino possível dentro do esquema de k-fold.
+
+b. ( ) Se repetíssemos o cálculo de LOOCV várias vezes no mesmo
+   conjunto de dados, obteríamos valores diferentes a cada repetição,
+   assim como acontece com 5-fold e 10-fold quando a partição é
+   sorteada de novo.
+
+c. ( ) Num conjunto de apenas 20 pacientes, LOOCV se torna
+   proporcionalmente mais atraente do que 10-fold, porque deixar de
+   fora 2 pacientes (10%) já é uma perda relativamente maior de dados
+   de treino do que deixar de fora 1.
+
+d. ( ) Como o ESL descreve o estimador de LOOCV como aproximadamente
+   não-enviesado, conclui-se que LOOCV é sempre a melhor estimativa
+   possível do erro de generalização, superando 5-fold e 10-fold em
+   qualidade.
+:::
+
+::: {.callout-tip}
+## Custo Computacional e Variância de k
+
+a. ( ) No limite em que $N$ é muito grande (milhões de pontos), o
+   custo de LOOCV ($N$ ajustes completos) se torna proibitivo mesmo
+   com ajustes individuais rápidos, tornando $k=5$ ou $10$ escolhas
+   praticamente necessárias.
+
+b. ( ) Se os $N$ conjuntos de treino do LOOCV fossem, ao contrário do
+   que o ESL descreve, bem diferentes entre si, a alta variância do
+   estimador de LOOCV deixaria de ser explicada por esse mecanismo.
+
+c. ( ) Se um outro pesquisador repetisse o experimento desta aula com
+   uma semente aleatória diferente para a partição de 10-fold, a média
+   obtida provavelmente seria ligeiramente diferente, mas dentro da
+   ordem de grandeza do desvio-padrão entre repetições já medido.
+
+d. ( ) Como $k=5$ e $k=10$ são mais baratos computacionalmente que
+   LOOCV, conclui-se que eles também produzem, necessariamente, uma
+   estimativa de erro menos precisa do que LOOCV.
+:::
+
+::: {.callout-tip}
+## Aplicação: Poda por Validação Cruzada
+
+a. ( ) No limite em que $\lambda=0$ (sem nenhuma penalidade), a árvore
+   escolhida seria a árvore completa, sem poda — o extremo oposto da
+   árvore escolhida por CV nesta aula.
+
+b. ( ) Se a árvore escolhida por CV (4 folhas) tivesse tido uma
+   acurácia de teste muito pior do que a árvore completa (19 folhas),
+   em vez do empate observado nesta aula, isso enfraqueceria o
+   argumento de preferir a árvore mais simples.
+
+c. ( ) Num sistema de aprovação de crédito auditado por reguladores,
+   uma árvore de 4 folhas escolhida por CV seria mais fácil de
+   justificar do que uma de 19 folhas, mesmo com a mesma acurácia.
+
+d. ( ) Como `cost_complexity_pruning_path` gera os candidatos de
+   $\lambda$ de forma determinística a partir do treino, escolher
+   $\lambda$ por inspeção visual de um único gráfico treino/validação
+   já garante a mesma reprodutibilidade que escolher por CV com
+   múltiplos folds.
+:::
+
+::: {.callout-tip}
+## A Regra de 1 Desvio-Padrão
+
+a. ( ) No limite em que o desvio-padrão entre folds de CV tende a
+   zero, a regra de 1-SE tende a escolher praticamente o mesmo modelo
+   que a regra de máxima média de CV.
+
+b. ( ) Se a árvore escolhida pela regra de 1-SE tivesse, por
+   coincidência, exatamente a mesma acurácia de teste que a árvore de
+   máxima média de CV, isso provaria que a regra de 1-SE está correta
+   em geral, não só neste experimento.
+
+c. ( ) Num cenário em que o custo de deploy de um modelo complexo é
+   alto (por exemplo, um dispositivo com pouca memória), a regra de
+   1-SE seria mais atraente do que neste experimento didático, mesmo
+   custando um pouco de acurácia.
+
+d. ( ) Como a regra de 1-SE reconhece que a estimativa de CV tem
+   incerteza amostral, conclui-se que ela elimina completamente essa
+   incerteza ao escolher o modelo mais simples dentro da faixa.
+:::
+
+::: {.callout-tip}
+## O Bootstrap
+
+a. ( ) No limite em que o número de réplicas $B\to\infty$, a
+   distribuição empírica das réplicas se aproxima de uma aproximação
+   estável da verdadeira distribuição amostral, mas o tamanho de CADA
+   réplica continua sendo $N$, não crescendo com $B$.
+
+b. ( ) Se o Bootstrap reamostrasse SEM reposição, cada réplica gerada
+   seria idêntica à amostra original (mesmos pontos), tornando a
+   técnica inútil para medir variabilidade.
+
+c. ( ) Num estudo que mede a mediana (não a média) do tempo de
+   resposta de um sistema, o Bootstrap ainda poderia estimar um
+   intervalo de confiança para essa mediana, mesmo sem fórmula
+   analítica fechada para seu erro-padrão.
+
+d. ( ) Como o Bootstrap e a validação cruzada usam ambos técnicas de
+   reamostragem sobre os mesmos dados, conclui-se que respondem
+   exatamente à mesma pergunta estatística.
+:::
+
+::: {.callout-tip}
+## Duas Aplicações do Bootstrap
+
+a. ( ) No limite em que o conjunto de teste tivesse um número enorme
+   de pacientes (não só 171), o intervalo de confiança da acurácia
+   tenderia a ficar mais estreito do que o observado nesta aula.
+
+b. ( ) Se, em vez de reajustar a árvore em cada réplica bootstrap do
+   treino, apenas reavaliássemos a MESMA árvore original em cada
+   réplica, essa variante mediria a mesma coisa que "reamostrar o
+   treino e reajustar".
+
+c. ( ) Numa empresa que quer saber tanto a taxa de erro real do seu
+   modelo de fraude implantado quanto o quanto seu processo de treino
+   é sensível à amostra histórica usada, essas duas perguntas exigiriam
+   as duas aplicações distintas do Bootstrap desta aula.
+
+d. ( ) Como as duas aplicações do Bootstrap desta aula usam a mesma
+   técnica de reamostragem com reposição, elas produzem,
+   necessariamente, o mesmo intervalo de confiança.
+:::
+
+::: {.callout-tip}
+## Vazamento de Dados (Data Leakage)
+
+a. ( ) No limite em que o número de atributos irrelevantes $p$ cresce
+   (mantendo $N=50$ fixo), o vazamento por seleção antes do split se
+   torna ainda mais grave, pois há mais chances de achar, por acaso,
+   atributos aparentemente correlacionados com o rótulo.
+
+b. ( ) Se a seleção dos 100 atributos mais correlacionados fosse feita
+   usando só os dados de treino de cada fold, o erro estimado por CV
+   se aproximaria do valor real de $50\%$, em vez do ${\sim}1{,}5\%$
+   observado no jeito errado.
+
+c. ( ) Um pipeline que aplica um redutor de dimensionalidade (como
+   PCA) ajustado com a base inteira, antes de particionar em folds,
+   sofre do mesmo tipo de vazamento do experimento de seleção de
+   atributos desta aula, mesmo sem nenhuma seleção explícita.
+
+d. ( ) Como o vazamento de dados infla artificialmente a estimativa de
+   CV para cima, conclui-se que vazamento de dados sempre faz a
+   estimativa de CV parecer PIOR do que o desempenho real do modelo.
+:::
+
+::: {.callout-tip}
+## Reportando Resultados de Validação Cruzada
+
+a. ( ) No limite em que o desvio-padrão entre folds de CV tende a
+   zero, reportar só a média já comunica virtualmente toda a
+   informação relevante sobre a incerteza da estimativa.
+
+b. ( ) Se o ESL não tivesse feito nenhuma recomendação explícita sobre
+   reportar o erro-padrão, ainda assim seria estatisticamente correto
+   reportá-lo, pois a variabilidade entre folds é uma propriedade real
+   da estimativa, independente de qualquer recomendação de livro-texto.
+
+c. ( ) Ao comparar dois modelos num artigo científico, reportar
+   "modelo A: 85% de acurácia, modelo B: 84%" sem nenhuma medida de
+   variabilidade não permite ao leitor avaliar se essa diferença é
+   estatisticamente significativa ou só ruído de amostragem.
+
+d. ( ) Como um desvio-padrão alto entre os folds de CV significa que a
+   métrica varia bastante de fold para fold, conclui-se que um
+   desvio-padrão alto indica uma estimativa mais estável e confiável
+   do desempenho do modelo.
+:::
+
+:::

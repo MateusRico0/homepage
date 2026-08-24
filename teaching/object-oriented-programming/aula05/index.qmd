@@ -1,0 +1,671 @@
+---
+title: "Acoplamento e Contratos"
+subtitle: "Aula 5 — Programação Orientada a Objetos"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: _lesson-nav.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    output-file: notas.html
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides →](slides.html){.see-all}
+:::
+
+# Proposta da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Na Aula 4, aprendemos a conectar objetos via Associação e a rotear tarefas via Delegação. É tentador achar que, tendo separado o código em classes e passado as dependências pelo construtor, o sistema já está desacoplado. Não está — o acoplamento físico (como as classes se instanciam) é só metade do problema. Uma classe pode receber a referência de um colaborador "corretamente" e, ainda assim, invadir a caixa preta dele por dentro.
+
+**O roteiro, em quatro perguntas:**
+
+1. Como uma associação "estruturalmente correta" pode esconder uma violação de encapsulamento?
+2. Como medir o acoplamento com números, em vez de "sentir" que o código está ruim?
+3. Quem deve ser responsável por uma tarefa, quando várias classes têm acesso aos dados envolvidos?
+4. O que fazer quando até a delegação bem-feita ainda deixa o núcleo do sistema refém de uma classe concreta?
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Aula 4 ensinou a conectar objetos.** Será que já basta para ter baixo acoplamento?
+
+::: {.fragment}
+**Não.** Passar a dependência certinho pelo construtor não impede a classe de invadir a caixa preta do colaborador por dentro.
+:::
+
+::: {.fragment}
+**Roteiro:** Feature Envy → métricas (CBO, Myers) → GRASP → Inversão de Dependência.
+:::
+
+:::
+
+# O Falso Desacoplamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+```java
+public class Pedido {
+    private Carrinho carrinho;
+
+    public Pedido(Carrinho carrinho) {
+        this.carrinho = carrinho; // Associacao estrutural correta
+    }
+
+    // VIOLACAO LOGICA: o Pedido invade a "caixa preta" do Carrinho
+    public double calcularCustoTotal() {
+        double total = 0.0;
+        // Feature Envy: o Pedido inveja os dados do Carrinho
+        for (Produto p : carrinho.getItens()) {
+            total += p.precoFinal();
+        }
+        return total;
+    }
+}
+```
+
+A associação via construtor é estruturalmente correta. O erro está em `calcularCustoTotal()`: em vez de perguntar ao `Carrinho` "qual é o seu total?", o `Pedido` extrai a lista inteira e faz a conta por fora. Isso é **Feature Envy** (Inveja de Recursos) — um método mais interessado nos dados de um colaborador do que nos seus próprios. O sintoma é a obsessão por *getters*; o diagnóstico definitivo é notar que qualquer mudança na estrutura interna do `Carrinho` (trocar `List` por `Map`, por exemplo) forçaria mudanças em `Pedido`, mesmo os dois estando em arquivos separados.
+
+A cura é **Move Method**: a lógica de soma pertence a quem tem os dados.
+
+```java
+public class Pedido {
+    private Carrinho carrinho;
+    public Pedido(Carrinho carrinho) { this.carrinho = carrinho; }
+
+    // REFATORACAO: delegacao pura, o "como" e responsabilidade do Carrinho
+    public double calcularCustoTotal() {
+        return this.carrinho.getTotal();
+    }
+}
+```
+
+O `Pedido` não sabe mais se o `Carrinho` itera um `ArrayList`, consulta em tempo real, ou mantém um saldo já calculado — voltou a ser uma caixa preta de verdade. Sem essa correção, se o marketing decidir uma promoção "Compre 3, Leve 4", e a lógica de soma estiver espalhada em `Pedido`, `Fatura`, `Checkout` e `RelatorioFinanceiro`, a mudança precisa ser caçada e repetida em todos eles — a **Cirurgia de Espingarda** já vista na Aula 4, agora com uma causa raiz mais específica: violação de *Tell, Don't Ask*.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Associação Correta, Comportamento Errado
+
+```java
+public Pedido(Carrinho carrinho) { this.carrinho = carrinho; } // ok
+
+public double calcularCustoTotal() {
+    double total = 0.0;
+    for (Produto p : carrinho.getItens()) total += p.precoFinal(); // Feature Envy!
+    return total;
+}
+```
+
+::: {.fragment}
+`Pedido` extrai os dados do `Carrinho` para processar por fora — a estrutura está certa, o comportamento não.
+:::
+
+## A Cura: *Move Method*
+
+```java
+public double calcularCustoTotal() {
+    return this.carrinho.getTotal(); // delegacao pura
+}
+```
+
+::: {.fragment}
+Se a regra de soma mudar, e vários lugares "espreitam" o carrinho, é **Cirurgia de Espingarda** de novo.
+:::
+
+:::
+
+# Medindo o Acoplamento: a Métrica CBO
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+"Sentir" que o código está acoplado demais não basta num ambiente profissional. A **Suíte CK** (Chidamber & Kemerer) define o **CBO** (*Coupling Between Object Classes*): conta a quantas classes externas uma classe está ligada, por métodos, atributos ou parâmetros.
+
+```java
+// Cenario A: Acoplamento Invasivo
+public class Pedido {
+    private Carrinho carrinho;                    // Dependencia 1: Carrinho
+    public double calcularCustoTotal() {
+        double total = 0.0;
+        for (Produto p : carrinho.getItens()) {   // Dependencia 2: Produto
+            total += p.precoFinal();
+        }
+        return total;
+    }
+}
+// CBO(Pedido) = 2
+
+// Cenario B: Delegacao Pura
+public class Pedido {
+    private Carrinho carrinho;                     // Dependencia 1: Carrinho
+    public double calcularCustoTotal() {
+        return this.carrinho.getTotal();           // Pedido so conhece o Carrinho
+    }
+}
+// CBO(Pedido) = 1
+```
+
+A diferença parece pequena num exemplo isolado, mas em sistemas com centenas de classes, manter o CBO baixo é o que minimiza a necessidade de testes extensivos e o risco de Efeito Cascata. A regra de ouro não é buscar CBO zero (um sistema sem conexão nenhuma não faz nada) — é manter cada conexão o mais fraca possível, o assunto do próximo bloco.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## CBO: Contando Dependências
+
+```java
+for (Produto p : carrinho.getItens()) { total += p.precoFinal(); } // CBO(Pedido) = 2
+```
+
+```java
+return this.carrinho.getTotal(); // CBO(Pedido) = 1
+```
+
+::: {.fragment}
+Não é buscar CBO zero — é manter cada conexão o mais fraca possível.
+:::
+
+:::
+
+::: {.callout-tip}
+## Se o CBO de uma classe é baixo, isso já garante que o acoplamento dela é saudável?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Feature Envy e CBO
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Passar uma dependência via construtor garante, por si só, o desacoplamento lógico entre as classes.
+b. Feature Envy é o sintoma de um método mais interessado nos dados de outra classe do que nos seus próprios.
+c. Refatorar de Inveja de Recursos para Delegação Pura reduz o CBO da classe orquestradora.
+d. Um CBO baixo, isoladamente, já garante que a qualidade de cada dependência restante é saudável.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Feature Envy e CBO — Resposta
+
+::: {.callout-tip}
+a. **Falso** — é exatamente a "falsa segurança" desta aula: estrutura correta não garante comportamento correto.
+b. **Verdadeiro** — é a definição de Fowler para o *code smell*.
+c. **Verdadeiro** — o exemplo `Pedido` mostrou CBO caindo de 2 para 1.
+d. **Falso** — CBO conta *quantas* dependências existem, não *quão saudável* cada uma é; é preciso a Escala de Myers para isso.
+:::
+
+:::
+
+# A Escala de Myers: Qualidade da Dependência
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O CBO conta dependências; a **Escala de Myers** classifica sua toxicidade, do pior para o ideal:
+
+**1. Acoplamento de Conteúdo (o pecado original)** — uma classe altera diretamente os atributos internos de outra:
+
+```java
+public class Carrinho { public List itens = new ArrayList<>(); } // ATRIBUTO PUBLICO!
+public class Pedido {
+    public void aplicarDescontoManual(Carrinho c) {
+        c.itens.clear(); // VIOLACAO: altera a estrutura do Carrinho por fora
+    }
+}
+```
+É a morte do encapsulamento — o objeto vira um aglomerado de variáveis globais disfarçadas.
+
+**2. Acoplamento Comum (global)** — dependência de estado global ou de métodos estáticos:
+
+```java
+public class Pedido {
+    public void verificarPagamento() {
+        // Dependencia estatica: impossivel testar sem disparar o codigo real
+        Notificacao.enviarEmailConfirmacao(this.cliente, this.rastreio);
+    }
+}
+```
+O acoplamento fica "enterrado" no corpo do método, invisível na assinatura — destrói a testabilidade e viola o Princípio Aberto/Fechado (mudar de e-mail para WhatsApp exige mexer em `Pedido`).
+
+**3. Acoplamento de Estampa** — passar um objeto inteiro quando só uma fração dele é usada:
+
+```java
+public class NotificacaoEmail {
+    public void enviarConfirmacao(Cliente cliente) {
+        String email = cliente.getEmail(); // so precisa disso, mas "conhece" o Cliente inteiro
+        System.out.println("Enviando para: " + email);
+    }
+}
+```
+Renomear `Cliente` para `Usuario` quebra `NotificacaoEmail`, mesmo que a lógica de e-mail não tenha mudado nada.
+
+**4. Acoplamento de Dados (o ideal)** — só o dado estritamente necessário trafega:
+
+```java
+public class Notificacao {
+    // Desconhece completamente a existencia de "Cliente"
+    public static void enviarEmailConfirmacao(String emailDestino, String rastreio) {
+        System.out.println("Enviando e-mail para: " + emailDestino);
+    }
+}
+// O orquestrador extrai o dado antes de chamar:
+Notificacao.enviarEmailConfirmacao(this.cliente.getEmail(), this.rastreio);
+```
+
+Com essa refatoração, `Notificacao` vira um serviço reutilizável — pode notificar clientes, fornecedores, administradores, sem carregar toda a bagagem de `Cliente` junto.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Nível 1 (Pior): Acoplamento de Conteúdo
+
+```java
+public List itens = new ArrayList<>(); // publico!
+c.itens.clear(); // outra classe mutila o estado por fora
+```
+
+## Nível 2: Acoplamento Comum (Global)
+
+```java
+Notificacao.enviarEmailConfirmacao(this.cliente, this.rastreio); // estatico, oculto
+```
+
+::: {.fragment}
+Impossível testar sem disparar o e-mail de verdade.
+:::
+
+## Nível 3: Acoplamento de Estampa
+
+```java
+public void enviarConfirmacao(Cliente cliente) { // so precisa do email!
+    String email = cliente.getEmail();
+}
+```
+
+## Nível 4 (Ideal): Acoplamento de Dados
+
+```java
+public static void enviarEmailConfirmacao(String emailDestino, String rastreio) { ... }
+```
+
+::: {.fragment}
+`Notificacao` não sabe mais que `Cliente` existe — reutilizável em qualquer contexto.
+:::
+
+:::
+
+::: {.callout-tip}
+## Por que o Acoplamento de Estampa é considerado "médio" — pior que Dados, mas melhor que Comum ou Conteúdo?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Escala de Myers
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. O Acoplamento de Conteúdo, o pior nível, ocorre quando uma classe modifica diretamente atributos de outra.
+b. O Acoplamento Comum via métodos estáticos é fácil de testar, pois não exige instanciar objetos.
+c. O Acoplamento de Estampa cria dependências transitivas: quem recebe o objeto herda tudo que ele conhece.
+d. O Acoplamento de Dados é o nível ideal, pois módulos comunicam-se só com o estritamente necessário.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Escala de Myers — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é a definição do "pecado original".
+b. **Falso** — pelo contrário, é o mais difícil de testar, pois a dependência fica oculta e não pode ser substituída por um mock.
+c. **Verdadeiro** — é o risco central do Acoplamento de Estampa.
+d. **Verdadeiro** — é a definição do nível ideal.
+:::
+
+:::
+
+# GRASP: o Especialista na Informação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Para além do diagnóstico intuitivo de *code smells*, o framework **GRASP** (Craig Larman) formaliza um critério: a responsabilidade de uma tarefa deve pertencer à classe que possui a maior parte das informações necessárias para cumpri-la — o **Especialista na Informação**.
+
+"Calcular o custo total" exige conhecer a lista de itens, quantidades e preços — informação que mora inteiramente dentro de `Carrinho`. A teoria de Larman classifica `Carrinho` como o Especialista; tentar fazer esse cálculo em `Pedido` força um roubo de informação (Feature Envy). Respeitar o Especialista na Informação garante que o comportamento siga os dados — resolvendo, ao mesmo tempo, o problema técnico (Feature Envy) e o organizacional (lógica de negócio centralizada e testável).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Princípio (GRASP, Larman)
+
+::: {.fragment}
+A responsabilidade pertence a quem tem a **informação** necessária para cumpri-la.
+:::
+
+::: {.fragment}
+"Calcular o total" precisa da lista de itens → mora no `Carrinho` → `Carrinho` é o Especialista.
+:::
+
+::: {.fragment}
+Comportamento segue dados: resolve Feature Envy **e** mantém a lógica de negócio centralizada.
+:::
+
+:::
+
+# O Limite da Composição e o Muro de Fronteira (DIP)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Mesmo com Feature Envy resolvido, ainda existe uma falha estrutural: acoplamento a **classes concretas**.
+
+```java
+public class Cliente {
+    private Cartao cartao; // acoplamento forte com implementacao CONCRETA
+    public void cadastrarCartao(double limite) { this.cartao = new Cartao(limite); }
+    public void realizarPagamento(double valor) { this.cartao.processar(valor); }
+}
+```
+
+`Cliente` (módulo de alto nível, regra de negócio) depende fisicamente de `Cartao` (módulo de baixo nível, detalhe técnico). Se o negócio pedir Pix e Boleto, o resultado é uma "gambiarra":
+
+```java
+public class Cliente {
+    private Cartao cartao;
+    private Pix pix;
+    private Boleto boleto;
+
+    public void pagar(double valor) {
+        // Violacao do OCP: complexidade ciclomatica explode
+        if (this.cartao != null) this.cartao.processar(valor);
+        else if (this.pix != null) this.pix.transferir(valor);
+        else if (this.boleto != null) this.boleto.gerarCodigoBarra(valor);
+    }
+}
+```
+
+Cada novo método de pagamento exige reabrir e recompilar `Cliente` — violando o **Princípio Aberto/Fechado** (aberto para extensão, fechado para modificação).
+
+A solução é o **Princípio da Inversão de Dependência** (DIP, Robert C. Martin): módulos de alto nível não devem depender de módulos de baixo nível — ambos devem depender de **abstrações**.
+
+```java
+public class Cliente {
+    // Dependemos de uma abstracao! O "Muro de Fronteira" esta erguido.
+    private Pagavel formaDePagamento;
+
+    public void pagar(double valor) {
+        // Polimorfismo: o Cliente confia cegamente no contrato
+        this.formaDePagamento.pagamentoConfirmado(valor);
+    }
+}
+```
+
+A dependência se inverte: `Cliente` já não olha para baixo pedindo serviços a `Cartao` — ele impõe um contrato (`Pagavel`), e são `Cartao` e `Pix` que precisam olhar para cima e obedecer. Se surgir o pagamento por criptomoeda amanhã, `Cliente` permanece intocado.
+
+**O gancho para a próxima aula.** Isso levanta um problema técnico: o Java é fortemente tipado — como o compilador aceita que a mesma variável `formaDePagamento` receba ora um `Pix`, ora um `Cartao`, se são classes completamente diferentes? A resposta é o **Polimorfismo**, viabilizado por Interfaces e Herança — os mecanismos de linguagem que a Aula 6 vai construir.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Limite: Acoplamento a Classes Concretas
+
+```java
+public class Cliente {
+    private Cartao cartao; // alto nivel depende de baixo nivel
+}
+```
+
+## O Pesadelo da Expansão
+
+```java
+public void pagar(double valor) {
+    if (this.cartao != null) this.cartao.processar(valor);
+    else if (this.pix != null) this.pix.transferir(valor);
+    else if (this.boleto != null) this.boleto.gerarCodigoBarra(valor);
+}
+```
+
+::: {.fragment}
+Cada novo meio de pagamento reabre `Cliente` — viola o **Princípio Aberto/Fechado**.
+:::
+
+## DIP: o Muro de Fronteira
+
+```java
+private Pagavel formaDePagamento; // abstracao, nao implementacao
+public void pagar(double valor) { this.formaDePagamento.pagamentoConfirmado(valor); }
+```
+
+::: {.fragment}
+Inversão: `Cartao`/`Pix` se adaptam ao contrato — `Cliente` fica imune a novidades.
+:::
+
+## O Gancho: Múltiplas Identidades
+
+::: {.fragment}
+Como a **mesma variável** `Pagavel` aceita ora um `Pix`, ora um `Cartao`? Resposta: **Polimorfismo** — próxima aula.
+:::
+
+:::
+
+::: {.callout-tip}
+## O que exatamente "se inverteu" no Princípio da Inversão de Dependência — o que dependia de quê antes, e o que passa a depender de quê depois?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Inversão de Dependência
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. No DIP, tanto o módulo de alto nível quanto o de baixo nível devem depender de uma abstração comum.
+b. Antes do DIP, `Cliente` (alto nível) dependia diretamente de `Cartao` (baixo nível).
+c. Depois do DIP, é `Cliente` que precisa se adaptar às mudanças em `Cartao` e `Pix`.
+d. A cadeia de `if/else` para escolher entre `Cartao`, `Pix` e `Boleto` é um sintoma de violação do Princípio Aberto/Fechado.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Inversão de Dependência — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — é a essência do DIP.
+b. **Verdadeiro** — é o problema de design descrito no início do bloco.
+c. **Falso** — é o oposto: depois da inversão, são `Cartao` e `Pix` que se adaptam ao contrato de `Cliente`.
+d. **Verdadeiro** — cada novo meio de pagamento reabre o código existente, violando OCP.
+:::
+
+:::
+
+# Conclusão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando às quatro perguntas da abertura:
+
+1. **Associação correta, comportamento errado:** passar a dependência pelo construtor não impede o objeto de "espreitar" o interior do colaborador — isso ainda é Feature Envy.
+2. **Medir com números:** CBO conta quantas dependências existem; a Escala de Myers classifica quão tóxica cada uma é.
+3. **Quem deve fazer o quê:** o Especialista na Informação — a classe que já tem os dados necessários.
+4. **Além da delegação:** quando até a delegação bem-feita ainda acopla o núcleo a uma classe concreta, a saída é inverter a dependência via uma abstração (DIP).
+
+### Ponte para a Aula 6 {.unnumbered}
+
+Terminamos com uma pergunta em aberto: como o compilador permite que a mesma variável aceite tipos completamente diferentes, desde que obedeçam ao mesmo contrato? A Aula 6 responde com os mecanismos de linguagem que tornam isso possível — Interfaces e Herança — e com testes automatizados (JUnit) para verificar que esses contratos são cumpridos.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos
+
+1. Associação correta não garante desacoplamento lógico (Feature Envy)
+2. CBO mede *quanto*; a Escala de Myers mede *quão tóxico*
+3. GRASP: responsabilidade pertence a quem tem a informação
+4. DIP: alto e baixo nível dependem de abstrações, nunca um do outro
+
+::: {.fragment}
+**Próxima aula:** Interfaces e Herança — os mecanismos que tornam `Pagavel` real.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. Explique por que a separação de código em arquivos diferentes e o uso de construtores não são, por si só, garantia de desacoplamento. Diferencie acoplamento físico de acoplamento lógico, usando o exemplo de `Pedido` e `Carrinho`.
+
+2. Entre a classe `Pedido` e a classe `Carrinho`, qual deveria calcular o valor total da compra, segundo o princípio GRASP do Especialista na Informação? Justifique com base em quem possui os dados necessários.
+
+3. O que significa dizer que "módulos de alto nível não devem depender de módulos de baixo nível"? Explique como criar uma interface `Pagavel` inverte a dependência entre `Cliente` e `Cartao`.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-tip}
+## Falso Desacoplamento
+
+a. ( ) O acoplamento físico (separação em arquivos) garante, por si só, o desacoplamento lógico entre classes.
+b. ( ) Passar uma dependência via construtor é estruturalmente correto, mas pode esconder violações de encapsulamento.
+c. ( ) O paradigma da Caixa Preta permite acessar os dados internos de um colaborador associado, desde que via getter.
+d. ( ) Ter a referência de um objeto não dá o direito de processar seus dados internos por fora dele.
+:::
+
+::: {.callout-tip}
+## Feature Envy (Inveja de Recursos)
+
+a. ( ) É um *code smell* onde um método parece mais interessado nos dados de outra classe do que nos próprios.
+b. ( ) O sintoma clássico é o uso repetitivo de getters de um colaborador para processar dados externamente.
+c. ( ) A técnica de *Move Method* cura o problema movendo o comportamento para onde os dados residem.
+d. ( ) Feature Envy não tem relação nenhuma com o princípio "Tell, Don't Ask".
+:::
+
+::: {.callout-tip}
+## A Métrica CBO
+
+a. ( ) CBO conta o número de classes externas distintas com as quais uma classe interage.
+b. ( ) Refatorar de Feature Envy para delegação pura tende a reduzir o CBO da classe orquestradora.
+c. ( ) Manter o CBO baixo reduz o risco de Efeito Cascata e facilita testes isolados.
+d. ( ) O objetivo ideal de qualquer design é atingir CBO igual a zero.
+:::
+
+::: {.callout-tip}
+## Acoplamento de Conteúdo e Comum
+
+a. ( ) O Acoplamento de Conteúdo, o pior nível da Escala de Myers, envolve modificar atributos internos de outra classe.
+b. ( ) Atributos `public` favorecem diretamente o Acoplamento de Conteúdo.
+c. ( ) O Acoplamento Comum via métodos estáticos facilita a substituição por mocks em testes automatizados.
+d. ( ) Uma chamada estática oculta no corpo de um método é uma dependência mais difícil de enxergar do que uma no construtor.
+:::
+
+::: {.callout-tip}
+## Acoplamento de Estampa e de Dados
+
+a. ( ) O Acoplamento de Estampa ocorre quando se passa um objeto inteiro para usar só uma fração dele.
+b. ( ) Renomear a classe passada por Estampa pode quebrar o receptor, mesmo sem mudança na lógica de negócio.
+c. ( ) O Acoplamento de Dados é o nível ideal, comunicando-se só com o estritamente necessário.
+d. ( ) Refatorar de Estampa para Dados torna o serviço menos reutilizável, pois perde contexto.
+:::
+
+::: {.callout-tip}
+## GRASP: Especialista na Informação
+
+a. ( ) A responsabilidade de uma tarefa deve pertencer à classe que detém os dados necessários para realizá-la.
+b. ( ) Segundo o GRASP, o `Pedido` deveria calcular o total, já que ele "contém" o `Carrinho`.
+c. ( ) Seguir o Especialista na Informação ajuda a manter a lógica de negócio centralizada e testável.
+d. ( ) O framework GRASP foi consolidado por Craig Larman.
+:::
+
+::: {.callout-tip}
+## O Limite da Composição
+
+a. ( ) `Cliente` com `private Cartao cartao` acoplado a uma classe concreta é um exemplo do limite da composição básica.
+b. ( ) Adicionar `Pix` e `Boleto` como novos atributos opcionais em `Cliente`, com `if/else`, respeita o OCP.
+c. ( ) A explosão de complexidade ciclomática por `if/else` é um sintoma de acoplamento a classes concretas.
+d. ( ) O acoplamento a implementações concretas impede a extensão *Plug-and-Play* do sistema.
+:::
+
+::: {.callout-tip}
+## Inversão de Dependência (DIP)
+
+a. ( ) Módulos de alto nível não devem depender de módulos de baixo nível; ambos devem depender de abstrações.
+b. ( ) Abstrações devem depender dos detalhes técnicos das implementações concretas.
+c. ( ) O DIP permite erguer um "Muro de Fronteira" entre o núcleo do negócio e a infraestrutura.
+d. ( ) Depois do DIP, `Cartao` e `Pix` precisam se adaptar ao contrato imposto por `Cliente`.
+:::
+
+::: {.callout-tip}
+## O Princípio Aberto/Fechado (OCP) e o DIP
+
+a. ( ) Um design é "aberto para extensão, fechado para modificação" quando novos comportamentos não exigem reabrir classes antigas.
+b. ( ) A cadeia de `if/else` sobre tipos concretos de pagamento é compatível com o OCP.
+c. ( ) Depender de uma interface como `Pagavel`, em vez de classes concretas, favorece o cumprimento do OCP.
+d. ( ) O DIP e o OCP trabalham juntos: abstrações estáveis permitem estender o sistema sem modificar o núcleo.
+:::
+
+::: {.callout-tip}
+## Barreira da Tipagem e o Gancho para Polimorfismo
+
+a. ( ) Em Java, uma variável do tipo `Pagavel` pode referenciar `Pix` ou `Cartao`, desde que ambos implementem o contrato.
+b. ( ) A composição pura, sem nenhum mecanismo de contrato, já é suficiente para essa substituição em tempo de execução.
+c. ( ) Interfaces e Herança são os mecanismos de linguagem que tornam esse contrato exigível pelo compilador.
+d. ( ) O problema de múltiplas classes assumirem a mesma "identidade" perante o sistema é resolvido pelo Polimorfismo.
+:::
+
+::: {.callout-tip}
+## Síntese: do Acoplamento ao Contrato
+
+a. ( ) Coesão, CBO, Escala de Myers e GRASP são ferramentas complementares para diagnosticar e melhorar o design.
+b. ( ) Resolver Feature Envy automaticamente resolve também o acoplamento a classes concretas do Bloco de DIP.
+c. ( ) Um sistema bem desenhado combina baixo CBO, acoplamento de dados, especialistas corretos e abstrações estáveis.
+d. ( ) A jornada desta aula termina exatamente onde a próxima começa: como impor contratos de verdade no compilador.
+:::
+
+:::

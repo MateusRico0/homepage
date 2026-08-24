@@ -6,6 +6,7 @@ date: today
 lang: pt-BR
 format:
   html:
+    include-after-body: _lesson-nav.html
     theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
     toc: true
     toc-depth: 3
@@ -39,7 +40,9 @@ execute:
   message: false
 ---
 
+::: {.content-visible when-format="html" unless-format="revealjs"}
 [Slides →](slides.html){.see-all}
+:::
 
 ```{python}
 #| echo: false
@@ -113,16 +116,22 @@ Três perguntas guiam o resto da aula:
 ## O Preço da Forma Fixa
 
 ::: {.fragment}
-Aulas 1–2: fronteira gaussiana e Naive Bayes decidem a **forma** da
-fronteira *antes* de ver os dados — sempre uma reta.
+* Aulas 1–2: fronteira gaussiana e Naive Bayes fixam a **forma** da
+fronteira *antes* de ver os dados — a família (reta, hiperplano) é
+escolhida a priori; só os parâmetros vêm da amostra.
 :::
 
 ::: {.fragment}
-<br/>
-
-::: {.callout-important icon=false}
-E se deixássemos os próprios dados decidirem a forma da fronteira, sem suposição paramétrica alguma?
+* E se os próprios dados decidissem a forma da fronteira, sem suposição
+paramétrica alguma?
 :::
+
+::: {.fragment}
+* A tentação é tratar isso como pura heurística — "corte até ficar
+homogêneo". Esta aula argumenta o contrário: o critério de corte é o
+mesmo **princípio de máxima verossimilhança** de sempre, aplicado a um
+modelo diferente — constante por partes, cuja forma nasce do próprio
+particionamento.
 :::
 
 :::
@@ -132,16 +141,16 @@ E se deixássemos os próprios dados decidirem a forma da fronteira, sem suposi�
 ## Três Perguntas de Hoje
 
 ::: {.fragment}
-**1.** O que, exatamente, uma árvore está estimando?
+* **1.** O que, exatamente, uma árvore está estimando?
 :::
 
 ::: {.fragment}
-**2.** Por que "reduzir a impureza" é, por baixo do capô, uma
+* **2.** Por que "reduzir a impureza" é, por baixo do capô, uma
 maximização de verossimilhança?
 :::
 
 ::: {.fragment}
-**3.** Que preço se paga por essa liberdade — é sempre bom negócio?
+* **3.** Que preço se paga por essa liberdade — é sempre bom negócio?
 :::
 
 :::
@@ -168,7 +177,7 @@ raiz até uma folha.
 #| echo: false
 #| fig-align: center
 
-fig, ax = plt.subplots(figsize=(5, 5))
+fig, ax = plt.subplots(figsize=(6, 6))
 
 theta1, theta2, theta3, theta4 = 0.45, 0.55, 0.70, 0.60
 
@@ -200,33 +209,43 @@ plt.show()
 A árvore por trás dessa partição é a travessia que gera essas cinco
 regiões, cada corte testando uma única variável contra um limiar:
 
-```{mermaid}
+::: {.fig-resize style="width: 50%; margin: 0 auto;"}
+```{.tikz}
 %%| fig-align: center
-flowchart TB
-    N1["x₁ ≤ θ₁?"]
-    N2["x₂ ≤ θ₂?"]
-    N3["x₁ ≤ θ₄?"]
-    N4["x₂ ≤ θ₃?"]
-    A["A"]
-    B["B"]
-    C["C"]
-    D["D"]
-    E["E"]
+\definecolor{nodecolor}{RGB}{93,109,126}
+\definecolor{nodeborder}{RGB}{55,65,81}
+\definecolor{leafcolor}{RGB}{17,122,101}
+\definecolor{leafborder}{RGB}{11,74,63}
 
-    N1 -->|sim| N2
-    N1 -->|não| N3
-    N2 -->|sim| A
-    N2 -->|não| B
-    N3 -->|sim| C
-    N3 -->|não| N4
-    N4 -->|sim| D
-    N4 -->|não| E
+\begin{tikzpicture}[
+  decision/.style={rectangle, rounded corners, fill=nodecolor, draw=nodeborder, line width=1pt, text=white, minimum width=2.6cm, minimum height=1cm, align=center, font=\small},
+  leaf/.style={rectangle, rounded corners, fill=leafcolor, draw=leafborder, line width=1pt, text=white, minimum width=1cm, minimum height=1cm, align=center, font=\small},
+  elabel/.style={font=\scriptsize, fill=white, inner sep=1pt},
+  edge from parent/.style={draw, thick, ->},
+  level 1/.style={sibling distance=48mm, level distance=16mm},
+  level 2/.style={sibling distance=24mm, level distance=16mm},
+  level 3/.style={sibling distance=24mm, level distance=16mm}
+]
 
-    classDef node fill:#5D6D7E,stroke:#374151,stroke-width:2px,color:#fff;
-    classDef leaf fill:#117A65,stroke:#0b4a3f,stroke-width:2px,color:#fff;
-    class N1,N2,N3,N4 node;
-    class A,B,C,D,E leaf;
+\node[decision] {$x_1 \le \theta_1?$}
+  child { node[decision] {$x_2 \le \theta_2?$}
+    child { node[leaf] {A} edge from parent node[elabel] {sim} }
+    child { node[leaf] {B} edge from parent node[elabel] {não} }
+    edge from parent node[elabel] {sim}
+  }
+  child { node[decision] {$x_1 \le \theta_4?$}
+    child { node[leaf] {C} edge from parent node[elabel] {sim} }
+    child { node[decision] {$x_2 \le \theta_3?$}
+      child { node[leaf] {D} edge from parent node[elabel] {sim} }
+      child { node[leaf] {E} edge from parent node[elabel] {não} }
+      edge from parent node[elabel] {não}
+    }
+    edge from parent node[elabel] {não}
+  };
+
+\end{tikzpicture}
 ```
+:::
 
 ::: {.callout-note}
 ## Isto **não** é um modelo probabilístico gráfico
@@ -244,12 +263,95 @@ entrava numa fórmula fixa (gaussiana, produto de Bernoullis) cujos
 *parâmetros* eram estimados dos dados, mas cuja *forma funcional* era
 escolhida por nós, de antemão. Aqui, a própria forma — quantas regiões,
 onde ficam os cortes — é aprendida dos dados. Isso é, em sentido
-estrito, uma estimativa **não-paramétrica** de $p(\mathbf{x}\mid
-\mathcal{C}_k)$ (em classificação) ou de $\mathbb{E}[t\mid\mathbf{x}]$
+estrito, uma estimativa **não-paramétrica** de $p(\mathcal{C}_k \mid
+\mathbf{x})$ (em classificação) ou de $\mathbb{E}[t\mid\mathbf{x}]$
 (em regressão): não-paramétrica não porque não haja números para
 ajustar, mas porque o número de "parâmetros" efetivos (quantas regiões,
 com que forma) cresce com os próprios dados, em vez de ser fixado a
 priori.
+
+::: {.callout-note}
+## Modelos generativos vs. preditivos
+
+Nas Aulas 1 e 2, o caminho até a decisão passava sempre pelo mesmo
+lugar: ajustar $p(\mathbf{x}\mid\mathcal{C}_k)$ para cada classe (a
+densidade condicional), multiplicar pela priori $\pi_k$, e obter a
+posteriori $p(\mathcal{C}_k\mid\mathbf{x})$ pelo Teorema de Bayes.
+Chamamos esse caminho de **modelo generativo**: ele modela como os
+dados de cada classe são gerados, e a regra de decisão é uma
+consequência derivada desse modelo.
+
+A árvore de decisão não faz isso. Em nenhum momento do procedimento
+existe uma densidade de $\mathbf{x}$ — nem geral, nem por classe. Cada
+folha estima diretamente a proporção de cada classe entre os pontos que
+caíram ali, $\hat p(\mathcal{C}_k \mid \mathbf{x}\in\mathcal{R}_\tau) =
+n_{\tau k}/N_\tau$: uma estimativa direta da **posteriori**, sem passar
+por uma densidade condicional de classe. É o primeiro modelo
+**preditivo** (ou discriminativo, em sentido amplo) do curso — ele
+aprende $p(\mathcal{C}_k\mid\mathbf{x})$ (ou $\mathbb{E}[t\mid
+\mathbf{x}]$, em regressão) diretamente, sem nunca modelar a
+distribuição de $\mathbf{x}$ pelo caminho.
+:::
+
+::: {.callout-note}
+## Paramétrico vs. não-paramétrico, mais formalmente
+
+Um modelo é **paramétrico** quando é indexado por um vetor de
+parâmetros $\theta \in \mathbb{R}^d$ de dimensão $d$ **fixa**, escolhida
+antes de ver os dados e que não cresce com o tamanho da amostra $N$. A
+gaussiana da Aula 1 ($\theta=(\mu,\sigma^2)$, $d=2$) e o Naive Bayes da
+Aula 2 são exemplos: por maior que seja $N$, o número de parâmetros
+ajustados continua o mesmo.
+
+Um modelo é **não-paramétrico** quando sua complexidade efetiva — o
+número de graus de liberdade que de fato se ajustam aos dados — cresce
+com $N$, em vez de ser fixada a priori. Numa árvore, esse papel é
+desempenhado pelo número de folhas: nada impede, em princípio, que uma
+árvore sem limite de profundidade continue crescendo à medida que mais
+dados chegam, criando mais regiões e mais constantes locais.
+"Não-paramétrico" não significa "sem parâmetro nenhum" — significa que
+o **número** de parâmetros não está fixado de antemão.
+:::
+
+::: {.callout-note}
+## Verossimilhança e o estimador de máxima verossimilhança (MLE)
+
+Dado um modelo probabilístico $p(\mathbf{x}\mid\theta)$ e uma amostra
+observada $\mathcal{D}=\{\mathbf{x}_1,\dots,\mathbf{x}_N\}$ i.i.d., a
+**função de verossimilhança** é a mesma expressão da densidade
+conjunta, mas vista como função de $\theta$ com os dados fixos:
+$$
+L(\theta; \mathcal{D}) = p(\mathcal{D}\mid\theta) = \prod_{n=1}^N
+p(\mathbf{x}_n\mid\theta).
+$$
+Repare na inversão de papéis em relação a uma densidade comum:
+$p(\mathbf{x}\mid\theta)$ varia $\mathbf{x}$ com $\theta$ fixo;
+$L(\theta;\mathcal{D})$ varia $\theta$ com os dados fixos. O
+**estimador de máxima verossimilhança** (MLE) é o valor de $\theta$ que
+torna os dados observados os mais prováveis possível sob o modelo:
+$$
+\hat\theta_{\text{MLE}} = \arg\max_\theta L(\theta;\mathcal{D}) =
+\arg\max_\theta \ln L(\theta;\mathcal{D}),
+$$
+usando o logaritmo (monótono crescente, não muda o $\arg\max$) para
+trocar produtório por somatório.
+
+**Exemplo canônico: a gaussiana.** Para $x_n \sim \mathcal{N}(\mu,
+\sigma^2)$ i.i.d., a log-verossimilhança é $\ell(\mu,\sigma^2) =
+-\frac{N}{2}\ln(2\pi\sigma^2) - \frac{1}{2\sigma^2}\sum_n(x_n-\mu)^2$.
+Maximizando em $\mu$ (com $\sigma^2$ fixo) obtém-se $\hat\mu_{\text{MLE}}
+= \bar{x}$, a média amostral; maximizando também em $\sigma^2$
+obtém-se $\hat\sigma^2_{\text{MLE}} = \frac{1}{N}\sum_n(x_n-\bar x)^2$
+— note o $N$ no denominador, não $N-1$: o MLE da variância é
+**enviesado** para baixo em amostras finitas, um fato que reaparece
+quando estimadores de covariância forem discutidos mais adiante no
+curso.
+
+Este é exatamente o mecanismo que o próximo bloco usa para justificar a
+média como previsão de uma folha de regressão — e a Seção seguinte
+repete o mesmo argumento para uma folha de classificação, só que com
+uma verossimilhança categórica em vez de gaussiana.
+:::
 
 Os próximos dois blocos tratam, em sequência, do critério que decide
 *onde* colocar cada corte — primeiro em regressão, onde a álgebra é mais
@@ -262,9 +364,9 @@ em classificação, onde a mesma lógica se veste de "impureza".
 
 ## Cinco Regiões, Quatro Cortes
 
+::: {.fig-resize style="width: 25%; margin: 0 auto;"}
 ```{python}
 #| echo: false
-#| fig-align: center
 
 fig, ax = plt.subplots(figsize=(5, 5))
 
@@ -290,6 +392,7 @@ ax.set_yticks([theta2, theta3]); ax.set_yticklabels([r"$\theta_2$", r"$\theta_3$
 plt.tight_layout()
 plt.show()
 ```
+:::
 
 ::: {.fragment}
 Sequência de perguntas binárias, cada uma testando **uma única
@@ -302,38 +405,48 @@ variável** contra um limiar.
 
 ## A Árvore Por Trás da Partição
 
-```{mermaid}
-%%| fig-align: center
-flowchart TB
-    N1["x₁ ≤ θ₁?"]
-    N2["x₂ ≤ θ₂?"]
-    N3["x₁ ≤ θ₄?"]
-    N4["x₂ ≤ θ₃?"]
-    A["A"]
-    B["B"]
-    C["C"]
-    D["D"]
-    E["E"]
+::: {.fig-resize style="width: 150%; margin-left: -25%;"}
+```{.tikz}
+\definecolor{nodecolor}{RGB}{93,109,126}
+\definecolor{nodeborder}{RGB}{55,65,81}
+\definecolor{leafcolor}{RGB}{17,122,101}
+\definecolor{leafborder}{RGB}{11,74,63}
 
-    N1 -->|sim| N2
-    N1 -->|não| N3
-    N2 -->|sim| A
-    N2 -->|não| B
-    N3 -->|sim| C
-    N3 -->|não| N4
-    N4 -->|sim| D
-    N4 -->|não| E
+\begin{tikzpicture}[
+  decision/.style={rectangle, rounded corners, fill=nodecolor, draw=nodeborder, line width=1pt, text=white, minimum width=2.6cm, minimum height=1cm, align=center, font=\small},
+  leaf/.style={rectangle, rounded corners, fill=leafcolor, draw=leafborder, line width=1pt, text=white, minimum width=1cm, minimum height=1cm, align=center, font=\small},
+  elabel/.style={font=\scriptsize, fill=white, inner sep=1pt},
+  edge from parent/.style={draw, thick, ->},
+  level 1/.style={sibling distance=48mm, level distance=16mm},
+  level 2/.style={sibling distance=24mm, level distance=16mm},
+  level 3/.style={sibling distance=24mm, level distance=16mm}
+]
 
-    classDef node fill:#5D6D7E,stroke:#374151,stroke-width:2px,color:#fff;
-    classDef leaf fill:#117A65,stroke:#0b4a3f,stroke-width:2px,color:#fff;
-    class N1,N2,N3,N4 node;
-    class A,B,C,D,E leaf;
+\node[decision] {$x_1 \le \theta_1?$}
+  child { node[decision] {$x_2 \le \theta_2?$}
+    child { node[leaf] {A} edge from parent node[elabel] {sim} }
+    child { node[leaf] {B} edge from parent node[elabel] {não} }
+    edge from parent node[elabel] {sim}
+  }
+  child { node[decision] {$x_1 \le \theta_4?$}
+    child { node[leaf] {C} edge from parent node[elabel] {sim} }
+    child { node[decision] {$x_2 \le \theta_3?$}
+      child { node[leaf] {D} edge from parent node[elabel] {sim} }
+      child { node[leaf] {E} edge from parent node[elabel] {não} }
+      edge from parent node[elabel] {não}
+    }
+    edge from parent node[elabel] {não}
+  };
+
+\end{tikzpicture}
 ```
+:::
 
 ::: {.fragment}
-::: {.callout-note icon=false}
-Não é um modelo probabilístico gráfico — é uma função determinística que mapeia $\mathbf{x}$ a uma região, e a região a uma constante.
-:::
+Não é um modelo probabilístico gráfico — não representa uma conjunta
+com dependências entre variáveis, como as redes de outras partes do
+curso. É, simplesmente, uma função **determinística** (dado o treino)
+que mapeia $\mathbf{x}$ a uma região, e a região a uma constante.
 :::
 
 :::
@@ -343,42 +456,156 @@ Não é um modelo probabilístico gráfico — é uma função determinística q
 ## A Inversão de Papéis
 
 ::: {.fragment}
-**Aulas 1–2:** a fórmula (gaussiana, produto de Bernoullis) é fixada
-antes — só os *parâmetros* vêm dos dados.
+* **Aulas 1–2:** $\mathbf{x}$ entrava numa fórmula fixa (gaussiana,
+produto de Bernoullis) cujos *parâmetros* vinham dos dados, mas cuja
+*forma funcional* era escolhida por nós, de antemão.
 :::
 
 ::: {.fragment}
-<br/>
-**Árvore:** a própria *forma* (quantas regiões, onde ficam os cortes)
-vem dos dados — estimativa **não-paramétrica**.
+* **Árvore:** a própria forma — quantas regiões, onde ficam os cortes —
+é aprendida dos dados. Estimativa **não-paramétrica** de
+$p(\mathcal{C}_k\mid\mathbf{x})$ ou de $\mathbb{E}[t\mid\mathbf{x}]$.
 :::
 
 ::: {.fragment}
-<br/>
-
-::: {.callout-tip icon=false}
-Os próximos dois blocos: o critério que decide *onde* cortar, primeiro em regressão, depois em classificação.
-:::
+* "Não-paramétrico" não é "sem parâmetro" — é "o número de parâmetros
+efetivos cresce com os dados, em vez de ser fixado a priori".
 :::
 
+::: {.fragment}
+* Os próximos dois blocos: o critério que decide *onde* cortar — primeiro
+em regressão, depois em classificação.
 :::
 
-::: {.callout-tip}
-## O que muda, na prática, entre "escolher uma família de curvas" e "deixar a partição emergir dos dados"?
-
-Escreva um exemplo (pode ser hipotético) de um problema em que você
-esperaria que uma fronteira em forma de reta funcionasse mal, mas uma
-árvore se saísse bem (2 min).
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## O que muda, na prática, entre "escolher uma família de curvas" e "deixar a partição emergir dos dados"?
+## Modelos Generativos vs. Preditivos
+
+::: {.fragment}
+* **Aulas 1–2 (generativo):** ajusta $p(\mathbf{x}\mid\mathcal{C}_k)$ por
+classe (a densidade condicional), multiplica pela priori $\pi_k$,
+obtém a posteriori pelo Teorema de Bayes. Modela como os dados são
+*gerados*; a decisão é consequência derivada disso.
+:::
+
+::: {.fragment}
+* **Árvore (preditivo):** em nenhum momento existe uma densidade de
+$\mathbf{x}$ — nem geral, nem por classe. Cada folha estima direto a
+posteriori,
+$$\hat p(\mathcal{C}_k\mid\mathbf{x}\in\mathcal{R}_\tau) = n_{\tau k}/N_\tau,$$
+sem nunca passar por uma densidade condicional de classe.
+:::
+
+::: {.fragment}
+* É o primeiro modelo **preditivo** (discriminativo, em sentido amplo) do
+curso e **não-paramétrico**.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Paramétrico vs. Não-Paramétrico
+
+::: {.fragment}
+* **Paramétrico:** indexado por $\theta\in\mathbb{R}^d$, $d$ **fixo**,
+escolhido antes de ver os dados e que não cresce com $N$. Gaussiana da
+Aula 1 ($d=2$), Naive Bayes da Aula 2: por maior que seja $N$, o número
+de parâmetros ajustados não muda.
+:::
+
+::: {.fragment}
+* **Não-paramétrico:** a complexidade efetiva — os graus de liberdade que
+de fato se ajustam aos dados — cresce com $N$. Numa árvore, esse papel
+é o número de folhas: sem limite de profundidade, nada impede a árvore
+de crescer conforme mais dados chegam.
+:::
+
+::: {.fragment}
+* Não é "sem parâmetro nenhum" — é "sem **número fixo** de parâmetros".
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Verossimilhança e MLE, Formalmente
+
+$$L(\theta;\mathcal{D}) = p(\mathcal{D}\mid\theta) = \prod_{n=1}^N p(\mathbf{x}_n\mid\theta) \qquad \hat\theta_{\text{MLE}} = \arg\max_\theta \ln L(\theta;\mathcal{D})$$
+
+::: {.fragment}
+* Note que a densidade $p(\mathbf{x}\mid\theta)$ varia
+$\mathbf{x}$ com $\theta$ fixo. Mas a verossimilhança, $L(\theta;\mathcal{D})$
+varia $\theta$ com os **dados fixos**. Logaritmo troca produtório por
+somatório sem mudar o $\arg\max$.
+:::
+
+::: {.fragment}
+* **Exemplo canônico — gaussiana:** $\hat\mu_{\text{MLE}}=\bar x$ (a média
+amostral); $\hat\sigma^2_{\text{MLE}}=\frac{1}{N}\sum(x_n-\bar x)^2$ —
+repare no $N$ no denominador, não $N-1$: **enviesado para baixo** em
+amostras finitas (vamos ver melhor em seguida).
+:::
+
+::: {.fragment}
+* Este é o mecanismo por trás da média como previsão de folha (Bloco 2) e
+da proporção empírica como previsão de classe (Bloco 4) — mesma lógica,
+verossimilhança diferente.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pergunta
 
 ::: {.callout-tip}
-::: {.fragment}
-*(Um exemplo, hipotético ou real. Compare com um colega.)*
+## O que muda, na prática, entre "escolher uma família de curvas" e "deixar a partição emergir dos dados"?
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. No limite em que o número de pontos de treino tende a infinito,
+   tanto um modelo paramétrico corretamente especificado quanto uma
+   árvore convergem para a fronteira verdadeira — mas o modelo
+   paramétrico, por ter menos a estimar, tende a precisar de menos
+   dados para chegar perto dela.
+b. Se, em vez de uma família paramétrica de baixa dimensão,
+   escolhêssemos uma família paramétrica muito flexível (por exemplo,
+   um polinômio de grau altíssimo), a distinção entre "forma fixa" e
+   "forma que emerge dos dados" desapareceria, já que ambas passam a
+   se ajustar a quase qualquer formato.
+c. Num problema de previsão de safra agrícola em que a relação entre
+   chuva e produtividade é conhecida por seguir aproximadamente uma
+   curva em forma de sino, escolher uma família paramétrica que já
+   capture esse formato (em vez de uma árvore) tende a exigir menos
+   dados para um bom ajuste.
+d. Como uma árvore não assume nenhuma família paramétrica específica,
+   conclui-se que ela nunca introduz nenhum viés sobre a forma da
+   fronteira, ao contrário de um modelo paramétrico.
 :::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pergunta — Resposta
+
+::: {.callout-tip}
+## O que muda, na prática, entre "escolher uma família de curvas" e "deixar a partição emergir dos dados"?
+
+a. **Verdadeiro** — com a família certa, o modelo paramétrico converge
+   mais rápido (menos parâmetros para estimar); a árvore também
+   converge, mas precisa "descobrir" a mesma forma por conta própria.
+b. **Falso** — flexibilidade não é o mesmo que não-paramétrico: um
+   polinômio de grau altíssimo ainda tem dimensão fixa, decidida antes
+   de ver os dados; só o número de folhas de uma árvore cresce com $N$.
+c. **Verdadeiro** — é o próprio argumento de abertura da aula: forma
+   fixa correta é mais barata em dados quando a forma já é conhecida.
+d. **Falso** — a árvore tem um viés próprio, geométrico (cortes
+   alinhados aos eixos), não ausência de viés — assunto da Seção de
+   Limites, mais adiante.
 :::
 
 :::
@@ -435,11 +662,47 @@ $$
 \frac{1}{2\sigma^2} \sum_{\mathbf{x}_n \in \mathcal{R}_\tau} (t_n -
 y_\tau)^2 .
 $$
-Maximizar $\ell_\tau$ em relação a $y_\tau$ é o mesmo que minimizar
-$\sum (t_n-y_\tau)^2$ — exatamente $Q_\tau$. A verificação abaixo
-confirma isso numericamente, com dados simulados: testamos vários
-candidatos para $y_\tau$ e mostramos que o máximo da log-verossimilhança
-bate exatamente com a média amostral.
+
+O caminho de $\ell_\tau$ até $Q_\tau$, passo a passo, sem pular nada:
+
+1. **Isole o que depende de $y_\tau$.** O primeiro termo,
+   $-\frac{N_\tau}{2}\ln(2\pi\sigma^2)$, não contém $y_\tau$ — é uma
+   constante para efeito desta maximização (depende só de $N_\tau$ e do
+   $\sigma^2$ fixado). Maximizar $\ell_\tau(y_\tau)$ é, portanto, o
+   mesmo que maximizar só o segundo termo:
+   $$
+   \arg\max_{y_\tau} \ell_\tau(y_\tau) = \arg\max_{y_\tau}
+   \left[-\frac{1}{2\sigma^2} \sum_{\mathbf{x}_n \in \mathcal{R}_\tau}
+   (t_n - y_\tau)^2\right].
+   $$
+2. **Troque o sinal.** $\frac{1}{2\sigma^2}$ é uma constante
+   **positiva**. Maximizar $-\frac{1}{2\sigma^2}\cdot(\text{algo})$
+   equivale a minimizar esse "algo" (multiplicar por um número negativo
+   inverte quem é máximo e quem é mínimo). Logo:
+   $$
+   \arg\max_{y_\tau} \ell_\tau(y_\tau) = \arg\min_{y_\tau}
+   \sum_{\mathbf{x}_n \in \mathcal{R}_\tau} (t_n - y_\tau)^2 =
+   \arg\min_{y_\tau} Q_\tau(y_\tau).
+   $$
+   Este é o elo central: **maximizar a verossimilhança gaussiana e
+   minimizar a soma de quadrados são, literalmente, o mesmo problema de
+   otimização** — não duas ideias parecidas, a mesma conta.
+3. **Resolva o mínimo.** Derive $Q_\tau$ em relação a $y_\tau$ e iguale
+   a zero:
+   $$
+   \frac{dQ_\tau}{dy_\tau} = -2\sum_{\mathbf{x}_n \in \mathcal{R}_\tau}
+   (t_n - y_\tau) = 0 \;\Longrightarrow\; \sum_{\mathbf{x}_n \in
+   \mathcal{R}_\tau} t_n = N_\tau\, y_\tau \;\Longrightarrow\; y_\tau =
+   \frac{1}{N_\tau}\sum_{\mathbf{x}_n \in \mathcal{R}_\tau} t_n .
+   $$
+   A mesma média amostral do argumento puramente geométrico do início
+   do bloco — só que agora chegamos lá partindo de uma suposição
+   probabilística explícita sobre os dados, não de uma escolha
+   arbitrária de função de perda.
+
+A verificação abaixo confirma isso numericamente, com dados simulados:
+testamos vários candidatos para $y_\tau$ e mostramos que o máximo da
+log-verossimilhança bate exatamente com a média amostral.
 
 ```{python}
 #| echo: true
@@ -569,22 +832,55 @@ limitação estrutural, no Bloco 5.
 ## Intuição → Formalismo: o Que Prever numa Folha?
 
 ::: {.fragment}
-**Intuição:** um só número para representar vários — a média.
+* **Intuição:** um só número para representar vários, minimizando o erro
+quadrático total — o candidato óbvio é a média.
 :::
 
 ::: {.fragment}
-<br/>
-**Formalismo:** a média minimiza a soma de quadrados
+* **Formalismo:** não é só intuição. Se $\mathcal{R}_\tau$ tem $N_\tau$
+pontos e alvos $t_n$, o $y_\tau$ que minimiza
 $$Q_\tau = \sum_{\mathbf{x}_n\in\mathcal{R}_\tau}(t_n-y_\tau)^2$$
-$$\Rightarrow\; y_\tau = \frac{1}{N_\tau}\sum_{\mathbf{x}_n\in\mathcal{R}_\tau} t_n$$
+é exatamente a média amostral,
+$$y_\tau = \frac{1}{N_\tau}\sum_{\mathbf{x}_n\in\mathcal{R}_\tau} t_n$$
+(derivada de $Q_\tau$ igualada a zero — mínimos quadrados de sempre).
 :::
 
 ::: {.fragment}
-<br/>
-
-::: {.callout-tip icon=false}
-Vou fazer uma afirmação forte: essa receita **é** uma maximização de verossimilhança. Vamos verificar.
+* Afirmação mais forte: essa receita **é**, ela mesma, uma maximização de
+verossimilhança — não uma escolha arbitrária de função de perda. Vamos
+verificar.
 :::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## De $\ell_\tau$ a $Q_\tau$, Sem Pular Nada
+Assumimos, em cada região terminal $\mathcal{R}_\tau$, que os alvos seguem uma Gaussiana com média $y_\tau$ e variância $\sigma^2$:
+$$
+p(t_n\mid \mathbf{x}_n\in\mathcal{R}_\tau, y_\tau,\sigma^2)
+= \frac{1}{\sqrt{2\pi\sigma^2}}
+\exp\!\left(-\frac{(t_n-y_\tau)^2}{2\sigma^2}\right).
+$$
+
+::: {.fragment}
+**1.** Para os $N_\tau$ pontos da folha (i.i.d.), a verossimilhança é o produto dessas densidades, e **aplicamos o log** para transformar produto em soma:
+$$
+\ell_\tau(y_\tau)
+= \log L_\tau(y_\tau)
+= \sum_{\mathbf{x}_n\in\mathcal{R}_\tau}\log p(t_n\mid y_\tau,\sigma^2) = \ell_\tau(y_\tau) = -\frac{N_\tau}{2}\ln(2\pi\sigma^2) - \frac{1}{2\sigma^2}\sum(t_n-y_\tau)^2$$
+:::
+
+::: {.fragment}
+**2.** O primeiro termo não tem $y_\tau$ — é constante para a maximização.
+:::
+
+::: {.fragment}
+**3.** $\frac{1}{2\sigma^2}>0$: maximizar $-\frac{1}{2\sigma^2}(\cdot)$ = minimizar $(\cdot)$. Logo $\arg\max_{y_\tau}\ell_\tau = \arg\min_{y_\tau} Q_\tau$.
+:::
+
+::: {.fragment}
+**4.** $\frac{dQ_\tau}{dy_\tau}=0 \;\Rightarrow\; y_\tau=\frac{1}{N_\tau}\sum t_n$ — a média, de novo, agora vinda de uma suposição probabilística explícita.
 :::
 
 :::
@@ -597,7 +893,7 @@ Vou fazer uma afirmação forte: essa receita **é** uma maximização de veross
 #| echo: false
 #| fig-align: center
 
-fig, ax = plt.subplots(figsize=(6, 3.2))
+fig, ax = plt.subplots(figsize=(5.5, 2.9))
 ys = np.linspace(y_hat - 2.5, y_hat + 2.5, 200)
 lls = [loglik_gauss(t_folha, y, sigma2_fixo) for y in ys]
 ax.plot(ys, lls, color=COR_A, lw=2.4)
@@ -610,9 +906,9 @@ plt.show()
 ```
 
 ::: {.fragment}
-::: {.callout-note icon=false}
-O máximo da log-verossimilhança cai exatamente na média amostral — não é coincidência, é o MLE gaussiano.
-:::
+O máximo da log-verossimilhança cai exatamente na média amostral — não
+é coincidência: prever a média numa folha **é** o MLE sob um modelo
+gaussiano com variância compartilhada, não uma convenção arbitrária.
 :::
 
 :::
@@ -636,16 +932,21 @@ plt.show()
 ```
 
 ::: {.fragment}
-Otimizar a estrutura **inteira** de uma vez: inviável. A saída: crescer
-nó a nó, testando exaustivamente variável × limiar a cada passo.
+Se a partição já está dada, o $y_\tau$ ótimo é trivial. O problema
+difícil é a partição em si: otimizar a estrutura **inteira** de uma vez
+é inviável — o número de árvores possíveis explode combinatorialmente.
 :::
 
 ::: {.fragment}
-<br/>
-
-::: {.callout-warning icon=false}
-Essa busca é **míope**: escolhe o melhor corte agora, sem olhar o que ele habilita depois. Volta no Bloco 4.
+Saída prática, **gulosa**: comece com um único nó; a cada passo, busque
+exaustivamente sobre (a) qual variável cortar e (b) que limiar usar,
+calcule o $Q$ resultante nas duas folhas geradas, escolha o menor.
 :::
+
+::: {.fragment}
+Essa busca é **míope** por construção: escolhe o corte que minimiza
+$Q$ *agora*, sem olhar o que ele habilita (ou impede) nos próximos
+níveis. O Bloco 4 volta a este ponto.
 :::
 
 :::
@@ -673,28 +974,959 @@ plt.show()
 ```
 
 ::: {.fragment}
-::: {.callout-note icon=false}
-Nunca deixa de ser uma função em degraus, descontínua nos limiares — guarde isso para o Bloco 5.
-:::
-:::
-
+Com poucas folhas, a árvore mal acompanha a curva; com mais folhas, ela
+aproxima bem — mas **nunca deixa de ser uma função em degraus**,
+descontínua nos limiares. Guarde essa observação para o Bloco 5.
 :::
 
-::: {.callout-tip}
-## Se duas folhas de uma árvore de regressão têm o mesmo número de pontos, a que tem maior soma de quadrados residuais $Q_\tau$ tem, necessariamente, maior variância dos alvos dentro dela?
-
-Pense antes de responder: $Q_\tau$ e a variância amostral diferem só por
-uma constante?
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## Se duas folhas de uma árvore de regressão têm o mesmo número de pontos, a que tem maior soma de quadrados residuais $Q_\tau$ tem, necessariamente, maior variância dos alvos dentro dela?
+## Pergunta
 
 ::: {.callout-tip}
-::: {.fragment}
-*(Pense: $Q_\tau = \sum(t_n-y_\tau)^2$ e a variância amostral $\hat\sigma^2 = Q_\tau/N_\tau$ — mesmo $N_\tau$, mesma ordem.)*
+## Se duas folhas de uma árvore de regressão têm o mesmo número de pontos, a que tem maior soma de quadrados residuais $Q_\tau$ tem, necessariamente, maior variância dos alvos dentro dela?
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. No limite em que duas folhas têm exatamente a mesma variância mas
+   números de pontos muito diferentes (uma com 10 pontos, outra com
+   10.000), a folha maior terá, necessariamente, $Q_\tau$ muito maior,
+   mesmo com variância idêntica.
+b. Se, em vez de comparar duas folhas com o mesmo $N_\tau$,
+   comparássemos duas folhas com $N_\tau$ diferentes, a folha de maior
+   $Q_\tau$ ainda teria, necessariamente, maior variância amostral.
+c. Ao comparar a dispersão de dois grupos de pacientes num estudo
+   médico, um com 50 e outro com 500, a soma dos quadrados dos desvios
+   (análoga a $Q_\tau$) não é uma métrica justa para comparar "quão
+   dispersos" os grupos são, a menos que se normalize pelo tamanho de
+   cada grupo.
+d. Como $Q_\tau$ e a variância amostral $\hat\sigma^2=Q_\tau/N_\tau$
+   diferem só por uma constante quando $N_\tau$ é fixo, conclui-se que
+   minimizar $Q_\tau$ ao comparar candidatos de corte diferentes (que
+   geram folhas de tamanhos diferentes) é equivalente a minimizar a
+   variância média resultante.
 :::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pergunta — Resposta
+
+::: {.callout-tip}
+## Se duas folhas de uma árvore de regressão têm o mesmo número de pontos, a que tem maior soma de quadrados residuais $Q_\tau$ tem, necessariamente, maior variância dos alvos dentro dela?
+
+a. **Verdadeiro** — $Q_\tau=N_\tau\hat\sigma^2$; com variância fixa,
+   $Q_\tau$ escala proporcionalmente a $N_\tau$.
+b. **Falso** — é exatamente a condição "mesmo $N_\tau$" que garante a
+   equivalência; com tamanhos diferentes, uma folha grande de baixa
+   variância pode ter $Q_\tau$ maior que uma pequena de alta variância.
+c. **Verdadeiro** — a soma bruta de quadrados cresce com o tamanho do
+   grupo; só a versão normalizada (dividida por $N$) mede dispersão de
+   forma comparável entre grupos de tamanhos diferentes.
+d. **Falso** — a "constante" que liga $Q_\tau$ e variância muda de
+   candidato para candidato (cada um gera $N_{\text{esq}}$,
+   $N_{\text{dir}}$ diferentes); minimizar a soma de $Q$ não é o mesmo
+   problema que minimizar alguma variância média não-ponderada.
+:::
+
+:::
+
+## O Algoritmo
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Tudo o que vimos até aqui — a média como previsão de folha, o $Q_\tau$ como critério, a busca exaustiva por um limiar — já é o suficiente para escrever o algoritmo por trás de qualquer árvore de regressão, por extenso:
+
+> **Algoritmo — crescimento guloso de uma árvore de regressão**
+>
+> 1. Comece com uma única região $\mathcal{R}_0$, contendo todos os pontos de treino.
+> 2. Enquanto houver folhas elegíveis para corte (respeitando um critério de parada, como profundidade máxima ou número mínimo de pontos por folha):
+>     a. Para **cada folha atual** $\mathcal{R}$, e para **cada variável** $x_j$, teste todo limiar candidato $s$ (tipicamente, os pontos médios entre valores consecutivos de $x_j$ observados em $\mathcal{R}$); calcule $Q(\mathcal{R}, j, s) = \sum_{\mathcal{R}_{\text{esq}}}(t_n-\bar t_{\text{esq}})^2 + \sum_{\mathcal{R}_{\text{dir}}}(t_n-\bar t_{\text{dir}})^2$.
+>     b. Escolha, entre **todas** as combinações (folha, variável, limiar) testadas, a que minimiza $Q$.
+>     c. Substitua essa folha por suas duas novas regiões.
+> 3. Pare quando nenhuma folha elegível reduzir $Q$ o suficiente, ou quando o critério de parada for atingido.
+
+O ponto que costuma passar despercebido no passo 2: a busca não é "escolha o próximo corte dentro desta folha" — é uma busca **entre todas as folhas atuais ao mesmo tempo**. A cada rodada, o algoritmo pergunta "de todos os cortes possíveis, em qualquer folha, qual reduz mais o erro total?", e só então corta ali. Isso é o que torna o crescimento **guloso**: a decisão de qual folha aprofundar, e não só onde cortar dentro dela, também é míope — feita rodada a rodada, sem enxergar o que essa escolha habilita (ou impede) adiante.
+
+Vamos ver isso em ação, num dataset real de regressão: **California Housing** (preço mediano de imóveis por região censitária, a partir de 8 atributos contínuos — o mesmo dataset já usado em `optimization-linear-algebra` para outro fim). Dois cuidados de tratamento, feitos explicitamente antes de qualquer ajuste:
+
+- Usamos só a partição de treino já separada no dataset (16.640 regiões), e dela sorteamos uma amostra de 500 pontos — o bastante para a árvore ter uma forma interessante, pequeno o bastante para cada conta caber numa tabela que se lê numa tela.
+- Para poder desenhar a partição em duas dimensões (e comparar diretamente com a figura de $\theta_1,\dots,\theta_4$ do início do bloco anterior), restringimos a busca a **duas** das oito variáveis: `MedInc` (renda mediana da região, em dezenas de milhares de dólares) e `HouseAge` (idade mediana dos imóveis, em anos). Uma árvore de produção buscaria sobre as oito; aqui a restrição é só didática, para manter a figura legível — o algoritmo em si não muda em nada.
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+# Carrega o dataset real (California Housing) — primeira vez nesta aula
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar
+disable_progress_bar()
+from datasets import load_dataset
+
+_ch = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+amostra = _ch.sample(n=500, random_state=20260824).reset_index(drop=True)
+NOMES_VAR = ["MedInc", "HouseAge"]  # restrição didática: 2 das 8 variáveis
+X_ch = amostra[NOMES_VAR].values
+t_ch = amostra["MedHouseVal"].values  # preço mediano, em $100 mil
+
+MIN_POR_FOLHA = 10
+
+def melhor_corte(idx):
+    """Busca exaustiva do Algoritmo, passo 2a-2b, restrita a uma única folha."""
+    Xr, tr = X_ch[idx], t_ch[idx]
+    melhor = None
+    for j in range(len(NOMES_VAR)):
+        valores = np.unique(Xr[:, j])
+        limiares = (valores[:-1] + valores[1:]) / 2
+        for s in limiares:
+            esq = Xr[:, j] <= s
+            n_esq, n_dir = esq.sum(), (~esq).sum()
+            if n_esq < MIN_POR_FOLHA or n_dir < MIN_POR_FOLHA:
+                continue
+            te, td = tr[esq], tr[~esq]
+            q = np.sum((te - te.mean())**2) + np.sum((td - td.mean())**2)
+            if melhor is None or q < melhor[0]:
+                melhor = (q, j, s)
+    return melhor  # (Q após o corte, índice da variável, limiar)
+
+print(f"Amostra: N={len(t_ch)} pontos, variáveis={NOMES_VAR}")
+print(f"Q da região inicial (raiz): {np.sum((t_ch - t_ch.mean())**2):.3f}")
+```
+
+O código acima **é** o algoritmo — não uma ilustração dele. `melhor_corte` implementa exatamente os passos 2a–2b para uma única região; o crescimento da árvore é só chamar essa função repetidamente, revisando todas as folhas abertas.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+**1.** Comece com uma única região (todos os pontos).
+:::
+::: {.fragment}
+**2.** Para **cada folha atual** × **cada variável** × **cada limiar candidato**, calcule $Q$. Escolha o mínimo **entre todas** as combinações.
+:::
+::: {.fragment}
+**3.** Corte ali. Repita, até um critério de parada.
+:::
+
+::: {.fragment}
+Guloso em dois sentidos: o limiar dentro de uma folha, **e** qual folha
+aprofundar a cada rodada — a busca é entre **todas** as folhas abertas
+ao mesmo tempo, não só dentro de uma escolhida de antemão.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Dados Reais: California Housing
+
+::: {.fragment}
+**California Housing** — preço mediano de imóvel por região, 8
+atributos contínuos. Dois cuidados de tratamento:
+:::
+
+::: {.fragment}
+Amostra de **500 pontos** sorteados do treino (16.640 disponíveis) —
+grande o bastante para uma forma interessante, pequeno o bastante para
+caber numa tabela.
+:::
+
+::: {.fragment}
+Restrição a **2 das 8 variáveis** (`MedInc`, `HouseAge`) — só para
+desenhar a partição em 2D. Uma árvore de produção buscaria sobre as 8;
+o algoritmo em si não muda em nada.
+:::
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+print(f"N={len(t_ch)}, variáveis={NOMES_VAR}")
+print(f"Q da raiz: {np.sum((t_ch - t_ch.mean())**2):.1f}")
+```
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Split 1 (a raiz).** A primeira chamada de `melhor_corte` sobre a região inteira:
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+raiz = np.arange(len(t_ch))
+q1, j1, s1 = melhor_corte(raiz)
+print(f"Melhor corte da raiz: {NOMES_VAR[j1]} <= {s1:.4f}  (Q depois do corte: {q1:.3f})")
+```
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+def aplicar(idx, j, s):
+    Xr = X_ch[idx]
+    esq = Xr[:, j] <= s
+    return idx[esq], idx[~esq]
+
+def resumo(idx):
+    return dict(n=len(idx), media=t_ch[idx].mean(), Q=np.sum((t_ch[idx]-t_ch[idx].mean())**2))
+
+idxL, idxR = aplicar(raiz, j1, s1)
+rL, rR = resumo(idxL), resumo(idxR)
+print(f"Esquerda (MedInc <= {s1:.2f}): n={rL['n']}, média={rL['media']:.3f}, Q={rL['Q']:.3f}")
+print(f"Direita  (MedInc >  {s1:.2f}): n={rR['n']}, média={rR['media']:.3f}, Q={rR['Q']:.3f}")
+```
+
+**Splits 2 e 3 (os dois filhos da raiz, "o nível de baixo").** Em vez de escolher qual dos dois aprofundar primeiro, vamos cortar **os dois** — exatamente o passo 2 do algoritmo aplicado, em sequência, às duas folhas que acabaram de nascer:
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+q2, j2, s2 = melhor_corte(idxL)   # melhor corte do filho esquerdo
+q3, j3, s3 = melhor_corte(idxR)   # melhor corte do filho direito
+print(f"Melhor corte de 'esquerda':  {NOMES_VAR[j2]} <= {s2:.4f}")
+print(f"Melhor corte de 'direita':   {NOMES_VAR[j3]} <= {s3:.4f}")
+```
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+idxLL, idxLR = aplicar(idxL, j2, s2)
+idxRL, idxRR = aplicar(idxR, j3, s3)
+folhas4 = {"LL": idxLL, "LR": idxLR, "RL": idxRL, "RR": idxRR}
+for nome, idx in folhas4.items():
+    r = resumo(idx)
+    print(f"{nome}: n={r['n']:3d}, média={r['media']:.3f}, Q={r['Q']:.3f}")
+```
+
+Depois dessas três chamadas, a árvore tem **4 folhas** (`LL`, `LR`, `RL`, `RR`) — uma na raiz, duas no nível de baixo. Falta a quarta chamada do enunciado: **mais um corte, num nível abaixo desse**. O algoritmo não escolhe isso arbitrariamente — ele testa `melhor_corte` nas quatro folhas atuais e compara a **redução** de $Q$ que cada uma ofereceria:
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+for nome, idx in folhas4.items():
+    q_antes = resumo(idx)["Q"]
+    q_depois, j, s = melhor_corte(idx)
+    print(f"{nome}: Q_antes={q_antes:7.3f}  melhor corte={NOMES_VAR[j]}<= {s:.4f}"
+          f"  Q_depois={q_depois:7.3f}  reducao={q_antes-q_depois:7.3f}")
+```
+
+A folha `RL` vence — sua redução de $Q$ (${\approx}20{,}0$) é quase o dobro da segunda colocada. É ali, e só ali, que o algoritmo corta na quarta rodada:
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+q4, j4, s4 = melhor_corte(idxRL)
+print(f"Split 4 (folha 'RL'): {NOMES_VAR[j4]} <= {s4:.4f}")
+```
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+idxRLa, idxRLb = aplicar(idxRL, j4, s4)
+folhas5 = {"LL": idxLL, "LR": idxLR, "RR": idxRR, "RLa": idxRLa, "RLb": idxRLb}
+for nome, idx in folhas5.items():
+    r = resumo(idx)
+    print(f"{nome}: n={r['n']:3d}, média={r['media']:.3f}, Q={r['Q']:.3f}")
+```
+
+Chegamos exatamente à forma pedida: um corte na raiz, os dois filhos cortados, e mais um corte no nível seguinte — **5 folhas**, 4 cortes. A árvore e a partição do plano ficam assim:
+
+```{.tikz}
+%%| fig-align: center
+\definecolor{nodecolor}{RGB}{93,109,126}
+\definecolor{nodeborder}{RGB}{55,65,81}
+\definecolor{leafcolor}{RGB}{17,122,101}
+\definecolor{leafborder}{RGB}{11,74,63}
+
+\begin{tikzpicture}[
+  decision/.style={rectangle, rounded corners, fill=nodecolor, draw=nodeborder, line width=1pt, text=white, minimum width=3.0cm, minimum height=1cm, align=center, font=\small},
+  leaf/.style={rectangle, rounded corners, fill=leafcolor, draw=leafborder, line width=1pt, text=white, minimum width=2.2cm, minimum height=1.1cm, align=center, font=\scriptsize},
+  elabel/.style={font=\scriptsize, fill=white, inner sep=1pt},
+  edge from parent/.style={draw, thick, ->},
+  level distance=17mm,
+  level 1/.style={sibling distance=55mm},
+  level 2/.style={sibling distance=26mm},
+  level 3/.style={sibling distance=26mm}
+]
+
+\node[decision] {$\mathrm{MedInc} \le 4.90?$}
+  child { node[decision] {$\mathrm{MedInc} \le 2.72?$}
+    child { node[leaf] {LL\\$n=132,\ \hat{y}=1.26$} edge from parent node[elabel] {sim} }
+    child { node[leaf] {LR\\$n=255,\ \hat{y}=1.90$} edge from parent node[elabel] {não} }
+    edge from parent node[elabel] {sim}
+  }
+  child { node[decision] {$\mathrm{MedInc} \le 6.50?$}
+    child { node[decision] {$\mathrm{HouseAge} \le 35.5?$}
+      child { node[leaf] {RLa\\$n=56,\ \hat{y}=2.48$} edge from parent node[elabel] {sim} }
+      child { node[leaf] {RLb\\$n=19,\ \hat{y}=3.67$} edge from parent node[elabel] {não} }
+      edge from parent node[elabel] {sim}
+    }
+    child { node[leaf] {RR\\$n=38,\ \hat{y}=4.07$} edge from parent node[elabel] {não} }
+    edge from parent node[elabel] {não}
+  };
+
+\end{tikzpicture}
+```
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(6, 5))
+cores5 = {"LL": COR_A, "LR": COR_B, "RR": COR_LIM, "RLa": COR_ALT, "RLb": COR_NEU}
+for nome, idx in folhas5.items():
+    ax.scatter(X_ch[idx, 0], X_ch[idx, 1], s=16, color=cores5[nome], alpha=0.7, label=nome)
+ax.axvline(s1, color="black", lw=1.2)
+ax.plot([X_ch[:,0].min(), s1], [s2, s2], color="black", lw=1.2)
+ax.plot([s1, X_ch[:,0].max()], [s3, s3], color="black", lw=1.2)
+ax.plot([s1, s3], [s4, s4], color="black", lw=1.2, ls="--")
+ax.set_xlabel("MedInc (renda mediana)")
+ax.set_ylabel("HouseAge (idade mediana dos imóveis)")
+ax.set_title("5 folhas, 4 cortes — dados reais (California Housing)")
+ax.legend(fontsize=8, loc="upper right", ncol=2)
+plt.tight_layout()
+plt.show()
+```
+
+**O quinto corte.** Com 5 folhas abertas, o algoritmo repete o mesmo passo: testar `melhor_corte` em cada uma, e cortar onde a redução de $Q$ for maior.
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+for nome, idx in folhas5.items():
+    resultado = melhor_corte(idx)
+    q_antes = resumo(idx)["Q"]
+    if resultado is None:
+        print(f"{nome}: sem corte válido (menos de {2*MIN_POR_FOLHA} pontos)")
+        continue
+    q_depois, j, s = resultado
+    print(f"{nome}: Q_antes={q_antes:7.3f}  melhor corte={NOMES_VAR[j]}<= {s:.4f}"
+          f"  Q_depois={q_depois:7.3f}  reducao={q_antes-q_depois:7.3f}")
+```
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+reducoes = {}
+for nome, idx in folhas5.items():
+    r = melhor_corte(idx)
+    if r is not None:
+        reducoes[nome] = resumo(idx)["Q"] - r[0]
+
+fig, ax = plt.subplots(figsize=(5.5, 3.4))
+nomes_ord = sorted(reducoes, key=reducoes.get, reverse=True)
+cores_barra = [COR_LIM if n == nomes_ord[0] else COR_NEU for n in nomes_ord]
+ax.bar(nomes_ord, [reducoes[n] for n in nomes_ord], color=cores_barra, alpha=0.85)
+ax.set_ylabel(r"redução de $Q$ com o melhor corte")
+ax.set_title("Quinto corte: qual folha vence?")
+plt.tight_layout()
+plt.show()
+
+vencedora = nomes_ord[0]
+print(f"\nVencedora: '{vencedora}' — é ali que o quinto corte acontece.")
+```
+
+`RLb`, com só 19 pontos, nem entra na disputa — não sobram $2\times 10$ pontos para dividir. Entre as quatro folhas restantes, `LR` vence com folga: tem o maior $Q$ inicial (é a folha mais numerosa, com 255 pontos) e ainda comporta uma redução grande, cortando por `HouseAge`. O quinto corte não acontece na folha mais "carente" (a de maior $Q$ resolveria a raiz de novo, por exemplo) nem na mais recém-criada — acontece onde a **conta** aponta o maior ganho, e só aí.
+
+Essa é a mecânica completa por trás de cada divisão de uma árvore, do primeiro corte ao centésimo: nenhuma delas é definida por regra alguma que não seja "teste tudo, meça $Q$, escolha o menor". As seções seguintes trocam a variável contínua $t$ por uma variável categórica — o algoritmo continua sendo o mesmo; só o critério de comparação entre um corte e outro muda de soma de quadrados para impureza.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Splits 1–4: Raiz, os Dois Filhos, e um Neto
+
+::: {.fig-resize style="width: 170%; margin: 0 auto;"}
+```{.tikz}
+%%| fig-align: center
+\definecolor{nodecolor}{RGB}{93,109,126}
+\definecolor{nodeborder}{RGB}{55,65,81}
+\definecolor{leafcolor}{RGB}{17,122,101}
+\definecolor{leafborder}{RGB}{11,74,63}
+
+\begin{tikzpicture}[
+  decision/.style={rectangle, rounded corners, fill=nodecolor, draw=nodeborder, line width=1pt, text=white, minimum width=3.0cm, minimum height=1cm, align=center, font=\small},
+  leaf/.style={rectangle, rounded corners, fill=leafcolor, draw=leafborder, line width=1pt, text=white, minimum width=1.8cm, minimum height=1cm, align=center, font=\scriptsize},
+  elabel/.style={font=\scriptsize, fill=white, inner sep=1pt},
+  edge from parent/.style={draw, thick, ->},
+  level distance=17mm,
+  level 1/.style={sibling distance=55mm},
+  level 2/.style={sibling distance=26mm},
+  level 3/.style={sibling distance=26mm}
+]
+
+\node[decision] {$\mathrm{MedInc} \le 4.90?$}
+  child { node[decision] {$\mathrm{MedInc} \le 2.72?$}
+    child { node[leaf] {LL\\$n=132$} edge from parent node[elabel] {sim} }
+    child { node[leaf] {LR\\$n=255$} edge from parent node[elabel] {não} }
+    edge from parent node[elabel] {sim}
+  }
+  child { node[decision] {$\mathrm{MedInc} \le 6.50?$}
+    child { node[decision] {$\mathrm{HouseAge} \le 35.5?$}
+      child { node[leaf] {RLa\\$n=56$} edge from parent node[elabel] {sim} }
+      child { node[leaf] {RLb\\$n=19$} edge from parent node[elabel] {não} }
+      edge from parent node[elabel] {sim}
+    }
+    child { node[leaf] {RR\\$n=38$} edge from parent node[elabel] {não} }
+    edge from parent node[elabel] {não}
+  };
+
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+4 cortes reais, sobre dados reais: raiz (`MedInc≤4.90`) → os dois
+filhos (`MedInc≤2.72` e `MedInc≤6.50`) → o neto de maior redução de $Q$
+(`HouseAge≤35.5`, dentro de `RL`) — 5 folhas ao todo.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Quinto Corte: Quem Vence?
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(5.2, 3.2))
+ax.bar(nomes_ord, [reducoes[n] for n in nomes_ord], color=cores_barra, alpha=0.85)
+ax.set_ylabel(r"redução de $Q$")
+plt.tight_layout()
+plt.show()
+```
+
+::: {.fragment}
+Com as 5 folhas abertas, o algoritmo testa `melhor_corte` em cada uma e
+compara a **redução** de $Q$ que cada corte ofereceria.
+:::
+
+::: {.fragment}
+`RLb` nem entra (só 19 pontos, sem par de $\ge$10 dos dois lados).
+Entre as demais, **`LR` vence** — maior redução de $Q$, não a folha
+mais nova nem a de maior $Q$ inicial.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pergunta
+
+::: {.callout-tip}
+## Por que o algoritmo escolhe cortar a folha `LR` no quinto passo, e não a folha com o maior $Q$ atual, nem a que acabou de nascer no quarto corte?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+:::
+
+::: {.callout-tip}
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Se o critério fosse "sempre aprofundar a folha com mais pontos", o quarto corte (a divisão de `RL`) não teria acontecido, pois `LL` (132 pontos) e `LR` (255 pontos) tinham mais pontos do que `RL` (113 pontos).
+b. Se `RLb` tivesse exatamente $2\times\text{MIN\_POR\_FOLHA}$ pontos no total, isso já garantiria a existência de um limiar candidato válido para cortá-la.
+c. Se a busca do quinto corte considerasse as 8 variáveis originais do California Housing em vez de só 2, a redução de $Q$ do vencedor jamais poderia ser menor do que a observada com 2 variáveis.
+d. Como `LR` tinha o maior $Q$ inicial entre as cinco folhas e também venceu, conclui-se que, em geral, escolher a folha de maior $Q$ atual é equivalente a escolher a de maior redução possível.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Por que `LR`, e Não Outra Folha? — Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — `RL` venceu por maior *redução*, não por ser a maior; o critério "mais pontos" teria escolhido errado.
+b. **Falso** — ter pontos suficientes no total não garante que exista um limiar que separe exatamente $\ge$ MIN de cada lado.
+c. **Verdadeiro** — mais variáveis candidatas só pode manter ou melhorar o máximo encontrado, nunca piorar.
+d. **Falso** — foi coincidência desta folha; o próprio quarto corte (`RL` vencendo `LL`/`LR`, maiores) já contradiz a regra geral.
+:::
+
+:::
+
+# Teoria da Informação: Medindo Probabilidade
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Nas Aulas 1 e 2 construímos um vocabulário para relações entre
+variáveis aleatórias — conjunta $p(x,y)$, condicional $p(x\mid y)$,
+marginal $p(x)$, independência ($p(x,y)=p(x)p(y)$), independência
+condicional. Esse vocabulário é **qualitativo**: diz *que tipo* de
+relação existe, mas não dá um número para "o quanto". Duas perguntas
+ficaram sem resposta quantitativa: quanto uma distribuição é incerta? E
+quanto duas variáveis se afastam de ser independentes?
+
+Teoria da informação responde as duas com a mesma ideia central:
+**medir probabilidade em unidades de incerteza**. É essa régua que a
+árvore de classificação vai usar, no bloco seguinte, para decidir onde
+cortar. Três perguntas guiam este bloco:
+
+1. O que significa, formalmente, "uma distribuição é incerta"?
+2. Quanto de incerteza sobre uma variável sobra depois de observar
+   outra?
+3. Como resumir, num único número, o quanto duas variáveis se afastam
+   da independência?
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Teoria da Informação: Medindo Probabilidade
+
+::: {.fragment}
+* Aulas 1–2: conjunta, condicional, marginal, independência — vocabulário
+**qualitativo**.
+:::
+
+::: {.fragment}
+* Falta um número para "o quanto": quanto uma distribuição é incerta?
+Quanto duas variáveis se afastam de ser independentes?
+:::
+
+::: {.fragment}
+* Teoria da informação = medir probabilidade em unidades de incerteza — a régua que a árvore de classificação vai usar para decidir onde
+cortar.
+:::
+
+:::
+
+## Entropia: Quanto uma Distribuição Surpreende
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Comece por um único resultado $x$ de uma variável aleatória $X$. Quanto
+mais improvável ele é, mais ele "surpreende" ao ser observado. Defina a
+**surpresa** (ou *informação*) de um resultado como
+
+$$
+s(x) = -\ln p(x).
+$$
+
+Um evento certo ($p=1$) tem surpresa $0$: não há nada a aprender ao
+observar o que já se sabia que ia acontecer. Um evento raro
+($p\to 0$) tem surpresa arbitrariamente grande. A **entropia** de $X$
+é a surpresa média, ponderada pela própria distribuição — quanto, *em
+expectativa*, você aprende ao observar um valor de $X$:
+
+$$
+H(X) = \mathbb{E}[s(X)] = -\sum_x p(x)\ln p(x).
+$$
+
+(Usamos logaritmo natural, medindo incerteza em **nats** — a mesma
+convenção que o Bloco 4 vai usar para a entropia de uma folha. A
+formulação clássica de Shannon usa $\log_2$, medindo em **bits**; a
+única diferença é a escala, $\ln 2 \approx 0{,}693$ vezes menor em
+nats — nenhuma propriedade qualitativa muda com a base.)
+
+$H(X)=0$ quando $X$ é determinística ($p(x)=1$ para um único valor); é
+**máxima** quando $X$ é uniforme — a incerteza é maior quando nenhum
+resultado é favorecido. Para uma variável binária com $p(X{=}1)=p$,
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+def H(p):
+    """Entropia (nats) de uma Bernoulli(p)."""
+    if p in (0, 1):
+        return 0.0
+    return -(p * np.log(p) + (1 - p) * np.log(1 - p))
+
+for p in [0.001, 0.10, 0.30, 0.50, 0.70, 0.90, 0.999]:
+    print(f"p={p:.3f}   H(p)={H(p):.4f} nats")
+```
+
+A entropia cresce à medida que $p$ se aproxima de $0{,}5$ (máxima
+incerteza sobre o resultado de uma moeda honesta, $H(0{,}5)=\ln 2
+\approx 0{,}693$ nats) e cai a zero nas bordas (resultado praticamente
+certo). Essa é a mesma curva côncava que vai reaparecer no Bloco 4,
+agora medindo a incerteza sobre a **classe** de um ponto numa folha —
+o vocabulário é idêntico, só a variável $X$ muda de "um resultado
+genérico" para "a classe $\mathcal{C}_k$".
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+* Surpresa de um resultado: $s(x) = -\ln p(x)$ — zero se certo, grande se
+raro.
+:::
+
+::: {.fragment}
+* Entropia = surpresa **média**: $H(X) = -\sum_x p(x)\ln p(x)$.
+:::
+
+::: {.fragment}
+* $H=0$: determinística. $H$ **máxima**: uniforme.
+:::
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+for p in [0.10, 0.50, 0.90]:
+    print(f"p={p:.2f}   H(p)={H(p):.4f} nats")
+```
+
+::: {.fragment}
+* Convenção: $\ln$ (nats), não $\log_2$ (bits) — mesma escala do Bloco 4
+adiante.
+:::
+
+:::
+
+## Entropia Condicional: o que Sobra Depois de Observar
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A entropia de uma única variável generaliza para um par $(X,Y)$: a
+**entropia conjunta** $H(X,Y) = -\sum_{x,y} p(x,y)\ln p(x,y)$ mede a
+incerteza sobre o par inteiro. A pergunta mais interessante,
+porém, é outra: *dado que já observei $X$, quanta incerteza ainda
+resta sobre $Y$?* Essa é a **entropia condicional**,
+
+$$
+H(Y\mid X) = \sum_x p(x)\, H(Y\mid X{=}x) = -\sum_{x,y} p(x,y)\ln
+p(y\mid x).
+$$
+
+Ela obedece à **regra da cadeia da entropia** — o análogo, em
+incerteza, da regra do produto de probabilidades ($p(x,y)=p(x)p(y\mid
+x)$) que já vimos na Aula 1:
+
+$$
+H(X,Y) = H(X) + H(Y\mid X).
+$$
+
+A leitura: a incerteza sobre o par se decompõe em "incerteza sobre
+$X$" mais "incerteza que sobra sobre $Y$, uma vez que $X$ é conhecido".
+
+**Por que independência implica $H(Y\mid X) = H(Y)$, passo a passo.**
+Não é só intuição de que "conhecer $X$ não ajuda" — sai direto da
+definição:
+
+1. **Independência (Aula 2)** diz que $p(y\mid x) = p(y)$ para todo
+   $x,y$: a distribuição condicional de $Y$ dado $X{=}x$ é, literalmente,
+   a mesma distribuição para qualquer $x$ — não muda com $x$.
+2. A entropia condicional num ponto fixo, $H(Y\mid X{=}x) = -\sum_y
+   p(y\mid x)\ln p(y\mid x)$, depende só dessa distribuição. Como ela
+   não muda com $x$ (passo 1), $H(Y\mid X{=}x) = H(Y)$ para **todo**
+   $x$ — a mesma entropia, qualquer que seja o valor observado de $X$.
+3. Substituindo na definição de entropia condicional:
+   $$
+   H(Y\mid X) = \sum_x p(x)\, H(Y\mid X{=}x) = \sum_x p(x)\, H(Y) =
+   H(Y) \underbrace{\sum_x p(x)}_{=\,1} = H(Y),
+   $$
+   onde o último passo usa só a normalização da marginal de $X$.
+
+Ou seja: $H(Y\mid X)$ é uma **média ponderada** de $H(Y\mid X{=}x)$ ao
+longo de $x$; se todos os termos dessa média já valem $H(Y)$ (passo 2),
+a média inteira também vale $H(Y)$ — não há nada mais sutil por trás.
+No outro extremo, se $Y$ é uma função determinística de $X$,
+$H(Y\mid X{=}x)=0$ para todo $x$ (dado $x$, $Y$ fica sabido com
+certeza), então $H(Y\mid X)=0$ pelo mesmo argumento: observar $X$
+elimina toda a incerteza sobre $Y$.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+* Conjunta: $H(X,Y) = -\sum_{x,y} p(x,y)\ln p(x,y)$.
+:::
+
+::: {.fragment}
+* Para um valor fixo $X=x$, a incerteza de $Y$ é a entropia da distribuição condicional $p(y\mid x)$:
+$$H(Y\mid X=x) = -\sum_y p(y\mid x)\ln p(y\mid x)$$
+:::
+
+::: {.fragment}
+* Condicional (média): $H(Y\mid X) = \sum_x p(x)\,H(Y\mid X=x)$ — incerteza **média** que sobra sobre $Y$, sabendo $X$.
+:::
+
+::: {.fragment}
+* Regra da cadeia: $H(X,Y) = H(X) + H(Y\mid X)$ — o análogo, em incerteza, de $p(x,y)=p(x)p(y\mid x)$.
+:::
+
+::: {.fragment}
+* **Independência $\Rightarrow H(Y\mid X)=H(Y)$:** 
+
+Como $p(y\mid x)=p(y)$ para todo $x$ (Aula 2) $\Rightarrow H(Y\mid X=x)=H(Y)$ para todo $x$ (mesma distribuição, mesma entropia).
+:::
+
+::: {.fragment}
+* $$H(Y\mid X) = \sum_x p(x)\,H(Y\mid X=x) = \sum_x p(x)\,H(Y) = H(Y)$$
+
+Uma média em que todo termo já vale $H(Y)$ — a média inteira também vale. Observar $X$ não ajuda em nada.
+:::
+
+:::
+
+## Informação Mútua
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Combine as duas ideias acima: $H(Y)$ é a incerteza original sobre $Y$;
+$H(Y\mid X)$ é o que sobra depois de observar $X$. A diferença é
+quanto **observar $X$ reduziu** a incerteza sobre $Y$ — isso é a
+**informação mútua**:
+
+$$
+I(X;Y) = H(Y) - H(Y\mid X) = H(X) - H(X\mid Y) = \sum_{x,y}
+p(x,y)\,\ln\frac{p(x,y)}{p(x)\,p(y)}.
+$$
+
+(As três expressões são iguais — é só álgebra a partir da regra da
+cadeia acima; a simetria $I(X;Y)=I(Y;X)$ não é óbvia à primeira vista,
+mas cai direto dela.) A terceira forma é a que conecta diretamente à
+Aula 2: o termo dentro do logaritmo é exatamente a razão entre a
+conjunta verdadeira e a conjunta *que existiria se $X,Y$ fossem
+independentes* ($p(x)p(y)$). Segue que
+
+$$
+I(X;Y) = 0 \iff p(x,y) = p(x)\,p(y) \text{ para todo } x,y \iff X, Y
+\text{ são independentes.}
+$$
+
+Ou seja: **independência (Aula 2) é exatamente o caso $I(X;Y)=0$**, e a
+informação mútua é a régua que mede, em nats, o quanto uma conjunta
+observada se afasta desse caso. (Também vale $I(X;Y)\geq 0$ sempre —
+informação mútua nunca é negativa; a prova usa a desigualdade de Jensen
+sobre a concavidade do logaritmo e não é reproduzida aqui, mas o fato é
+usado livremente a partir de agora.)
+
+::: {.callout-note}
+## Por que "distância até a independência" e não literalmente uma distância
+
+$I(X;Y)$ tem a forma de uma **divergência de Kullback-Leibler**, $D_{KL}\big(p(x,y)\,\|\,p(x)p(y)\big)$ — uma medida de quão diferente uma distribuição é de outra. Como toda KL, ela não é simétrica em suas duas entradas nem satisfaz a desigualdade triangular, então "distância" aqui é uma metáfora, não uma métrica no sentido formal. O que se mantém da metáfora: $I=0$ só quando as duas distribuições coincidem (a conjunta real e a conjunta sob independência), e $I$ cresce conforme elas se afastam.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+$I(X;Y) = H(Y) - H(Y\mid X)$ — quanto observar $X$ **reduz** a
+incerteza sobre $Y$.
+:::
+
+::: {.fragment}
+Forma equivalente: $I(X;Y) = \sum_{x,y} p(x,y)\ln\dfrac{p(x,y)}{p(x)p(y)}$.
+:::
+
+::: {.fragment}
+$$
+I(X;Y) = 0 \iff p(x,y)=p(x)p(y) \iff X,Y \text{ independentes (Aula 2)}
+$$
+:::
+
+::: {.fragment}
+$I(X;Y)\geq 0$ sempre — nunca negativa (desigualdade de Jensen).
+:::
+
+:::
+
+## O Ganho de Informação da Aula 2 é Informação Mútua
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Vamos quantificar o próprio exemplo da Aula 2. Duas palavras de um
+e-mail, "grátis" ($G$) e "ganhador" ($W$), eram **condicionalmente
+independentes dada a classe** ($\mathcal{C}=\text{spam}$ ou
+$\text{ham}$, $\pi_{\text{spam}}=0{,}5$), com
+
+$$
+p(G{=}1\mid\text{spam})=0{,}85,\quad p(W{=}1\mid\text{spam})=0{,}60,
+\qquad p(G{=}1\mid\text{ham})=0{,}03,\quad p(W{=}1\mid\text{ham})=0{,}02.
+$$
+
+Naquela aula, comparamos só a célula $(1,1)$: marginalizando a classe,
+$p(G{=}1,W{=}1)=0{,}255$ contra $p(G{=}1)\,p(W{=}1)=0{,}136$ se fossem
+independentes — evidência de que $G$ e $W$ são **marginalmente
+dependentes**, apesar de condicionalmente independentes dada a classe.
+Agora podemos ir além de uma célula e medir a dependência inteira, em
+nats, com $I(G;W)$:
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+pi_spam = 0.5
+pG_spam, pW_spam = 0.85, 0.60
+pG_ham,  pW_ham  = 0.03, 0.02
+
+def conjunta_dado_classe(pg, pw):
+    return {(1,1): pg*pw, (1,0): pg*(1-pw), (0,1): (1-pg)*pw, (0,0): (1-pg)*(1-pw)}
+
+j_spam = conjunta_dado_classe(pG_spam, pW_spam)
+j_ham  = conjunta_dado_classe(pG_ham, pW_ham)
+conjunta = {k: pi_spam*j_spam[k] + (1-pi_spam)*j_ham[k] for k in j_spam}
+
+pG1 = conjunta[(1,1)] + conjunta[(1,0)]
+pW1 = conjunta[(1,1)] + conjunta[(0,1)]
+
+def H_lista(ps):
+    return -sum(p*np.log(p) for p in ps if p > 0)
+
+H_G, H_W = H_lista([pG1, 1-pG1]), H_lista([pW1, 1-pW1])
+H_GW = H_lista(conjunta.values())
+I_GW = H_G + H_W - H_GW
+
+print(f"conjunta p(G,W) = { {k: round(v,4) for k,v in conjunta.items()} }")
+print(f"p(G=1)={pG1:.3f}  p(W=1)={pW1:.3f}  (produto se independentes: {pG1*pW1:.4f})")
+print(f"H(G)={H_G:.4f}  H(W)={H_W:.4f}  H(G,W)={H_GW:.4f}  (nats)")
+print(f"I(G;W) = H(G)+H(W)-H(G,W) = {I_GW:.4f} nats  (> 0: confirma a dependência marginal)")
+```
+
+$I(G;W)\approx 0{,}14$ nats confirma, com um único número, o que a Aula
+2 já mostrava célula a célula: as duas palavras não são marginalmente
+independentes. Mas a pergunta mais relevante para uma árvore de decisão
+é outra — não "$G$ e $W$ dependem uma da outra?", e sim **"$G$ e $W$
+dizem algo sobre a classe?"**. É essa a pergunta que $I(G;\mathcal{C})$
+e $I(W;\mathcal{C})$ respondem:
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+H_G_dado_C = pi_spam*H_lista([pG_spam, 1-pG_spam]) + (1-pi_spam)*H_lista([pG_ham, 1-pG_ham])
+H_W_dado_C = pi_spam*H_lista([pW_spam, 1-pW_spam]) + (1-pi_spam)*H_lista([pW_ham, 1-pW_ham])
+I_G_C = H_G - H_G_dado_C
+I_W_C = H_W - H_W_dado_C
+
+print(f"I(G;C) = H(G) - H(G|C) = {I_G_C:.4f} nats")
+print(f"I(W;C) = H(W) - H(W|C) = {I_W_C:.4f} nats")
+```
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(4.6, 3.2))
+ax.bar(["I(G;C)", "I(W;C)"], [I_G_C, I_W_C], color=[COR_A, COR_B], alpha=0.85)
+ax.set_ylabel("informação mútua com a classe (nats)")
+ax.set_title('"Grátis" é mais informativo sobre a classe que "ganhador"')
+plt.tight_layout()
+plt.show()
+```
+
+$I(G;\mathcal{C})\approx 0{,}41$ nats é quase o dobro de
+$I(W;\mathcal{C})\approx 0{,}23$ nats: "grátis" reduz mais a incerteza
+sobre spam/ham do que "ganhador" — apesar de $W$ ter, sozinha,
+**menos** entropia própria ($H(W) < H(G)$, ela já é mais previsível de
+saída). É exatamente esse tipo de comparação — quanto uma variável
+candidata reduz a incerteza sobre a classe — que o próximo bloco usa
+para escolher onde uma árvore de classificação corta: o critério
+tradicionalmente chamado de **ganho de informação** é, sem disfarce,
+$I(\text{variável de corte}\,;\,\text{classe})$, calculado localmente
+dentro de cada nó.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+Aula 2: "grátis" ($G$) e "ganhador" ($W$) eram condicionalmente
+independentes dada a classe, mas $p(G{=}1,W{=}1)=0{,}255$ vs.
+$p(G{=}1)p(W{=}1)=0{,}136$ — dependentes, célula a célula.
+:::
+
+::: {.fragment}
+Agora podemos medir a dependência **inteira**, num único número, em
+nats:
+:::
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+print(f"I(G;W) = {I_GW:.4f} nats")
+```
+
+::: {.fragment}
+$I(G;W) > 0$ confirma, com um número o que o que a Aula 2 discutiu.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Quem Diz Mais Sobre a Classe?
+
+::: {.fragment}
+A pergunta mais relevante para uma árvore não é "$G$ e $W$ dependem
+entre si?", é **"dizem algo sobre a classe?"** — $I(G;\mathcal{C})$ e
+$I(W;\mathcal{C})$.
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(4.6, 3.0))
+ax.bar(["I(G;C)", "I(W;C)"], [I_G_C, I_W_C], color=[COR_A, COR_B], alpha=0.85)
+ax.set_ylabel("nats")
+plt.tight_layout()
+plt.show()
+```
+
+::: {.fragment}
+"Grátis" reduz quase o dobro da incerteza sobre a classe — apesar de
+$W$ ter, sozinha, **menos** entropia própria ($H(W)<H(G)$). Esse
+número é o **ganho de informação** — $I(\text{variável};\text{classe})$
+— o critério que a próxima seção usa para escolher onde cortar.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pergunta
+
+::: {.callout-tip}
+## Se uma variável candidata a corte tem entropia própria $H(X)$ baixa (ela já é bem previsível), isso garante que ela também é pouco informativa sobre a classe, $I(X;\mathcal{C})$ baixo?
+
+Pense no exemplo de "ganhador" antes de responder.
+:::
+
+::: {.callout-tip}
+## Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. $I(X;\mathcal{C})$ nunca pode ser maior que $H(X)$, porque não é possível reduzir mais incerteza sobre a classe do que a própria variável carrega.
+b. Ter $H(X)$ baixo garante $I(X;\mathcal{C})$ baixo, já que uma variável pouco incerta não tem "espaço" para informar muito.
+c. No exemplo de "grátis" e "ganhador", $H(W) < H(G)$ e ainda assim $I(W;\mathcal{C}) < I(G;\mathcal{C})$ — a variável de entropia menor também informou menos sobre a classe, mas isso é coincidência do exemplo, não uma implicação geral.
+d. $I(X;\mathcal{C})=0$ é compatível com $H(X)$ alto — por exemplo, se $X$ for uniforme e completamente independente da classe.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pergunta — Resposta
+
+::: {.callout-tip}
+## Se uma variável candidata a corte tem entropia própria $H(X)$ baixa, isso garante $I(X;\mathcal{C})$ também baixo?
+
+a. **Verdadeiro** — $I(X;\mathcal{C}) = H(X) - H(X\mid\mathcal{C}) \le H(X)$, já que $H(X\mid\mathcal{C})\geq 0$.
+b. **Falso** — é o item (a) que limita $I$ por cima; $H(X)$ baixo não impede $I(X;\mathcal{C})$ de ser relativamente alto (só limita seu teto).
+c. **Verdadeiro** — a implicação geral não existe; o exemplo apenas ilustra um caso em que a ordem coincidiu.
+d. **Verdadeiro** — entropia própria alta e informação mútua nula podem conviver perfeitamente (é o caso de independência total).
 :::
 
 :::
@@ -760,6 +1992,38 @@ $$
 mencionada. Ela é a mesma equivalência do Bloco 2 (mínimos quadrados =
 MLE gaussiano), agora do lado categórico.
 :::
+
+O Bloco 4 (Teoria da Informação) já adiantou a peça que falta: a
+entropia $H(\hat p_\tau)$ de uma folha é a mesma entropia $H(X)$
+definida ali, só que aplicada à variável "classe de um ponto sorteado
+da folha". Isso permite escrever, com precisão, o que significa
+"reduzir a impureza ao cortar" — não é uma analogia, é a mesma
+informação mútua de novo. Para um candidato de corte $s$ no nó $\tau$,
+que separa os $N_\tau$ pontos em $N_{\text{esq}}$ à esquerda e
+$N_{\text{dir}}$ à direita, o **ganho de informação** é
+
+$$
+IG(\tau, s) = H(\hat p_\tau) - \left[\frac{N_{\text{esq}}}{N_\tau}
+H(\hat p_{\text{esq}}) + \frac{N_{\text{dir}}}{N_\tau}
+H(\hat p_{\text{dir}})\right].
+$$
+
+Compare com a definição de informação mútua do Bloco 4,
+$I(X;Y) = H(Y) - H(Y\mid X)$: o termo entre colchetes acima é
+exatamente $H(\mathcal{C}\mid S)$, a entropia condicional da classe
+dado o **indicador de lado do corte** $S\in\{\text{esq},\text{dir}\}$,
+calculada empiricamente nos $N_\tau$ pontos do nó. Logo
+
+$$
+IG(\tau, s) = I(S ; \mathcal{C}),
+$$
+
+a informação mútua entre "qual lado do corte $s$" e a classe,
+**localmente**, dentro do nó $\tau$. A busca gulosa dos Blocos 2–3 —
+"teste toda variável e limiar, escolha o que reduz mais o erro" — em
+classificação é, sem nenhuma metáfora, "teste toda variável e limiar,
+escolha o que **maximiza a informação mútua com a classe**". É por
+isso que esse critério tem o nome que tem.
 
 A entropia tem a forma que se espera de uma medida de incerteza:
 
@@ -850,21 +2114,33 @@ def medida_ponderada(medida, esq, dir_):
     n = n_esq + n_dir
     return (n_esq * medida(esq) + n_dir * medida(dir_)) / n
 
+pai = (400, 400)
 split1 = ((300, 100), (100, 300))
 split2 = ((400, 200), (0, 200))
 
+H_pai, G_pai = entropia_idx(pai), gini_idx(pai)
+print(f"Nó pai: entropia={H_pai:.4f}  gini={G_pai:.4f}\n")
+
 for nome, (esq, dir_) in [("Split 1", split1), ("Split 2", split2)]:
+    h_filhos = medida_ponderada(entropia_idx, esq, dir_)
+    g_filhos = medida_ponderada(gini_idx, esq, dir_)
     print(f"{nome}: erro={medida_ponderada(erro_classificacao, esq, dir_):.4f}  "
-          f"gini={medida_ponderada(gini_idx, esq, dir_):.4f}  "
-          f"entropia={medida_ponderada(entropia_idx, esq, dir_):.4f}")
+          f"gini={g_filhos:.4f} (ganho={G_pai-g_filhos:.4f})  "
+          f"entropia={h_filhos:.4f} (IG={H_pai-h_filhos:.4f})")
 ```
 
 As duas opções têm **exatamente a mesma** taxa de erro de classificação
 ponderada ($0{,}25$) — a métrica bruta é cega para a diferença entre
-elas. Mas Gini e entropia **preferem o Split 2** (valores menores):
-ele produz uma folha perfeitamente pura, o que a taxa de erro bruta
-simplesmente não enxerga, porque só olha quem "ganha a maioria", não o
-quão desequilibrada é essa maioria.
+elas. Mas Gini e entropia **preferem o Split 2** (valores menores nos
+filhos, ganhos maiores): $IG(\text{Split 2})\approx0{,}216$ nats contra
+$IG(\text{Split 1})\approx0{,}131$ nats — o Split 2 é o que mais reduz
+a incerteza sobre a classe, exatamente o que a Seção anterior definiu
+como informação mútua entre o corte e a classe. (A mesma leitura de
+"ganho" vale para o índice de Gini, mas ali é só uma diferença de
+impureza — a igualdade com informação mútua é uma propriedade só da
+entropia.) Ele produz uma folha perfeitamente pura, o que a taxa de
+erro bruta simplesmente não enxerga, porque só olha quem "ganha a
+maioria", não o quão desequilibrada é essa maioria.
 
 Isso explica a assimetria de uso: entropia e Gini são diferenciáveis e
 mais sensíveis à distribuição interna da folha, por isso são preferidas
@@ -879,16 +2155,17 @@ geralmente reservada para a fase de *poda* — assunto do próximo bloco.
 ## O Que uma Folha de Classificação Prevê
 
 ::: {.fragment}
-Não um número — uma **distribuição** sobre classes: $\hat p_{\tau k} =
-n_{\tau k}/N_\tau$, a proporção empírica.
+* Não um número — uma **distribuição** sobre classes: $\hat p_{\tau k} = n_{\tau k}/N_\tau$, a proporção empírica de cada classe entre os
+$N_\tau$ pontos da folha.
 :::
 
 ::: {.fragment}
-<br/>
-
-::: {.callout-tip icon=false}
-Mesmo padrão do Bloco 2: o MLE categórico numa folha é, de novo, a proporção empírica. Verificado a seguir.
+* Mesma pergunta do Bloco 2, agora para uma distribuição categórica: qual $p_{\tau k}$ maximiza a verossimilhança dos dados da folha?
 :::
+
+::: {.fragment}
+* Mesmo padrão: o máximo bate exatamente com a proporção empírica — o
+MLE categórico, verificado a seguir.
 :::
 
 :::
@@ -898,15 +2175,46 @@ Mesmo padrão do Bloco 2: o MLE categórico numa folha é, de novo, a proporçã
 ## A Conexão Central: Impureza = Log-Verossimilhança
 
 ::: {.fragment}
+Substituindo $\hat p_{\tau k}$ na log-verossimilhança da folha:
 $$\ell_\tau(\hat p_\tau) = -N_\tau\, H(\hat p_\tau)$$
+onde $H(p)=-\sum_k p_k\ln p_k$ é a **entropia** da distribuição de
+classes na folha.
+:::
 
+::: {.fragment}
 $$\textbf{maximizar log-verossimilhança} \equiv \textbf{minimizar entropia}$$
 :::
 
 ::: {.fragment}
-<br/>
-Exatamente o critério de "reduzir a impureza" — só que raramente
-apresentado com essa conexão explícita.
+É exatamente o critério mais comum para cortar uma árvore de
+classificação — só que costuma ser apresentado como "reduzir a
+impureza", sem essa conexão com verossimilhança explicitada. Mesma
+equivalência do Bloco 2 (mínimos quadrados = MLE gaussiano), agora do
+lado categórico.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Ganho de Informação = Informação Mútua, Localmente
+
+::: {.fragment}
+* Para um corte $s$ que separa os $N_\tau$ pontos em $N_{\text{esq}}$ e
+$N_{\text{dir}}$, o **ganho de informação** é $$IG(\tau,s) = H(\hat p_\tau) - \left[\frac{N_{\text{esq}}}{N_\tau}H(\hat p_{\text{esq}}) + \frac{N_{\text{dir}}}{N_\tau}H(\hat p_{\text{dir}})\right].$$
+:::
+
+::: {.fragment}
+* Compare com o Bloco 4: $I(X;Y)=H(Y)-H(Y\mid X)$. O termo entre
+colchetes é $H(\mathcal{C}\mid S)$ — a entropia condicional da classe
+dado $S$, o indicador de lado do corte. Logo
+$$IG(\tau,s) = I(S;\mathcal{C}).$$
+:::
+
+::: {.fragment}
+* A busca gulosa dos Blocos 2–3 — "teste variável e limiar, escolha o
+que reduz mais o erro" — em classificação é, sem metáfora, "escolha o
+que **maximiza a informação mútua com a classe**". Por isso o critério tem o nome que tem.
 :::
 
 :::
@@ -930,9 +2238,16 @@ plt.show()
 ```
 
 ::: {.fragment}
-::: {.callout-warning icon=false title="Aviso de leitura"}
-Uma formulação sem o sinal negativo, em algumas fontes, descreve "máximo em $p=0{,}5$" — só consistente com a convenção padrão (com o sinal). Usamos a padrão aqui.
+**Índice de Gini:** $G(p)=\sum_k p_{\tau k}(1-p_{\tau k})$ — a
+probabilidade de errar classificando um ponto sorteado da folha com um
+segundo rótulo, também sorteado segundo $p_\tau$. Interpretação
+própria, não uma conexão de verossimilhança tão direta quanto a
+entropia; mesmo formato geral, computacionalmente mais barato (sem
+logaritmo).
 :::
+
+::: {.callout-warning.fragment icon=false title="Aviso de leitura"}
+Uma formulação sem o sinal negativo, em algumas fontes, descreve "máximo em $p=0{,}5$" — só consistente com a convenção padrão (com o sinal). Usamos a padrão aqui.
 :::
 
 :::
@@ -961,36 +2276,47 @@ Antes de calcular: mesma qualidade, olhando só a taxa de erro?
 ```{python}
 #| echo: false
 #| fig-align: center
-print("Split 1: erro=0.2500  gini=0.3750  entropia=0.5623")
-print("Split 2: erro=0.2500  gini=0.3333  entropia=0.4774")
+print(f"Nó pai: entropia={H_pai:.4f}  gini={G_pai:.4f}")
+print("Split 1: erro=0.2500  entropia=0.5623 (IG=0.1308)  gini=0.3750 (ganho=0.1250)")
+print("Split 2: erro=0.2500  entropia=0.4774 (IG=0.2158)  gini=0.3333 (ganho=0.1667)")
 ```
 
 ::: {.fragment}
-::: {.callout-important icon=false}
-Mesma taxa de erro (0,25) — mas Gini e entropia **preferem o Split 2** (folha pura). A taxa de erro bruta é cega a essa diferença.
-:::
+Mesma taxa de erro (0,25) — mas o Split 2 tem o maior ganho de
+informação ($IG\approx0{,}216$ contra $0{,}131$ nats). A taxa de erro
+bruta é cega a essa diferença: só olha quem "ganha a maioria", não o
+quão desequilibrada é essa maioria.
 :::
 
 ::: {.fragment}
-<br/>
-Por isso: entropia/Gini para **crescer**; taxa de erro bruta para **podar**.
+Entropia/Gini são diferenciáveis e mais sensíveis à composição interna
+da folha — por isso preferidas para **crescer**; a taxa de erro bruta,
+mais grosseira, fica reservada para **podar**.
 :::
 
 :::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
 
 ::: {.callout-tip}
 ## Julgue V ou F: entropia, Gini e taxa de erro para crescer/podar árvores
 
 Julgue V ou F — a questão só conta se acertar os 4 itens:
 
-a. O MLE de uma distribuição categórica numa folha é a proporção
-   empírica de cada classe.
-b. Entropia e Gini são preferidas para crescer a árvore porque são
-   diferenciáveis e sensíveis à distribuição interna da folha.
-c. Dois splits podem ter a mesma taxa de erro de classificação e, ainda
-   assim, impurezas (Gini/entropia) diferentes.
-d. A taxa de erro de classificação bruta é a escolha usual para
-   *crescer* a árvore, não para podá-la.
+a. Se todas as decisões de corte usassem a taxa de erro bruta como
+   critério de crescimento, o Split 2 do contraexemplo desta aula
+   (folha direita pura) não teria vantagem alguma sobre o Split 1.
+b. No limite em que uma folha tem uma única classe presente, o ganho
+   de informação de um corte que produz duas folhas puras é igual à
+   própria entropia do nó pai.
+c. Num conjunto de diagnóstico médico com 95% de pacientes saudáveis
+   e 5% doentes, o nó representando toda a base já tem entropia baixa
+   mesmo sem nenhum corte, simplesmente pela composição das classes.
+d. Como Gini e entropia têm o mesmo formato geral (zero nas bordas,
+   máximo em $p=0{,}5$), qualquer corte preferido pela entropia é
+   necessariamente também preferido pelo Gini.
+:::
+
 :::
 
 ::: {.content-visible when-format="revealjs"}
@@ -1000,14 +2326,18 @@ d. A taxa de erro de classificação bruta é a escolha usual para
 ::: {.callout-tip}
 Julgue V ou F — a questão só conta se acertar os 4 itens:
 
-a. O MLE de uma distribuição categórica numa folha é a proporção
-   empírica de cada classe.
-b. Entropia e Gini são preferidas para crescer a árvore porque são
-   diferenciáveis e sensíveis à distribuição interna da folha.
-c. Dois splits podem ter a mesma taxa de erro de classificação e, ainda
-   assim, impurezas (Gini/entropia) diferentes.
-d. A taxa de erro de classificação bruta é a escolha usual para
-   *crescer* a árvore, não para podá-la.
+a. Se todas as decisões de corte usassem a taxa de erro bruta como
+   critério de crescimento, o Split 2 do contraexemplo desta aula
+   (folha direita pura) não teria vantagem alguma sobre o Split 1.
+b. No limite em que uma folha tem uma única classe presente, o ganho
+   de informação de um corte que produz duas folhas puras é igual à
+   própria entropia do nó pai.
+c. Num conjunto de diagnóstico médico com 95% de pacientes saudáveis
+   e 5% doentes, o nó representando toda a base já tem entropia baixa
+   mesmo sem nenhum corte, simplesmente pela composição das classes.
+d. Como Gini e entropia têm o mesmo formato geral (zero nas bordas,
+   máximo em $p=0{,}5$), qualquer corte preferido pela entropia é
+   necessariamente também preferido pelo Gini.
 :::
 
 :::
@@ -1017,39 +2347,92 @@ d. A taxa de erro de classificação bruta é a escolha usual para
 ## Julgue V ou F: entropia, Gini e taxa de erro — Resposta
 
 ::: {.callout-tip}
-a. **Verdadeiro** — verificado numericamente acima.
-b. **Verdadeiro** — exatamente o argumento do bloco.
-c. **Verdadeiro** — é o próprio contraexemplo Split 1 vs. Split 2.
-d. **Falso** — é o oposto: erro bruto é usado para *podar*; entropia/Gini para *crescer*.
+a. **Verdadeiro** — erro bruto empata as duas em 0,25; é cego à pureza que o Split 2 alcança.
+b. **Verdadeiro** — a média ponderada dos filhos vai a zero, então $IG=H(\text{pai})-0$.
+c. **Verdadeiro** — entropia baixa vem da composição desbalanceada, não de algum corte já ter sido feito.
+d. **Falso** — mesma forma não garante mesma ordem de preferência entre candidatos (verificado numericamente: existem pares de splits em que Gini e entropia discordam sobre qual é melhor).
 :::
 
 :::
 
-# Poda e o Critério de Custo-Complexidade
+# Custo vs. Complexidade: a Poda de Árvores
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-O Bloco 2 já registrou o problema: a busca gulosa decide cada corte
-olhando só o ganho imediato. Isso tem uma consequência prática
-incômoda — **empiricamente**, é comum que nenhum dos cortes disponíveis
-produza uma redução significativa de erro, e ainda assim, algumas
-divisões depois, uma redução substancial apareça. Um critério de parada
-baseado só em "pare quando o próximo corte não ajudar muito" cortaria a
-árvore cedo demais, perdendo esses ganhos adiados.
+Todo modelo dos últimos blocos foi ajustado do mesmo jeito: cresça (ou
+ajuste) até que ele explique o treino o melhor possível. Isso é, em
+geral, uma péssima ideia — um modelo com liberdade suficiente
+(uma árvore sem limite de folhas é o exemplo mais literal) consegue
+reduzir o erro de treino a praticamente zero, memorizando peculiaridades
+daquela amostra específica em vez de captar o padrão que se repetiria em
+dados novos. O que se quer não é o modelo que erra menos **no treino**,
+é o que erra menos **em dados que ele não viu**. Essa tensão — entre o
+quanto um modelo se ajusta ao que já foi visto e o quanto ele generaliza
+— é o tema deste bloco, e reaparece, com nomes diferentes, em
+praticamente todo o resto do curso (regularização, seleção de modelo,
+o vício-variância da Aula 4). Em árvores, o nome que essa tensão ganha é
+**custo-complexidade**, e o mecanismo que a resolve é a **poda**.
+
+O Bloco 2 já registrou uma faceta do problema: a busca gulosa decide
+cada corte olhando só o ganho imediato. Isso tem uma consequência
+prática incômoda — **empiricamente**, é comum que nenhum dos cortes
+disponíveis produza uma redução significativa de erro, e ainda assim,
+algumas divisões depois, uma redução substancial apareça. Um critério
+de parada baseado só em "pare quando o próximo corte não ajudar muito"
+cortaria a árvore cedo demais, perdendo esses ganhos adiados.
 
 A prática recomendada inverte a lógica: cresça uma árvore **grande**
 (baseada só no número de pontos por folha, sem se preocupar com
 overfitting), e **depois** pode de volta. A poda é guiada por um
 critério de custo-complexidade que soma o erro residual de todas as
-folhas a uma penalidade proporcional ao **número de folhas**:
+folhas (o **custo**, no sentido de quão mal a árvore se ajusta ao
+próprio treino) a uma penalidade proporcional ao **número de folhas**
+(a **complexidade**, no sentido de quantos graus de liberdade a árvore
+usa):
 $$
-C(T) = \sum_{\tau=1}^{|T|} Q_\tau(T) + \lambda |T| .
+C(T) = \underbrace{\sum_{\tau=1}^{|T|} Q_\tau(T)}_{\text{custo}} +
+\underbrace{\lambda |T|}_{\text{complexidade}} .
 $$
 O parâmetro $\lambda \ge 0$ controla o trade-off: $\lambda=0$ não pena
-nada (a árvore completa, sem poda, sempre "vence"); $\lambda$ grande
-pena fortemente árvores complexas, empurrando a poda para árvores bem
-menores. O valor de $\lambda$ em si não vem de teoria — é escolhido por
-validação cruzada, o mesmo procedimento formalizado na Aula 4.
+nada (a árvore completa, sem poda, sempre "vence" — puro custo, zero
+penalidade de complexidade); $\lambda$ grande pena fortemente árvores
+complexas, empurrando a poda para árvores bem menores. Não existe um
+$\lambda$ "correto" universal — o valor certo depende de quanto ruído
+há nos dados e de quantos pontos se tem para estimar cada folha, e por
+isso é escolhido empiricamente, não derivado de teoria.
+
+::: {.callout-note}
+## O que é um conjunto de validação, e por que separar os dados
+
+Até aqui, "treino" significava simplesmente "os dados usados para
+ajustar o modelo" — a média de uma folha, a proporção de classes, o
+próprio corte escolhido, tudo veio do treino. A partir deste bloco,
+precisamos de uma segunda fatia de dados com um papel bem diferente: o
+**conjunto de validação**, reservado desde o início e nunca usado para
+ajustar nada (nem um corte, nem a estimativa de uma folha) — só para
+medir, depois que a árvore já está pronta, o quão bem ela se sai.
+
+A razão para separar os dois não é burocracia, é estatística: medir o
+erro de um modelo **nos mesmos dados usados para ajustá-lo** é uma
+estimativa **otimista** — inflada — do quão bem ele generaliza. O caso
+extremo é a própria árvore completa deste bloco: ela pode chegar a
+$100\%$ de acerto no treino (uma folha por ponto, se preciso), o que
+não diz nada sobre o desempenho em um dado novo. O conjunto de
+validação, por nunca ter influenciado o ajuste, dá uma estimativa
+honesta do erro de generalização — é o mesmo raciocínio que a Aula 4
+desta disciplina generaliza para a escolha de qualquer hiperparâmetro
+de complexidade, não só o $\lambda$ de poda de uma árvore.
+
+O que fazemos abaixo é a versão mais simples possível dessa ideia: uma
+única divisão treino/validação, $60\%/40\%$, sorteada uma vez.
+Essa simplicidade tem um custo que só será tratado com o devido
+cuidado na **Aula 4** (Validação Cruzada e Bootstrap): uma única
+divisão desperdiça dados (os $40\%$ de validação não ajudam a ajustar
+a árvore) e a estimativa de erro resultante depende de qual divisão
+específica saiu no sorteio — trocar a semente aleatória desloca um
+pouco onde cai o "melhor" $\lambda$. A Aula 4 resolve os dois problemas
+reamostrando repetidamente, em vez de dividir uma única vez.
+:::
 
 ```{python}
 #| echo: false
@@ -1116,26 +2499,78 @@ capacidade de memorizar o próprio treino) — mas a acurácia de
 
 ::: {.content-visible when-format="revealjs"}
 
+## Custo vs. Complexidade
+
+::: {.fragment}
+Todo modelo até aqui foi ajustado do mesmo jeito: cresça até explicar o
+treino o melhor possível. Um modelo com liberdade suficiente reduz o
+erro de **treino** a quase zero — memorizando a amostra, não o padrão.
+:::
+
+::: {.fragment}
+Não se quer o modelo que erra menos **no treino** — se quer o que erra
+menos **em dados novos**.
+:::
+
+::: {.fragment}
+Essa tensão — custo (erro de treino) vs. complexidade (graus de
+liberdade) — reaparece o curso inteiro (regularização, seleção de
+modelo, vício-variância da Aula 4). Em árvores, o nome é
+**custo-complexidade**; o mecanismo é a **poda**.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
 ## Crescer Demais, Depois Podar
 
 ::: {.fragment}
-Empiricamente: um corte "inútil" agora pode habilitar um corte muito
-bom depois. Parar cedo perde esse ganho adiado.
+Empiricamente: nenhum corte disponível reduz o erro de forma
+perceptível, mas algumas divisões depois, uma redução substancial
+aparece. Parar cedo ("pare quando o próximo corte não ajudar") perde
+esse ganho adiado.
 :::
 
 ::: {.fragment}
-<br/>
-**Prática:** crescer uma árvore grande, depois podar por
-custo-complexidade:
-$$C(T) = \sum_\tau Q_\tau(T) + \lambda|T|$$
+**Prática:** crescer uma árvore grande, sem preocupação com
+overfitting, e **depois** podar de volta por custo-complexidade:
+$$C(T) = \underbrace{\sum_\tau Q_\tau(T)}_{\text{custo}} + \underbrace{\lambda|T|}_{\text{complexidade}}$$
 :::
 
 ::: {.fragment}
-<br/>
-
-::: {.callout-tip icon=false}
-$\lambda=0$: árvore completa sempre vence. $\lambda$ grande: poda forte. O valor certo vem de validação cruzada (Aula 4).
+$\lambda=0$: puro custo, a árvore completa sempre vence. $\lambda$
+grande: penaliza fortemente a complexidade, poda forte. Não há um
+$\lambda$ "correto" universal — depende do ruído nos dados e é
+escolhido empiricamente.
 :::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Treino vs. Validação
+
+::: {.fragment}
+**Treino:** os dados usados para ajustar tudo — cortes, médias,
+proporções de folha.
+:::
+
+::: {.fragment}
+**Validação:** reservada desde o início, nunca usada para ajustar nada
+— só para medir, depois de pronta, o quão bem a árvore se sai.
+:::
+
+::: {.fragment}
+Medir erro nos mesmos dados do ajuste é uma estimativa **otimista** —
+o caso extremo é a própria árvore completa, que pode chegar a $100\%$
+de acerto no treino sem dizer nada sobre dados novos.
+:::
+
+::: {.fragment}
+Aqui: a versão mais simples possível — uma única divisão $60\%/40\%$,
+sorteada uma vez. Desperdiça dados e depende de qual divisão saiu no
+sorteio; a Aula 4 resolve os dois problemas reamostrando repetidamente.
 :::
 
 :::
@@ -1167,29 +2602,65 @@ plt.show()
 ```
 
 ::: {.fragment}
-::: {.callout-note icon=false}
-Treino só piora; validação tem um ótimo — nem completa (overfitting), nem podada demais (underfitting).
-:::
+A acurácia de **treino** só piora conforme $\lambda$ cresce e a árvore
+encolhe (menos capacidade de memorizar). A de **validação** tem um
+ponto ótimo no meio — nem a árvore completa (overfitting), nem a
+excessivamente podada (underfitting).
 :::
 
-:::
-
-::: {.callout-tip}
-## Por que "pare quando o próximo corte não reduzir muito o erro" é uma estratégia de parada ruim?
-
-Pense num exemplo em que dois cortes ruins, em sequência, habilitam um
-terceiro corte excelente — e escreva por que um critério de parada
-míope perderia esse ganho.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## Por que "pare quando o próximo corte não reduzir muito o erro" é uma estratégia de parada ruim?
+## Pergunta
 
 ::: {.callout-tip}
-::: {.fragment}
-*(Um corte ruim pode isolar um subgrupo que só fica homogêneo depois de mais um corte.)*
+## Por que "pare quando o próximo corte não reduzir muito o erro" é uma estratégia de parada ruim?
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. No limite em que todo corte candidato, em qualquer nível, sempre
+   reduz o erro por uma quantidade pequena mas positiva, um critério
+   de "pare quando a redução for menor que um limiar fixo" eventualmente
+   para a árvore, mesmo que cortes futuros muito bons ainda estivessem
+   disponíveis mais adiante.
+b. Se o critério de parada, em vez de olhar só o próximo corte,
+   pudesse olhar dois níveis à frente (checando se algum neto de um
+   corte candidato produz uma redução grande, mesmo que o corte
+   imediato não produza), esse critério ainda sofreria do mesmo tipo
+   de miopia, só que adiada por um nível.
+c. Num algoritmo de busca em jogos como xadrez, um jogador que só
+   avalia a qualidade imediata de cada lance pode recusar um sacrifício
+   de peça que parece ruim agora mas abre caminho para xeque-mate
+   poucas jogadas depois — o mesmo tipo de miopia do critério de
+   parada por corte único.
+d. Como crescer a árvore por completo e depois podar evita a miopia do
+   critério de parada por corte único, conclui-se que a árvore
+   completa, antes da poda, já é a estrutura ótima entre todas as
+   árvores possíveis com aquele número final de folhas.
 :::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pergunta — Resposta
+
+::: {.callout-tip}
+## Por que "pare quando o próximo corte não reduzir muito o erro" é uma estratégia de parada ruim?
+
+a. **Verdadeiro** — o critério só enxerga o ganho imediato; uma
+   sequência de ganhos pequenos cruza o limiar e para a árvore, mesmo
+   que um ganho grande estivesse logo depois.
+b. **Verdadeiro** — olhar mais um nível adia o problema, não o resolve:
+   sempre existe algum corte bom o suficiente à frente para escapar do
+   horizonte de busca escolhido.
+c. **Verdadeiro** — mesma estrutura: avaliação imediata míope perde um
+   ganho que só aparece olhando mais à frente.
+d. **Falso** — crescer e depois podar evita parar cedo demais, mas a
+   árvore completa ainda foi construída por uma sequência de escolhas
+   gulosas; a poda escolhe a melhor subárvore *dentro do que foi
+   construído*, não corrige os cortes gulosos já feitos.
 :::
 
 :::
@@ -1271,8 +2742,13 @@ X_inst, y_inst = X_diag.copy(), y_diag.copy()
 arv_original = DecisionTreeClassifier(max_depth=2, random_state=0)
 arv_original.fit(X_inst, y_inst)
 
-# Remove 5 pontos específicos (uma perturbação pequena, ~1% dos dados)
-idx_remover = rng.choice(len(X_inst), size=5, replace=False)
+# Remove 5 pontos específicos (uma perturbação pequena, ~1% dos dados).
+# Gerador local e com seed própria (não o `rng` global desta aula): a
+# demonstração precisa de uma amostra de 5 pontos específica que desloque
+# o corte, e prender isso ao estado do `rng` global a tornaria frágil a
+# qualquer mudança em chunks anteriores.
+rng_perturbacao = np.random.default_rng(241)
+idx_remover = rng_perturbacao.choice(len(X_inst), size=5, replace=False)
 mascara = np.ones(len(X_inst), dtype=bool)
 mascara[idx_remover] = False
 
@@ -1288,8 +2764,13 @@ print("Corte da raiz, árvore original:   ", descreve_raiz(arv_original))
 print("Corte da raiz, com 5 pontos a menos:", descreve_raiz(arv_perturbada))
 ```
 
-Remover menos de $2\%$ dos pontos já pode mudar qual variável entra
-primeiro, ou deslocar o limiar de forma perceptível — algo que não
+Remover só 5 pontos ($1\%$ da amostra) já desloca o limiar do corte da
+raiz de $0{,}014$ para $-0{,}113$ — a mesma variável $x_2$ ainda vence,
+mas o ponto de corte se move o suficiente para redesenhar as duas
+regiões de forma perceptível. Dependendo de quais pontos especificamente
+saem, uma perturbação desse tamanho pode até trocar qual variável entra
+primeiro no corte da raiz — não é preciso um exemplo extremo para isso
+acontecer, só um sorteio específico de poucos pontos. Nada disso
 aconteceria com um ajuste de mínimos quadrados, cujo hiperplano se move
 suavemente com pequenas mudanças nos dados. Esta é exatamente a
 instabilidade que, mais adiante no curso (Aula 9, Ensemble Theory), deixa
@@ -1351,6 +2832,14 @@ quantificar a incerteza dessa estimativa.
 
 ## Splits Alinhados aos Eixos: o Caso Diagonal
 
+::: {.fragment}
+Toda fronteira de árvore é uma sequência de cortes paralelos aos
+eixos — ótimo se a fronteira verdadeira também é; péssimo se não é. O
+caso mais claro: duas gaussianas com covariância compartilhada e
+correlacionada (Aula 2), cuja fronteira ótima é **uma única reta**, não
+alinhada aos eixos.
+:::
+
 ```{python}
 #| echo: false
 #| fig-align: center
@@ -1372,9 +2861,12 @@ plt.show()
 ```
 
 ::: {.fragment}
-::: {.callout-warning icon=false}
-A reta tracejada (fronteira ótima, Aula 2) nunca é alcançada — só aproximada em degraus, cada vez mais finos.
-:::
+Mesmo com 8 níveis, a árvore aproxima a diagonal com uma escadinha —
+nunca alcança a reta, precisa de folhas cada vez mais numerosas para
+chegar perto. A gaussiana resolve com **uma única direção**, porque sua
+forma já é adequada a esse tipo de fronteira: forma fixa é ótima
+quando acerta o formato certo; árvore é ótima quando não se sabe (ou
+não se quer assumir) qual é esse formato.
 :::
 
 :::
@@ -1382,6 +2874,12 @@ A reta tracejada (fronteira ótima, Aula 2) nunca é alcançada — só aproxima
 ::: {.content-visible when-format="revealjs"}
 
 ## Instabilidade: Poucos Pontos, Corte Diferente
+
+::: {.fragment}
+A estrutura aprendida é sensível a detalhes do treino — remover ou
+adicionar poucos pontos pode mudar qual variável e limiar são
+escolhidos no corte da raiz, que reverbera por toda a árvore abaixo.
+:::
 
 ```{python}
 #| echo: false
@@ -1391,14 +2889,15 @@ print("Corte da raiz, com 5 pontos a menos:", descreve_raiz(arv_perturbada))
 ```
 
 ::: {.fragment}
-::: {.callout-important icon=false}
-Menos de 2% dos pontos removidos já muda o corte da raiz — algo que não aconteceria com um ajuste de mínimos quadrados.
-:::
+Só $1\%$ dos pontos removidos já desloca o limiar de $0{,}014$ para
+$-0{,}113$ — mesma variável, corte bem diferente. Algo que não
+aconteceria com um ajuste de mínimos quadrados, cujo hiperplano se
+move suavemente com pequenas mudanças nos dados.
 :::
 
 ::: {.fragment}
-<br/>
-Essa fraqueza vira ingrediente útil na Aula 9 (*bagging*: média de muitas árvores levemente diferentes).
+Essa fraqueza vira ingrediente útil na Aula 9 (*bagging*: média de
+muitas árvores levemente diferentes).
 :::
 
 :::
@@ -1408,32 +2907,44 @@ Essa fraqueza vira ingrediente útil na Aula 9 (*bagging*: média de muitas árv
 ## Partição Rígida: Descontinuidades
 
 ::: {.fragment}
-Cada ponto pertence a exatamente uma folha — a previsão salta no
-limiar entre folhas vizinhas.
+Terceira limitação, já vista na figura da senoide (Bloco 2): cada
+ponto pertence a exatamente uma folha, e a previsão salta no limiar
+entre folhas vizinhas.
 :::
 
 ::: {.fragment}
-<br/>
-Neutro em classificação; ruim em regressão quando o alvo é suave (Bloco 2, a senoide).
+Neutro em classificação (uma fronteira sempre existe em algum lugar);
+ruim em regressão quando o alvo verdadeiro é uma função suave — a
+árvore cria descontinuidades exatamente onde a função não tem nenhuma.
 :::
 
 :::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
 
 ::: {.callout-tip}
 ## Julgue V ou F: limites estruturais das árvores
 
 Julgue V ou F — a questão só conta se acertar os 4 itens:
 
-a. Uma árvore de profundidade suficientemente grande sempre alcança
-   exatamente uma fronteira linear diagonal, sem aproximação em
-   degraus.
-b. A estrutura de uma árvore pode mudar substancialmente com a remoção
-   de uma pequena fração dos pontos de treino.
-c. A partição de uma árvore é rígida: cada ponto do espaço pertence a
-   exatamente uma folha.
-d. Descontinuidades nas previsões de uma árvore de regressão são
-   especialmente problemáticas quando o alvo verdadeiro é uma função
-   suave.
+a. No limite em que a profundidade máxima não é limitada e há pelo
+   menos um ponto de treino distinto por folha, o erro de treino de
+   uma árvore de classificação tende a zero, independentemente de
+   quão complexa seja a verdadeira fronteira de decisão.
+b. Se as 500 amostras do exemplo do California Housing fossem
+   substituídas por outra amostra, sorteada com outra semente
+   aleatória, o corte escolhido para a raiz poderia mudar, mesmo
+   mantendo as mesmas duas variáveis candidatas.
+c. Numa aplicação de visão computacional em que cada variável de
+   entrada é um pixel, uma árvore de cortes alinhados aos eixos
+   enfrentaria a mesma limitação de aproximar só em degraus fronteiras
+   não alinhadas a pixels individuais.
+d. Como instabilidade estrutural e partição rígida vêm do mesmo
+   processo de ajuste guloso, uma regra de desempate determinística
+   para cortes quase empatados eliminaria também a rigidez da
+   partição e suas descontinuidades.
+:::
+
 :::
 
 ::: {.content-visible when-format="revealjs"}
@@ -1443,16 +2954,22 @@ d. Descontinuidades nas previsões de uma árvore de regressão são
 ::: {.callout-tip}
 Julgue V ou F — a questão só conta se acertar os 4 itens:
 
-a. Uma árvore de profundidade suficientemente grande sempre alcança
-   exatamente uma fronteira linear diagonal, sem aproximação em
-   degraus.
-b. A estrutura de uma árvore pode mudar substancialmente com a remoção
-   de uma pequena fração dos pontos de treino.
-c. A partição de uma árvore é rígida: cada ponto do espaço pertence a
-   exatamente uma folha.
-d. Descontinuidades nas previsões de uma árvore de regressão são
-   especialmente problemáticas quando o alvo verdadeiro é uma função
-   suave.
+a. No limite em que a profundidade máxima não é limitada e há pelo
+   menos um ponto de treino distinto por folha, o erro de treino de
+   uma árvore de classificação tende a zero, independentemente de
+   quão complexa seja a verdadeira fronteira de decisão.
+b. Se as 500 amostras do exemplo do California Housing fossem
+   substituídas por outra amostra, sorteada com outra semente
+   aleatória, o corte escolhido para a raiz poderia mudar, mesmo
+   mantendo as mesmas duas variáveis candidatas.
+c. Numa aplicação de visão computacional em que cada variável de
+   entrada é um pixel, uma árvore de cortes alinhados aos eixos
+   enfrentaria a mesma limitação de aproximar só em degraus fronteiras
+   não alinhadas a pixels individuais.
+d. Como instabilidade estrutural e partição rígida vêm do mesmo
+   processo de ajuste guloso, uma regra de desempate determinística
+   para cortes quase empatados eliminaria também a rigidez da
+   partição e suas descontinuidades.
 :::
 
 :::
@@ -1462,10 +2979,10 @@ d. Descontinuidades nas previsões de uma árvore de regressão são
 ## Julgue V ou F: limites estruturais das árvores — Resposta
 
 ::: {.callout-tip}
-a. **Falso** — nunca alcança exatamente; só aproxima em degraus cada vez mais finos.
-b. **Verdadeiro** — verificado acima (5 pontos já mudam o corte da raiz).
-c. **Verdadeiro** — é a definição de partição rígida.
-d. **Verdadeiro** — a árvore introduz descontinuidades onde a função suave não tem nenhuma.
+a. **Verdadeiro** — profundidade e granularidade suficientes bastam para memorizar o treino, não importa a fronteira real.
+b. **Verdadeiro** — reamostrar é uma perturbação ainda maior que os 5 pontos já usados na demonstração de instabilidade.
+c. **Verdadeiro** — a limitação é sobre a geometria do particionamento, não específica dos exemplos 2D usados na aula.
+d. **Falso** — são causas independentes: rigidez vem da partição em si, não da forma como o corte é escolhido.
 :::
 
 :::
@@ -1476,25 +2993,51 @@ d. **Verdadeiro** — a árvore introduz descontinuidades onde a função suave 
 
 ::: {.fragment}
 Nenhum dos dois extremos (sempre linear vs. totalmente livre) é
-gratuito. Forma fixa: barata e estável, erra sistematicamente. Árvore:
-acerta qualquer formato, paga em instabilidade e miopia.
+gratuito. Forma fixa: barata e estável, erra sistematicamente quando o
+formato certo não é o assumido. Árvore: acerta qualquer formato, paga
+em instabilidade e miopia gulosa.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Retomando as Perguntas de Abertura
+
+::: {.fragment}
+**1. O que uma árvore está estimando?** Uma função constante por
+partes — de $p(\mathcal{C}_k\mid\mathbf{x})$ ou de
+$\mathbb{E}[t\mid\mathbf{x}]$ —, cuja forma (não só os parâmetros) vem
+dos dados.
 :::
 
 ::: {.fragment}
-<br/>
-
-::: {.callout-warning icon=false title="Ponte para a Aula 4"}
-Como escolher, de forma sistemática, o **tanto de complexidade** certo — o $\lambda$ de poda, ou qualquer outro hiperparâmetro?
-:::
-:::
-
+**2. Por que "reduzir a impureza" é maximizar verossimilhança?** A
+proporção empírica de classes numa folha é o MLE categórico; maximizar
+essa log-verossimilhança é, algebricamente, minimizar a entropia —
+mesmo argumento que já valia para a média em regressão.
 :::
 
-# Exercícios
+::: {.fragment}
+**3. Que preço se paga pela liberdade?** Splits alinhados aos eixos
+podem ser muito subótimos, a estrutura é instável a pequenas mudanças
+no treino, e a partição é rígida — descontinuidades que uma função
+suave não tem.
+:::
+
+::: {.fragment}
+**Ponte para a Aula 4:** como escolher, de forma sistemática, o
+**tanto de complexidade** certo — o $\lambda$ de poda, ou qualquer
+outro hiperparâmetro?
+:::
+
+:::
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-## Questões discursivas
+# Exercícios
+
+## Questões discursivas 
 
 1. Explique, com suas próprias palavras, por que dizer "a árvore
    escolhe o corte que reduz mais a impureza" é equivalente a dizer "a
@@ -1521,206 +3064,294 @@ branco tem penalidade de 20% da nota da questão).
 ::: {.callout-tip}
 ## Árvores como estimação não-paramétrica
 
-a. ( ) Uma árvore de decisão particiona o espaço de entrada em regiões
-   retangulares alinhadas aos eixos.
+a. ( ) Se, em vez de cortes alinhados aos eixos, uma árvore pudesse
+   usar cortes ao longo de qualquer direção linear (hiperplanos
+   oblíquos), mantendo a mesma lógica gulosa de escolher o corte que
+   mais reduz $Q$, ela deixaria de ser um modelo não-paramétrico.
 
-b. ( ) Uma árvore de decisão é um modelo probabilístico gráfico, com
-   dependências explícitas entre as variáveis de entrada.
+b. ( ) Se o número mínimo de pontos por folha for reduzido a $1$ e a
+   profundidade máxima não for limitada, o número de parâmetros
+   efetivos de uma árvore pode crescer até se igualar ao número de
+   pontos de treino $N$.
 
-c. ( ) Dentro de cada região (folha), o modelo previsto é uma
-   constante.
+c. ( ) Suponha que se queira usar uma árvore para modelar a
+   distribuição conjunta completa $p(\mathbf{x}, y)$, não só a
+   fronteira de decisão. Isso é possível diretamente com o mesmo
+   procedimento de ajuste desta aula, sem nenhuma modificação.
 
-d. ( ) O número de parâmetros efetivos de uma árvore é fixado antes de
-   olhar para os dados, como numa gaussiana ou num Naive Bayes.
+d. ( ) Numa árvore com uma única folha (nenhum corte realizado), a
+   estimativa em classificação se reduz à priori marginal $\hat\pi_k$
+   da amostra de treino, ignorando completamente $\mathbf{x}$.
 :::
 
 ::: {.callout-tip}
 ## O estimador ótimo numa folha de regressão
 
-a. ( ) A predição que minimiza a soma de quadrados residuais dentro de
-   uma folha é a mediana dos alvos ali contidos.
+a. ( ) Se, em vez de uma verossimilhança gaussiana, assumíssemos uma
+   verossimilhança de Laplace (dupla exponencial) para os alvos de uma
+   folha, o estimador de máxima verossimilhança de $y_\tau$ deixaria
+   de ser a média amostral e passaria a ser a mediana amostral.
 
-b. ( ) Sob um modelo gaussiano com média constante por folha e
-   variância compartilhada, o MLE da média é a média amostral.
+b. ( ) Se todos os $N_\tau$ alvos de uma folha forem idênticos entre
+   si (variância zero), o valor mínimo de $Q_\tau$ é zero, e a
+   log-verossimilhança gaussiana correspondente, no limite
+   $\sigma^2\to 0$, tende a $+\infty$.
 
-c. ( ) Minimizar a soma de quadrados residuais numa folha é
-   equivalente a maximizar a log-verossimilhança gaussiana da mesma
-   folha.
+c. ( ) Uma folha com $N_\tau=1$ ainda define um $Q_\tau$ mínimo bem
+   definido e igual a zero, mas a variância amostral desse único ponto
+   não pode ser estimada de forma não-enviesada (o denominador $N_\tau
+   - 1$ seria zero).
 
-d. ( ) A busca pelo melhor corte, numa árvore de regressão, é feita
-   testando exaustivamente combinações de variável e limiar.
+d. ( ) Como $Q_\tau$ e a variância amostral $\hat\sigma^2_\tau =
+   Q_\tau/N_\tau$ diferem apenas por uma constante multiplicativa,
+   qualquer corte que minimize $Q_\tau$ nas duas folhas geradas também
+   minimiza, necessariamente, a variância combinada dessas folhas.
 :::
 
 ::: {.callout-tip}
 ## Crescimento guloso e sua miopia
 
-a. ( ) Otimizar a estrutura inteira de uma árvore de uma só vez,
-   mesmo com número fixo de nós, é computacionalmente inviável em
-   geral.
+a. ( ) Se o critério fosse "sempre aprofundar a folha mais numerosa"
+   em vez de "maior redução de $Q$", o resultado seria idêntico ao
+   crescimento guloso descrito na aula, já que a folha mais numerosa
+   tende a ter o maior $Q$.
 
-b. ( ) A busca gulosa escolhe, a cada passo, o corte que produz o
-   maior ganho apenas naquele passo, sem considerar cortes futuros.
+b. ( ) No limite em que o número mínimo de pontos por folha tende a
+   zero, a busca exaustiva de limiares dentro de uma folha com
+   $N_\tau$ pontos distintos passa a testar até $N_\tau - 1$ limiares
+   candidatos.
 
-c. ( ) Um corte que não reduz o erro de forma perceptível nunca pode
-   habilitar um corte seguinte que reduza o erro substancialmente.
+c. ( ) Se, em vez de um único alvo, tivéssemos alvos multivariados
+   $\mathbf{t}\in\mathbb{R}^p$ e definíssemos $Q_\tau$ como a soma das
+   somas de quadrados de cada componente, o mesmo algoritmo de busca
+   exaustiva continuaria bem definido, sem alteração na lógica do
+   Passo 2.
 
-d. ( ) Crescer a árvore nó a nó, adicionando um par de folhas por vez,
-   é a estratégia prática usual, diante da inviabilidade da otimização
-   conjunta.
+d. ( ) Como a busca escolhe sempre o corte de menor $Q$ entre as duas
+   folhas geradas, a árvore final construída por esse processo guloso
+   é, necessariamente, a de menor $Q$ total entre todas as árvores com
+   o mesmo número de folhas.
 :::
 
 ::: {.callout-tip}
-## MLE categórico e a conexão com entropia
+## Entropia e informação mútua
 
-a. ( ) O MLE de uma distribuição categórica numa folha, dados os
-   dados observados, é a proporção empírica de cada classe.
+a. ( ) Se uma variável $X$ tem $K$ resultados possíveis e é uniforme
+   entre eles, sua entropia tende a $\ln K$ nats — e, no limite em que
+   $K\to\infty$ mantendo a uniformidade, $H(X)\to\infty$.
 
-b. ( ) A log-verossimilhança categórica maximizada numa folha é
-   proporcional à entropia da distribuição de classes na folha, com
-   sinal positivo.
+b. ( ) Se $Y$ fosse uma função determinística e invertível de $X$
+   (conhecer $Y$ permite recuperar $X$ exatamente, e vice-versa),
+   então $I(X;Y) = H(X) = H(Y)$.
 
-c. ( ) Maximizar a log-verossimilhança categórica numa folha equivale
-   a minimizar a entropia dessa folha.
+c. ( ) Considere duas moedas honestas lançadas de forma totalmente
+   independente, sem qualquer relação causal entre elas. Mesmo assim,
+   numa amostra finita de $N$ lançamentos, a informação mútua empírica
+   calculada a partir das frequências observadas dificilmente será
+   exatamente zero, mesmo que a informação mútua populacional
+   verdadeira seja zero.
 
-d. ( ) A entropia $H(p) = -\sum_k p_k\ln p_k$ vale zero quando a folha
-   é perfeitamente pura (uma única classe presente).
+d. ( ) Como $I(X;Y)$ é sempre não-negativa e vale zero exatamente na
+   independência, uma informação mútua alta necessariamente implica
+   que $X$ causa $Y$ (ou vice-versa).
+:::
+
+::: {.callout-tip}
+## Ganho de informação e a conexão MLE categórico–entropia
+
+a. ( ) Se, em vez de comparar $H(\hat p_\tau)$ com a **média
+   ponderada** das entropias dos filhos, comparássemos com a MAIOR das
+   duas entropias, o valor resultante ainda seria igual à informação
+   mútua $I(S;\mathcal{C})$.
+
+b. ( ) No caso extremo em que um corte separa perfeitamente as duas
+   classes (ambas as folhas filhas ficam com $H=0$), o ganho de
+   informação desse corte é exatamente igual a $H(\hat p_\tau)$ — o
+   maior valor possível para aquele nó.
+
+c. ( ) Numa folha com 3 classes, em contagens $(10,10,10)$, o MLE
+   categórico dessa folha ainda seria a proporção empírica
+   $(1/3,1/3,1/3)$, com entropia dada pela mesma fórmula, agora
+   somando sobre 3 termos.
+
+d. ( ) Como maximizar a log-verossimilhança categórica equivale a
+   minimizar a entropia da folha, um corte que reduz a entropia de
+   AMBAS as folhas filhas em relação à do pai necessariamente maximiza
+   o ganho de informação entre todos os cortes candidatos disponíveis
+   naquele nó.
 :::
 
 ::: {.callout-tip}
 ## Entropia e Gini: forma e interpretação
 
-a. ( ) Tanto a entropia quanto o índice de Gini se anulam quando a
-   folha é perfeitamente pura.
+a. ( ) À medida que o número de classes $K$ numa folha cresce, sempre
+   mantendo a distribuição uniforme entre elas, tanto a entropia
+   máxima $H=\ln K$ quanto o valor máximo do índice de Gini,
+   $G=1-1/K$, crescem sem limite.
 
-b. ( ) A entropia e o índice de Gini atingem seu valor máximo quando
-   as classes estão igualmente representadas na folha.
+b. ( ) Se, em vez do índice de Gini, usássemos $G'(p)=\max_k p_k$ (a
+   proporção da classe majoritária) como critério de impureza, um
+   corte que produz duas folhas com $\max_k p_k$ idêntico teria
+   impureza ponderada igual, mesmo que as distribuições internas das
+   duas folhas fossem completamente diferentes fora da classe
+   majoritária.
 
-c. ( ) O índice de Gini é, em geral, um estimador de máxima
-   verossimilhança tão direto quanto a entropia.
+c. ( ) Num problema de detecção de fraude com 99% de transações
+   legítimas e 1% fraudulentas, uma folha que reproduz exatamente essa
+   proporção tem entropia próxima do mínimo possível, mesmo antes de
+   qualquer corte ser feito.
 
-d. ( ) O índice de Gini pode ser interpretado como a taxa de erro
-   esperada de um classificador que sorteia rótulos segundo as
-   proporções da própria folha.
+d. ( ) Como entropia e Gini se anulam numa folha pura e atingem o
+   máximo em $p=0{,}5$ (caso binário), as duas medidas sempre
+   concordam sobre qual, entre dois cortes candidatos, produz a maior
+   redução de impureza.
 :::
 
 ::: {.callout-tip}
 ## Por que não usar a taxa de erro bruta para crescer a árvore
 
-a. ( ) Dois splits distintos podem ter exatamente a mesma taxa de erro
-   de classificação ponderada e, ainda assim, impurezas (Gini/entropia)
-   diferentes.
+a. ( ) Num nó com duas classes empatadas em número de pontos
+   (proporção $50/50$), a taxa de erro do classificador majoritário é
+   $0{,}5$ — o valor máximo possível dessa métrica, coincidindo com o
+   ponto de máxima entropia e máximo Gini.
 
-b. ( ) A taxa de erro de classificação bruta é diferenciável em
-   relação às probabilidades dos nós, assim como a entropia.
+b. ( ) Se a taxa de erro bruta fosse o único critério de crescimento,
+   e dois cortes candidatos produzissem a mesma taxa de erro
+   ponderada, o algoritmo não teria como preferir um corte ao outro,
+   nem mesmo quando um deles produz uma folha perfeitamente pura.
 
-c. ( ) Entropia e Gini são mais sensíveis do que a taxa de erro bruta
-   a mudanças na composição interna de uma folha.
+c. ( ) Considere um nó com 3 classes e contagens $(50,49,1)$. O
+   classificador que sempre prevê a classe majoritária nesse nó erra
+   em $50\%$ dos casos, mesmo a folha estando longe de ser
+   uniformemente distribuída entre as 3 classes.
 
-d. ( ) A taxa de erro de classificação bruta é a escolha mais comum
-   para a etapa de poda de uma árvore.
+d. ( ) Como a validação, na escolha de $\lambda$, usa a acurácia
+   (equivalente à taxa de erro), conclui-se que entropia e Gini
+   deixam de ter qualquer papel na fase de poda por custo-complexidade.
 :::
 
 ::: {.callout-tip}
-## O critério de custo-complexidade
+## Custo vs. complexidade e a poda
 
-a. ( ) O critério de poda $C(T) = \sum_\tau Q_\tau(T) + \lambda|T|$
-   penaliza árvores com mais folhas, para $\lambda > 0$.
+a. ( ) No limite em que $\lambda\to\infty$, o critério $C(T) =
+   \sum_\tau Q_\tau(T) + \lambda|T|$ é minimizado por uma árvore com
+   uma única folha.
 
-b. ( ) Com $\lambda = 0$, a árvore completa (sem poda) sempre minimiza
-   $C(T)$ entre todas as subárvores possíveis.
+b. ( ) Se a penalidade de complexidade fosse proporcional à
+   profundidade da árvore em vez de ao número de folhas, duas árvores
+   com o mesmo número de folhas mas formatos diferentes (uma bem
+   desbalanceada, outra balanceada) poderiam receber penalidades
+   diferentes sob esse critério alternativo, ao contrário do critério
+   $C(T)$ usado na aula.
 
-c. ( ) O valor de $\lambda$ usado na prática é derivado analiticamente
-   a partir do número de variáveis do problema, não escolhido por
-   validação cruzada.
+c. ( ) Numa tarefa de regressão em que os alvos $t$ passam a ser
+   medidos numa escala muito maior (ex.: milhões em vez de milhares de
+   dólares), o mesmo valor de $\lambda$ usado na escala original não
+   produz, em geral, a mesma árvore podada na nova escala.
 
-d. ( ) Aumentar $\lambda$ tende a reduzir o número de folhas da árvore
-   podada.
+d. ( ) Como $\sum_\tau Q_\tau(T)$ só pode diminuir (ou manter-se)
+   conforme se adicionam folhas, e $\lambda|T|$ só pode aumentar,
+   conclui-se que $C(T)$ é uma função estritamente convexa do número
+   de folhas, com um único mínimo global bem definido.
 :::
 
 ::: {.callout-tip}
-## Por que crescer grande e depois podar
+## Treino vs. validação: por que separar os dados
 
-a. ( ) É empiricamente comum que um corte não produza redução
-   perceptível de erro, mas habilite um corte seguinte com redução
-   substancial.
+a. ( ) Se o conjunto de validação tivesse exatamente $0\%$ dos dados
+   (todo o conjunto fosse usado como treino), a acurácia medida no que
+   sobrasse para "validação" seria, no limite, idêntica à acurácia de
+   treino.
 
-b. ( ) Parar de crescer a árvore assim que um corte não reduzir muito
-   o erro é uma estratégia livre de riscos de subajuste (*underfitting*).
+b. ( ) Se a escolha do melhor $\lambda$ fosse feita usando a acurácia
+   de TREINO em vez da de validação, o $\lambda$ escolhido tenderia a
+   ser sistematicamente menor (menos poda) do que o escolhido por
+   validação.
 
-c. ( ) A prática recomendada é crescer uma árvore grande e, só depois,
-   podar por custo-complexidade.
+c. ( ) Num cenário com apenas 40 pontos de treino disponíveis,
+   reservar $40\%$ deles só para validação tem um custo prático mais
+   sério do que reservar a mesma proporção de um conjunto de 40.000
+   pontos.
 
-d. ( ) A acurácia de treino, à medida que $\lambda$ aumenta e a árvore
-   encolhe, tende a piorar ou manter-se, nunca a melhorar.
-:::
-
-::: {.callout-tip}
-## Acurácia de treino vs. validação sob poda
-
-a. ( ) A acurácia de treino é, em geral, maior ou igual para árvores
-   maiores (menos podadas) do que para árvores muito podadas.
-
-b. ( ) A acurácia de validação, variando $\lambda$, tende a ter um
-   único ponto ótimo, nem na árvore completa nem na mais podada
-   possível.
-
-c. ( ) Escolher $\lambda$ pela acurácia de treino, em vez da de
-   validação, tende a favorecer árvores maiores do que o ideal.
-
-d. ( ) Se a acurácia de validação piora tanto para $\lambda$ muito
-   pequeno quanto para $\lambda$ muito grande, isso é evidência de
-   *overfitting* e *underfitting*, respectivamente.
+d. ( ) Como o conjunto de validação nunca é usado para ajustar os
+   cortes da árvore, o desempenho medido nele é uma estimativa
+   não-enviesada do erro de generalização, mesmo que o próprio valor
+   de $\lambda$ tenha sido escolhido observando exatamente esse mesmo
+   conjunto.
 :::
 
 ::: {.callout-tip}
 ## Splits alinhados aos eixos
 
-a. ( ) Uma fronteira de decisão ótima alinhada aos eixos é aproximada
-   por uma árvore com poucos cortes.
+a. ( ) No limite em que a profundidade tende a infinito, o erro de
+   aproximação de uma fronteira diagonal por cortes alinhados aos
+   eixos tende a zero, mas o número de folhas necessário para um erro
+   menor que $\epsilon$ cresce sem limite à medida que $\epsilon\to0$.
 
-b. ( ) Uma fronteira de decisão ótima diagonal (a 45 graus dos eixos)
-   é aproximada por uma árvore com um único corte, tão bem quanto uma
-   fronteira alinhada aos eixos.
+b. ( ) Se a fronteira de decisão ótima entre duas classes fosse
+   alinhada a um dos eixos originais (dependendo só de $x_1$, por
+   exemplo), uma árvore poderia representá-la exatamente com um único
+   corte, ao contrário do caso diagonal.
 
-c. ( ) Uma árvore de profundidade suficiente pode aproximar
-   arbitrariamente bem uma fronteira diagonal, ainda que nunca a
-   alcance exatamente.
+c. ( ) Considere um problema em que a fronteira ótima é um círculo
+   centrado na origem. Uma árvore com cortes alinhados aos eixos pode
+   aproximar essa fronteira com uma sequência de retângulos, mas nunca
+   a representa exatamente com um número finito de cortes.
 
-d. ( ) Uma gaussiana com covariância compartilhada resolve o caso da
-   fronteira diagonal com uma única direção de corte.
+d. ( ) Como uma árvore com profundidade suficiente aproxima
+   arbitrariamente bem qualquer fronteira, o número de folhas
+   necessário para uma boa aproximação não depende da complexidade
+   geométrica da fronteira verdadeira, só da profundidade escolhida.
 :::
 
 ::: {.callout-tip}
 ## Instabilidade estrutural
 
-a. ( ) A estrutura de uma árvore de decisão é, em geral, insensível a
-   pequenas mudanças no conjunto de treino.
+a. ( ) Se, em vez de escolher deterministicamente o corte de maior
+   $IG$ (ou menor $Q$), o algoritmo escolhesse aleatoriamente entre os
+   $k$ melhores cortes candidatos a cada rodada, a instabilidade da
+   estrutura de uma árvore individual a pequenas mudanças no treino
+   tenderia a diminuir.
 
-b. ( ) Remover uma pequena fração dos pontos de treino pode mudar qual
-   variável é escolhida no corte da raiz.
+b. ( ) No limite em que o conjunto de treino tem um número muito
+   grande de pontos amostrados da mesma distribuição geradora, o corte
+   escolhido na raiz se aproxima de um valor estável, e pequenas
+   remoções de pontos deixam de mudar esse corte de forma perceptível.
 
-c. ( ) Um ajuste de mínimos quadrados (como uma reta de regressão) é,
-   em geral, mais estável a pequenas mudanças no treino do que a
-   estrutura de uma árvore.
+c. ( ) Num conjunto de dados em que várias variáveis são fortemente
+   correlacionadas entre si (quase redundantes para prever a classe),
+   a instabilidade estrutural de uma árvore tende a ser maior do que
+   em variáveis pouco correlacionadas.
 
-d. ( ) A instabilidade estrutural das árvores é, mais adiante no
-   curso, um ingrediente que torna o *bagging* eficaz.
+d. ( ) Como a estrutura de uma árvore pode mudar substancialmente com
+   a remoção de poucos pontos de treino, as previsões dessa árvore
+   para a maioria dos pontos de teste também mudam substancialmente
+   sempre que a estrutura muda.
 :::
 
 ::: {.callout-tip}
 ## Partição rígida e descontinuidades
 
-a. ( ) Numa árvore, cada ponto do espaço de entrada pertence a
-   exatamente uma folha.
+a. ( ) À medida que o número de folhas de uma árvore de regressão
+   cresce sem limite, o tamanho de cada descontinuidade entre folhas
+   vizinhas tende a diminuir, mas a partição continua sendo, em
+   qualquer profundidade finita, uma função em degraus.
 
-b. ( ) A previsão de uma árvore de regressão pode ter descontinuidades
-   exatamente nos limiares entre folhas vizinhas.
+b. ( ) Se, em vez de prever a média constante em cada folha, a árvore
+   previsse uma reta local ajustada por mínimos quadrados dentro de
+   cada folha, as descontinuidades entre folhas vizinhas
+   desapareceriam automaticamente, sem qualquer restrição adicional.
 
-c. ( ) A rigidez da partição de uma árvore é um problema
-   exclusivamente de classificação, não de regressão.
+c. ( ) Na aplicação de precificação de imóveis desta aula (California
+   Housing), dois imóveis com `MedInc` quase idêntico, mas de lados
+   opostos de um limiar de corte, podem receber previsões de preço
+   bastante diferentes, mesmo sendo quase indistinguíveis em todo o
+   resto.
 
-d. ( ) Aumentar o número de folhas de uma árvore de regressão elimina
-   completamente as descontinuidades nas previsões.
+d. ( ) Como a rigidez da partição é a mesma característica que
+   permite à árvore modelar interações não-lineares sem exigir que
+   sejam especificadas de antemão, conclui-se que a rigidez da
+   partição não tem nenhuma desvantagem prática relevante.
 :::
 
 ## Aviso

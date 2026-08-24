@@ -88,84 +88,214 @@ h2 {
    algo como minmax(500px, calc(850px - 3em)) — ~850px fixos, bem estreito
    em telas largas. Substituímos por uma única regra (com !important, para
    vencer qualquer uma das variações acima) onde o conteúdo sempre ocupa
-   75% da largura da tela, com margens iguais dos dois lados. */
+   70% da largura da tela, com margens iguais (15%) dos dois lados. */
 .page-columns {
   grid-template-columns:
     [screen-start] 1fr
-    [screen-start-inset page-start page-start-inset body-start-outset body-start body-content-start] minmax(0, 75vw)
+    [screen-start-inset page-start page-start-inset body-start-outset body-start body-content-start] minmax(0, 70vw)
     [body-content-end body-end body-end-outset page-end-inset page-end screen-end-inset] 1fr
     [screen-end] !important;
 }
 
 /* A regra acima colapsa "body-end" e "page-end" na mesma linha do grid —
    ótimo para a maioria das páginas (sem barra lateral), mas o CSS padrão
-   do Quarto posiciona a barra de categorias de um listing com
+   do Quarto posiciona a barra de categorias/TOC de um listing com
    `grid-column: body-end / page-end` (ver _bootstrap-rules.scss): duas
    linhas iguais viram uma coluna de largura zero, e a barra lateral acaba
-   se sobrepondo ao conteúdo (visto ao vivo em Publications, com
-   `filter-ui: true`). A solução: tirar só ESSA barra lateral (a de
-   categorias) do fluxo do grid (`position: fixed`, ancorada à direita da
-   viewport) — ela deixa de disputar espaço com a coluna de conteúdo,
-   então a reserva de coluna não é mais necessária. A margem direita da
-   página (fora dos 75vw de conteúdo) é (100vw-75vw)/2 = 12.5vw de cada
-   lado — largura suficiente para a barra viver dentro dela sem invadir o
-   conteúdo.
+   se sobrepondo ao conteúdo. A solução é reabrir, só para essa variante,
+   colunas de verdade entre "body-content-end" e a borda da tela — tiradas
+   de dentro dos mesmos 70vw de conteúdo (não somados a eles), pra manter
+   a regra de 70% de tela ocupada.
    Importante: #quarto-margin-sidebar também é usado, em QUALQUER página
    de conteúdo com `toc: true` (todas as aulas), para o sumário (#TOC) —
-   um elemento completamente diferente, que já funciona bem no grid
-   padrão do Quarto e nunca teve o problema de sobreposição (não convive
-   com uma barra de categorias na mesma página). Aplicar position:fixed
-   ali também já quebrou esse TOC uma vez nesta sessão. Por isso o
-   seletor abaixo usa `:has()` para mirar só a variante com a nuvem de
-   categorias (`.quarto-listing-category`, adicionada logo abaixo) —
-   nunca a variante com `#TOC`. */
-#quarto-margin-sidebar:has(.quarto-listing-category) {
-  position: fixed;
-  top: 6rem;
-  right: 1vw;
-  width: min(260px, 11vw);
-  max-height: calc(100vh - 8rem);
-  overflow-y: auto;
+   por isso o seletor usa `:has()` para mirar as duas variantes (nuvem de
+   categorias OU TOC).
+   Conteúdo sempre 70vw. Margem esquerda sempre 15vw — igual à regra
+   geral acima, com ou sem menu, pra não sobrar mais espaço vazio de um
+   lado do que do outro. Quando há menu (categorias ou TOC), ele mora
+   DENTRO da margem direita, que por isso também continua 15vw no total —
+   só que preenchida por 1vw de respiro colado ao conteúdo + 11vw pro
+   menu em si + 3vw de margem até a borda da tela, em vez de vazia.
+
+   BUG CORRIGIDO — nomeação das linhas do grid não podia ser lida de
+   trás pra frente igual à ordem em que os nomes aparecem no CSS. A
+   versão anterior desta regra escrevia, nessa ordem:
+     [body-content-end body-end-outset body-end] 1vw [page-end-inset page-end] 11vw [screen-end-inset screen-end] 3vw
+   ou seja, "body-end" ficava ANTES da faixa de 1vw (respiro), e
+   "page-end" ficava DEPOIS dela — só que o CSS padrão do Quarto (linha
+   ~309 de _bootstrap-rules.scss) posiciona a barra lateral exatamente
+   com `grid-column: body-end / page-end`. Com "body-end" e "page-end"
+   colados nas duas pontas da faixa de 1vw (não da faixa de 11vw!), a
+   ÁREA DE GRID de verdade da barra lateral era essa faixa de 1vw
+   (~9px em telas largas, menos ainda em telas estreitas) — não os 11vw
+   pretendidos. O `width: 11vw` que forçávamos no elemento (ver abaixo)
+   só mascarava o sintoma: o box ficava largo o bastante visualmente,
+   mas "vazava" da sua área de grid pra direita a partir do canto
+   esquerdo dela (comportamento padrão do navegador quando um item é
+   mais largo que a própria área) — nunca alcançando de fato a borda
+   direita da faixa de 11vw real, que sobrava vazia bem à direita da
+   barra. Em telas estreitas (<1000px) a faixa de 1vw physically
+   shrinks to just a few px, tornando o efeito ainda mais visível
+   (a barra "flutua" ainda mais perto do conteúdo, com uma faixa maior
+   de espaço morto entre ela e a borda da tela).
+   Fix: mover "body-end" pra DEPOIS da faixa de 1vw e "page-end" pra
+   DEPOIS da faixa de 11vw — agora a área de grid real da barra lateral
+   (body-end → page-end) é exatamente a faixa de 11vw pretendida, igual
+   à convenção que o próprio Quarto usa nos mixins de TOC (ver
+   _bootstrap-mixins.scss, `page-columns-tocleft-wide`). "screen-end"
+   também precisa ser a ÚLTIMA linha nomeada, sem nenhuma faixa depois
+   dela (assim como na regra geral acima, sem barra lateral) — na
+   versão anterior havia uma faixa de 3vw DEPOIS de "screen-end", então
+   qualquer regra do site (nossa ou do Quarto) que use "screen-end" como
+   borda da tela parava 3vw curta da borda real. */
+.page-columns:has(.quarto-listing-category),
+.page-columns:has(nav[role="doc-toc"]) {
+  grid-template-columns:
+    [screen-start] 15vw
+    [screen-start-inset page-start page-start-inset body-start-outset body-start body-content-start] minmax(0, 70vw)
+    [body-content-end body-end-outset] minmax(0, 1vw)
+    [body-end] minmax(0, max(11vw, 170px))
+    [page-end-inset page-end screen-end-inset] 3vw
+    [screen-end]
+    !important;
 }
 
-/* Nuvem de categorias (Publications: `categories: cloud`) como pastilhas
-   arredondadas, no mesmo estilo dos ícones de contato (#links) — em vez
-   da lista simples e sem graça do Quarto. */
+/* Mesmo bug de largura das categorias (ver bloco de categorias mais
+   abaixo: um item de grid position:static/sticky não estica pra
+   largura da coluna sozinho, só com `vw` explícito, não com `%`) — só
+   que aqui SEM tocar em position/top/max-height, porque o TOC deve
+   continuar sticky (acompanhar o scroll é o comportamento certo pra um
+   sumário, diferente da nuvem de categorias). Agora que a área de grid
+   (ver correção acima) já é exatamente 11vw, esse width não é mais uma
+   máscara pro bug de posicionamento — é só o valor real da coluna.
+   Cartão (fundo + borda), no mesmo espírito visual da barra de
+   categorias de Publications (pedido explícito: "deixar o toc com uma
+   estrutura parecida do categories"). margin-top (não padding-top)
+   empurra o CARTÃO INTEIRO pra baixo até alinhar com o topo do título
+   da aula — um padding-top só empurraria o texto de dentro, deixando a
+   borda do cartão "vazando" pra cima, ocupando visualmente parte da
+   margem superior que o resto do conteúdo respeita (era exatamente essa
+   a reclamação: "eles ainda ocupam a margem de cima"). Valor calibrado
+   comparando o topo do cartão com o topo do <h1> da aula. */
+#quarto-margin-sidebar:has(nav[role="doc-toc"]) {
+  width: max(11vw, 170px);
+  box-sizing: border-box;
+  margin-top: 1.9rem;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 10px;
+  padding: 1rem 1.15rem;
+}
+
+/* Categorias de Publications: painel fechado por padrão (cartão
+   delimitado — fundo + borda —, título clicável com ícone de seta
+   inserido via JS em publications/categories-accordion.html, e lista de
+   texto simples em vez das pílulas antigas — pílulas quebrando em 2-3
+   linhas numa coluna estreita, com nomes como "Multi-objective
+   Optimization", é o que deixava a barra lateral com aparência
+   desleixada; texto simples quebra linha normalmente, sem parecer
+   quebrado).
+   Também: sem position fixed/sticky (herdado de `.sidebar.margin-sidebar`
+   no CSS padrão do Quarto) — a barra cresce com o próprio conteúdo e
+   rola junto com o resto da página, como pedido.
+   align-self:start é necessário porque, sem ele, o item de grid estica
+   (comportamento padrão) até a altura da linha inteira — que vai até o
+   fim da lista de publicações —, e com fundo/borda isso virava um
+   painel cinza enorme e vazio ocupando a coluna toda até o rodapé.
+   width:11vw é necessário porque, de volta ao grid normal (sem
+   position:fixed), o item por padrão NÃO estica na largura: fica do
+   tamanho do próprio conteúdo (~41px), bem mais estreito que a coluna
+   "page-end" reservada pra ele (11vw, definida em
+   .page-columns:has(...) acima). `width:100%` (percentual) não resolve
+   certo aqui — testado isoladamente, dá os mesmos ~41px, aparentemente
+   um caso em que o Chrome não trata "%" como relativo à área do grid
+   neste elemento em particular — mas `vw` (absoluto, não percentual)
+   funciona, por isso repetimos aqui o mesmo valor da coluna.
+   margin-top alinha o TOPO DO CARTÃO (borda, não só o texto de dentro)
+   com o topo do título "Publications" — sem isso, o cartão (que começa
+   no topo da própria linha do grid, antes do respiro que o título tem
+   por padrão) ficava uns 35px mais alto que o título, "vazando" pra
+   dentro da margem superior que o resto do conteúdo respeita. Mesma
+   lógica e mesmo mecanismo do TOC (`:has(nav[role="doc-toc"])` acima). */
+#quarto-margin-sidebar:has(.quarto-listing-category) {
+  position: static;
+  top: auto;
+  max-height: none;
+  overflow-y: visible;
+  align-self: start;
+  width: max(11vw, 170px);
+  box-sizing: border-box;
+  margin-top: 2.2rem;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 10px;
+  padding: 1rem 1.15rem;
+}
 
 .quarto-listing-category-title {
-  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
   color: #212529;
-  margin-bottom: 0.75rem;
+  cursor: pointer;
+  user-select: none;
 }
 
+.quarto-listing-category-title .bi-list {
+  color: #6c757d;
+  font-size: 1rem;
+}
+
+#quarto-margin-sidebar.categories-collapsed .quarto-listing-category.category-cloud {
+  display: none;
+}
+
+/* Aberta, a lista tem ~35 categorias — sem limite ela cresce até
+   qualquer altura e empurra o resto da página. max-height relativo a
+   `vh` (não a um valor fixo em px) faz a caixa se adaptar ao tamanho
+   da tela — cabe menos linhas visíveis numa tela baixa, mais numa
+   alta —, com barra de rolagem própria pro que não cabe, em vez de a
+   lista toda participar do scroll da página. */
 .quarto-listing-category.category-cloud {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  display: block;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e9ecef;
+  max-height: 70vh;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .quarto-listing-category.category-cloud .category {
-  padding: 0.3rem 0.75rem;
-  border-radius: 999px;
-  background: #f4f5f6;
+  padding: 0.35rem 0;
   color: #495057;
-  font-size: 0.8rem;
   line-height: 1.3;
-  transition: background-color 0.15s ease-in-out, color 0.15s ease-in-out;
+  cursor: pointer;
+  transition: color 0.15s ease-in-out;
+}
+
+/* A nuvem varia o tamanho da fonte pela frequência de cada categoria
+   (category-cloud-1 a -4) — nivelamos, senão a lista de texto simples
+   fica com tamanhos de linha inconsistentes, o mesmo efeito "poluído"
+   que estávamos tentando eliminar, só que sem as pílulas. */
+.quarto-listing-category.category-cloud .category span {
+  font-size: 0.85rem !important;
 }
 
 .quarto-listing-category.category-cloud .category:hover {
-  background: #0085ca;
-  color: #ffffff;
+  color: #0085ca;
 }
 
 .quarto-listing-category.category-cloud .category.active {
-  background: #0085ca;
-  color: #ffffff;
+  color: #0085ca;
   font-weight: 600;
 }
 
-/* Foto do IC no topo de Teaching / embaixo de Projects. */
+/* Foto do IC no topo de Teaching / embaixo de Projects / Contact. */
 .page-banner {
   width: 100%;
   height: auto;
@@ -173,6 +303,37 @@ h2 {
   object-fit: cover;
   border-radius: 8px;
   margin-bottom: 1.5rem;
+}
+
+/* Contact: cada dado (email, telefone, endereço, horário) como uma linha
+   com ícone à esquerda, em vez do bloco de texto corrido com só
+   **negrito** que a página tinha antes — mesmo espírito visual dos
+   ícones de #links na home, mas em lista (cada item já tem um rótulo
+   textual ao lado, então não faz sentido o mesmo tratamento circular). */
+.contact-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
+.contact-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.contact-item i {
+  flex-shrink: 0;
+  width: 1.5rem;
+  margin-top: 0.2rem;
+  font-size: 1.3rem;
+  color: #0085ca;
+  text-align: center;
+}
+
+.contact-item p {
+  margin-bottom: 0;
 }
 
 /* Período (ano de início/fim) de cada projeto, no mesmo estilo discreto
@@ -338,6 +499,36 @@ h2 {
   margin-bottom: 0;
 }
 
+/* Campo de busca ("Filter"): pedido explícito pra morar DENTRO do
+   cartão "Categories" da barra lateral, não solto ao lado do título
+   "Publications". A barra lateral (#quarto-margin-sidebar) é irmã de
+   #quarto-document-content, não descendente — não dá pra resolver só
+   com CSS (não existe seletor que mova um nó pra outro container). A
+   solução é mover o próprio elemento (não uma cópia) via JS, em
+   publications/categories-accordion.html, pra dentro do cartão de
+   categorias, logo abaixo do título clicável e antes da lista — o
+   binding de busca do List.js (site_libs/quarto-listing/list.min.js,
+   `new List('listing-listing', ...)`) já aconteceu antes desse ponto
+   (o script dele carrega e roda primeiro no <head>/fim do <body>, e
+   nosso script de mover é registrado depois) — mover um nó no DOM não
+   desliga os event listeners já presos a ele, então o filtro continua
+   funcionando normalmente depois de realocado.
+   Só faz sentido mover em telas onde a barra lateral existe: o próprio
+   Quarto esconde #quarto-margin-sidebar por completo abaixo de 768px
+   (ver _bootstrap-rules.scss, "@include media-breakpoint-down(md)") —
+   por isso o JS só move quando `window.matchMedia("(min-width: 768px)")`
+   é verdade nesse momento; abaixo disso, o campo continua onde o Quarto
+   já colocava por padrão (acima da lista, dentro de #listing-listing),
+   sem nenhum CSS especial precisando entrar em ação. */
+#quarto-margin-sidebar .listing-actions-group {
+  width: 100%;
+  margin: 0.85rem 0 0;
+}
+
+#quarto-margin-sidebar .listing-actions-group .input-group {
+  width: 100%;
+}
+
 /* Zebra branco/cinza entre os cards da listagem de teaching (um card por
    disciplina), para diferenciar visualmente cada entrada. */
 #teaching-listing .quarto-grid-item.card:nth-child(odd) {
@@ -372,6 +563,75 @@ body {
   margin-top: 0;
 }
 
+/* Faixa final da home ("Meet the team"): foto (team.jpg, um mural do IC)
+   como fundo full-bleed (mesmo tratamento de ponta-a-ponta das faixas
+   cinza/branco das outras seções) em vez de só o botão solto num fundo
+   branco liso que a seção tinha antes.
+   Precisa ser uma seção "##" de verdade (`## Meet the team
+   {.team-band-heading}`, processada pelo band-sections.lua como as
+   demais) — um `::: {.column-screen} :::` manual sem heading própria
+   antes dele fica acumulado dentro do CONTEÚDO da seção anterior
+   ("Latest Publications"), porque o filtro só fecha uma seção quando
+   encontra o próximo "##" no nível raiz do documento. Aninhado assim
+   dentro de `.section-content` (que é display:block, não mais
+   full-bleed), o `.column-screen` não tem mais um ancestral
+   `.page-columns` de verdade pra caber ponta-a-ponta — ele fica travado
+   na largura da coluna de conteúdo (~977px), não da tela cheia. Foi
+   exatamente esse bug visível quando a imagem apareceu: a foto ficava
+   dentro de uma caixa mais estreita, "num quadro dentro de
+   publications", em vez de ocupar a tela toda como as outras faixas.
+   Sendo uma seção "##" de verdade, o band-sections.lua gera a mesma
+   estrutura de duas colunas (rótulo + conteúdo) das demais seções —
+   removida abaixo só pra esta faixa (:has() mirando a classe do
+   heading), porque aqui o título faz parte do herói centralizado, não
+   de um rótulo fixo à esquerda.
+   O gradiente escuro por cima garante contraste pro texto branco
+   independente de onde a foto for mais clara/colorida (o mural tem
+   muita cor, um overlay uniforme é mais confiável do que contar com um
+   ponto específico da imagem estar escuro). */
+.column-screen:has(.team-band-heading) {
+  position: relative;
+  background-image: linear-gradient(
+      to bottom,
+      rgba(15, 23, 32, 0.6),
+      rgba(15, 23, 32, 0.72)
+    ),
+    url("team.jpg");
+  background-size: cover;
+  background-position: center 35%;
+  padding: 4.5rem 0;
+}
+
+.column-screen:has(.team-band-heading) .section-row {
+  flex-direction: column !important;
+  align-items: center;
+  gap: 0.6rem !important;
+  text-align: center;
+}
+
+.column-screen:has(.team-band-heading) .section-label,
+.column-screen:has(.team-band-heading) .section-content {
+  flex: none !important;
+  width: 100%;
+  text-align: center;
+}
+
+.team-band-heading {
+  margin: 0;
+  color: #ffffff;
+}
+
+.team-band-content p {
+  max-width: 34em;
+  margin: 0 auto 1.5rem;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.team-band-content .btn-outline-light {
+  border-width: 1.5px;
+  font-weight: 600;
+}
+
 /* Cada seção da home vira duas colunas: título sozinho, fixo no topo à
    esquerda (com espaço vazio embaixo), e todo o conteúdo (listagem) à
    direita, numa coluna mais larga.
@@ -387,11 +647,18 @@ body {
    a linha inteira até a borda da tela em vez de ficar dentro da coluna de
    conteúdo centralizada — por isso o título/lista ficavam grudados à
    esquerda. Fixamos o grid-column de volta para a coluna de conteúdo
-   normal (a mesma que .column-body já usa), também com !important. */
+   normal (a mesma que .column-body já usa), também com !important.
+   Essa mesma regra do Quarto (`body.listing:not(.floating):not(.docked)
+   .page-columns`) também zera o "gap" — e como nem ela nem a nossa regra
+   original tinham !important, quem ganhava era só a especificidade (a
+   regra do Quarto, bem mais específica, vencia mesmo carregando antes) —
+   por isso a seção de Publications ficava sem o respiro entre o título e
+   a lista, coladas uma na outra, só nessa seção. Daí o !important
+   também no gap abaixo. */
 .section-row {
   display: flex !important;
   grid-column: body-content-start / body-content-end !important;
-  gap: 2.5rem;
+  gap: 2.5rem !important;
   align-items: flex-start;
 }
 
@@ -423,10 +690,50 @@ body {
   }
 }
 
+/* "SEE ALL"/"Slides" eram só um link sublinhado simples — mesmo espírito
+   do botão outline usado em "Meet the team", só sem cor de fundo. Nas
+   seções da home (Teaching/Projects/Publications), o parágrafo que
+   contém só esse link vira centralizado, pro botão ficar no meio da
+   coluna de conteúdo, não colado à esquerda. */
 .see-all {
   display: inline-block;
+  margin-top: 0.75rem;
+  padding: 0.4rem 1rem;
+  border: 1.5px solid #0085ca;
+  border-radius: 999px;
+  color: #0085ca;
+  font-size: 0.85em;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 0.15s ease-in-out, color 0.15s ease-in-out;
+}
+
+.see-all:hover {
+  background-color: #0085ca;
+  color: #ffffff;
+}
+
+.section-content p:has(> a.see-all) {
+  text-align: center;
   margin-top: 0.5rem;
-  font-size: 0.9em;
+}
+
+/* Ícone de slides no link "Slides →" das notas de aula, em vez de só
+   depender do "Outros formatos: RevealJS" (texto genérico, escondido no
+   TOC) que o Quarto adiciona sozinho quando a página tem mais de um
+   formato de saída. */
+a.see-all[href="slides.html"]::before {
+  font-family: "bootstrap-icons";
+  content: "\f66c";
+  margin-right: 0.4rem;
+}
+
+/* O Quarto adiciona esse bloco "Outros formatos: RevealJS" sozinho no
+   fim do TOC sempre que a página tem mais de um formato de saída — mas
+   já temos o link "Slides →" (com ícone, acima) no corpo principal da
+   aula, então esse bloco fica redundante e pouco visível ali embaixo. */
+.quarto-alternate-formats {
+  display: none;
 }
 
 /* Cartão de perfil: menos espaço entre a função (subtitle) e a instituição,

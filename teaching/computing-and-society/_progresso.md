@@ -8,11 +8,79 @@ Fontes em `fontes/`: `CSV1.pdf`, `CSV2.pdf`, `CSV3.pdf` (Maciel & Viterbo,
 
 **Diferença estrutural desta disciplina:** é humanidades/ética, não STEM.
 Por decisão do usuário, o `.qmd` não usa chunks de código Python/simulação
-— só prosa (HTML/RevealJS via `content-visible`) e diagramas Mermaid para
-modelos conceituais. Sem `exemplos-estilo/` ainda (as outras disciplinas
-são todas STEM; não fazem sentido como referência de tom aqui — considerar
-usar a própria Aula 1 como exemplo depois de aprovada, como já feito nas
-outras disciplinas).
+— só prosa (HTML/RevealJS via `content-visible`). Sem `exemplos-estilo/`
+ainda (as outras disciplinas são todas STEM; não fazem sentido como
+referência de tom aqui — considerar usar a própria Aula 1 como exemplo
+depois de aprovada, como já feito nas outras disciplinas).
+
+**Atualização (2026-08-24): Mermaid → TikZ.** A decisão original acima
+("diagramas Mermaid para modelos conceituais") foi revista a pedido
+explícito do usuário — os diagramas da Aula 3 foram convertidos para
+TikZ, alinhando esta disciplina com a convenção já usada nas disciplinas
+STEM (ver `../CLAUDE.md`, seção "Sugestão de fluxogramas e diagramas").
+Esta nota substitui a decisão anterior; novas aulas desta disciplina
+devem usar TikZ, não Mermaid, para diagramas.
+
+## Aula 3: conversão de diagramas para TikZ + slides mais completos (2026-08-24)
+
+- **6 diagramas Mermaid convertidos para TikZ** (3 conceitos, cada um
+  com uma versão para as notas HTML e uma condensada para os slides):
+  linha do tempo do caso BART; "quantas profissões o Brasil regula"
+  (cadeia com um ramo tracejado destacando a Informática); comparação
+  Landon & Landon vs. Ciclo Ético. As duas últimas passaram de layout
+  vertical (`flowchart TB`, sem cores) para **horizontal, com paleta
+  clara** (tons pastéis das cores do IC — azul, laranja, verde-água,
+  vermelho —, texto preto em vez de branco sobre fundo saturado),
+  pedido explícito do usuário visando legibilidade em slides projetados.
+- **Bug real encontrado e corrigido: `step` é uma palavra reservada do
+  TikZ/pgf** (usada para espaçamento de grade, ex. `grid[step=1cm]`).
+  Nomear um estilo customizado `step/.style={...}` faz o pgfkeys tentar
+  interpretar `[step]` como essa chave nativa, que "requer um valor" —
+  o estilo é silenciosamente ignorado, o nó perde toda formatação
+  (cor, tamanho mínimo, alinhamento), e o resultado colapsa numa caixa
+  de proporção degenerada (larga e quase sem altura). Diagnosticado
+  compilando o trecho TikZ isoladamente com `pdflatex` fora do pipeline
+  Quarto/Pandoc até isolar o erro exato (`pgfkeys Error: The key
+  '/tikz/step' requires a value`). Corrigido renomeando o estilo para
+  `tlbox`. Lição para diagramas futuros: evitar nomes de estilo que
+  colidam com chaves nativas do TikZ (`step`, `above`, `below`, `left`,
+  `right`, `node`, etc. são candidatos arriscados).
+- **Segundo problema, não relacionado, encontrado no caminho:** os
+  nós usavam posicionamento relativo (`right=Xmm of nome`, da
+  biblioteca `positioning`) em vez de coordenadas absolutas — resultou
+  em todos os nós colapsando na origem ("aglomerado de caixas",
+  relatado pelo usuário). Os diagramas já validados nesta disciplina
+  (e nas disciplinas STEM) nunca dependem de `positioning`; usam
+  coordenadas explícitas `at (x,y)` ou a árvore nativa do TikZ
+  (`child{...}`). Corrigido convertendo todos os nós para `at (x,y)`
+  explícito — mais verboso, mas não depende de nenhuma biblioteca extra
+  estar carregada no pipeline de renderização.
+- **Terceiro problema, também no caminho:** o estilo de seta usava
+  `>=Stealth` (exige a biblioteca `arrows.meta`), que não está
+  confirmada como carregada neste pipeline; causava o erro visualmente
+  enganoso `pgf@stop` aparecendo como texto literal no diagrama.
+  Corrigido removendo `>=Stealth`, usando só `->` simples — o mesmo
+  padrão já usado nos diagramas validados das disciplinas STEM.
+- **Cache duplo, útil de saber para depuração futura:** além do cache
+  normal do Quarto (`index_files/`, por aula), o filtro
+  `pandoc-ext/diagram` mantém um cache próprio, persistente e fora do
+  projeto, em `~/.cache/pandoc-diagram-filter/` (chaveado pelo conteúdo
+  do diagrama). Ao depurar um diagrama que parece "não atualizar" apesar
+  de mudanças no `.qmd`, limpar os dois caches, não só `index_files/`.
+- **Slides "mais completos"** (feedback direto do usuário): revisão de
+  densidade em 3 pontos identificados como abaixo do padrão das notas
+  HTML — "Mapeando a Formação da Computação no Brasil" (histórico do
+  Bloco 4, ganhou a citação de página e o elo com a regulamentação dos
+  anos 1970), "O Elo Fica Completo" (fechamento do Bloco 3, caixa
+  desnecessária removida), e principalmente "O Que Fica Desta Aula"
+  (fechamento da aula inteira — reescrito para retomar explicitamente
+  as 3 perguntas do "plano de hoje" da abertura, uma a uma, seguindo o
+  padrão de fechamento do `CLAUDE.md`, que antes só existia nas notas
+  HTML, não nos slides).
+- Revalidado com `quarto render --to html` e `--to revealjs`, sem
+  erro nem warning; balanço de divs conferido por script; dimensões
+  dos 6 SVGs gerados conferidas uma a uma (proporções plausíveis,
+  nenhuma caixa degenerada).
 
 ## Achado importante: citação quebrada no `index.md`
 
