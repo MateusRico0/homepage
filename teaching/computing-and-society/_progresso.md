@@ -182,6 +182,55 @@ publicação real do site podem quebrar até que a Aula 1 e as outras
 disciplinas também migrem para o novo caminho, ou até o `_quarto.yml`
 volte ao valor antigo — vale confirmar com o usuário antes de publicar.
 
-## Aulas 3–15
+## Aula 3 — Computing, Its Domains, and Professional Responsibility
+
+- [x] `_00-plano-aula.md` — reestruturado em 2 rodadas nesta sessão
+      (2026-08-25): (1) reordenação em 6 blocos (BART → códigos
+      concretos → conselho+LGPD/GDPR → regular ou não [Brasil+mundo] →
+      limites → fechamento); (2) a pedido do usuário, a partir dos
+      slides de uma versão anterior da disciplina: Dez Mandamentos
+      removidos ("são bem tocos"), ACM Code e IEEE-CS/ACM Code
+      aprofundados (cláusulas numeradas + gloss "na prática", citados
+      como fonte primária/oficial), LGPD/GDPR fundida ao bloco de
+      conselho de profissão (duas formas de regulação judicializada),
+      autorregulação-para-evitar-regulação explicitada no bloco de
+      limites (caso Tozer). Framework de Ruggiero avaliado e
+      **descartado por decisão do usuário** (não está em nenhuma fonte
+      da disciplina).
+- [x] `_01-fontes.md` — 17 fontes dos livros-texto + fontes
+      primárias/legais sinalizadas como tal (ACM Code, IEEE-CS/ACM SE
+      Code, Lei 13.709/2018 Art. 6º) + fontes web da comparação
+      internacional (NCEES, Engineers Canada, BCS).
+- [x] `index.qmd` — reescrito por completo nesta sessão, com Exercícios
+      (3 discursivas + 12 blocos de V/F, seguindo a metodologia de
+      heurísticas do `../CLAUDE.md`) e 4 exercícios de checagem
+      intercalados nos slides (um por bloco, Blocos 2–5). **Bug
+      encontrado e corrigido:** um `::: {.fig-resize}` aninhado
+      diretamente dentro de um `::: {.fragment}`, precedido de `<br/>`,
+      faz o Reveal.js/Pandoc perder o fechamento do div (o texto do
+      fence e as aspas do atributo `style` leakam como texto literal,
+      com aspas convertidas para curly quotes pelo smart-quotes — sinal
+      de que o div não foi reconhecido). Ocorria em exatamente 2 dos 9
+      usos de `.fig-resize` nos slides (os 2 que estavam aninhados
+      dentro de um `.fragment`; os que ficam no nível do slide, fora de
+      fragment, não têm o problema). **Corrigido fundindo as duas
+      classes num único div** (`::: {.fragment .fig-resize style="..."}`)
+      em vez de aninhar dois divs — mesmo efeito visual (revelação
+      progressiva + redimensionamento), sem a combinação problemática.
+      Lição para diagramas futuros nesta e em outras disciplinas: não
+      aninhar `.fig-resize` dentro de `.fragment` como dois divs
+      separados; usar um único div com as duas classes.
+- [x] `_02-solucoes.md` — justificativa dos 48 itens de V/F (12 blocos
+      × 4), com heurística nomeada por item.
+- Validado com `quarto render --to html` e `--to revealjs` (usando
+  `--output-dir` para um diretório de teste, já que o pipeline normal
+  do projeto não deixou os `.html` renderizados no lugar esperado do
+  código-fonte — investigar isso separadamente se for bloquear alguma
+  tarefa futura). Sem warning, sem erro, balanço de divs conferido por
+  script.
+- **Pendente:** Etapa 5 (link no `index.md` da disciplina) — só depois
+  de aprovação do usuário sobre o conteúdo final desta rodada.
+
+## Aulas 4–15
 
 Não iniciadas.

@@ -197,6 +197,69 @@ Link da Aula 1 adicionado (não existia nenhum antes — só texto em negrito
 sem link): `../../unsupervised/aula01/notas.html` (+ Slides), mesmo padrão
 das outras disciplinas. Mostrado no chat antes de aplicar.
 
-## Aulas 2–12
+## Aula 2 — Vizinhos Mais Próximos, Maldição da Dimensionalidade e KDE
+
+Construída do zero nesta sessão (2026-08-25/26), a pedido do usuário
+("Começe a criar a aula 2 não supervisionado ... pode criar o index
+inclusive").
+
+- [x] `_00-plano-aula.md` — 7 blocos, ~110–120 min. Continuidade direta
+      com a Aula 1: o gancho de fechamento da Aula 1 ("$\hat\Sigma$
+      exige $N>d$") é retomado na abertura. **Dataset trocado** de Pima
+      Indians Diabetes (Aula 1) para **Breast Cancer Wisconsin**
+      (30 atributos contínuos) — motivo explícito: a demonstração de
+      concentração de medida precisa de dimensionalidade variável e
+      alta, que os 8 atributos do Pima não sustentam.
+- [x] `_01-fontes.md` — PRML §1.4 (maldição, offset +20, já usado nas
+      Aulas anteriores) e §2.5 (KDE, $k$-NN, offset +20); **ESL
+      (Hastie, Tibshirani & Friedman), §2.5 "Local Methods in High
+      Dimensions" usado por primeira vez nesta disciplina** (offset
+      **+19**, confirmado nesta sessão) — cobre a maldição
+      especificamente para métodos locais, com fórmulas mais concretas
+      que o PRML (comprimento de aresta $e_p(r)=r^{1/p}$; distância
+      mediana ao vizinho mais próximo). L1/L2/Cosseno do `index.qmd` da
+      disciplina não encontrado em nenhum dos 3 livros-texto (PRML, ESL,
+      DLFC) — tratado como demonstração numérica nossa (métrica de
+      "contraste relativo", estilo Beyer et al. 1999), sinalizada como
+      tal, mesmo tratamento do $\chi^2_d$ da Aula 1.
+- [x] `index.qmd` — todos os números centrais **verificados por script
+      antes de escrever a aula** (não inventados): contraste relativo
+      no Breast Cancer Wisconsin ($d=2\to30$: $\approx221\to\approx10$);
+      picos de KDE gaussiano em `radius_mean` para $h=0{,}3/1{,}0/3{,}0$
+      (12/3/1 picos); densidade por $k$-NN em 3 pontos-teste × 3 valores
+      de $K$, mostrando a suavização adaptativa ($d_K$ cresce muito mais
+      na cauda que na região densa). Bloco 6 revela, só ao final, que a
+      bimodalidade encontrada sem rótulo corresponde à divisão
+      benigno/maligno — mesmo padrão de "achado real, rótulo nunca usado
+      no ajuste" já estabelecido na Aula 1 com o Pima.
+      **Exercícios**: 3 discursivas + 12 blocos de V/F (48 itens) nas
+      notas; 4 exercícios de checagem intercalados nos slides (um por
+      bloco, Blocos 2, 4, 5, 6), cada um com slide de Resposta imediato
+      — confirmado via extração de `id=` do `slides.html` renderizado
+      (4 pares `pergunta-N`/`resposta-N`).
+      **Bug de div encontrado e corrigido**: 3 dos 4 blocos de checagem
+      nos slides tinham uma linha `:::` extra sobrando (fechamento
+      duplicado) logo após o par abertura/`callout-tip`, um erro de
+      digitação ao gerar o arquivo — sem efeito visual óbvio no render,
+      mas quebrando o balanço de divs; corrigido removendo a linha
+      solta nos 3 pontos, confirmado por script de balanço antes e
+      depois de cada correção.
+- [x] `_02-solucoes.md` — justificativa dos 48 itens, heurística nomeada
+      por item. Um item foi reescrito no meio da sessão (bloco "$h$ como
+      parâmetro de suavização", item a) por depender de um teorema
+      (monotonicidade do número de modas do KDE gaussiano em função de
+      $h$, Silverman 1981) nunca ensinado na aula — substituído por um
+      caso-limite ($h\to0^+$) diretamente derivável do que foi
+      apresentado.
+- Validado com `quarto render --to html` e `--to revealjs` via
+  `--output-dir` para diretório de teste (mesmo problema de path do
+  pipeline normal já registrado em `computing-and-society/_progresso.md`)
+  — 22 células Python executadas sem erro, sem warning de div, 10
+  imagens geradas, 4 pares Pergunta/Resposta confirmados.
+- [x] Etapa 5 — link da Aula 2 adicionado ao `index.qmd` da disciplina
+  (`[**Lesson 2: ...**](./aula02/index.qmd)`, mesmo padrão da Aula 1),
+  mostrado no chat e aplicado após aprovação do usuário.
+
+## Aulas 3–12
 
 Não iniciadas.

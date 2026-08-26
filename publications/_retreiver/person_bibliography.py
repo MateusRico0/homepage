@@ -113,13 +113,15 @@ def set_person_publications(person_slug: str, has_publications: bool) -> Path:
     if not path.exists():
         raise FileNotFoundError(f"Perfil não encontrado: {path}")
 
-    text = path.read_text(encoding="utf-8")
+    original = path.read_text(encoding="utf-8")
+    text = original
 
     if not has_publications:
         text = SECTION_RE.sub("", text) if SECTION_RE.search(text) else text
         text = _set_listing_block(text, person_slug, False)
         text = _ensure_blank_line_before_headings(text)
-        path.write_text(text, encoding="utf-8")
+        if text != original:
+            path.write_text(text, encoding="utf-8")
         return path
 
     section = "\n" + SECTION_BODY
@@ -130,5 +132,14 @@ def set_person_publications(person_slug: str, has_publications: bool) -> Path:
 
     text = _set_listing_block(text, person_slug, True)
     text = _ensure_blank_line_before_headings(text)
-    path.write_text(text, encoding="utf-8")
+    # Escrever só quando o conteúdo muda de verdade (não a cada render,
+    # incondicionalmente) é essencial, não só uma otimização: um
+    # pre-render script que sempre grava (mesmo com o mesmo conteúdo)
+    # muda o mtime de todo people/*.qmd em TODO render — e qualquer
+    # coisa que observe o projeto por mtime (ex.: preview-watch.py) vê
+    # isso como "mudança", dispara outro render, que grava de novo, que
+    # dispara outro... Foi exatamente essa a causa de um loop infinito
+    # real (~4h30 rerenderizando sozinho) já visto em produção aqui.
+    if text != original:
+        path.write_text(text, encoding="utf-8")
     return path

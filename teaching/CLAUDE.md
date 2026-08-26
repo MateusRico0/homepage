@@ -85,12 +85,20 @@ disciplina identificada nesta etapa, não à raiz `teaching/`.
 
 ### Estrutura macro (o "esqueleto" da aula)
 
-A espinha dorsal mais robusta é a de três movimentos:
+Tendo em vista a natureza dos conteúdos do curso, a estrutura da aula deve seguir **uma de duas estratégias pedagogicamente fundamentadas**, a ser escolhida na **Etapa 1 (Plano de Aula)** de acordo com o tipo de objeto de estudo:
+* **Estratégia A: *Outside-In* (Para Aulas de Modelos e Algoritmos)**
+  *Uso:* Árvores de Decisão, SVM, Gradient Boosting, Regressão Logística, K-Means.
+  *Lógica:* Guiada do prático para o formal (Modelo Mental/Catchy $\to$ Necessidade Teórica $\to$ Teoria Formal $\to$ Síntese e Limitações).
+* **Estratégia B: *Inside-Out com Problema-Fio* (Para Aulas de Fundamentação Matemática/Linguagem)**
+  *Uso:* Representações Matriciais, Derivadas/Gradiente, Espaços Vetoriais, SVD/Decomposição.
+  *Lógica:* Guiada pela necessidade do idioma matemático (Problema-Fio da Engenharia/Geometria $\to$ Mecanismo/Operação $\to$ Diagnóstico Teórico $\to$ Ponte/Limitação para a próxima aula).
+
+Ambas as abordagens devem manter os **3 movimentos fundamentais** (Abertura com problema/roteiro, Desenvolvimento segmentado em blocos de 10–15 min com pausas ativas onde tem perguntas e testes de V/F, e Fechamento retomando os desafios iniciais da aula):
 
 **1. Abertura (5–10 min)** — o objetivo é criar o "gancho" cognitivo:
 - **Organizador prévio** (Ausubel): uma ideia-ponte que conecta o novo conteúdo ao que já se sabe. Ex.: antes de modelos generativos, retomar "estimar densidade" como algo já visto em detecção de anomalias.
 - **Roteiro explícito**: dizer as 3–4 perguntas que a aula vai responder. Isso reduz carga cognitiva extrínseca porque o aluno para de gastar memória de trabalho tentando adivinhar para onde vai.
-- **Problema motivador** antes do formalismo, não depois.
+- **Problema motivador** antes do formalismo, não depois. No caso da estratégia A, vale a pena apresentar o core principal do método, sem grandes complicações, de forma intuitiva.
 
 **2. Desenvolvimento (segmentado)** — o ponto crítico: não é um bloco contínuo.
 - **Segmentação em blocos de 10–15 min**, cada um com um único "ponto de aterrissagem". A atenção sustentada em exposição passiva degrada rapidamente; o corte periódico reinicia o ciclo.
@@ -154,8 +162,10 @@ produz duas saídas (HTML e RevealJS) via blocos
 - **HTML** (`unless-format="revealjs"`): prosa corrida, completa,
   com as provas/derivações por extenso, citações de página do livro,
   avisos de leitura e notas de rodapé pedagógicas. Sai como `notas.html`
-  (algumas aulas ainda saem como `index.html`, o nome padrão do Quarto —
-  ver "Nomes de arquivo de saída" abaixo).
+  em TODA aula, sem exceção (ver "Nomes de arquivo de saída" abaixo) —
+  o ícone de livro no rodapé dos slides (`../logos-footer.html`) linka
+  direto pra `notas.html` como caminho relativo fixo, contando com esse
+  nome ser sempre o mesmo.
 - **RevealJS**: densa e completa, não um resumo de tópicos — os slides
   precisam sustentar a aula sozinhos em sala, não só sinalizar
   *highlights* ("só highlights é complicado para trabalhar", feedback
@@ -317,7 +327,11 @@ ilustram tanto a versão HTML quanto a RevealJS.
 
 **Nomes de arquivo de saída:** definir explicitamente no YAML do
 `index.qmd`, já que o padrão do Quarto usaria o nome do próprio arquivo
-(`index`) para ambos os formatos:
+(`index`) para ambos os formatos. **`output-file: notas.html` não é só
+convenção — é obrigatório**: o ícone de livro no rodapé dos slides
+(`../logos-footer.html`) linka pra `notas.html` como caminho relativo
+fixo; uma aula sem esse `output-file` sairia como `index.html` e o
+ícone quebraria (404) nela.
 
 ```yaml
 format:
@@ -362,6 +376,30 @@ Pra mudar o tamanho de uma figura/diagrama numa aula, use uma das duas vias abai
   ```
 
   Pra ENCOLHER (`width` menor que 100%), `margin: 0 auto` já centraliza sozinho. Pra AUMENTAR além de 100% (ex.: `width: 150%`), use `margin-left` negativo igual à metade do excesso (150% → `-25%`) — `auto` não centraliza uma caixa mais larga que o próprio pai. Esta é também a forma correta de centralizar um diagrama TikZ sem legenda (já que `fig-align` não funciona nesse caso — ver acima), e evita o auto-stretch do RevealJS (que estica pra tela cheia qualquer slide com uma única imagem solta) — o wrapper `.fig-resize` não bate no padrão que o RevealJS procura pra ativar esse comportamento.
+
+  Tabela de referência `width` → `margin-left` (só usar `margin-left` acima de 100%; abaixo disso é sempre `margin: 0 auto`):
+
+  | `width` | `margin-left` |
+  |---|---|
+  | ≤100% | (nenhum — usar `margin: 0 auto`) |
+  | 120% | `-10%` |
+  | 150% | `-25%` |
+  | 170% | `-35%` |
+  | 200% | `-50%` |
+
+  **Cuidado com um efeito colateral: sem o wrapper, toda imagem do site (inclusive figuras de chunk Python) já tem um teto de exibição de 100% do container** — regra CSS genérica do próprio Quarto (`img { max-width: 100% }`), independente de `.fig-resize`. Isso quer dizer que `figsize=(w, h)` maior só muda o tamanho **real/interno** da imagem gerada (resolução, proporção); visualmente ela para de crescer assim que atinge 100% do container — aumentar `figsize` além disso não tem nenhum efeito na tela (foi exatamente essa a origem de "aumento `figsize` e não muda"). `figsize` sozinho só funciona pra ENCOLHER (abaixo do teto); pra crescer além do container, é `.fig-resize` com `width` > 100%, não `figsize`.
+
+  **Regra de autoria (padrão em toda aula nova, pedido explícito do usuário): todo chunk Python que gera figura e todo bloco `{.tikz}` devem sair já envolvidos em `.fig-resize`, mesmo que o tamanho padrão (100%) sirva.** Não espere o usuário reclamar de tamanho pra só então adicionar o wrapper — deixe-o pronto desde a primeira versão da aula, com `width: 100%; margin: 0 auto;` como valor de partida:
+
+  ```
+  ::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+  ```{python}
+  ...
+  ```
+  :::
+  ```
+
+  Motivo: sem o wrapper já presente, o usuário precisa pedir pra você adicioná-lo toda vez que quiser ajustar um tamanho — com ele sempre presente, o ajuste vira só trocar o número do `width` (e, se passar de 100%, calcular o `margin-left` pela tabela acima), sem precisar descobrir de novo qual mecanismo usar.
 
 ## Exercícios (obrigatório em toda aula)
 
@@ -456,6 +494,7 @@ Gerar `aulaNN/_00-plano-aula.md`, contendo:
   apresentados, com tempo estimado por bloco (somando à carga horária
   da aula) e a lógica de transição entre eles (ex: "Bloco 1 termina
   com uma pergunta sem resposta, que o Bloco 2 resolve").
+- **Estratégia Pedagógica Escolhida:** Indicar explicitamente se a aula seguirá a Estratégia A (Outside-In) ou Estratégia B (Inside-Out com Problema-Fio) e a justificativa em 1 linha (ex.: "Estratégia B por se tratar de aula de fundação matemática de representação/linguagem").
 
 Formato:
 
@@ -463,6 +502,8 @@ Formato:
 ## Resumo — Aula N
 
 [5-10 linhas: cobertura, objetivos, pré-requisitos]
+
+**Estratégia Pedagógica:** [Estratégia A (Outside-In) OU Estratégia B (Inside-Out com Problema-Fio)] — [Justificativa em 1 linha]
 
 ## Plano de aula — Aula N (carga horária: XXmin)
 

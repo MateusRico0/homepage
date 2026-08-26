@@ -181,10 +181,34 @@ h2 {
   width: max(11vw, 170px);
   box-sizing: border-box;
   margin-top: 1.9rem;
+  /* Sem isso, o item de grid estica por padrão (align-self:stretch é o
+     default) até a altura da LINHA inteira do grid — que vai até o fim
+     do conteúdo da página, quase sempre bem mais alto que a lista real
+     de "Nesta aula"/"Outras aulas". Com align-self:start, a caixa
+     (fundo + borda) só ocupa a altura do próprio conteúdo — mesma
+     lógica já aplicada à caixa de categorias, abaixo. position:sticky
+     continua funcionando normalmente com align-self:start (é o caso
+     comum: a maioria dos elementos sticky não é esticada). */
+  align-self: start;
   background: #f8f9fa;
   border: 1px solid #e9ecef;
   border-radius: 10px;
   padding: 1rem 1.15rem;
+  /* Pedido explícito: nunca passar de 75% da altura da tela — útil pra
+     disciplinas com "Outras aulas" longa (muitas aulas) ou uma aula com
+     muitos títulos no sumário. overflow-y:auto dá rolagem própria pro
+     que não cabe, em vez de a caixa crescer sem limite (mesma lógica já
+     usada na nuvem de categorias de Publications, com 70vh).
+     !important é necessário aqui: o próprio Quarto define, via JS (não
+     CSS), um style INLINE neste elemento — `max-height: calc(-79px +
+     100vh); top: 79px;` — pra manter o sidebar sticky abaixo da navbar
+     fixa (79px de altura). Style inline tem prioridade sobre qualquer
+     regra de folha de estilo externa, mesmo com seletor mais específico
+     (confirmado inspecionando `sidebar.style.cssText` ao vivo — sem
+     !important, esta regra NUNCA tinha efeito nenhum, apesar de "ganhar"
+     na comparação de especificidade entre seletores). */
+  max-height: 75vh !important;
+  overflow-y: auto;
 }
 
 /* Categorias de Publications: painel fechado por padrão (cartão
@@ -722,10 +746,73 @@ body {
    depender do "Outros formatos: RevealJS" (texto genérico, escondido no
    TOC) que o Quarto adiciona sozinho quando a página tem mais de um
    formato de saída. */
-a.see-all[href="slides.html"]::before {
+/* [href$="slides.html"] ("termina com"), não [href="slides.html"]
+   (correspondência exata) — extensões de navegador que reescrevem links
+   relativos pra absolutos (`href="slides.html"` vira
+   `href="http://.../slides.html"`) quebram uma correspondência exata,
+   mas continuam terminando em "slides.html". Bug real encontrado assim:
+   o ícone nunca aparecia no Chrome do usuário (perfil com extensões),
+   mesmo com a regra correta no CSS. */
+a.see-all[href$="slides.html"]::before {
   font-family: "bootstrap-icons";
   content: "\f66c";
   margin-right: 0.4rem;
+}
+
+/* Cabeçalho da aula (Autor / Data de Publicação / Slides): o Quarto usa
+   `grid-template-columns: repeat(2, 1fr)` nativamente (ver
+   .quarto-title-meta no CSS do Bootstrap) — cada coluna ocupa metade da
+   largura disponível mesmo quando o conteúdo é bem mais curto que isso.
+   `grid-auto-flow: column` com `grid-auto-columns: max-content` troca
+   isso por colunas do tamanho do próprio conteúdo, na ordem em que os
+   filhos aparecem no DOM — os dois `<div>` nativos (Autor, Data) mais o
+   link "Slides →" (terceiro filho, movido pra cá por
+   teaching/toc-accordion.js) viram três colunas lado a lado, coladas.
+   align-items:stretch faz as três caixas abaixo terem a mesma altura. */
+.quarto-title-meta {
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  column-gap: 1rem;
+  align-items: stretch;
+}
+
+/* As três "caixas" do cabeçalho (Autor, Data, Slides) — pedido
+   explícito do usuário: mais quadradas que o antigo texto corrido /
+   botão em pílula. Mesma linguagem visual dos outros cartões do site
+   (barra de categorias/TOC: fundo cinza claro, borda fina, cantos
+   arredondados — ver #quarto-margin-sidebar mais abaixo). min-width dá
+   uma base quadrada quando o conteúdo é curto (ex.: a data); texto mais
+   longo (ex.: nome + afiliação do autor) só quebra linha dentro da
+   mesma caixa, sem alargar desproporcionalmente.
+   `.quarto-title-meta > a.see-all` (o link movido pra cá) é mais
+   específico que a regra genérica `.see-all` (pílula azul, ver acima),
+   então ganha da cascata sem precisar de !important — vira uma caixa
+   igual às outras duas, só que clicável, com o mesmo ícone de slide. */
+.quarto-title-meta > div,
+.quarto-title-meta > a.see-all {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-width: 150px;
+  padding: 0.85rem 1.25rem;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 10px;
+  margin-top: 0;
+}
+
+.quarto-title-meta > a.see-all {
+  color: #0085ca;
+  font-size: 0.9em;
+}
+
+.quarto-title-meta > a.see-all:hover {
+  background-color: #0085ca;
+  color: #ffffff;
+  border-color: #0085ca;
 }
 
 /* O Quarto adiciona esse bloco "Outros formatos: RevealJS" sozinho no

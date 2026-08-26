@@ -68,6 +68,17 @@ def esc(s: str) -> str:
     )
 
 
+def _write_if_changed(path: Path, text: str) -> None:
+    # Só grava quando o conteúdo muda de verdade — escrever
+    # incondicionalmente a cada render muda o mtime do arquivo mesmo sem
+    # nenhuma mudança real, o que confunde qualquer coisa que observe o
+    # projeto por mtime (ex.: preview-watch.py, watchers de editor) e já
+    # causou um loop infinito real de re-render em produção aqui (ver o
+    # mesmo cuidado em publications/_retreiver/person_bibliography.py).
+    if not path.exists() or path.read_text(encoding="utf-8") != text:
+        path.write_text(text, encoding="utf-8")
+
+
 def build_lesson_nav_html(lessons, current_index: int) -> str:
     items = []
     for i, (num, title, href) in enumerate(lessons):
@@ -104,9 +115,7 @@ def process_discipline(discipline_dir: Path) -> int:
         return 0
 
     if len(aula_dirs) == 1:
-        (aula_dirs[0] / "_lesson-nav.html").write_text(
-            build_toc_only_html(), encoding="utf-8"
-        )
+        _write_if_changed(aula_dirs[0] / "_lesson-nav.html", build_toc_only_html())
         return 1
 
     lessons = []
@@ -119,7 +128,7 @@ def process_discipline(discipline_dir: Path) -> int:
 
     for i, aula_dir in enumerate(aula_dirs):
         nav_html = build_lesson_nav_html(lessons, i)
-        (aula_dir / "_lesson-nav.html").write_text(nav_html, encoding="utf-8")
+        _write_if_changed(aula_dir / "_lesson-nav.html", nav_html)
 
     return len(aula_dirs)
 

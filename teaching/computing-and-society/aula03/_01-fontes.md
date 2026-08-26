@@ -15,6 +15,16 @@
 >   confirmado de novo em outro ponto do livro (p. 140 impressa = página
 >   141 do PDF). Constante em todo o intervalo lido (pp. 12–20 e
 >   141–150).
+> - `../fontes/CSV2.pdf` (Maciel & Viterbo, 2020, Vol. 2): usado nesta
+>   revisão (2026-08-25) pela primeira vez nesta aula, para o trecho de
+>   GDPR/LGPD do Cap. 12 (e-Democracia).
+> - **Fontes primárias/legais (não são citação literal dos três
+>   livros-texto da disciplina — sinalizadas como tal, mesmo tratamento
+>   já dado à comparação internacional do Bloco 4):** texto oficial do
+>   ACM Code of Ethics and Professional Conduct (2018), do IEEE-CS/ACM
+>   Software Engineering Code of Ethics and Professional Practice
+>   (1999), e da Lei 13.709/2018 (LGPD), Art. 6º. Ver Fontes 5, 6 e 10
+>   abaixo.
 
 ---
 
@@ -71,7 +81,7 @@
 ---
 
 ### Fonte 3: Van de Poel & Royakkers (2011), Cap. 2, §2.2.1, pp. 38–40
-**Uso pretendido:** exemplos concretos de cláusulas de códigos profissionais reais (NSPE, FEANI, IEEE) (Bloco 2).
+**Uso pretendido:** exemplos concretos de cláusulas de códigos profissionais reais (NSPE, FEANI) como aquecimento, antes de ACM/IEEE-CS (Bloco 2).
 
 **Trecho:**
 > "Professional codes for engineers provide content to the
@@ -98,7 +108,7 @@
 ---
 
 ### Fonte 4: Maciel & Viterbo (2020), Vol. 1, Cap. 7, p. 199
-**Uso pretendido:** os códigos de ética específicos de computação (ACM, IEEE-CS/ACM) e a ausência de regulamentação oficial no Brasil — conecta diretamente com o Bloco 4 (Bloco 2).
+**Uso pretendido:** a existência e o escopo dos dois códigos de computação (ACM, IEEE-CS/ACM), e a ausência de conselho/código oficial no Brasil — ponte direta com o Bloco 3 (Bloco 2).
 
 **Trecho:**
 > "Sabemos então o que faz um profissional de Computação, mas esta
@@ -126,34 +136,78 @@
 
 ---
 
-### Fonte 5: Maciel & Viterbo (2020), Vol. 1, Cap. 7, p. 200
-**Uso pretendido:** os Dez Mandamentos da Ética na Computação — exemplo de código consultivo memorável (Bloco 2).
+### Fonte 5 (primária, não do livro-texto): ACM Code of Ethics and Professional Conduct (2018)
+**Uso pretendido:** conteúdo real e detalhado do código da ACM — 3 partes, cláusulas numeradas com gloss "na prática" (Bloco 2).
 
-**Trecho:**
-> "Os Dez Mandamentos da Ética na Computação: 1. Não usarás um computador
-> para causar mal a outrem. 2. Não interferirás no trabalho de
-> computação de outrem. 3. Não bisbilhotarás os arquivos de computação de
-> outrem. 4. Não usarás um computador para roubar. 5. Não usarás um
-> computador para dar falso testemunho. 6. Não copiarás nem usarás
-> software proprietário pelo qual não tenhas pago. 7. Não usarás os
-> recursos computacionais de outrem sem a devida autorização ou
-> compensação. 8. Não te apropriarás do produto intelectual de outrem. 9.
-> Considerarás as consequências sociais do programa que estás escrevendo
-> ou do sistema que estás projetando. 10. Usarás sempre um computador por
-> caminhos que garantam a consideração e o respeito pelos teus
-> semelhantes. (Fonte: Computer Ethics Institute, 'The Ten Commandments
-> of Computer Ethics')" (p. 200)
+**Sinalização de fonte:** texto oficial (`acm.org/code-of-ethics`), **não** uma citação literal dos livros-texto — as cláusulas específicas não aparecem em Maciel & Viterbo (que só menciona a existência do código, Fonte 4) nem em Steen (que resume a estrutura em 1 parágrafo, p. 88, sem as cláusulas numeradas). Texto verificado via cópia oficial redistribuída por terceiros (Matthew Bauer/IIT, `moss.cs.iit.edu`), cotejada com fragmentos do texto oficial obtidos por busca.
+
+**Trecho (seleção usada na aula):**
+> "1. GENERAL ETHICAL PRINCIPLES. A computing professional should... 1.1
+> Contribute to society and to human well-being, acknowledging that all
+> people are stakeholders in computing. [...] 1.4 Be fair and take action
+> not to discriminate."
+>
+> "2. PROFESSIONAL RESPONSIBILITIES. A computing professional should...
+> 2.1 Strive to achieve high quality in both the processes and products
+> of professional work. 2.2 Maintain high standards of professional
+> competence, conduct, and ethical practice. [...] 2.5 Give comprehensive
+> and thorough evaluations of computer systems and their impacts,
+> including analysis of possible risks."
+>
+> "3. PROFESSIONAL LEADERSHIP PRINCIPLES. A computing professional
+> should... 3.4 Articulate, apply, and support policies and processes
+> that reflect the principles of the Code. [...] 3.7 Recognize and take
+> special care of systems that become integrated into the infrastructure
+> of society."
 
 ---
 
-### Fonte 6: Van de Poel & Royakkers (2011), Cap. 2, §2.3.1, pp. 44–46
-**Uso pretendido:** limite dos códigos — autointeresse e *window-dressing*, caso Google na China (Bloco 3).
+### Fonte 6 (primária, não do livro-texto): IEEE-CS/ACM Software Engineering Code of Ethics and Professional Practice (1999)
+**Uso pretendido:** os 8 princípios do código de Engenharia de Software, com gloss "na prática" — reconecta com o caso BART (Bloco 2).
+
+**Sinalização de fonte:** texto oficial (código conjunto IEEE Computer Society / ACM), cujo preâmbulo já é citado por Van de Poel & Royakkers numa questão de estudo (p. 62), mas cujos 8 princípios não são enumerados no livro-texto. Verificado por busca cruzada de múltiplas cópias redistribuídas do texto oficial.
+
+**Trecho:**
+> "PUBLIC — Software engineers shall act consistently with the public
+> interest. [...] CLIENT AND EMPLOYER — Software engineers shall act in
+> a manner that is in the best interests of their client and employer,
+> consistent with the public interest. [...] PRODUCT — Software
+> engineers shall ensure that their products and related modifications
+> meet the highest professional standards possible. [...] JUDGMENT —
+> Software engineers shall maintain integrity and independence in their
+> professional judgment. [...] MANAGEMENT — Software engineering managers
+> and leaders shall subscribe to and promote an ethical approach to the
+> management of software development and maintenance. [...] PROFESSION —
+> Software engineers shall advance the integrity and reputation of the
+> profession consistent with the public interest. [...] COLLEAGUES —
+> Software engineers shall be fair to and supportive of their colleagues.
+> [...] SELF — Software engineers shall participate in lifelong learning
+> regarding the practice of their profession and shall promote an
+> ethical approach to the practice of the profession."
+
+---
+
+### Fonte 7: Van de Poel & Royakkers (2011), Cap. 2, §2.3.1, pp. 44–46
+**Uso pretendido:** limite dos códigos — autointeresse, autorregulação como estratégia para evitar regulação real, *window-dressing*, e o caso Google na China (Bloco 5).
 
 **Trecho:**
 > "Codes of conduct are a form of self-regulation. Sometimes, they are
 > primarily formulated for reasons of self-interest, for example to
 > improve one's image to the outside world, to avoid government
 > regulation or to silence dissident voices." (p. 44)
+>
+> "An example in which the latter happened is the case of Jon Tozer [...].
+> In 1989 the Australian engineer John Tozer criticized the decision of
+> the Coffs Harbour authorities to pump sewage into the sea. According to
+> him the engineers employed by the local authority had given a
+> misleading impression of the effects upon the environment and they had
+> failed to properly investigate the alternatives. The engineers in
+> question were subsequently successful in removing Tozer from the
+> Association of Consulting Engineers Australia (ACEA). Tozer was accused
+> of having contravened the professional code by openly criticizing the
+> work of other (associated) engineers. Because of his disbarment Tozer,
+> who has his own consulting engineering firm, is no longer able to
+> fulfill any contracts for customers demanding ACEA membership." (p. 44)
 >
 > "Window-dressing: Presenting a favorable impression that is not based
 > on the actual facts. [...] A code of conduct serving only the interests
@@ -174,8 +228,8 @@
 
 ---
 
-### Fonte 7: Van de Poel & Royakkers (2011), Cap. 2, §2.3.2, pp. 47–48
-**Uso pretendido:** vagueza e contradições potenciais — lealdade crítica/acrítica, e inconsistência entre códigos sobre confidencialidade vs. dever de informar (Bloco 3).
+### Fonte 8: Van de Poel & Royakkers (2011), Cap. 2, §2.3.2, pp. 47–48
+**Uso pretendido:** vagueza e contradições potenciais — lealdade crítica/acrítica, e inconsistência entre códigos sobre confidencialidade vs. dever de informar (Bloco 5).
 
 **Trecho:**
 > "One relevant notion from codes of conduct that is in need of further
@@ -204,8 +258,8 @@
 
 ---
 
-### Fonte 8: Van de Poel & Royakkers (2011), Cap. 2, §2.3.4, p. 50
-**Uso pretendido:** o problema de "viver pelo código" — reabre o caso BART, ecoa o dilema do *whistleblower* das Aulas 1–2 (Bloco 3).
+### Fonte 9: Van de Poel & Royakkers (2011), Cap. 2, §2.3.4, p. 50
+**Uso pretendido:** o problema de "viver pelo código" — reabre o caso BART, ecoa o dilema do *whistleblower* das Aulas 1–2 (Bloco 5).
 
 **Trecho:**
 > "Codes of conduct sometimes contain provisions that are very difficult
@@ -223,8 +277,55 @@
 
 ---
 
-### Fonte 9: Maciel & Viterbo (2020), Vol. 1, Cap. 5, pp. 142–144
-**Uso pretendido:** contexto — como funcionam os conselhos de profissão no Brasil, e quantas profissões são de fato regulamentadas (Bloco 4).
+### Fonte 10 (primária/legal, não do livro-texto): Lei 13.709/2018 (LGPD), Art. 6º
+**Uso pretendido:** os princípios que regem o tratamento de dados pessoais no Brasil, agrupados em 6 blocos temáticos (Finalidade; Adequação e Necessidade; Livre Acesso e Transparência; Segurança e Prevenção; Não Discriminação; Responsabilização) — mecanismo de regulação judicializada da atuação em computação, ao lado do conselho de profissão (Bloco 3).
+
+**Sinalização de fonte:** texto legal oficial, não uma citação literal dos livros-texto (CSV2 menciona a existência da LGPD/GDPR, mas não enumera os princípios do Art. 6º — ver Fonte 11).
+
+**Trecho:**
+> "Art. 6º As atividades de tratamento de dados pessoais deverão
+> observar a boa-fé e os seguintes princípios: I - finalidade: realização
+> do tratamento para propósitos legítimos, específicos, explícitos e
+> informados ao titular, sem possibilidade de tratamento posterior de
+> forma incompatível com essas finalidades; II - adequação:
+> compatibilidade do tratamento com as finalidades informadas ao
+> titular, de acordo com o contexto do tratamento; III - necessidade:
+> limitação do tratamento ao mínimo necessário para a realização de suas
+> finalidades [...]; IV - livre acesso: garantia, aos titulares, de
+> consulta facilitada e gratuita sobre a forma e a duração do tratamento
+> [...]; V - qualidade dos dados: garantia [...] de exatidão, clareza,
+> relevância e atualização dos dados [...]; VI - transparência: garantia
+> [...] de informações claras, precisas e facilmente acessíveis [...];
+> VII - segurança: utilização de medidas técnicas e administrativas
+> aptas a proteger os dados pessoais [...]; VIII - prevenção: adoção de
+> medidas para prevenir a ocorrência de danos [...]; IX - não
+> discriminação: impossibilidade de realização do tratamento para fins
+> discriminatórios ilícitos ou abusivos; X - responsabilização e
+> prestação de contas: demonstração, pelo agente, da adoção de medidas
+> eficazes e capazes de comprovar a observância e o cumprimento das
+> normas de proteção de dados pessoais."
+
+---
+
+### Fonte 11: Maciel & Viterbo (2020), Vol. 2, Cap. 12 ("Fundamentos da e-Democracia"), pp. 110–111
+**Uso pretendido:** GDPR/LGPD já mencionados no livro-texto da disciplina, como um dos requisitos de "propriedade e privacidade de dados" numa lista mais ampla (Shapiro, 2018) — ponto de partida para o aprofundamento com a Fonte 10 (Bloco 3).
+
+**Trecho:**
+> "Propriedade e privacidade de dados: isso representa o compromisso na
+> proteção da propriedade dos dados individuais contra o uso não
+> autorizado por empresas e mesmo pelo governo, sejam esses dados
+> relativos a preferências de compra sejam dados de saúde, por exemplo. A
+> União Européia colocou em vigor a Regulamentação Geral de Proteção aos
+> Dados (GDPR) em maio de 2018. No Brasil, uma lei semelhante também foi
+> aprovada no Senado, em agosto de 2018. A lei n° 13.709/2018, também
+> chamada de Lei Geral de Proteção de Dados (LGPD) garantirá ao cidadão
+> maior controle e rastreabilidade quanto ao uso dos seus dados pessoais
+> tanto por entes governamentais quanto privados." (p. 111)
+
+---
+
+### Fonte 12: Maciel & Viterbo (2020), Vol. 1, Cap. 5, pp. 142–144
+**Uso pretendido:** contexto — como funcionam os conselhos de profissão no Brasil, e quantas profissões são de fato regulamentadas (Bloco 3, função do conselho; Bloco 4, panorama brasileiro).
 
 **Trecho:**
 > "Na década de 70, apenas 20 anos após a chegada dos primeiros
@@ -251,8 +352,8 @@
 
 ---
 
-### Fonte 10: Maciel & Viterbo (2020), Vol. 1, Cap. 5, pp. 148–149
-**Uso pretendido:** a afirmação central do bloco — Informática não é regulamentada no Brasil — e a lista de vantagens/desvantagens já argumentadas no livro (Bloco 4).
+### Fonte 13: Maciel & Viterbo (2020), Vol. 1, Cap. 5, pp. 148–149
+**Uso pretendido:** a afirmação central do Bloco 4 — Informática não é regulamentada no Brasil — e a lista de vantagens/desvantagens já argumentadas no livro (Bloco 4).
 
 **Trecho:**
 > "A Informática não é uma profissão regulamentada no Brasil, embora
@@ -288,8 +389,8 @@
 
 ---
 
-### Fonte 11: Maciel & Viterbo (2020), Vol. 1, Cap. 5, p. 144, "Lei 5.194/1966 (Regulamentação dos Engenheiros)"
-**Uso pretendido:** exemplo concreto de lei de regulamentação profissional real, para contraste com a ausência de uma equivalente para computação (Bloco 4).
+### Fonte 14: Maciel & Viterbo (2020), Vol. 1, Cap. 5, p. 144, "Lei 5.194/1966 (Regulamentação dos Engenheiros)"
+**Uso pretendido:** exemplo concreto de lei de regulamentação profissional real — como um conselho de profissão tem poder legal de fato (Bloco 3).
 
 **Trecho:**
 > "Art. 6º Exerce ilegalmente a profissão de engenheiro, arquiteto ou
@@ -300,7 +401,7 @@
 
 ---
 
-### Fonte 12: Maciel & Viterbo (2020), Vol. 1, Cap. 1, pp. 12, 16–17
+### Fonte 15: Maciel & Viterbo (2020), Vol. 1, Cap. 1, pp. 12, 16–17
 **Uso pretendido:** contexto breve — mapeando o campo da computação no Brasil, história curta (Bloco 4, introdução).
 
 **Trecho:**
@@ -322,8 +423,8 @@
 
 ---
 
-### Fonte 13: Maciel & Viterbo (2020), Vol. 1, Cap. 7, §7.5, p. 209
-**Uso pretendido:** caso de fechamento/provocação — Edward Snowden, vigilância em massa (Bloco 5).
+### Fonte 16: Maciel & Viterbo (2020), Vol. 1, Cap. 7, §7.5, p. 209
+**Uso pretendido:** caso de fechamento/provocação — Edward Snowden, vigilância em massa (Bloco 6).
 
 **Trecho:**
 > "Quando Edward Snowden, um ex-prestador de serviços para a NSA (Agência
@@ -342,8 +443,8 @@
 
 ---
 
-### Fonte 14: Maciel & Viterbo (2020), Vol. 1, Cap. 7, §7.4, pp. 204–205
-**Uso pretendido:** processo de 5 passos de Landon & Landon para deliberação ética — comparação com o Ciclo Ético da Aula 2 (Bloco 5).
+### Fonte 17: Maciel & Viterbo (2020), Vol. 1, Cap. 7, §7.4, pp. 204–205
+**Uso pretendido:** processo de 5 passos de Landon & Landon para deliberação ética — comparação com o Ciclo Ético da Aula 2 (Bloco 6).
 
 **Trecho:**
 > "Landon e Landon (2011) [...] sugerem um passo-a-passo para deliberar
@@ -368,23 +469,44 @@ engenharia) e não se citam mutuamente nas páginas lidas.
 
 ---
 
+## Fontes web (comparação internacional, Bloco 4 — sem mudança desta revisão)
+
+Sinalizadas explicitamente como tal no texto da aula, não misturadas com
+as citações literais dos livros:
+
+- NCEES/NSPE (EUA): exame de licenciamento PE para *Software
+  Engineering*, criado em 2013, descontinuado em 2019 por baixa demanda.
+  ([NCEES](https://ncees.org/ncees-discontinuing-pe-software-engineering-exam/),
+  [NSPE](https://www.nspe.org/career-growth/pe-magazine/may-2018/ncees-ends-software-engineering-pe-exam))
+- Engineers Canada / Alberta: título "*engineer*" protegido por lei
+  provincial; Alberta abriu, em 2024, uma exceção para "*software
+  engineer*" sem licença da APEGA.
+  ([Engineers Canada](https://engineerscanada.ca/news-and-events/news/engineering-regulators-reiterate-licensure-requirements-for-those-using-software-engineer-and-other-it-titles),
+  [CBC](https://www.cbc.ca/news/canada/edmonton/alberta-software-engineer-amendment-1.7019743))
+- Reino Unido: título voluntário Chartered IT Professional (CITP) da
+  British Computer Society, sem licença compulsória.
+  ([Wikipedia](https://en.wikipedia.org/wiki/Chartered_IT_Professional),
+  [BCS](https://www.bcs.org/membership-and-registrations/get-registered/chartered-it-professional/))
+
+---
+
 ## Pendências e notas
 
-- **Inconsistência de numeração na fonte** (Fonte 10): o PDF do Cap. 5
+- **Dez Mandamentos da Ética na Computação removidos desta revisão**
+  (feedback do usuário: "são bem tocos") — a citação literal (Maciel &
+  Viterbo, p. 200) que embasava esse trecho na versão anterior deste
+  arquivo foi retirada; o texto integral continua disponível no
+  histórico do arquivo caso precise ser restaurado.
+- **Framework de tomada de decisão moral de Ruggiero:** avaliado nesta
+  revisão e **descartado por decisão do usuário** — não está em nenhum
+  dos 5 PDFs de `_fontes/` desta disciplina, e o usuário optou por não
+  buscar uma fonte externa para incluí-lo. Não usado nesta aula.
+- **Inconsistência de numeração na fonte** (Fonte 13): o PDF do Cap. 5
   rotula uma subseção "6.2 Conselhos de profissão" dentro do que é,
   claramente pelo título do capítulo e pela paginação contínua, o
-  Capítulo 5. Isso parece ser um erro de numeração do próprio livro
-  (talvez um capítulo tenha sido renumerado na editoração e uma
-  subseção não foi atualizada) — sinalizado aqui, não corrigido por nós.
-- **Cap. 1 usado apenas superficialmente** — o capítulo completo cobre
-  também a crise do ensino superior brasileiro e o modelo Humboldtiano de
-  universidade (pp. 17–19), não usados nesta aula por não se conectarem
-  diretamente ao tema de responsabilidade profissional; conteúdo
-  disponível se uma aula futura quiser aprofundar formação acadêmica.
-- **Cap. 7 tem muito mais conteúdo não usado nesta aula** — em
-  particular, o artigo de James Moor "What is Computer Ethics?" (1985),
-  a "Lei de Moor" sobre revoluções tecnológicas, e as "Cinco Dimensões
-  Morais da Era da Informação" de Landon & Landon (Figura 7.2) — todos
-  lidos nesta sessão mas não incorporados ao plano desta aula por
-  prioridade de tempo; poderiam enriquecer uma versão futura ou uma aula
-  correlata sobre ética da informação de forma mais ampla.
+  Capítulo 5. Sinalizado aqui, não corrigido por nós.
+- **Cap. 1 e Cap. 7 têm mais conteúdo não usado nesta aula** — a crise
+  do ensino superior brasileiro, o modelo Humboldtiano de universidade
+  (Cap. 1), o artigo de James Moor "What is Computer Ethics?", a "Lei de
+  Moor", e as "Cinco Dimensões Morais da Era da Informação" de Landon &
+  Landon (Cap. 7) — lidos, não incorporados por prioridade de tempo.

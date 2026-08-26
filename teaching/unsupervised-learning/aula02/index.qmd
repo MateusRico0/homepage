@@ -1,0 +1,1733 @@
+---
+title: "Aula 2: Vizinhos Mais Próximos, Maldição da Dimensionalidade e KDE"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: _lesson-nav.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: sensibleml-moo
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides →](slides.html){.see-all}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar
+disable_progress_bar()
+from datasets import load_dataset
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.spatial import cKDTree
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({
+    "figure.dpi": 130,
+    "font.size": 11,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "legend.frameon": True,
+    "legend.framealpha": 0.9,
+})
+
+rng = np.random.default_rng(20260826)
+
+# --- Paleta do IC, ordem preferencial ---------------------------------
+COR_A   = "#0085CA"   # densidade / rota k-NN
+COR_B   = "#FF5E00"   # densidade / rota KDE
+COR_LIM = "#E03C31"   # avisos, casos extremos
+COR_NEU = "#5D6D7E"   # dados brutos, elementos neutros
+
+# --- Problema-fio: Breast Cancer Wisconsin (569 x 30 atributos) ------
+ds = load_dataset("scikit-learn/breast-cancer-wisconsin")["train"].to_pandas()
+ds = ds.drop(columns=["id", "Unnamed: 32"])
+feat_cols = [c for c in ds.columns if c != "diagnosis"]
+
+X_full = ds[feat_cols].values
+X_std = (X_full - X_full.mean(axis=0)) / X_full.std(axis=0)
+
+x_radius = ds["radius_mean"].values
+N = len(x_radius)
+
+
+def gaussian_kde_1d(x_eval, data, h):
+    """KDE gaussiano univariado, Eq. (2.250) de PRML."""
+    diffs = (x_eval[:, None] - data[None, :]) / h
+    return (1.0 / (len(data) * h * np.sqrt(2 * np.pi))) * np.exp(-0.5 * diffs ** 2).sum(axis=1)
+
+
+def knn_density_1d(x_eval, data, K):
+    """Densidade por k-NN univariada: p(x) = K / (N * 2*d_K(x))."""
+    tree = cKDTree(data.reshape(-1, 1))
+    dK, _ = tree.query(x_eval.reshape(-1, 1), k=K)
+    dK = dK[:, -1] if K > 1 else dK
+    return K / (len(data) * 2 * dK)
+
+
+def relative_contrast(X, d, n_trials=30, rng=rng):
+    """Contraste relativo (dist_max - dist_min)/dist_min, média sobre n_trials sorteios de d colunas."""
+    n, D = X.shape
+    vals = []
+    for _ in range(n_trials):
+        cols = rng.choice(D, size=d, replace=False)
+        Xd = X[:, cols]
+        q = rng.integers(0, n)
+        dists = np.linalg.norm(Xd - Xd[q], axis=1)
+        dists = np.delete(dists, q)
+        vals.append((dists.max() - dists.min()) / dists.min())
+    return np.mean(vals), np.std(vals)
+```
+
+# Abertura — O Que Fazer Sem Forma Paramétrica, e Sem $N \gg d$
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A Aula 1 fez uma aposta específica: assumir que os dados vêm de uma
+Gaussiana multivariada, ajustá-la por máxima verossimilhança, e usar a
+distância de Mahalanobis para decidir o que é típico. Essa aposta tinha
+uma ressalva anunciada, mas não resolvida: $\hat\Sigma$ só é invertível
+se $N > d$ — e o ajuste piora conforme $d$ cresce, mesmo quando $N > d$
+tecnicamente vale.
+
+Esta aula puxa esse fio até o fim, respondendo duas perguntas:
+
+1. **Por que exatamente "espaço de alta dimensão" é um problema
+   geométrico** — não só um problema de contar parâmetros de $\Sigma$?
+2. **Se não quisermos mais assumir nenhuma forma funcional** para
+   $p(\mathbf{x})$ — nem Gaussiana, nem nenhuma outra família —, como
+   estimar densidade deixando os dados "falarem por si"?
+
+A resposta à segunda pergunta vem em duas versões-espelho — $k$-vizinhos-
+mais-próximos e estimação de densidade por kernel (KDE) — que são,
+como veremos, a mesma ideia vista de dois lados opostos.
+
+::: {.callout-note}
+## O plano desta aula
+
+1. Por que a intuição geométrica de baixa dimensão falha em alta
+   dimensão (maldição da dimensionalidade).
+2. Um resultado geral, $p(\mathbf{x})=K/(NV)$, que unifica os dois
+   métodos não-paramétricos que veremos.
+3. $k$-vizinhos-mais-próximos e KDE, cada um explorando esse resultado
+   de um lado diferente.
+4. Por que nenhum dos dois é "imune" à maldição — e uma ponte para a
+   Aula 3.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Da Aula 1 Para Hoje
+
+::: {.fragment}
+Aula 1: assumir Gaussiana, ajustar $\hat{\boldsymbol\mu}, \hat\Sigma$,
+usar Mahalanobis. Ressalva anunciada: $\hat\Sigma$ exige $N>d$ — e piora
+conforme $d$ cresce.
+:::
+
+::: {.fragment}
+<br/>
+Hoje: duas perguntas.
+
+1. Por que "alta dimensão" quebra a intuição geométrica?
+2. Sem assumir nenhuma forma para $p(\mathbf{x})$, como estimar
+   densidade?
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Plano de Hoje
+
+::: {.fragment}
+1. Maldição da dimensionalidade — por que a intuição de 2–3 dimensões falha.
+2. Um resultado geral, $p(\mathbf{x})=K/(NV)$.
+3. $k$-vizinhos-mais-próximos e KDE — duas leituras do mesmo resultado.
+4. Por que nenhum dos dois escapa da maldição — ponte para a Aula 3.
+:::
+
+```{.tikz}
+\definecolor{stepfill}{RGB}{219,234,254}
+\definecolor{stepborder}{RGB}{0,133,202}
+\definecolor{limfill}{RGB}{253,224,220}
+\definecolor{limborder}{RGB}{224,60,49}
+
+\begin{tikzpicture}[
+  tlbox/.style={rectangle, rounded corners, fill=stepfill, draw=stepborder, line width=1.2pt, text=black, minimum width=2.6cm, minimum height=1.5cm, align=center, font=\small},
+  limbox/.style={rectangle, rounded corners, fill=limfill, draw=limborder, line width=1.2pt, text=black, minimum width=2.6cm, minimum height=1.5cm, align=center, font=\small},
+  arr/.style={draw=stepborder, thick, ->}
+]
+
+\node[tlbox] (n1) at (0,0)   {Aula 1\\ Gaussiana\\ paramétrica};
+\node[limbox] (n2) at (3.2,0) {$N>d$?\\ forma\\ conhecida?};
+\node[tlbox] (n3) at (6.4,0) {Hoje:\\ não-paramétrico\\ ($k$-NN, KDE)};
+\node[tlbox] (n4) at (9.6,0) {Aula 3\\ $d_K(\mathbf{x})$ como\\ métrica de grafo};
+
+\draw[arr] (n1) -- (n2);
+\draw[arr] (n2) -- (n3);
+\draw[arr] (n3) -- (n4);
+
+\end{tikzpicture}
+```
+
+:::
+
+# A Maldição da Dimensionalidade, Geometricamente
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Antes de qualquer estimador, uma pergunta mais básica: por que exatamente
+"muitas dimensões" é um problema? A resposta, em duas partes, vem de
+dois livros diferentes — convergindo na mesma conclusão por caminhos
+distintos.
+
+## Volume que se esconde na casca
+
+Bishop (PRML, §1.4) começa pelo problema mais ingênuo: dividir cada
+variável em $M$ células e contar pontos por célula.
+
+> "Another major limitation of the histogram approach is its scaling
+> with dimensionality. If we divide each variable in a D-dimensional
+> space into M bins, then the total number of bins will be $M^D$. This
+> exponential scaling with D is an example of the curse of
+> dimensionality." (p. 121)
+
+Mas o resultado mais surpreendente de PRML não é sobre células — é sobre
+**onde mora o volume** de uma esfera em alta dimensão:
+
+> "consider a sphere of radius r = 1 in a space of D dimensions, and ask
+> what is the fraction of the volume of the sphere that lies between
+> radius $r=1-\epsilon$ and $r=1$. [...] the volume of a sphere of radius
+> r in D dimensions must scale as $r^D$ [...] Thus the required fraction
+> is given by $\dfrac{V_D(1)-V_D(1-\epsilon)}{V_D(1)} = 1-(1-\epsilon)^D$
+> [...] for large D, this fraction tends to 1 even for small values of
+> $\epsilon$. Thus, in spaces of high dimensionality, most of the volume
+> of a sphere is concentrated in a thin shell near the surface!" (pp.
+> 36–37)
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+epsilon = 0.05
+for D in [1, 2, 5, 10, 30, 100]:
+    frac = 1 - (1 - epsilon) ** D
+    print(f"D={D:3d}: fração do volume na casca de espessura ε=0.05  ≈ {frac:.3f}")
+```
+
+Em $D=100$, praticamente **100% do volume** de uma esfera mora nos
+últimos 5% do raio. A intuição de "o centro concentra a massa" — válida
+em 1, 2 ou 3 dimensões — se inverte por completo.
+
+> "consider the behaviour of a Gaussian distribution in a high-
+> dimensional space. [...] we see that for large D the probability mass
+> of the Gaussian is concentrated in a thin shell." (PRML, p. 37)
+
+O mesmo vale para uma Gaussiana: a massa de probabilidade se afasta da
+média e se acumula numa casca fina — nem perto do centro, nem
+espalhada uniformemente.
+
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(5.5, 3.8))
+eps_grid = np.linspace(0.001, 0.5, 200)
+for D, cor in zip([1, 2, 5, 10, 30], [COR_NEU, COR_NEU, COR_A, COR_A, COR_LIM]):
+    frac = 1 - (1 - eps_grid) ** D
+    lw = 2.6 if D in (10, 30) else 1.4
+    ax.plot(eps_grid, frac, color=cor, lw=lw, label=f"D={D}", alpha=0.9)
+ax.set_xlabel(r"$\epsilon$ (espessura relativa da casca)")
+ax.set_ylabel("fração do volume na casca")
+ax.set_title("Onde mora o volume de uma esfera, por dimensão $D$")
+ax.legend(fontsize=8, loc="lower right")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+## O mesmo efeito, do ponto de vista de um vizinho mais próximo
+
+O ESL (Hastie, Tibshirani & Friedman, §2.5 "Local Methods in High
+Dimensions") chega à mesma conclusão por um caminho mais concreto,
+pensando diretamente em vizinhança:
+
+> "Suppose we send out a hypercubical neighborhood about a target point
+> to capture a fraction r of the observations. [...] the expected edge
+> length will be $e_p(r) = r^{1/p}$. In ten dimensions $e_{10}(0.01) =
+> 0.63$ and $e_{10}(0.1) = 0.80$, while the entire range for each input
+> is only 1.0. So to capture 1% or 10% of the data to form a local
+> average, we must cover 63% or 80% of the range of each input
+> variable. Such neighborhoods are no longer 'local.'" (p. 22)
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+for p in [1, 2, 10, 30]:
+    e10 = 0.10 ** (1 / p)
+    print(f"p={p:3d}: para capturar 10% dos dados, cobrir {e10:.2%} da amplitude de cada eixo")
+```
+
+Em $p=30$, é preciso cobrir **93% da amplitude de cada variável** só
+para capturar 10% dos dados — a vizinhança deixou de ser local há muito
+tempo. O segundo resultado do ESL é ainda mais direto:
+
+> "The median distance from the origin to the closest data point is
+> given by the expression $d(p,N) = \big(1-(1/2)^{1/N}\big)^{1/p}$
+> [...]. For N = 500, p = 10, $d(p,N)\approx 0.52$, more than halfway to
+> the boundary. Hence most data points are closer to the boundary of the
+> sample space than to any other data point." (pp. 22–23)
+
+Isso quer dizer que, com $N=500$ pontos uniformes numa bola unitária de
+$D=10$ dimensões, o ponto mais próximo da origem está, em mediana, a
+mais da metade do caminho até a borda — **mais perto da fronteira do
+espaço do que de qualquer outro ponto de dado**.
+
+## Consequência: distâncias deixam de discriminar
+
+Os dois resultados acima — volume na casca, vizinhos perto da borda —
+apontam para o mesmo problema prático: em alta dimensão, a noção de
+"vizinho próximo" fica cada vez menos informativa, porque **todo mundo
+fica a distâncias parecidas de todo mundo**. Uma forma direta de medir
+isso é o **contraste relativo**: fixe um ponto de consulta, calcule a
+distância a todos os outros pontos, e compare a distância mínima com a
+máxima,
+$$\text{contraste} = \frac{\text{dist}_{\max}-\text{dist}_{\min}}{\text{dist}_{\min}}.$$
+Se esse contraste é grande, "o vizinho mais próximo" é um conceito com
+significado — está bem mais perto que o ponto mais distante. Se o
+contraste desmorona para perto de zero, todo ponto está igualmente
+longe, e "vizinho mais próximo" deixa de ser um conceito útil.
+
+::: {.callout-note}
+## Sinalização de fonte
+
+Esta métrica específica — e a comparação $L_1$/$L_2$/Cosseno em geral —
+**não foi encontrada em PRML, ESL nem DLFC** (os três livros-texto desta
+disciplina) apesar de busca dedicada. É um resultado padrão da
+literatura de busca aproximada de vizinhos (Beyer et al., 1999;
+Aggarwal et al., 2001), citado aqui por atribuição de origem da ideia,
+não como trecho literal de um livro-fonte. A demonstração numérica a
+seguir é nossa, verificada por script antes de escrever esta aula — o
+mesmo tratamento já dado ao resultado $\chi^2_d$ da Aula 1.
+:::
+
+Aplicando essa medida ao próprio Breast Cancer Wisconsin (padronizado),
+sorteando aleatoriamente $d$ das 30 colunas disponíveis:
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+for d in [2, 5, 10, 20, 30]:
+    media, desvio = relative_contrast(X_std, d)
+    print(f"d={d:2d}  contraste relativo médio = {media:6.2f}  (desvio {desvio:.2f})")
+```
+
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+ds_list = [2, 5, 10, 20, 30]
+medias = []
+desvios = []
+for d in ds_list:
+    m, s = relative_contrast(X_std, d, n_trials=60)
+    medias.append(m)
+    desvios.append(s)
+
+fig, ax = plt.subplots(figsize=(5.5, 3.8))
+ax.errorbar(ds_list, medias, yerr=desvios, color=COR_A, marker="o", lw=2.2,
+            capsize=4, ecolor=COR_NEU)
+ax.set_xlabel("$d$ (número de atributos usados)")
+ax.set_ylabel("contraste relativo médio")
+ax.set_title("Concentração de medida no Breast Cancer Wisconsin")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+O contraste relativo desmorona de $\approx 220$ (2 atributos) para
+$\approx 10$ (30 atributos) — num dado **real**, não simulado. Não é só
+teoria de livro: a maldição da dimensionalidade aparece exatamente
+neste dataset, com estes 30 atributos de exame clínico.
+
+::: {.callout-important}
+## Pergunta
+
+::: {.callout-tip}
+## Se distâncias deixam de discriminar em alta dimensão, o que isso quebra primeiro: um classificador ou um estimador de densidade?
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Se a distância entre o ponto de consulta e seu vizinho mais próximo,
+   e a distância até o ponto mais distante, convergem para o mesmo
+   valor conforme $d$ cresce, então a ordem dos $k$ vizinhos mais
+   próximos de um ponto se torna cada vez mais sensível a perturbações
+   minúsculas nos dados.
+b. No limite em que o contraste relativo é exatamente zero, todo
+   subconjunto de $k$ pontos escolhido por proximidade é, na prática,
+   uma escolha tão informativa quanto um subconjunto de $k$ pontos
+   escolhido aleatoriamente.
+c. Se um dataset tem 30 atributos mas apenas 3 deles carregam
+   informação relevante (os outros 27 são ruído independente da
+   variável de interesse), aumentar a dimensionalidade usada de 3 para
+   30 sempre melhora a qualidade da estimativa de densidade local.
+d. A fórmula $e_p(r) = r^{1/p}$ do ESL implica que, para qualquer $r<1$
+   fixo, o comprimento de aresta necessário cresce (se aproxima de 1)
+   conforme $p$ aumenta.
+:::
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Volume que se Esconde na Casca
+
+::: {.fragment}
+> *"if we divide a region of a space into regular cells [...] the number of such cells grows exponentially with the dimensionality"* — PRML, p. 121
+:::
+
+::: {.fragment}
+<br/>
+> *"in spaces of high dimensionality, most of the volume of a sphere is concentrated in a thin shell near the surface"* — PRML, p. 37
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Onde Mora o Volume, Por Dimensão
+
+::: {.fig-resize style="width: 68%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(5.2, 3.6))
+eps_grid = np.linspace(0.001, 0.5, 200)
+for D, cor in zip([1, 2, 5, 10, 30], [COR_NEU, COR_NEU, COR_A, COR_A, COR_LIM]):
+    frac = 1 - (1 - eps_grid) ** D
+    lw = 2.6 if D in (10, 30) else 1.4
+    ax.plot(eps_grid, frac, color=cor, lw=lw, label=f"D={D}", alpha=0.9)
+ax.set_xlabel(r"$\epsilon$")
+ax.set_ylabel("fração do volume na casca")
+ax.legend(fontsize=8, loc="lower right")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.fragment}
+Em $D=100$, quase todo o volume mora nos últimos 5% do raio.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Mesmo Efeito, do Ponto de Vista de um Vizinho
+
+::: {.fragment}
+> *"the expected edge length will be $e_p(r)=r^{1/p}$. [...] to capture 1% or 10% of the data [...] we must cover 63% or 80% of the range [...] Such neighborhoods are no longer 'local.'"* — ESL, p. 22
+:::
+
+::: {.fragment}
+<br/>
+```{python}
+#| echo: true
+for p in [1, 2, 10, 30]:
+    e10 = 0.10 ** (1 / p)
+    print(f"p={p:3d}: cobrir {e10:.0%} da amplitude p/ capturar 10% dos dados")
+```
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Mais Perto da Borda do que de Qualquer Vizinho
+
+::: {.fragment}
+> *"The median distance from the origin to the closest data point [...] For N = 500, p = 10, $d(p,N)\approx 0.52$, more than halfway to the boundary."* — ESL, pp. 22–23
+:::
+
+::: {.fragment}
+<br/>
+
+::: {.callout-important icon=false}
+Com $N=500$ pontos, $D=10$: o vizinho mais próximo da origem está, em mediana, mais perto da fronteira do espaço do que de qualquer outro ponto.
+:::
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Contraste Relativo: Quando "Vizinho Próximo" Deixa de Significar Algo
+
+::: {.fragment}
+$$\text{contraste} = \frac{\text{dist}_{\max}-\text{dist}_{\min}}{\text{dist}_{\min}}$$
+:::
+
+::: {.fragment}
+<br/>
+
+::: {.callout-note icon=false appearance="simple"}
+Não está em PRML/ESL/DLFC — atribuído a Beyer et al. (1999); demonstração numérica nossa, verificada antes da aula.
+:::
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Concentração de Medida, no Dado Real
+
+::: {.fragment}
+```{python}
+#| echo: true
+for d in [2, 5, 10, 20, 30]:
+    m, s = relative_contrast(X_std, d)
+    print(f"d={d:2d}  contraste médio = {m:6.2f}")
+```
+:::
+
+::: {.fragment}
+<br/>
+
+::: {.fig-resize style="width: 60%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(4.8, 3.3))
+ax.errorbar(ds_list, medias, yerr=desvios, color=COR_A, marker="o", lw=2.2,
+            capsize=4, ecolor=COR_NEU)
+ax.set_xlabel("$d$")
+ax.set_ylabel("contraste relativo médio")
+plt.tight_layout()
+plt.show()
+```
+:::
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pergunta
+
+::: {.callout-tip}
+## Se distâncias deixam de discriminar em alta dimensão, o que isso quebra primeiro: um classificador ou um estimador de densidade?
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Se a distância ao vizinho mais próximo e ao mais distante convergem
+   conforme $d$ cresce, a ordem dos $k$ vizinhos mais próximos se torna
+   cada vez mais sensível a perturbações minúsculas nos dados.
+b. No limite em que o contraste relativo é exatamente zero, um
+   subconjunto de $k$ pontos escolhido por proximidade é, na prática,
+   tão informativo quanto um subconjunto escolhido aleatoriamente.
+c. Se só 3 de 30 atributos carregam informação relevante (os outros 27
+   são ruído), aumentar a dimensionalidade usada de 3 para 30 sempre
+   melhora a estimativa de densidade local.
+d. A fórmula $e_p(r)=r^{1/p}$ implica que, para $r<1$ fixo, o
+   comprimento de aresta necessário se aproxima de 1 conforme $p$
+   aumenta.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — quando as distâncias quase não se distinguem, uma perturbação pequena pode trocar a ordem de quem é "o $k$-ésimo mais próximo".
+b. **Verdadeiro** — contraste zero significa que a distância não carrega mais informação sobre proximidade real.
+c. **Falso** — adicionar 27 atributos de ruído dilui o sinal dos 3 relevantes e piora a estimativa (é a própria maldição em ação).
+d. **Verdadeiro** — $r^{1/p}\to 1$ quando $p\to\infty$, para qualquer $0<r<1$ fixo.
+:::
+
+:::
+
+# Da Ideia Geral ao Estimador: $p(\mathbf{x}) = K/(NV)$
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Se abandonamos a forma Gaussiana, o que resta? PRML propõe um caminho
+que começa, de novo, no histograma — mas dessa vez extraindo a lição
+certa dele, em vez de só o problema.
+
+> "First, to estimate the probability density at a particular location,
+> we should consider the data points that lie within some local
+> neighbourhood of that point. [...] Second, the value of the smoothing
+> parameter should be neither too large nor too small in order to obtain
+> good results." (PRML, pp. 121–122)
+
+Formalizando essa intuição: fixe um ponto $\mathbf{x}$ e uma região $R$
+pequena de volume $V$ ao redor dele. A probabilidade de um ponto de
+treino cair em $R$ é $P=\int_R p(\mathbf{x})\,d\mathbf{x}$. Com $N$
+pontos de treino, o número $K$ que cai em $R$ segue uma binomial:
+
+> "the total number K of points that lie inside R will be distributed
+> according to the binomial distribution [...] For large N, this
+> distribution will be sharply peaked around the mean and so $K\simeq
+> NP$. If, however, we also assume that the region R is sufficiently
+> small that the probability density $p(\mathbf{x})$ is roughly constant
+> over the region, then we have $P\simeq p(\mathbf{x})V$ [...] Combining
+> [...] we obtain our density estimate in the form
+> $$p(\mathbf{x}) = \frac{K}{NV}.$$" (p. 122)
+
+Esse resultado é o eixo de toda a aula. Ele tem uma tensão interna
+deliberada: $R$ precisa ser **pequeno o bastante** para que $p(\mathbf x)$
+seja aproximadamente constante dentro dela, e **grande o bastante** para
+que $K$ não seja um número tão pequeno que a binomial fique ruidosa.
+Nenhum valor fixo de $V$ resolve os dois lados ao mesmo tempo em todo
+lugar do espaço — o que já anuncia por que precisaremos de um parâmetro
+de suavização em qualquer método que construamos a partir daqui.
+
+> "We can exploit this result in two different ways. Either we can fix K
+> and determine the value of V from the data, which gives rise to the
+> K-nearest-neighbour technique [...], or we can fix V and determine K
+> from the data, giving rise to the kernel approach." (PRML, p. 123)
+
+```{.tikz}
+\definecolor{genfill}{RGB}{224,242,241}
+\definecolor{genborder}{RGB}{17,122,101}
+\definecolor{knnfill}{RGB}{219,234,254}
+\definecolor{knnborder}{RGB}{0,133,202}
+\definecolor{kdefill}{RGB}{255,232,214}
+\definecolor{kdeborder}{RGB}{255,94,0}
+
+\begin{tikzpicture}[
+  gen/.style={rectangle, rounded corners, fill=genfill, draw=genborder, line width=1.2pt, text=black, minimum width=5.4cm, minimum height=1.4cm, align=center, font=\small},
+  branch/.style={rectangle, rounded corners, fill=knnfill, draw=knnborder, line width=1.2pt, text=black, minimum width=4cm, minimum height=1.7cm, align=center, font=\small},
+  branch2/.style={rectangle, rounded corners, fill=kdefill, draw=kdeborder, line width=1.2pt, text=black, minimum width=4cm, minimum height=1.7cm, align=center, font=\small},
+  arr/.style={draw=black!60, thick, ->}
+]
+
+\node[gen] (G) at (3,1.6) {$p(\mathbf{x})=K/(NV)$};
+\node[branch] (A) at (0,-1.0) {Fixar $K$\\ achar $V$ nos dados\\ $\to$ $k$-NN};
+\node[branch2] (B) at (6,-1.0) {Fixar $V$\\ contar $K$ nos dados\\ $\to$ KDE};
+
+\draw[arr] (G) -- (A);
+\draw[arr] (G) -- (B);
+
+\end{tikzpicture}
+```
+
+Os dois métodos que vemos a seguir não são "duas técnicas parecidas" —
+são a mesma identidade matemática, explorada de dois lados opostos.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Herança do Histograma
+
+::: {.fragment}
+> *"we should consider the data points that lie within some local neighbourhood [...] the value of the smoothing parameter should be neither too large nor too small"* — PRML, pp. 121–122
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Resultado Geral
+
+::: {.fragment}
+Região $R$ de volume $V$ ao redor de $\mathbf{x}$; $K$ pontos de treino caem dentro; $K\sim\mathrm{Bin}(N,P)$, $P\approx p(\mathbf{x})V$:
+:::
+
+::: {.fragment}
+<br/>
+$$p(\mathbf{x}) = \frac{K}{NV}$$
+:::
+
+::: {.fragment}
+<br/>
+
+::: {.callout-note icon=false}
+Tensão interna: $V$ precisa ser pequeno (densidade quase constante dentro) **e** grande (contar pontos suficientes) — ao mesmo tempo.
+:::
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Duas Rotas Para a Mesma Identidade
+
+```{.tikz}
+\definecolor{genfill}{RGB}{224,242,241}
+\definecolor{genborder}{RGB}{17,122,101}
+\definecolor{knnfill}{RGB}{219,234,254}
+\definecolor{knnborder}{RGB}{0,133,202}
+\definecolor{kdefill}{RGB}{255,232,214}
+\definecolor{kdeborder}{RGB}{255,94,0}
+
+\begin{tikzpicture}[
+  gen/.style={rectangle, rounded corners, fill=genfill, draw=genborder, line width=1.2pt, text=black, minimum width=4.6cm, minimum height=1.3cm, align=center, font=\small},
+  branch/.style={rectangle, rounded corners, fill=knnfill, draw=knnborder, line width=1.2pt, text=black, minimum width=3.4cm, minimum height=1.5cm, align=center, font=\small},
+  branch2/.style={rectangle, rounded corners, fill=kdefill, draw=kdeborder, line width=1.2pt, text=black, minimum width=3.4cm, minimum height=1.5cm, align=center, font=\small},
+  arr/.style={draw=black!60, thick, ->}
+]
+
+\node[gen] (G) at (2.5,1.4) {$p(\mathbf{x})=K/(NV)$};
+\node[branch] (A) at (0,-0.9) {Fixar $K$\\ $\to$ $k$-NN};
+\node[branch2] (B) at (5,-0.9) {Fixar $V$\\ $\to$ KDE};
+
+\draw[arr] (G) -- (A);
+\draw[arr] (G) -- (B);
+
+\end{tikzpicture}
+```
+
+:::
+
+# $k$-Vizinhos-Mais-Próximos Para Densidade
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Primeira rota: **fixar $K$**, e deixar os dados determinarem $V$.
+
+> "instead of fixing V and determining the value of K from the data, we
+> consider a fixed value of K and use the data to find an appropriate
+> value for V. To do this, we consider a small sphere centred on the
+> point x [...] and we allow the radius of the sphere to grow until it
+> contains precisely K data points. The estimate of the density $p(x)$
+> is then given by [K/(NV)] with V set to the volume of the resulting
+> sphere. This technique is known as K nearest neighbours." (PRML, pp.
+> 124–125)
+
+Chame de $d_K(\mathbf{x})$ o raio dessa esfera — a distância ao
+$K$-ésimo vizinho mais próximo. Como o volume de uma esfera de raio $r$
+em $D$ dimensões escala como $r^D$ (a mesma identidade do Bloco 2, eq.
+1.75 de PRML), temos $V \propto d_K(\mathbf{x})^D$. Substituindo em
+$p(\mathbf{x})=K/(NV)$:
+$$p(\mathbf{x}) \;\propto\; \frac{1}{d_K(\mathbf{x})^D}$$
+
+Esse é o resultado central do `index.qmd` desta disciplina para esta
+aula. A leitura é direta: **ponto num bairro denso** → $K$ vizinhos
+estão próximos → $d_K$ pequeno → densidade estimada alta. **Ponto
+isolado** → $d_K$ grande → densidade baixa. $K$ funciona como parâmetro
+de suavização — $K$ pequeno é ruidoso, $K$ grande borra estrutura real
+(o mesmo trade-off do Bloco 3, agora com um rosto concreto).
+
+Aplicando isso a `radius_mean` do Breast Cancer Wisconsin, em três
+pontos-teste e três valores de $K$:
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+for K in [5, 20, 50]:
+    for x0 in [12.0, 17.5, 25.0]:
+        dens = knn_density_1d(np.array([x0]), x_radius, K)[0]
+        print(f"K={K:3d}  x0={x0:5.1f}  densidade estimada ≈ {dens:.4f}")
+    print()
+```
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(6, 3.8))
+grid = np.linspace(x_radius.min() - 1, x_radius.max() + 1, 300)
+for K, cor in zip([5, 20, 50], [COR_LIM, COR_A, COR_B]):
+    dens = knn_density_1d(grid, x_radius, K)
+    ax.plot(grid, dens, color=cor, lw=2.2, label=f"$K={K}$")
+ax.scatter(x_radius, np.zeros_like(x_radius) - 0.005, color=COR_NEU, s=6, alpha=0.4)
+ax.set_xlabel("radius_mean")
+ax.set_ylabel(r"$\hat p(x)$ por $k$-NN")
+ax.set_title("Densidade por $k$-NN, três valores de $K$")
+ax.legend(fontsize=9)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+Note o *rug plot* (traços cinzas no eixo x): as duas concentrações de
+pontos visíveis já sugerem que `radius_mean` não é unimodal — vamos
+voltar a isso no Bloco 6.
+
+::: {.callout-warning}
+## Aviso: isto não é uma densidade de verdade
+
+> "Note that the model produced by K nearest neighbours is not a true
+> density model because the integral over all space diverges." (PRML, p. 125)
+
+A cauda de $1/d_K(\mathbf{x})^D$ não decai rápido o bastante para que a
+integral sobre todo o espaço convirja para 1. Isso não invalida o uso
+de $k$-NN como *score* de densidade relativa (comparar pontos entre si)
+— mas quer dizer que não se deve tratar o número produzido como uma
+probabilidade calibrada.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Fixar $K$, Deixar $V$ Crescer
+
+::: {.fragment}
+> *"we consider a small sphere centred on the point x [...] and we allow the radius of the sphere to grow until it contains precisely K data points."* — PRML, pp. 124–125
+:::
+
+::: {.fragment}
+<br/>
+$$p(\mathbf{x}) \propto \frac{1}{d_K(\mathbf{x})^D}$$
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Bairro Denso, Bairro Isolado
+
+::: {.fragment}
+Ponto num bairro **denso** → $K$ vizinhos próximos → $d_K$ pequeno → densidade alta.
+:::
+
+::: {.fragment}
+<br/>
+Ponto **isolado** → $d_K$ grande → densidade baixa. $K$ é o parâmetro de suavização.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Densidade por $k$-NN, No Dado Real
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(5.6, 3.6))
+for K, cor in zip([5, 20, 50], [COR_LIM, COR_A, COR_B]):
+    dens = knn_density_1d(grid, x_radius, K)
+    ax.plot(grid, dens, color=cor, lw=2.2, label=f"$K={K}$")
+ax.scatter(x_radius, np.zeros_like(x_radius) - 0.005, color=COR_NEU, s=6, alpha=0.4)
+ax.set_xlabel("radius_mean")
+ax.legend(fontsize=9)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Aviso: Isto Não é Uma Densidade de Verdade
+
+::: {.fragment}
+::: {.callout-warning icon=false}
+*"the model produced by K nearest neighbours is not a true density model because the integral over all space diverges."* — PRML, p. 125
+:::
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pergunta
+
+::: {.callout-tip}
+## Se $K$ é fixo e $d_K(\mathbf{x})$ é o raio que cresce até capturar $K$ pontos, o que acontece exatamente quando $K=N$ (todos os pontos)?
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Se $K=N$ (todos os pontos de treino), $d_K(\mathbf{x})$ é a mesma
+   para qualquer $\mathbf{x}$ dentro do suporte dos dados igual à
+   distância até o ponto mais distante — e a densidade estimada por
+   $k$-NN se torna praticamente constante em todo o espaço.
+b. Um ponto que está exatamente na posição de um outro ponto de treino
+   (distância zero) faria a densidade estimada por $k$-NN, com $K=1$,
+   divergir para infinito.
+c. Aumentar $K$ de 5 para 50, num ponto que já está numa região muito
+   densa, deveria produzir uma mudança relativa muito menor em
+   $d_K(\mathbf{x})$ do que a mesma mudança de $K$ produziria num ponto
+   isolado na cauda da distribuição.
+d. Como a densidade por $k$-NN não integra a 1, ela nunca pode ser usada
+   para comparar, de forma válida, se um ponto é mais ou menos denso do
+   que outro.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — com $K=N$, a esfera sempre cresce até englobar todo o conjunto; $d_N(\mathbf{x})$ varia pouco, e a "densidade" perde quase todo o poder de discriminação local.
+b. **Verdadeiro** — $d_1(\mathbf{x})\to 0$ faz $1/d_1(\mathbf{x})^D\to\infty$ — degenerescência real do estimador em pontos coincidentes.
+c. **Verdadeiro** — é exatamente a suavização adaptativa do $k$-NN: em região densa, $d_K$ cresce pouco com $K$; na cauda, $d_K$ cresce muito.
+d. **Falso** — não integrar a 1 não impede comparações relativas de densidade entre pontos; só impede tratar o valor como probabilidade calibrada.
+:::
+
+:::
+
+# Do Histograma ao Kernel Suave: KDE
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Segunda rota: **fixar $V$**, e contar quantos pontos $K$ caem dentro.
+PRML começa com a versão mais simples de $V$ fixo — um hipercubo — via
+a chamada janela de Parzen:
+
+> "we take the region R to be a small hypercube centred on the point x
+> [...] $k(u)=1$ if $|u_i|\le 1/2$ for $i=1,\dots,D$, 0 otherwise [...]
+> The total number of data points lying inside this cube will therefore
+> be $K=\sum_n k\big((\mathbf{x}-\mathbf{x}_n)/h\big)$. Substituting this
+> expression [...] gives [...] $p(\mathbf{x}) = \frac{1}{N}\sum_n
+> \frac{1}{h^D} k\big(\frac{\mathbf{x}-\mathbf{x}_n}{h}\big)$." (p. 123)
+
+O problema dessa janela dura (hipercubo) é o mesmo do histograma:
+descontinuidades artificiais nas bordas do cubo.
+
+> "We can obtain a smoother density model if we choose a smoother kernel
+> function, and a common choice is the Gaussian [...]
+> $$p(\mathbf{x}) = \frac{1}{N}\sum_{n=1}^N \frac{1}{(2\pi h^2)^{1/2}}
+> \exp\left(-\frac{\|\mathbf{x}-\mathbf{x}_n\|^2}{2h^2}\right)$$
+> where h represents the standard deviation of the Gaussian components."
+> (p. 124)
+
+Em palavras: coloque uma gaussiana de largura $h$ sobre **cada** ponto
+de treino, some todas, divida por $N$. $h$ é o parâmetro de suavização —
+o mesmo papel que $K$ desempenhava no Bloco 4, e que $\Delta$ (largura
+de bin) desempenhava no histograma.
+
+> "We see that, as expected, the parameter h plays the role of a
+> smoothing parameter, and there is a trade-off between sensitivity to
+> noise at small h and over-smoothing at large h." (PRML, p. 124)
+
+Verificando isso em `radius_mean`, contando picos (máximos locais) da
+densidade estimada para três larguras de banda:
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+grid = np.linspace(x_radius.min() - 2, x_radius.max() + 2, 400)
+for h in [0.3, 1.0, 3.0]:
+    dens = gaussian_kde_1d(grid, x_radius, h)
+    picos = ((dens[1:-1] > dens[:-2]) & (dens[1:-1] > dens[2:])).sum()
+    print(f"h={h:.1f}: {picos:2d} picos detectados, densidade máxima {dens.max():.4f}")
+```
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 3, figsize=(9, 3.2), sharey=False)
+for ax, h, cor in zip(axes, [0.3, 1.0, 3.0], [COR_LIM, COR_A, COR_B]):
+    dens = gaussian_kde_1d(grid, x_radius, h)
+    ax.plot(grid, dens, color=cor, lw=2.0)
+    ax.scatter(x_radius, np.zeros_like(x_radius) - dens.max() * 0.03,
+               color=COR_NEU, s=4, alpha=0.3)
+    ax.set_title(f"$h={h}$")
+    ax.set_xlabel("radius_mean")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+$h=0.3$ (pequeno demais) produz 12 picos espúrios — ruído, não
+estrutura real. $h=3.0$ (grande demais) produz 1 pico só — borra
+qualquer estrutura que exista. $h=1.0$ mostra 3 picos: candidato mais
+plausível a capturar algo real, sem exagerar no ruído. Voltaremos a essa
+estrutura de 3 picos no Bloco 6.
+
+::: {.callout-note}
+## O que muda de nome, mas não de ideia
+
+| No histograma | No $k$-NN (Bloco 4) | No KDE (aqui) |
+|---|---|---|
+| largura do bin $\Delta$ | número de vizinhos $K$ | largura do kernel $h$ |
+
+: O mesmo parâmetro de suavização, três disfarces
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Fixar $V$: a Janela de Parzen
+
+::: {.fragment}
+> *"we take the region R to be a small hypercube [...] $p(\mathbf{x})=\frac{1}{N}\sum_n \frac{1}{h^D}k\left(\frac{\mathbf{x}-\mathbf{x}_n}{h}\right)$"* — PRML, p. 123
+:::
+
+::: {.fragment}
+<br/>
+
+::: {.callout-warning icon=false}
+Problema: descontinuidades artificiais nas bordas do cubo — o mesmo problema do histograma.
+:::
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Do Cubo ao Kernel Gaussiano
+
+::: {.fragment}
+$$p(\mathbf{x}) = \frac{1}{N}\sum_{n=1}^N \frac{1}{(2\pi h^2)^{1/2}} \exp\left(-\frac{\|\mathbf{x}-\mathbf{x}_n\|^2}{2h^2}\right)$$
+:::
+
+::: {.fragment}
+<br/>
+Uma gaussiana de largura $h$ sobre **cada** ponto — somadas, normalizadas.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## $h$ Pequeno, $h$ Grande, $h$ Certo
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 3, figsize=(8.4, 3.0), sharey=False)
+for ax, h, cor in zip(axes, [0.3, 1.0, 3.0], [COR_LIM, COR_A, COR_B]):
+    dens = gaussian_kde_1d(grid, x_radius, h)
+    ax.plot(grid, dens, color=cor, lw=2.0)
+    ax.set_title(f"$h={h}$", fontsize=10)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.fragment}
+$h=0.3$: 12 picos (ruído). $h=3.0$: 1 pico (borra tudo). $h=1.0$: 3 picos — melhor candidato.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Mesmo Parâmetro, Três Disfarces
+
+| Histograma | $k$-NN | KDE |
+|---|---|---|
+| $\Delta$ | $K$ | $h$ |
+
+::: {.fragment}
+::: {.callout-note icon=false appearance="simple"}
+Sempre o mesmo trade-off: pequeno demais é ruído, grande demais borra estrutura.
+:::
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pergunta
+
+::: {.callout-tip}
+## Se $h\to\infty$ no KDE gaussiano, o que exatamente acontece com a forma da densidade estimada?
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. No limite $h\to\infty$, a densidade estimada por KDE gaussiano se
+   torna aproximadamente constante em qualquer região finita do espaço
+   — a mesma degenerescência de "borrar tudo" vista no limite $K=N$ do
+   $k$-NN (Bloco 4).
+b. No limite $h\to 0$, o KDE gaussiano converge para uma soma de
+   funções delta centradas em cada ponto de treino, e a densidade
+   estimada em qualquer ponto que não seja exatamente um dado de
+   treino tende a zero.
+c. Se dois conjuntos de dados têm o mesmo número de pontos $N$, mas um
+   deles está mais espalhado (maior variância), usar o mesmo valor fixo
+   de $h$ para os dois produzirá, em geral, o mesmo grau relativo de
+   suavização nos dois casos.
+d. A escolha de $h$ no KDE é conceitualmente equivalente à escolha da
+   largura de bin $\Delta$ num histograma — ambas controlam o mesmo
+   trade-off entre ruído e viés.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — $h$ grande borra toda estrutura local, assim como $K=N$ no $k$-NN; os dois métodos degeneram no mesmo tipo de limite, por razões diferentes.
+b. **Verdadeiro** — cada gaussiana colapsa numa função delta; fora dos pontos exatos de treino, a soma tende a zero.
+c. **Falso** — o mesmo $h$ fixo é relativamente mais suavizante no conjunto mais concentrado (escala menor) do que no mais espalhado — é exatamente por isso que $h$ deveria, idealmente, se adaptar à escala dos dados.
+d. **Verdadeiro** — ambos são larguras de uma janela de suavização; o trade-off ruído/viés é estruturalmente o mesmo.
+:::
+
+:::
+
+# $k$-NN vs. KDE, Lado a Lado, no Dado Real
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Os Blocos 4 e 5 construíram a mesma identidade $p(\mathbf{x})=K/(NV)$
+por lados opostos. Colocando as duas melhores versões (KDE com $h=1.0$,
+$k$-NN com $K=20$) uma sobre a outra:
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(6.2, 3.8))
+dens_kde = gaussian_kde_1d(grid, x_radius, 1.0)
+dens_knn = knn_density_1d(grid, x_radius, 20)
+ax.plot(grid, dens_kde / dens_kde.max(), color=COR_B, lw=2.2, label="KDE, $h=1.0$")
+ax.plot(grid, dens_knn / dens_knn.max(), color=COR_A, lw=2.2, ls="--", label="$k$-NN, $K=20$")
+ax.scatter(x_radius, np.zeros_like(x_radius) - 0.03, color=COR_NEU, s=6, alpha=0.4)
+ax.set_xlabel("radius_mean")
+ax.set_ylabel("densidade (normalizada ao máximo)")
+ax.set_title("KDE vs. $k$-NN, mesma variável, escalas comparáveis")
+ax.legend(fontsize=9)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+Concordam bastante no grosso da distribuição — mas divergem exatamente
+onde a teoria prevê que deveriam: nas caudas. **KDE tem largura de
+suavização fixa** ($h$ igual em toda parte); **$k$-NN tem largura
+adaptativa** ($d_K$ encolhe onde há muitos pontos, cresce onde há
+poucos). Veja a diferença direta nos números já calculados no Bloco 4:
+
+```{python}
+#| echo: true
+
+for x0 in [12.0, 25.0]:
+    for K in [5, 20, 50]:
+        dK = knn_density_1d(np.array([x0]), x_radius, K)
+        tree = cKDTree(x_radius.reshape(-1, 1))
+        dist, _ = tree.query([[x0]], k=K)
+        print(f"x0={x0:5.1f}  K={K:3d}  d_K={dist[0, -1]:.3f}")
+```
+
+Em $x_0=12$ (região densa), $d_K$ cresce muito pouco entre $K=5$ e
+$K=50$ — a janela quase não precisa se abrir. Em $x_0=25$ (cauda,
+poucos pontos), $d_K$ cresce muito mais rápido — a janela precisa se
+abrir bastante para achar $K$ vizinhos. O KDE, com $h$ fixo, não tem
+esse ajuste: usa a mesma largura nos dois lugares, mesmo que um deles
+tenha muito menos dados por perto.
+
+## O que a estrutura de 3 picos realmente é
+
+O Bloco 5 encontrou 3 picos com $h=1.0$. O que são, de fato?
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 2, figsize=(9, 3.6))
+dens = gaussian_kde_1d(grid, x_radius, 1.0)
+axes[0].plot(grid, dens, color=COR_NEU, lw=2.0)
+axes[0].set_title("Sem rótulo (o que vimos até agora)")
+axes[0].set_xlabel("radius_mean")
+
+for diag, cor, nome in zip(["B", "M"], [COR_A, COR_LIM], ["Benigno", "Maligno"]):
+    sub = x_radius[ds["diagnosis"].values == diag]
+    dens_sub = gaussian_kde_1d(grid, sub, 1.0) * (len(sub) / N)
+    axes[1].plot(grid, dens_sub, color=cor, lw=2.0, label=nome)
+axes[1].plot(grid, dens, color=COR_NEU, lw=1.2, ls=":", label="conjunta (KDE)")
+axes[1].set_title("Revelando o diagnóstico (não usado no ajuste)")
+axes[1].set_xlabel("radius_mean")
+axes[1].legend(fontsize=8)
+plt.tight_layout()
+plt.show()
+```
+
+O rótulo de diagnóstico — **nunca usado em nenhum dos ajustes acima** —
+explica a estrutura: os tumores benignos têm `radius_mean` médio
+$\approx 12{,}1$, os malignos $\approx 17{,}5$. O KDE e o $k$-NN, sem
+ver rótulo nenhum, já haviam capturado essa mistura de duas
+subpopulações na forma da densidade estimada. Isso é exatamente o tipo
+de achado que motiva aprendizado não supervisionado: a estrutura estava
+lá, mesmo sem ninguém apontar para ela.
+
+## Nenhum dos dois escapa da maldição
+
+Voltando ao Bloco 2: tanto $k$-NN quanto KDE são não-paramétricos, mas
+**não** são imunes à maldição da dimensionalidade — só falham de um
+jeito diferente do paramétrico:
+
+> "As discussed so far, both the K-nearest-neighbour method, and the
+> kernel density estimator, require the entire training data set to be
+> stored, leading to expensive computation if the data set is large."
+> (PRML, p. 127)
+
+E, do ESL: a densidade amostral necessária para manter a mesma
+qualidade de estimativa local cresce como $N^{1/p}$ — ou seja, para
+manter a mesma "cobertura local" que 100 pontos dão em 1 dimensão,
+seriam necessários $100^{10}$ pontos em 10 dimensões. Nem $k$-NN nem
+KDE contornam isso — eles só não exigem, como a Gaussiana da Aula 1,
+que $N > d$ para a matriz de covariância ser invertível. A maldição
+ainda está lá; só troca de forma.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## KDE vs. $k$-NN, Mesma Variável
+
+::: {.fig-resize style="width: 78%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(5.4, 3.4))
+ax.plot(grid, dens_kde / dens_kde.max(), color=COR_B, lw=2.2, label="KDE, $h=1.0$")
+ax.plot(grid, dens_knn / dens_knn.max(), color=COR_A, lw=2.2, ls="--", label="$k$-NN, $K=20$")
+ax.set_xlabel("radius_mean")
+ax.legend(fontsize=9)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Fixo vs. Adaptativo: os Números
+
+::: {.fragment}
+```{python}
+#| echo: true
+for x0 in [12.0, 25.0]:
+    tree = cKDTree(x_radius.reshape(-1, 1))
+    for K in [5, 20, 50]:
+        dist, _ = tree.query([[x0]], k=K)
+        print(f"x0={x0:5.1f}  K={K:3d}  d_K={dist[0,-1]:.3f}")
+```
+:::
+
+::: {.fragment}
+<br/>
+Em $x_0=12$ (denso): $d_K$ quase não cresce. Em $x_0=25$ (cauda): $d_K$ dispara. KDE, com $h$ fixo, não tem esse ajuste.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Que a Estrutura de 3 Picos Realmente É
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(6, 3.4))
+for diag, cor, nome in zip(["B", "M"], [COR_A, COR_LIM], ["Benigno", "Maligno"]):
+    sub = x_radius[ds["diagnosis"].values == diag]
+    dens_sub = gaussian_kde_1d(grid, sub, 1.0) * (len(sub) / N)
+    ax.plot(grid, dens_sub, color=cor, lw=2.0, label=nome)
+ax.plot(grid, dens, color=COR_NEU, lw=1.2, ls=":", label="conjunta (KDE)")
+ax.set_xlabel("radius_mean")
+ax.legend(fontsize=9)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.fragment}
+Diagnóstico **nunca usado no ajuste** — mas a mistura de duas subpopulações já estava na forma da densidade estimada.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Nenhum dos Dois Escapa da Maldição
+
+::: {.fragment}
+> *"both the K-nearest-neighbour method, and the kernel density estimator, require the entire training data set to be stored"* — PRML, p. 127
+:::
+
+::: {.fragment}
+<br/>
+ESL: densidade amostral $\propto N^{1/p}$ — $100$ pontos em 1D exigiriam $100^{10}$ em 10D, para a mesma cobertura local.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pergunta
+
+::: {.callout-tip}
+## A estrutura de 3 picos que vimos no Bloco 5 "some" se a suavização for pequena o bastante para revelar 2 picos em vez de 3 — o que isso significa sobre o método?
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+a. Se KDE e $k$-NN, sem usar o rótulo de diagnóstico, produzem
+   densidades estimadas com formas visivelmente parecidas entre si,
+   isso é evidência de que a estrutura bimodal encontrada reflete algo
+   real nos dados, não um artefato de um método específico.
+b. Numa região onde a densidade real varia muito de um lado para o
+   outro (ex.: perto da fronteira entre as duas subpopulações), o KDE
+   com $h$ fixo tende a suavizar demais nessa fronteira, comparado ao
+   $k$-NN, que reduz $d_K$ automaticamente onde há mais pontos por
+   perto.
+c. Como tanto $k$-NN quanto KDE evitam a suposição de forma funcional
+   da Gaussiana da Aula 1, nenhum dos dois herda qualquer versão da
+   restrição $N>d$ que limitava o ajuste de $\hat\Sigma$.
+d. Se o objetivo fosse só comparar a densidade relativa entre dois
+   pontos específicos (qual dos dois está numa região mais densa), o
+   fato de $k$-NN não integrar a 1 não impediria essa comparação.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Resposta
+
+::: {.callout-tip}
+a. **Verdadeiro** — concordância entre dois métodos independentes é evidência de que o achado é real, não um artefato de escolha de método.
+b. **Verdadeiro** — é exatamente a vantagem do $k$-NN: largura adaptativa lida melhor com regiões de densidade desigual do que a largura fixa do KDE.
+c. **Falso** — nenhum herda a restrição de invertibilidade de $\hat\Sigma$, mas ambos herdam uma versão própria da maldição (custo de armazenamento, densidade amostral $\propto N^{1/p}$) — "não-paramétrico" não é "imune".
+d. **Verdadeiro** — comparação relativa de densidade não exige que o estimador seja uma densidade normalizada de verdade.
+:::
+
+:::
+
+# Armadilhas, Custo, e Ponte Para a Aula 3
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Um último contraste com a Aula 1, para fechar: o ajuste Gaussiano
+**resume** $N$ pontos em dois números — $\hat{\boldsymbol\mu}$ e
+$\hat\Sigma$ — e depois pode descartar os dados. Nem $k$-NN nem KDE
+fazem isso:
+
+> "both the K-nearest-neighbour method, and the kernel density
+> estimator, require the entire training data set to be stored, leading
+> to expensive computation if the data set is large." (PRML, p. 127)
+
+Isso é o preço de não assumir forma nenhuma: sem uma família paramétrica
+para "absorver" a informação dos dados em poucos parâmetros, os dados
+**são** o modelo. Toda consulta nova precisa revisitar (uma parte de)
+todo o conjunto de treino.
+
+::: {.callout-tip}
+## Ponte para a Aula 3
+
+A distância ao $K$-ésimo vizinho, $d_K(\mathbf{x})$, que hoje serviu
+para estimar densidade, será reaproveitada na Aula 3 como uma **métrica
+de densidade local** para construir caminhos num grafo — a base de
+Clustering Hierárquico e HDBSCAN. O mesmo número, um uso novo: em vez de
+"quão denso é este ponto", a pergunta vira "quais pontos formam um
+caminho de alta densidade entre si".
+:::
+
+Essa é a lição desta aula: abandonar a forma paramétrica troca um
+problema (a forma pode estar errada) por outro (guardar e revisitar
+todos os dados, e ainda sofrer a maldição da dimensionalidade de um
+jeito diferente). Não há almoço gratuito — só uma escolha diferente de
+onde pagar o preço.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Preço de Não Assumir Forma Nenhuma
+
+::: {.fragment}
+Aula 1: $N$ pontos → resumidos em $\hat{\boldsymbol\mu}, \hat\Sigma$ → dados descartáveis.
+:::
+
+::: {.fragment}
+<br/>
+
+::: {.callout-warning icon=false}
+Hoje: *"both [...] require the entire training data set to be stored"* — PRML, p. 127. Sem forma paramétrica, os dados **são** o modelo.
+:::
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Ponte Para a Aula 3
+
+::: {.fragment}
+$d_K(\mathbf{x})$ — hoje, uma ferramenta para estimar densidade.
+:::
+
+::: {.fragment}
+<br/>
+Na Aula 3: a mesma distância, usada como métrica de densidade local para construir caminhos num **grafo** — a base de Clustering Hierárquico e HDBSCAN.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Que Fica Desta Aula
+
+::: {.fragment}
+**1. Por que alta dimensão é geometricamente estranha?** Volume se
+concentra numa casca fina (PRML); vizinhanças deixam de ser "locais"
+(ESL); distâncias perdem poder de discriminação — verificado no dado
+real.
+:::
+
+::: {.fragment}
+**2. Como estimar densidade sem assumir forma nenhuma?** $p(\mathbf{x})
+= K/(NV)$ — fixar $K$ e achar $V$ dá $k$-NN; fixar $V$ e contar $K$ dá
+KDE.
+:::
+
+::: {.fragment}
+**3. Nenhum dos dois escapa da maldição.** Custo de armazenamento,
+densidade amostral $\propto N^{1/p}$ — a maldição só troca de forma.
+:::
+
+::: {.fragment}
+**Ponte para a Aula 3:** $d_K(\mathbf{x})$ reaparece como métrica de
+grafo em Clustering Hierárquico e HDBSCAN.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. A Aula 1 exigia $N>d$ para que $\hat\Sigma$ fosse invertível. Explique
+   por que $k$-NN e KDE não têm essa mesma exigência formal — e, ainda
+   assim, por que isso não significa que eles "resolveram" a maldição
+   da dimensionalidade. Use os dois resultados do ESL (comprimento de
+   aresta e densidade amostral $\propto N^{1/p}$) na sua resposta.
+
+2. O Bloco 6 mostrou que $k$-NN e KDE produzem densidades estimadas
+   parecidas no grosso da distribuição de `radius_mean`, mas divergem
+   nas caudas. Explique, em termos da definição de cada método (fixar
+   $K$ vs. fixar $V$), por que é justamente nas caudas — regiões de
+   baixa densidade — que essa divergência deveria aparecer com mais
+   força.
+
+3. Escolha uma situação prática (pode ser fora de medicina) em que
+   usar um estimador de densidade não-paramétrico ($k$-NN ou KDE) seria
+   preferível a assumir uma Gaussiana multivariada como na Aula 1 — e
+   uma situação em que o custo de armazenar todo o conjunto de dados
+   (Bloco 7) tornaria essa escolha impraticável. Justifique os dois
+   casos.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada
+correta se todos os 4 itens forem julgados corretamente (deixar em
+branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-tip}
+## Concentração de volume na hiperesfera
+
+a. ( ) Se $\epsilon=0{,}5$ (a casca cobre metade do raio), a fração do
+   volume de uma esfera de raio 1 contida nessa casca, em $D=1$
+   dimensão, é exatamente $0{,}5$.
+b. ( ) Para qualquer $\epsilon\in(0,1)$ fixo, a fração do volume
+   contida na casca de espessura $\epsilon$ é uma função estritamente
+   crescente de $D$.
+c. ( ) Um argumento análogo ao da hiperesfera se aplicaria a um
+   hipercubo de lado 1 em $D$ dimensões: a fração do volume contida
+   numa casca de espessura relativa $\epsilon$ próxima da superfície do
+   cubo também tenderia a 1 conforme $D\to\infty$.
+d. ( ) Se a massa de probabilidade de uma Gaussiana multivariada se
+   concentra numa casca fina afastada da média em alta dimensão, isso
+   implica que a moda da distribuição (o ponto de densidade máxima) não
+   é mais o ponto de $\mathbf{x}$ onde a maior parte da massa de
+   probabilidade está localizada.
+:::
+
+::: {.callout-tip}
+## As fórmulas do ESL (comprimento de aresta e distância mediana)
+
+a. ( ) Segundo $e_p(r)=r^{1/p}$, para capturar uma fração fixa $r<1$ dos
+   dados, o comprimento de aresta necessário aumenta conforme $p$
+   aumenta.
+b. ( ) A fórmula $d(p,N)=(1-(1/2)^{1/N})^{1/p}$ prevê que, mantendo $p$
+   fixo e aumentando $N$ para infinito, a distância mediana ao vizinho
+   mais próximo da origem tende a zero.
+c. ( ) Se, para $N=500$ e $p=10$, a distância mediana ao vizinho mais
+   próximo da origem é $\approx 0{,}52$ (mais da metade do raio), então,
+   necessariamente, mais da metade dos 500 pontos está a uma distância
+   menor que $0{,}52$ da origem.
+d. ( ) O crescimento da densidade amostral necessária, $N^{1/p}$, e o
+   crescimento do comprimento de aresta necessário, $r^{1/p}$, são dois
+   sintomas independentes da maldição da dimensionalidade, sem relação
+   matemática direta entre si.
+:::
+
+::: {.callout-tip}
+## Concentração de medida e métricas de distância
+
+a. ( ) Se o contraste relativo $(\text{dist}_{\max}-\text{dist}_{\min})/\text{dist}_{\min}$
+   tende a zero conforme $d$ cresce, isso implica que a distância
+   absoluta entre pontos também tende a zero.
+b. ( ) Num dataset em que só um pequeno subconjunto dos atributos
+   carrega informação relevante para a tarefa e o restante é ruído
+   independente, aumentar $d$ usando apenas os atributos informativos
+   NÃO deveria produzir a mesma queda no contraste relativo observada
+   ao aumentar $d$ com atributos aleatórios (informativos + ruído).
+c. ( ) O fato de o contraste relativo cair de $\approx 220$ (d=2) para
+   $\approx 10$ (d=30) no Breast Cancer Wisconsin depende da escolha
+   específica desse dataset, e um dataset sintético com atributos
+   i.i.d. uniformes mostraria, em geral, o oposto (contraste relativo
+   crescente com $d$).
+d. ( ) Padronizar os atributos (subtrair a média, dividir pelo desvio)
+   antes de calcular distâncias é irrelevante para o fenômeno de
+   concentração de medida — ele ocorreria de forma idêntica mesmo sem
+   essa padronização.
+:::
+
+::: {.callout-tip}
+## O resultado geral $p(\mathbf{x})=K/(NV)$
+
+a. ( ) A derivação de $p(\mathbf{x})=K/(NV)$ depende da suposição de que
+   $p(\mathbf{x})$ é aproximadamente constante dentro da região $R$ —
+   se essa suposição falhar (por exemplo, $R$ grande demais numa região
+   de densidade muito variável), a estimativa fica sistematicamente
+   distorcida mesmo com $N$ muito grande.
+b. ( ) A aproximação $K\simeq NP$ é uma consequência de a distribuição
+   binomial $\mathrm{Bin}(K\mid N,P)$ ficar mais concentrada em torno da
+   sua média conforme $N$ cresce — não é uma igualdade exata para
+   qualquer $N$ finito.
+c. ( ) Se $V\to 0$ mantendo $N$ fixo, a estimativa $K/(NV)$ tende, na
+   prática, a ficar mais estável e menos ruidosa, porque $R$ fica mais
+   fiel à suposição de densidade constante.
+d. ( ) As duas rotas — fixar $K$ e achar $V$, ou fixar $V$ e achar $K$
+   — produzem, em geral, estimativas numericamente idênticas ponto a
+   ponto, para o mesmo dataset e os mesmos valores nominais de "quantos
+   pontos" ou "que tamanho de região" foram usados.
+:::
+
+::: {.callout-tip}
+## $k$-NN para densidade
+
+a. ( ) A relação $p(\mathbf{x})\propto 1/d_K(\mathbf{x})^D$ implica que,
+   para o mesmo valor de $d_K(\mathbf{x})$, a densidade estimada em
+   $D=30$ dimensões é numericamente igual à densidade estimada em
+   $D=2$ dimensões.
+b. ( ) Se dois pontos $\mathbf{x}_1$ e $\mathbf{x}_2$ têm o mesmo valor
+   de $d_K(\mathbf{x})$ para o mesmo $K$, o modelo de $k$-NN atribui a
+   eles a mesma densidade estimada, independentemente de quaisquer
+   outras diferenças entre suas vizinhanças.
+c. ( ) Aumentar $K$ de 5 para 50 num ponto na região mais densa dos
+   dados produz uma variação relativa menor em $d_K(\mathbf{x})$ do que
+   a mesma variação de $K$ produziria num ponto na cauda da
+   distribuição.
+d. ( ) Como o $k$-NN não assume nenhuma forma funcional para
+   $p(\mathbf{x})$, ele está imune a qualquer viés sistemático — ao
+   contrário do ajuste Gaussiano da Aula 1, que pode enviesar a
+   estimativa se a forma verdadeira não for Gaussiana.
+:::
+
+::: {.callout-tip}
+## "Isto não é uma densidade de verdade"
+
+a. ( ) O fato de a integral de $p(\mathbf{x})\propto 1/d_K(\mathbf{x})^D$
+   sobre todo o espaço divergir é uma consequência de como a cauda
+   dessa função decai com a distância, não um erro de implementação
+   específico de algum software.
+b. ( ) Ainda que o modelo de $k$-NN não seja uma densidade
+   normalizada, ele pode ser usado de forma válida para ordenar pontos
+   do menos denso ao mais denso.
+c. ( ) Se o objetivo fosse calcular a probabilidade exata de um novo
+   ponto pertencer a uma região específica do espaço (uma integral de
+   $p(\mathbf{x})$ sobre essa região), o modelo de $k$-NN, sem
+   modificação, forneceria essa probabilidade corretamente.
+d. ( ) Normalizar a saída do $k$-NN dividindo pelo seu valor máximo
+   observado no conjunto de teste resolve, por si só, o problema da
+   integral divergente e produz uma densidade de probabilidade válida.
+:::
+
+::: {.callout-tip}
+## Janela de Parzen e kernel gaussiano
+
+a. ( ) A janela de Parzen (hipercubo) e o kernel gaussiano produzem a
+   mesma estimativa de densidade sempre que $h$ é escolhido de forma
+   equivalente nos dois casos, porque ambos implementam exatamente a
+   mesma função de peso.
+b. ( ) Um ponto de treino localizado exatamente na borda de um
+   hipercubo de largura $h$ centrado num ponto de consulta $\mathbf{x}$
+   pode contar ou não para $K$, dependendo de detalhes de borda
+   (inclusão estrita ou não) que não têm análogo no kernel gaussiano,
+   que atribui peso positivo (ainda que pequeno) a qualquer distância
+   finita.
+c. ( ) As condições $k(u)\ge 0$ e $\int k(u)\,du=1$ (PRML, eq. 2.251–
+   2.252) seriam violadas por um kernel gaussiano com $h$ negativo,
+   mas não por nenhuma outra escolha razoável de $h>0$.
+d. ( ) Trocar o kernel gaussiano por um kernel uniforme (janela dura) de
+   mesma largura $h$ elimina completamente a possibilidade de
+   descontinuidades na densidade estimada.
+:::
+
+::: {.callout-tip}
+## $h$ como parâmetro de suavização
+
+a. ( ) No limite $h\to 0^+$, cada ponto de treino distinto se torna,
+   ele mesmo, um pico isolado da densidade estimada — no limite, até
+   $N$ picos, um por ponto de treino.
+b. ( ) Se dois datasets diferentes têm o mesmo número de pontos $N$ mas
+   escalas muito diferentes (um varia entre 0 e 1, outro entre 0 e
+   1000), usar o mesmo valor absoluto de $h$ para os dois produzirá, em
+   geral, graus de suavização relativa muito diferentes.
+c. ( ) O trade-off entre $h$ pequeno (ruidoso) e $h$ grande (borrado) é
+   conceitualmente o mesmo trade-off entre viés e variância discutido
+   em outros contextos de ajuste de modelo — $h$ pequeno tende a
+   variância alta, $h$ grande tende a viés alto.
+d. ( ) Escolher $h$ de forma a minimizar o erro no próprio conjunto de
+   treino (sem nenhuma validação separada) tende a favorecer valores de
+   $h$ artificialmente pequenos.
+:::
+
+::: {.callout-tip}
+## $k$-NN vs. KDE: suavização adaptativa vs. fixa
+
+a. ( ) A vantagem da suavização adaptativa do $k$-NN é mais pronunciada
+   em datasets onde a densidade real varia muito de uma região para
+   outra do que em datasets aproximadamente uniformes.
+b. ( ) Como o $k$-NN adapta $d_K(\mathbf{x})$ à densidade local, ele
+   nunca pode sofrer do mesmo problema de "borrar estrutura real" que o
+   KDE sofre com $h$ grande demais.
+c. ( ) Se dois pontos de consulta estão na mesma região densa dos
+   dados, mas um deles coincide exatamente com um ponto de treino e o
+   outro não, isso não deveria, em geral, causar uma diferença grande
+   em $d_K(\mathbf{x})$ para $K$ moderado ou grande.
+d. ( ) A concordância visual entre as curvas de KDE e $k$-NN no grosso
+   da distribuição de `radius_mean` (Bloco 6) seria esperada mesmo se um
+   dos dois métodos estivesse capturando um artefato espúrio e o outro
+   não.
+:::
+
+::: {.callout-tip}
+## Custo computacional e armazenamento
+
+a. ( ) A necessidade de armazenar todo o conjunto de treino, citada
+   para $k$-NN e KDE, é uma consequência de esses métodos não
+   resumirem os dados em um número fixo de parâmetros — ao contrário do
+   ajuste Gaussiano da Aula 1, que resume $N$ pontos em
+   $\hat{\boldsymbol\mu}$ e $\hat\Sigma$.
+b. ( ) Se o objetivo fosse só classificar um único ponto novo (não
+   estimar densidade em toda parte), o custo de avaliar $k$-NN ou KDE
+   nesse único ponto ainda cresceria, em geral, com $N$.
+c. ( ) Construir uma estrutura de busca em árvore para os dados de
+   treino (mencionado por PRML como mitigação) elimina completamente a
+   necessidade de armazenar o conjunto de treino.
+d. ( ) O custo de armazenamento de $k$-NN/KDE e a exigência de $N>d$
+   para $\hat\Sigma$ na Aula 1 são, ambos, formas do mesmo problema
+   subjacente: dados insuficientes relativos à complexidade do modelo.
+:::
+
+::: {.callout-tip}
+## Maldição da dimensionalidade em métodos não-paramétricos
+
+a. ( ) Como $k$-NN e KDE não assumem nenhuma família paramétrica, eles
+   não sofrem de nenhuma versão da maldição da dimensionalidade — só o
+   ajuste Gaussiano da Aula 1 sofre desse problema.
+b. ( ) Segundo o ESL, manter a mesma densidade amostral (cobertura
+   local) ao passar de $p=1$ para $p=10$ dimensões exigiria multiplicar
+   o tamanho do conjunto de dados por um fator que cresce
+   exponencialmente com $p$.
+c. ( ) O fato de $k$-NN e KDE precisarem armazenar todo o conjunto de
+   treino é agravado, não resolvido, pelo crescimento da quantidade de
+   dados necessária em alta dimensão — os dois problemas se combinam.
+d. ( ) Uma forma de escapar completamente da maldição da
+   dimensionalidade, para qualquer método não-paramétrico, é aumentar
+   $N$ até que $N>2^d$.
+:::
+
+::: {.callout-tip}
+## Ponte para a Aula 3: $d_K(\mathbf{x})$ como métrica de grafo
+
+a. ( ) Reaproveitar $d_K(\mathbf{x})$ como métrica de densidade local
+   para construir um grafo é possível porque o valor de $d_K(\mathbf{x})$
+   já foi mostrado, no Bloco 4, como inversamente relacionado à
+   densidade local — a mesma quantidade, um uso diferente.
+b. ( ) Se dois pontos $\mathbf{x}_1,\mathbf{x}_2$ pertencem à mesma
+   região de alta densidade, é razoável esperar que $d_K(\mathbf{x}_1)$
+   e $d_K(\mathbf{x}_2)$ sejam parecidos entre si, para o mesmo $K$.
+c. ( ) Usar $d_K(\mathbf{x})$ para construir caminhos num grafo exige,
+   necessariamente, resolver primeiro o problema de a integral de
+   $1/d_K(\mathbf{x})^D$ divergir — sem isso, a construção do grafo não
+   é matematicamente válida.
+d. ( ) A escolha de $K$ que funcionava bem para estimar densidade no
+   Bloco 4 (nem pequeno, nem grande demais) é, a priori, um bom
+   candidato para o mesmo papel de parâmetro de suavização na
+   construção do grafo da Aula 3, ainda que a validação final dependa do
+   contexto de clustering, não só de densidade.
+:::
+
+## Aviso
+
+As questões de Verdadeiro/Falso e discursivas ficam sem solução neste
+arquivo — são para resolução autônoma do aluno, fora do horário de aula.
+
+:::

@@ -5,6 +5,32 @@
 // padrão) — abrir um fecha o outro. Quando a disciplina só tem uma
 // aula (sem .lesson-nav), o TOC ainda fica colapsável, só sem par.
 document.addEventListener("DOMContentLoaded", function () {
+  // Move o link "Slides →" (com o ícone, ver styles.css) pra dentro do
+  // cabeçalho de metadados da aula, como uma terceira "coluna" ao lado
+  // de Autor e Data de Publicação — pedido explícito do usuário, no
+  // lugar do botão solto logo abaixo do cabeçalho. Anexado como filho
+  // DIRETO de .quarto-title-meta (não dentro do <div> da data) pra virar
+  // uma terceira caixa quadrada igual às outras duas (ver
+  // `.quarto-title-meta > a.see-all` em styles.css). Roda antes/
+  // independente do resto do script (acordeão do TOC), que não existe
+  // em toda página.
+  var slidesLink = document.querySelector('a.see-all[href$="slides.html"]');
+  var titleMeta = document.querySelector(".quarto-title-meta");
+  if (slidesLink && titleMeta) {
+    var oldParagraph = slidesLink.parentElement;
+    titleMeta.appendChild(slidesLink);
+    // O <p> que embrulhava o link fica vazio depois do appendChild acima
+    // (que MOVE o nó, não copia) — remove pra não sobrar um espaço em
+    // branco onde o botão costumava estar.
+    if (
+      oldParagraph &&
+      oldParagraph.tagName === "P" &&
+      oldParagraph.childNodes.length === 0
+    ) {
+      oldParagraph.remove();
+    }
+  }
+
   var sidebar = document.getElementById("quarto-margin-sidebar");
   var toc = document.getElementById("TOC");
   if (!sidebar || !toc) return;

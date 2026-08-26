@@ -213,6 +213,52 @@ Link da Aula 1 corrigido: apontava para `../../algebra/aula1/livro.html`
 `../../algebra_opt/aula01/notas.html` (+ Slides), mesmo padrão do
 `supervised`. Mostrado no chat antes de aplicar.
 
-## Aulas 2–15
+## Aula 2 — Matrizes, Sistemas Lineares e Independência
+
+Nota: esta seção não havia sido criada quando a Aula 2 foi originalmente
+escrita (o registro de progresso ficou desatualizado) — preenchida agora
+retroativamente, junto com o trabalho desta sessão.
+
+**Auditoria e reescrita completa dos itens de V/F (2026-08-26)**, a
+pedido do usuário ("Reescreva os vf da aula dois de algebra"), depois de
+uma auditoria (agente dedicado) que encontrou: de 48 itens nas notas e
+12 nos slides, só ~8 satisfaziam de fato uma das quatro heurísticas
+exigidas pelo `CLAUDE.md` (Contrafactual/Caso limite/Transferência de
+domínio/Falsa dicotomia) — a grande maioria era paráfrase literal ou
+recall de uma frase já dada no texto (padrão "proibido"), incluindo 2
+pares de itens duplicados quase palavra-por-palavra entre slides e
+notas. `_02-solucoes.md` (obrigatório) nunca havia sido criado.
+
+- **Todos os 48 itens das notas (12 blocos) e os 12 itens dos 3
+  *checkpoints* de slides foram reescritos** — mesmos temas/títulos de
+  bloco, itens novos, cada um checado individualmente contra sua
+  heurística antes de fixar a resposta (evitando repetir o erro de
+  assumir a resposta sem verificar a mecânica, ex.: o item sobre "$AB$
+  e $BA$ nunca definidos simultaneamente" foi corrigido para citar o
+  contraexemplo de matriz quadrada, e o item sobre "reduzir $N$ abaixo
+  de $d$ garante solução exata" foi descartado por, na verificação,
+  também ser tecnicamente verdadeiro no caso genérico — não servia como
+  armadilha).
+- **`_02-solucoes.md` criado do zero**, com heurística nomeada e
+  justificativa por item, mesmo formato já padronizado nas outras
+  disciplinas.
+- Duplicações entre slides e notas eliminadas — nenhum item dos 3
+  *checkpoints* de slides repete um item das 12 questões de notas,
+  mesmo cobrindo temas próximos.
+- Revalidado com `quarto render --to html` e `--to revealjs`, sem
+  erro; contagem de `id="pergunta*"`/`id="resposta*"` no `slides.html`
+  renderizado confirma a mesma estrutura de antes (5 `Pergunta`/3
+  `Resposta` — só o conteúdo dos itens mudou, não a estrutura de
+  slides).
+- **Pendências não resolvidas nesta rodada** (fora do escopo do pedido,
+  que foi só sobre os V/F — sinalizadas para o usuário, não corrigidas
+  sem confirmação): 2 das 5 pausas ativas ainda não têm um bloco de V/F
+  + slide de `Resposta` (só a pergunta discursiva); nenhuma figura ou
+  bloco `{.tikz}` está envolvido em `.fig-resize`; dois avisos de
+  leitura naturais (interpretação por coluna do MathML sendo exposição
+  nossa; resultado de posto citado sem prova) continuam como texto
+  simples, não em `callout-note`/`callout-warning`.
+
+## Aulas 3–15
 
 Não iniciadas.

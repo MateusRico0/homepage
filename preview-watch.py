@@ -18,6 +18,7 @@ desvinculados, como pedido.
 Uso: ./deploy.sh --watch   (ou: python3 preview-watch.py)
 Ctrl+C encerra o servidor e a observação juntos.
 """
+import fcntl
 import http.server
 import os
 import socketserver
@@ -29,6 +30,7 @@ import time
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SITE_DIR = os.path.join(ROOT, "_site")
 PORT = int(os.environ.get("PREVIEW_PORT", "2222"))
+LOCK_PATH = os.path.join(ROOT, ".preview-watch.lock")
 
 # Diretórios nunca observados: saída do próprio build (_site), cache de
 # execução (_freeze), extensões pandoc (raramente mudam), e as pastas de
@@ -37,7 +39,23 @@ EXCLUDE_DIRS = {"_site", "_freeze", "_extensions"}
 WATCH_EXTS = {".qmd", ".py", ".scss", ".css", ".js", ".yml", ".yaml", ".html", ".lua"}
 # Arquivos cuja mudança pode afetar mais de uma página — força um render
 # completo do projeto em vez de renderizar só o arquivo que mudou.
-GLOBAL_FILES = {"_quarto.yml", "styles.css", "custom.scss", "lesson-theme.scss"}
+GLOBAL_FILES = {
+    "_quarto.yml",
+    "styles.css",
+    "custom.scss",
+    "lesson-theme.scss",
+    # Partials incluídos (include-after-body/include-in-header) em TODA
+    # aula via front matter — mudar um deles afeta todas as 18 aulas de
+    # uma vez, não só a que estiver sendo editada no momento.
+    "logos-footer.html",
+    "bootstrap-icons-header.html",
+    "toc-accordion.js",
+    "lesson-nav.js",
+}
+# Únicos .html legitimamente editados à mão na árvore-fonte (os dois
+# partials acima) — qualquer outro .html fora de _site/ é sempre saída
+# de render perdida, nunca autoria manual (ver o filtro em snapshot()).
+HTML_PARTIALS = {"logos-footer.html", "bootstrap-icons-header.html"}
 POLL_INTERVAL = 1.5
 
 
@@ -52,12 +70,34 @@ def snapshot():
             d for d in dirnames if d not in EXCLUDE_DIRS and not d.startswith(".")
         ]
         for fn in filenames:
-            if os.path.splitext(fn)[1] in WATCH_EXTS:
-                p = os.path.join(dirpath, fn)
-                try:
-                    state[p] = os.path.getmtime(p)
-                except OSError:
-                    pass
+            # Arquivo com "_" na frente (ex.: _lesson-nav.html) é sempre
+            # gerado por um pre-render script, nunca editado à mão (é a
+            # própria convenção do Quarto — ver teaching/CLAUDE.md) — sem
+            # excluir, o próprio render regenerava esses arquivos e o
+            # watcher se via disparando outro render sozinho.
+            if fn.startswith("_"):
+                continue
+            ext = os.path.splitext(fn)[1]
+            if ext not in WATCH_EXTS:
+                continue
+            if ext == ".html" and fn not in HTML_PARTIALS:
+                # .html solto na árvore-fonte nunca é editado à mão neste
+                # projeto — só existe de verdade dentro de _site/ (já
+                # ignorado). Um .html aqui só pode ser saída de render
+                # perdida fora de _site/ (já visto ao vivo: uma corrida
+                # entre dois `quarto render` concorrentes gravou
+                # index.html/people/*.html direto na árvore-fonte). Sem
+                # este filtro, esse arquivo perdido vira "mudança" a cada
+                # poll, e o watcher entra num loop se auto-disparando pra
+                # sempre — foi exatamente essa a causa de um segundo loop
+                # infinito real já visto em produção aqui, além do já
+                # corrigido em publications/_retreiver/person_bibliography.py.
+                continue
+            p = os.path.join(dirpath, fn)
+            try:
+                state[p] = os.path.getmtime(p)
+            except OSError:
+                pass
     return state
 
 
@@ -116,7 +156,15 @@ def watch_loop():
             render_files(changed)
         else:
             render_full()
-        prev = snapshot()
+        # Usa o snapshot de ANTES do render (`cur`), não um novo
+        # snapshot tirado depois — um render (mesmo de um arquivo só)
+        # pode levar vários segundos, e qualquer edição feita NESSE
+        # meio-tempo (num arquivo diferente do que disparou o render)
+        # já teria seu mtime novo "engolido" por um snapshot pós-render,
+        # nunca mais sendo detectada como mudança. Bug real: editar dois
+        # arquivos em sequência rápida fazia o segundo nunca ser
+        # renderizado, silenciosamente.
+        prev = cur
 
 
 class Server(socketserver.ThreadingTCPServer):
@@ -137,12 +185,41 @@ def serve():
         httpd.serve_forever()
 
 
-def main():
-    log("🚀 render inicial completo...")
-    if not run_render(["quarto", "render"]):
-        log("❌ render inicial falhou — corrija o erro antes de continuar.")
+def acquire_single_instance_lock():
+    # Trava de instância única — `flock` é liberada automaticamente pelo
+    # kernel quando o processo termina (mesmo com kill -9), então não há
+    # risco de lock "preso" sobrevivendo a um processo morto, diferente
+    # de checar só a existência de um arquivo de PID. Duas instâncias
+    # rodando ao mesmo tempo já causaram dois incidentes reais aqui: um
+    # loop de render se auto-disparando por horas, e uma corrida entre
+    # dois `quarto render` concorrentes que chegou a gravar HTML direto
+    # na árvore-fonte (fora de _site/).
+    lock_file = open(LOCK_PATH, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log(
+            "❌ já existe uma instância de preview-watch.py rodando "
+            f"(lock em {LOCK_PATH}) — encerrando essa nova tentativa."
+        )
         sys.exit(1)
+    lock_file.write(str(os.getpid()))
+    lock_file.flush()
+    return lock_file  # mantém referência viva (fecha o fd = libera o lock)
+
+
+def main():
+    _lock = acquire_single_instance_lock()  # noqa: F841 — só precisa existir
+    # O servidor sobe ANTES do render inicial (não depois): _site/ já
+    # existe de builds anteriores na maioria dos restarts (o script
+    # cai/reinicia, o computador dorme, etc.), então não faz sentido
+    # deixar a porta inacessível por 1-2 minutos refazendo um render
+    # completo que talvez nem mude nada — o site antigo já serve
+    # enquanto o novo termina em paralelo.
     threading.Thread(target=serve, daemon=True).start()
+    log("🚀 conferindo se o site precisa de um render completo...")
+    if not run_render(["quarto", "render"]):
+        log("⚠️  render inicial falhou — servindo o que já existia em _site/ (se houver); corrija o erro acima.")
     try:
         watch_loop()
     except KeyboardInterrupt:
