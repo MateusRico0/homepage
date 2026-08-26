@@ -17,6 +17,28 @@ terreno para a Aula 3: a distância ao $k$-ésimo vizinho,
 $d_k(\mathbf{x})$, não serve só para estimar densidade — vira, ela
 mesma, uma métrica de densidade local usável para construir grafos.
 
+**Estratégia Pedagógica:** Estratégia B (Inside-Out com Problema-Fio) —
+o desafio que abre a aula é geométrico/matemático (por que a intuição de
+distância e vizinhança falha em alta dimensão), não um modelo prático
+chamativo a ser apresentado primeiro; o aluno precisa desse "idioma"
+novo (maldição da dimensionalidade) antes de $k$-NN e KDE fazerem
+sentido como resposta, não o contrário.
+
+**Mapeamento Problema-Fio → Mecanismo → Diagnóstico → Ponte** (adicionado
+nesta revisão, 2026-08-26, para conformidade com a nova política de
+`../../CLAUDE.md`; a estrutura dos 7 blocos abaixo não mudou de
+conteúdo, só ganhou esta camada explícita de justificativa):
+- **Problema-Fio da Geometria** (Blocos 1–2): o gancho da Aula 1
+  ($N>d$) reaberto como um problema genuinamente geométrico — maldição
+  da dimensionalidade, concentração de medida, verificada no dado real.
+- **Mecanismo/Operação** (Blocos 3–5): o resultado geral
+  $p(\mathbf{x})=K/(NV)$ e suas duas explorações opostas ($k$-NN, KDE).
+- **Diagnóstico Teórico** (Bloco 6 + parte do 7): comparação direta
+  $k$-NN vs. KDE no dado real, e o diagnóstico de que nenhum dos dois
+  escapa da maldição (custo de armazenamento, $N^{1/p}$).
+- **Ponte/Limitação** (Bloco 7): $d_K(\mathbf{x})$ reaproveitado como
+  métrica de grafo na Aula 3.
+
 **Pré-requisitos:** Aula 1 (Gaussiana multivariada, estimação por
 máxima verossimilhança de $\hat{\boldsymbol\mu}$ e $\hat\Sigma$, e a
 observação de que $\hat\Sigma$ exige $N > d$ — o gancho direto para
@@ -75,18 +97,68 @@ para sua aprovação:** ok trocar de dataset entre aulas por esse motivo,
 ou prefere manter o Pima e aceitar um efeito de concentração mais fraco
 na demonstração?
 
-## Plano de aula — Aula 2 (carga horária: ~110–120min)
+## Plano de aula — Aula 2 (carga horária: ~120–130min)
+
+**Revisão de estrutura (2026-08-26), a pedido do usuário, para
+conformidade com a nova política de `../../CLAUDE.md`** — mudanças
+estruturais nesta rodada (conteúdo técnico/numérico não muda, já estava
+verificado):
+
+- **Bloco novo: "Intuição"** (fase antes chamada "Aula Simplificada" —
+  renomeada no `../../CLAUDE.md` a pedido do usuário, "Aula Simplificada
+  tá bem zoado"), logo após a Abertura — antes de entrar na maldição da
+  dimensionalidade, uma passagem intuitiva, sem matemática, sobre o que
+  $k$-NN e KDE fazem. Aplicação da regra ("quando cabível" para
+  Estratégia B) de dar um modelo mental prévio antes do desenvolvimento
+  rigoroso.
+- **Pausa ativa ao final de todo bloco de desenvolvimento**, não mais
+  um mínimo de 3 espalhadas — agora 7 pausas ativas (Abertura, Aula
+  Simplificada, Maldição, $K/(NV)$ geral, $k$-NN, KDE, Comparação),
+  cada uma com pergunta motivadora + dica + V/F de 4 itens (formato
+  checkbox `- [ ] Afirmação`, não mais lettered `a. ( )`) + slide de
+  Resposta que também repete a pergunta motivadora ao final.
+- **Nova seção "Respostas da aula"** nas notas HTML, discutindo as 7
+  perguntas motivadoras e dando a solução dos V/F de pausa ativa (**só**
+  os de pausa ativa — os 12 blocos de V/F do final, na seção
+  Exercícios, continuam sem solução no `index.qmd`, com justificativa
+  só em `_02-solucoes.md`, como já era).
+- **Chunks de código compartilhados entre HTML e RevealJS**, não mais
+  duplicados com tamanhos ligeiramente diferentes — cada figura/TikZ
+  agora é um único chunk fora dos blocos `content-visible`, gerado uma
+  vez, aparecendo nos dois formatos no mesmo ponto do documento.
+- Uso de caixas (`callout-*`) liberado de volta (a restrição anterior
+  de "evite caixas" foi revista pela nova política) — só a regra de no
+  máximo uma caixa por slide se aplica agora.
 
 1.  **Abertura: o que fazer sem uma forma paramétrica, e sem $N \gg d$**
-    (~10 min) — Retomar o fio deixado pela Aula 1: $\hat\Sigma$ exige
+    (~8 min) — Retomar o fio deixado pela Aula 1: $\hat\Sigma$ exige
     $N > d$, e o ajuste piora conforme $d$ cresce mesmo quando $N > d$
     tecnicamente vale. Duas perguntas centrais de hoje: (1) por que
     exatamente "espaço de alta dimensão" é um problema geométrico, não
     só um problema de contagem de parâmetros; (2) se não quisermos mais
     assumir uma forma funcional (Gaussiana) para $p(\mathbf{x})$, como
-    estimar densidade "deixando os dados falarem por si"?
+    estimar densidade "deixando os dados falarem por si"? **Pausa ativa
+    1** ao final: o que exatamente quebra quando $d$ cresce, mesmo com
+    $N>d$ satisfeito.
 
-2.  **A maldição da dimensionalidade, geometricamente** (~20 min) —
+2.  **Intuição: contando e somando vizinhos** (~8–10 min, **reescrito
+    nesta rodada** — a versão anterior, com
+    metáforas de "bairro povoado"/"brilho de cada casa", foi
+    explicitamente rejeitada pelo usuário como "muito ruim": abstrata
+    demais, sem nenhum gráfico, distante do dado real da aula) — Agora
+    ancorado direto em `radius_mean`, o próprio atributo real usado no
+    resto da aula: (a) "contar vizinhos por perto" — andar até juntar
+    um número fixo de pacientes, poucos passos = valor comum; (b)
+    "somar contribuições de cada paciente" — cada paciente empresta um
+    peso que encolhe com a distância, somar tudo. **Mostra um gráfico
+    de verdade** (preview de $k$-NN com $K=20$ e KDE com $h=1{,}0$,
+    lado a lado, sem fórmula nenhuma no texto) — não só prosa. O aluno
+    já vê, antes de qualquer equação, que as duas contas concordam
+    sobre onde os 569 pacientes se concentram. **Pausa ativa 2** ao
+    final: por que as duas curvas concordam tanto, vindo de contas tão
+    diferentes.
+
+3.  **A maldição da dimensionalidade, geometricamente** (~20 min) —
     PRML §1.4: o problema do histograma em $D$ dimensões ($M^D$
     células, crescimento exponencial, p. 121); o resultado central —
     fração do volume de uma hiperesfera entre $r=1-\epsilon$ e $r=1$
@@ -99,9 +171,11 @@ na demonstração?
     razão entre a distância mais próxima e a mais distante de um ponto
     de referência tende a 1 — "todo mundo fica igualmente longe de todo
     mundo". Demonstração numérica com o Breast Cancer Wisconsin,
-    subamostrando $d=2,5,10,20,30$ atributos.
+    subamostrando $d=2,5,10,20,30$ atributos. **Pausa ativa 3** ao
+    final: reaproveitada da rodada anterior (o que quebra primeiro
+    quando distâncias deixam de discriminar).
 
-3.  **Da ideia geral ao estimador: $p(\mathbf{x}) = K/(NV)$** (~15 min)
+4.  **Da ideia geral ao estimador: $p(\mathbf{x}) = K/(NV)$** (~15 min)
     — PRML §2.5 intro (pp. 122–123): lições do histograma (localidade;
     o parâmetro de suavização não pode ser grande nem pequeno demais);
     o resultado geral — fixado um ponto $\mathbf{x}$ e uma região $R$
@@ -110,9 +184,10 @@ na demonstração?
     p(\mathbf{x})V$, dando $p(\mathbf{x})\approx K/(NV)$ (eq. 2.246).
     Duas formas de explorar essa mesma identidade: fixar $K$ e
     encontrar $V$ nos dados ($k$-NN), ou fixar $V$ e contar $K$ (kernel/
-    KDE).
+    KDE). **Pausa ativa 4** ao final (nova): a tensão interna de $V$
+    precisar ser pequeno e grande ao mesmo tempo.
 
-4.  **$k$-vizinhos-mais-próximos para densidade** (~20 min) — Fixar $K$;
+5.  **$k$-vizinhos-mais-próximos para densidade** (~20 min) — Fixar $K$;
     crescer uma esfera centrada em $\mathbf{x}$ até conter exatamente
     $K$ pontos de treino; o raio dessa esfera é, por definição,
     $d_K(\mathbf{x})$ (PRML pp. 124–125). Como o volume de uma esfera de
@@ -127,9 +202,10 @@ na demonstração?
     parâmetro de suavização (Fig. 2.26: $K$ pequeno = ruidoso, $K$
     grande = borra estrutura). Nota honesta (PRML p. 125): o modelo de
     $k$-NN não é uma densidade de verdade — a integral sobre todo o
-    espaço diverge.
+    espaço diverge. **Pausa ativa 5** ao final: reaproveitada (o que
+    acontece quando $K=N$).
 
-5.  **Do histograma ao kernel suave: KDE** (~20 min) — Caminho espelhado:
+6.  **Do histograma ao kernel suave: KDE** (~20 min) — Caminho espelhado:
     fixar $V$ (um hipercubo de lado $h$ centrado em $\mathbf{x}$),
     contar $K$ via a função-janela de Parzen (eq. 2.247–2.249, p. 123).
     Problema do hipercubo: descontinuidades artificiais nas bordas — o
@@ -139,9 +215,10 @@ na demonstração?
     $h$ desempenha o mesmo papel de parâmetro de suavização que $K$
     desempenhava no Bloco 4 e $\Delta$ desempenhava no histograma (Fig.
     2.25: $h$ pequeno = ruidoso, $h$ grande = borra estrutura) — mesmo
-    trade-off, três disfarces diferentes.
+    trade-off, três disfarces diferentes. **Pausa ativa 6** ao final:
+    reaproveitada (o limite $h\to\infty$).
 
-6.  **$k$-NN vs. KDE, lado a lado, no dado real** (~15–20 min) —
+7.  **$k$-NN vs. KDE, lado a lado, no dado real** (~15–20 min) —
     Aplicar os dois métodos ao Breast Cancer Wisconsin (1–2 atributos
     mais informativos, para visualização), comparando: KDE tem largura
     de suavização **fixa** ($h$ igual em toda parte); $k$-NN tem largura
@@ -153,9 +230,12 @@ na demonstração?
     quantidade de dados que cresce descontroladamente com $d$ para
     continuar confiáveis (PRML p. 127, "these nonparametric methods are
     still severely limited"). Não-paramétrico não é "imune" à maldição
-    — só falha de um jeito diferente do paramétrico.
+    — só falha de um jeito diferente do paramétrico. **Pausa ativa 7**
+    ao final: reaproveitada (a estrutura de 3 picos que "some" com
+    suavização diferente).
 
-7.  **Armadilhas, custo, e ponte para a Aula 3** (~10 min) — Custo
+8.  **Armadilhas, custo, e ponte para a Aula 3** (~10 min, sem pausa
+    ativa própria — transita direto para o fechamento) — Custo
     computacional: os dois métodos exigem guardar **todo** o conjunto
     de treino e não têm fase de "treinamento" de verdade (PRML p. 127)
     — ao contrário do ajuste por máxima verossimilhança da Aula 1, que

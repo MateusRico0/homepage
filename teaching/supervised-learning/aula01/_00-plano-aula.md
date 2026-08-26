@@ -19,6 +19,20 @@ Basic calculus (integration, change of variables), elementary probability (rando
 
 *(fonte: `../index.md`, Lesson 1)*
 
+### Estratégia Pedagógica
+
+**Estratégia A (Outside-In)** — classificação por comparação de
+densidades é um modelo/procedimento concreto (não um idioma matemático
+de fundação como espaços vetoriais ou derivadas), e a aula já abre
+assim de fato: depois do preâmbulo obrigatório de Aula 1 ("Proposta do
+Curso", necessário só por ser a primeira aula do semestre), o gancho
+real é o exemplo concreto "duas populações, o formato que os dados
+assumem" — deliberadamente sem fórmula, sem família nomeada — antes de
+qualquer formalização de Beta, MLE ou limiar de decisão. **Adicionado
+nesta revisão (2026-08-26)** para conformidade com a nova política de
+`../../CLAUDE.md`; sem mudança de conteúdo no `index.qmd` — a aula já
+seguia essa lógica, só faltava a declaração formal.
+
 ## Plano de aula — Aula 1 (carga horária: ~130min)
 
 **Nota de reconciliação (adicionada ao revisar a aula já pronta).** A

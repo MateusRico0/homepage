@@ -34,6 +34,11 @@ matrizes por definição, sem interpretação geométrica ainda).
   matriz, e identificar problemas de multicolinearidade no espaço de
   características.
 
+**Estratégia Pedagógica:** Estratégia B (Inside-Out com Problema-Fio) —
+aula de fundação matemática de representação/linguagem (matrizes,
+sistemas lineares), guiada pela necessidade do idioma matemático mais
+do que por um modelo/algoritmo específico a "desmontar".
+
 **Dataset real usado como fio condutor:** *California Housing* (via
 Hugging Face Hub, `gvlassis/california_housing`), já usado na Aula 1 —
 continuidade de dataset entre aulas. Um subconjunto de atributos
@@ -43,7 +48,14 @@ correlacionados (mais cômodos tendem a vir com mais quartos) — bom
 candidato real para ilustrar quase-multicolinearidade no Bloco 5, sem
 precisar fabricar uma coluna artificialmente duplicada.
 
-## Plano de aula — Aula 2 (carga horária estimada: ~115min)
+## Plano de aula — Aula 2 (carga horária real da turma: 100min)
+
+Feedback do usuário (2026-08-26): o conteúdo original desta aula, na
+prática, se dava em ~50min — muito abaixo dos 100min reais de aula.
+Não era um problema de foco (o conteúdo selecionado já servia o fio
+condutor da aula), era falta de profundidade real nos mesmos blocos.
+Quatro adições feitas para preencher a carga horária real sem diluir o
+fio condutor — detalhadas dentro dos blocos 2, 3 e 5 abaixo.
 
 1.  **Da Vetor ao Dataset: a Matriz de Design** (~15 min) — Organizador
     prévio: a Aula 1 trabalhou com um vetor $\mathbf{x}\in\mathbb{R}^d$
@@ -68,7 +80,11 @@ precisar fabricar uma coluna artificialmente duplicada.
     exatamente um produto matriz-vetor, e $\mathbf{w}$ pondera o quanto
     cada atributo (coluna de $X$) contribui para a previsão. Produto
     matriz-matriz definido brevemente (será revisitado na Aula 3 via
-    $X^TX$).
+    $X^TX$). **[Adição 2026-08-26]** Walkthrough completo com um
+    $\mathbf{w}$ inventado: previsão dos 6 bairros da amostra vs. valor
+    real (`MedHouseVal`), introduzindo o **resíduo**
+    $\hat{\mathbf{y}}-\mathbf{y}$ como antecipação direta da pergunta
+    da Aula 3 (existe $\mathbf{w}$ que minimiza esse erro?).
 
 3.  **Sistemas Lineares: Quando $A\mathbf{x}=\mathbf{b}$ Tem Solução?**
     (~25 min) — Generalização direta do resultado já visto na Aula 1
@@ -83,7 +99,13 @@ precisar fabricar uma coluna artificialmente duplicada.
     $N \gg d$ (muito mais observações que atributos) — um sistema
     **sobredeterminado**, que genericamente não tem solução exata
     nenhuma. Esse é o problema sem resposta que fecha a aula e abre a
-    Aula 3 (projeções ortogonais, mínimos quadrados).
+    Aula 3 (projeções ortogonais, mínimos quadrados). **[Adição
+    2026-08-26]** Exemplo resolvido completo de eliminação de Gauss
+    (sistema 3×3, forma triangular, substituição reversa), incluindo
+    como reconhecer os outros dois casos (linha "$0=$ não-zero" =
+    contradição/sem solução; linha "$0=0$" = redundância/infinitas
+    soluções) sem fazer a conta toda — a ponte natural para o atalho do
+    posto no Bloco 5.
 
 4.  **Independência Linear** (~20 min) — Definição formal: um conjunto
     de vetores é linearmente independente se a única combinação linear
@@ -113,7 +135,19 @@ precisar fabricar uma coluna artificialmente duplicada.
     dados reais (exigiria uma relação linear perfeita); o problema
     prático mais comum é a quase-dependência, que não quebra o posto
     tecnicamente mas antecipa a instabilidade numérica que a Aula 4
-    (autovalores) vai quantificar via número de condição.
+    (autovalores) vai quantificar via número de condição. **[Adições
+    2026-08-26]** (a) Antes da definição formal de posto, uma
+    visualização geométrica do espaço-coluna (no exemplo do Bloco 3:
+    o espaço-coluna de $A$ é uma reta, e $\mathbf{b}$ está nela ou não)
+    — a definição formal e o critério $\text{rk}(A)=\text{rk}(A|\mathbf{b})$
+    vêm depois, como formalização do que o desenho já mostrou, não como
+    ponto de partida. (b) Demonstração numérica da instabilidade da
+    quase-multicolinearidade: ajuste por mínimos quadrados numa amostra
+    pequena (20 bairros) de `AveRooms`/`AveBedrms`, perturbação de 1% em
+    `MedHouseVal` fazendo o peso de `AveBedrms` variar ~30%, contra
+    <1% de variação no par bem condicionado `MedInc`/`HouseAge` sob o
+    mesmo ruído — evidência concreta, não só uma promessa de "isso é
+    assunto da Aula 4".
 
 6.  **Fechamento: Multicolinearidade na Prática e Ponte para a Aula 3**
     (~10 min) — Retomar as quatro perguntas de abertura, cada uma

@@ -259,6 +259,397 @@ inclusive").
 - [x] Etapa 5 — link da Aula 2 adicionado ao `index.qmd` da disciplina
   (`[**Lesson 2: ...**](./aula02/index.qmd)`, mesmo padrão da Aula 1),
   mostrado no chat e aplicado após aprovação do usuário.
+- **Conformidade com a nova política de Estratégia Pedagógica
+  (2026-08-26)**, a pedido do usuário ("veja como está a nova política
+  de criação de aulas e refaça a estrutura"): `CLAUDE.md` passou a
+  exigir a declaração explícita, no plano de aula, de qual das duas
+  estratégias macro (A — Outside-In, para modelos/algoritmos; B —
+  Inside-Out com Problema-Fio, para fundamentação matemática) a aula
+  segue. `_00-plano-aula.md` atualizado com **Estratégia B**,
+  justificada (o desafio de abertura é geométrico — maldição da
+  dimensionalidade —, não um modelo prático chamativo), e um mapeamento
+  explícito dos 7 blocos existentes às 4 fases da Estratégia B
+  (Problema-Fio → Mecanismo → Diagnóstico → Ponte). Nesta rodada,
+  **sem mudança de conteúdo no `index.qmd`** — só na rodada seguinte
+  (abaixo).
+
+## Reconstrução completa por nova revisão do `CLAUDE.md` (2026-08-26)
+
+O usuário revisou `../CLAUDE.md` de forma mais profunda (não só a
+Estratégia A/B) e pediu para refazer a Aula 2 inteira **sem consultar**,
+para garantir aderência total. Mudanças da nova política, e como cada
+uma foi aplicada:
+
+- **Novo bloco obrigatório "Aula Simplificada"** (~10 min, entre
+  Abertura e Desenvolvimento, "quando cabível" para Estratégia B) —
+  adicionado como Bloco 2: duas metáforas sem matemática ("andar até
+  achar $K$ casas" para $k$-NN; "somar o brilho de cada casa" para
+  KDE), antes de qualquer geometria.
+- **Pausa ativa ao final de todo bloco**, não mais um mínimo de 3
+  espalhadas — agora **7 pausas ativas** (Abertura, Aula Simplificada,
+  Maldição, $K/(NV)$ geral, $k$-NN, KDE, Comparação), cada uma com
+  pergunta motivadora + dica + V/F de 4 itens.
+- **Formato de V/F mudou de lettered (`a. ( )`) para checkbox**
+  (`- [ ] Afirmação`) — aplicado em todas as pausas ativas e nos 12
+  blocos de Exercícios. Confirmado no HTML renderizado:
+  `<input type="checkbox">` gerado corretamente pelo Pandoc a partir da
+  sintaxe de lista de tarefas do Markdown.
+- **Slide de Resposta agora repete a pergunta motivadora ao final**
+  (como fragmento de texto simples, não uma segunda caixa — a nova
+  regra de "no máximo uma caixa por slide" não permite duas).
+- **Nova seção "Respostas da Aula"** nas notas HTML, discutindo as 7
+  perguntas motivadoras e dando a solução dos V/F de pausa ativa — os
+  12 blocos de V/F do final (Exercícios) continuam sem solução no
+  `index.qmd`, com justificativa só em `_02-solucoes.md`, como já era.
+- **Chunks de código/TikZ compartilhados entre HTML e RevealJS, não
+  mais duplicados** — cada figura agora é um único chunk fora dos
+  blocos `content-visible quando`, gerado uma vez, visível nos dois
+  formatos. Confirmado no render: **13 células executadas**, contra 22
+  na versão anterior (quase metade, sem nenhuma duplicação de plot).
+- **Caixas (`callout-*`) liberadas de volta** — a instrução anterior de
+  "evite caixas" foi revertida pela nova política; só a regra de no
+  máximo uma caixa por slide se aplica.
+- **Formato do Exercícios mudou de `callout-tip` para `callout-note
+  icon=false`**, mantendo o checkbox nos itens.
+- Conteúdo técnico e números verificados (contraste relativo, picos de
+  KDE, densidade por $k$-NN) **não mudaram** — só a estrutura/formato,
+  seguindo exatamente a instrução do usuário de "refazer a estrutura".
+- Revalidado com `quarto render --to html` e `--to revealjs` via
+  `--output-dir`, sem erro nem warning de div; confirmado por extração
+  de `id=` do `slides.html`: **7 pares `pergunta`/`resposta`** (antes
+  eram 4); balanço de divs conferido por script antes e depois do
+  render.
+- `_02-solucoes.md` mantido sem alteração de conteúdo (os itens e suas
+  justificativas continuam corretos — só o marcador visual no
+  `index.qmd` mudou de letra para checkbox, o texto de cada afirmação é
+  idêntico).
+
+## Aula Simplificada reescrita (2026-08-26, mesma sessão)
+
+Feedback direto do usuário: a primeira versão do Bloco 2 ("Aula
+Simplificada") — duas metáforas em prosa ("bairro povoado"/"casa que
+espalha brilho") — ficou **"muito ruim"**. O usuário revisou o
+`../CLAUDE.md` de novo, detalhando o que essa etapa precisa ter: um
+exemplo concreto ancorado no próprio algoritmo/aula (o `CLAUDE.md` cita
+como referência a explicação de árvore de decisão: "vamos quebrar o
+espaço recursivamente..."), **gráficos/diagramas de verdade**, e o
+aluno devendo "praticamente entender o que vamos fazer" ao final do
+bloco — não uma metáfora abstrata sem nenhuma imagem.
+
+- **Bloco 2 reescrito do zero**, agora ancorado direto em
+  `radius_mean` (o atributo real já usado no resto da aula), com duas
+  ideias descritas em termos do próprio dado ("contar vizinhos por
+  perto" / "somar contribuições de cada paciente") — nada de bairro ou
+  casas.
+- **Gráfico novo adicionado**: preview lado a lado de $k$-NN ($K=20$) e
+  KDE ($h=1{,}0$) nos 569 pacientes reais, sem nenhuma fórmula no
+  texto ao redor — o aluno já vê a forma final antes de qualquer
+  equação, satisfazendo a exigência de "mostrar gráficos" e "já
+  entender o que vamos fazer".
+- Pausa ativa 2 reescrita para perguntar sobre esse gráfico
+  específico ("por que as duas curvas concordam, vindo de contas
+  diferentes"), em vez da pergunta genérica sobre metáforas.
+- `_00-plano-aula.md` atualizado registrando explicitamente a rejeição
+  da primeira versão e o motivo.
+- Revalidado com `quarto render --to html` e `--to revealjs`: 14
+  células executadas (1 a mais que a rodada anterior, pela nova
+  figura), sem erro nem warning de div; 7 pares `pergunta`/`resposta`
+  confirmados, 10 imagens no `slides.html` (1 a mais).
+
+## Desenvolvimento matemático tornado "principled" (2026-08-26, mesma sessão)
+
+Feedback do usuário: gostou da nova Aula Simplificada, mas pediu que a
+**parte matemática** (Blocos 4–6: $K/(NV)$ geral, $k$-NN, KDE) fosse
+"mais bem desenvolvida" — anunciar as premissas primeiro, depois
+desenvolver passo a passo até a técnica final, em vez de apresentar o
+resultado já pronto. O usuário também pediu para registrar essa
+exigência no `../CLAUDE.md` (feito: novo bullet "Desenvolvimento
+matemático *principled*" na seção Desenvolvimento).
+
+- **Bloco 4 ($K/(NV)$ geral)**: reescrito com uma caixa explícita
+  "Premissas desta derivação" (3 premissas numeradas: ponto+região+
+  volume; $p(\mathbf{x})$ aprox. constante; $N$ pontos i.i.d.) seguida
+  de 5 passos numerados até $p(\mathbf{x})=K/(NV)$, cada passo
+  referenciando qual premissa o justifica. A tensão interna $V$
+  pequeno/grande agora é apresentada como consequência direta das
+  premissas (Premissa 2 vs. Passo 4), não como observação solta.
+- **Bloco 5 ($k$-NN)**: mesma tratativa — 2 premissas (fixar $K$;
+  $V$ vem dos dados) + 3 passos até $p(\mathbf{x})\propto
+  1/d_K(\mathbf{x})^D$, citando explicitamente qual resultado anterior
+  cada passo reaproveita (a escala $r^D$ do bloco da maldição da
+  dimensionalidade; o $K/(NV)$ do bloco anterior).
+- **Bloco 6 (KDE)**: mesma tratativa — 2 premissas (fixar $V=h^D$; $K$
+  vem dos dados) + 4 passos (janela de Parzen → contar pontos →
+  substituir em $K/(NV)$ → trocar o kernel duro pelo gaussiano),
+  deixando explícito que a fórmula gaussiana final vem do **mesmo**
+  Passo 3 (substituir em $K/(NV)$), só trocando a função de peso do
+  Passo 1.
+- **Correção lateral**: as referências antigas a "Bloco 2"/"Bloco 4"
+  (números de bloco que ficaram desatualizados depois da reestruturação
+  anterior, quando "Aula Simplificada" virou o Bloco 2) foram trocadas
+  por referências descritivas ("o bloco da maldição da
+  dimensionalidade", "o bloco anterior"), evitando nova referência
+  frágil a numeração.
+- Espelhado nos slides com a mesma estrutura (Premissas em caixa,
+  passos como fragmentos numerados sequenciais).
+- Revalidado com `quarto render --to html` e `--to revealjs`: 14
+  células, sem erro nem warning de div; 7 slides `Pergunta` confirmados
+  (nenhuma pausa ativa foi afetada pela reescrita — só o texto entre
+  elas mudou).
+
+## Respostas separadas do material + caixinhas não-clicáveis (2026-08-26, mesma sessão)
+
+Duas peças de feedback do usuário: (1) a seção "Respostas da Aula"
+estava dentro do `index.qmd` **publicado** — deveria estar separada;
+(2) os itens de V/F usavam a sintaxe de lista de tarefas do Markdown
+(`- [ ]`), que o Pandoc renderiza como `<input type="checkbox">`
+**clicável** no navegador — indesejado; pediu também que a solução
+mostrasse "o V ou o X estilizado nas caixinhas".
+
+- **`# Respostas da Aula` removida do `index.qmd`**, movida para um
+  arquivo novo e não publicado, `aulaNN/_03-respostas-pausas.md` (o
+  `index.qmd` agora só contém a pergunta de cada pausa ativa, nunca a
+  resolução).
+- **Achado técnico real, documentado no `../CLAUDE.md`**: a extensão
+  `task_lists` do Pandoc trata alguns glifos Unicode como sinônimos de
+  `[ ]`/`[x]` **mesmo fora da sintaxe de colchetes** — testado
+  isoladamente com `pandoc -f markdown -t html`: `☐` (U+2610) e `☒`
+  (U+2612) viram `<input type="checkbox">` clicável só de aparecerem
+  no início de um item de lista; `☑` (U+2611), por coincidência, não é
+  tratado como especial. A primeira tentativa de correção (trocar `[ ]`
+  por `☐`/`☑`/`☒`) **não resolveu o problema** — só descobri isso
+  testando o HTML renderizado, não bastava trocar por "qualquer
+  glifo de caixa".
+- **Glifos confirmados seguros, usados em toda a aula**: `□` (U+25A1,
+  quadrado vazio) para item não resolvido; `✔` (U+2714) para
+  Verdadeiro; `✗` (U+2717) para Falso — nenhum dos três é especial
+  para o Pandoc, testado e confirmado no HTML renderizado (0 ocorrências
+  de `<input type="checkbox">` real, só uma regra CSS órfã e inofensiva
+  para uma classe `task-list` que não existe mais no documento).
+- Aplicado nos 76 itens de pergunta (7 pausas × 4 + 12 blocos de
+  Exercícios × 4) e nos 28 itens resolvidos das 7 respostas de slide,
+  mais os 48 itens de `_02-solucoes.md` (glifo escolhido
+  programaticamente a partir do campo **Resposta** já existente de
+  cada item, para não reintroduzir erro manual).
+- Revalidado com `quarto render --to html` e `--to revealjs`: sem
+  erro, sem warning de div, sem `<input type="checkbox">` real, 7 pares
+  `pergunta`/`resposta` confirmados.
+
+## Fase "Aula Simplificada" renomeada para "Intuição" (2026-08-26, mesma sessão)
+
+Feedback do usuário: o nome da fase (e o título de seção resultante,
+"Aula Simplificada — O Resultado Final, Antes da Matemática") ficou
+"bem zoado". Depois de descartar alternativas específicas para esta
+aula (o pedido era sobre o nome da **fase em geral**, para todas as
+aulas), o usuário escolheu **"Intuição"** como novo nome da fase no
+`../CLAUDE.md` (Abertura → Intuição → Desenvolvimento → Fechamento).
+
+- `../CLAUDE.md` atualizado: "Aula Simplificada" → "Intuição" no nome
+  da fase e na referência dentro do bullet "Desenvolvimento matemático
+  *principled*".
+- `index.qmd`: título da seção trocado para "Intuição — Contando e
+  Somando Vizinhos" (título descritivo do conteúdo real do bloco —
+  contar vizinhos por perto / somar contribuições —, não mais uma
+  descrição genérica do papel pedagógico do bloco). Espelho em
+  RevealJS ("## O Resultado Final, Antes da Matemática") também
+  renomeado para "## Contando e Somando Vizinhos".
+- `_00-plano-aula.md` atualizado com o novo nome, registrando o motivo
+  da mudança.
+- Revalidado com `quarto render --to html`, sem erro nem warning de
+  div.
+
+## Slides enriquecidos para paridade de detalhe com as notas (2026-08-26, mesma sessão)
+
+Feedback do usuário: os slides desta aula estavam "muito
+simplificados" — `radius_mean` era usado sem nunca ser explicado, e de
+forma geral faltava informação para dar a aula só com o slide. Isso
+motivou uma nova seção no `../CLAUDE.md` ("## Formato do arquivo de
+aula") deixando explícito que o papel de HTML vs. RevealJS não é
+"completo" vs. "resumido", é "corrido" vs. "itemizado" — quantidade de
+informação quase igual — com um autoteste concreto ("se o aluno só
+tivesse o slide, ele perderia algo que só está na prosa?").
+
+Aplicado retroativamente nesta aula, bloco a bloco, comparando cada
+slide RevealJS com o trecho HTML correspondente:
+
+- **Intuição:** slide agora explica que `radius_mean` é "o raio médio
+  do tumor medido no exame — um único número por paciente", antes
+  ausente do slide (só nas notas).
+- **Maldição da dimensionalidade:** adicionados ao RevealJS — a
+  interpretação numérica do resultado $D=100$ (quase 100% do volume na
+  casca) com a analogia à Gaussiana; a interpretação do resultado
+  $p=30$ do ESL (93% da amplitude para capturar 10% dos dados); o elo
+  conceitual antes ausente entre os dois resultados (casca + vizinho na
+  borda) e a métrica de contraste relativo ("todo mundo fica a
+  distâncias parecidas de todo mundo"); e a leitura do resultado
+  numérico final (contraste caindo de ≈220 para ≈10 no próprio
+  Breast Cancer Wisconsin).
+- **$p(\mathbf{x})=K/(NV)$:** adicionado o slide "Duas Rotas, Não Duas
+  Técnicas" (ausente do RevealJS; só existia nas notas) — $k$-NN e KDE
+  não são "técnicas parecidas", são a mesma identidade explorada de
+  dois lados opostos.
+- **$k$-NN:** adicionada a citação literal de PRML (pp. 124–125) que
+  faltava no slide, e um slide novo sobre a pista do *rug plot* (duas
+  concentrações de pontos sugerindo `radius_mean` não-unimodal),
+  ausente do RevealJS.
+- **KDE:** adicionada a citação final de PRML (p. 124) sobre $h$ como
+  parâmetro de suavização e o trade-off ruído/sobre-suavização, ausente
+  do slide.
+- **$k$-NN vs. KDE lado a lado:** adicionada a leitura interpretativa
+  dos números de $d_K$ fixo-vs-adaptativo (antes só nas notas); e a
+  explicação de que os tumores benignos têm `radius_mean` médio
+  ≈12,1 e os malignos ≈17,5 — o que os 3 picos realmente são —, ausente
+  do RevealJS.
+
+Revalidado com `quarto render --to html` e `--to revealjs`: sem erro,
+sem warning de div (`:::` balanceado), sem `<input type="checkbox">`
+real, 7 pares `pergunta`/`resposta` confirmados intactos.
+
+## Abertura reforçada: recapitulação da Aula 1 mais completa (2026-08-26, mesma sessão)
+
+Feedback do usuário sobre o slide "Da Aula 1 Para Hoje": simplificado
+demais — faltava resumir a Aula 1 de forma mais completa antes de
+trazer a problemática desta aula. Também apontou que o slide "O Que Já
+Dá Para Ver" (bloco Intuição) ficava "tosco" por vir depois do gráfico,
+sem o gráfico por perto. Isso motivou uma nova regra geral no
+`../CLAUDE.md`: nenhum slide pode ficar vazio/fino demais — ou tem
+conteúdo suficiente para se sustentar sozinho, ou junta com o slide
+vizinho.
+
+- **Abertura:** recapitulação da Aula 1 reescrita, nas notas e nos
+  slides, cobrindo o que antes só estava implícito ou faltava
+  completamente: o problema de *profiling* sem rótulo, a fórmula do
+  ajuste por máxima verossimilhança, a fórmula da distância de
+  Mahalanobis e sua deformação geométrica, a conversão para $p$-valor
+  via $\chi^2_d$, o contraste conjunta-vs-por-dimensão (Fisher), e as
+  duas rachaduras já anunciadas no fechamento da Aula 1 (multimodalidade,
+  outliers) antes de chegar na terceira rachadura ($N>d$) que abre esta
+  aula. Nos slides, esse recap agora ocupa 2 slides cheios
+  ("Da Aula 1: O Que Fizemos" e "Da Aula 1: Conjunta vs. Por Dimensão,
+  e as Rachaduras") antes do slide-ponte original ("Da Aula 1 Para
+  Hoje"), em vez de um único slide raso.
+- **Intuição:** o slide "O Que Já Dá Para Ver" (texto puro, sem
+  gráfico) foi fundido de volta no slide anterior que já contém o
+  gráfico de $k$-NN/KDE — heading removido, conteúdo virou continuação
+  em fragmentos do mesmo slide, para não separar imagem da leitura da
+  imagem.
+- `../CLAUDE.md`: nova regra sob "Formato do arquivo de aula" — nenhum
+  slide pode ficar vazio ou fino demais; ou adicionar conteúdo, ou
+  juntar com o slide vizinho; caso específico citado (gráfico num
+  slide, comentário do gráfico isolado no seguinte) como padrão a
+  evitar.
+
+Revalidado com `quarto render --to html` e `--to revealjs`: sem erro,
+sem warning de div, sem `<input type="checkbox">` real, 7 pares
+`pergunta`/`resposta` confirmados intactos.
+
+## Duas correções pontuais de conteúdo/didática (2026-08-26, mesma sessão)
+
+**1. Exemplo das "3 bolas" corrigido para ser literal, não analogia.**
+Feedback do usuário: o exemplo de volume-na-casca deveria ter sido
+feito em $D=1$, $D=2$, $D=3$ — as únicas dimensões em que a geometria é
+literalmente desenhável — em vez da versão anterior ($D=2,10,100$),
+que usava uma área 2D como *proxy* visual para representar a fração de
+volume em dimensões que não dá para desenhar de verdade. Reescrito:
+
+- $D=1$: um segmento de reta (o "volume" é comprimento, escala com
+  $r$) — barra horizontal com núcleo/casca por comprimento real.
+- $D=2$: um disco de verdade (área, escala com $r^2$) — círculos
+  concêntricos com raio geométrico real.
+- $D=3$: uma esfera de verdade, renderizada em 3D
+  (`ax.plot_surface`, projeção `3d` do matplotlib) — volume real,
+  escala com $r^3$.
+
+Em nenhum dos três painéis há truque de área-como-proxy: o raio do
+núcleo é sempre o raio geométrico real $1-\epsilon$, e a fração de
+"volume" (comprimento/área/volume, cada um na sua dimensão) sai
+automaticamente correta por construção — sem precisar de nenhuma
+analogia ou aviso de "isto não é literal". O texto que acompanhava o
+exemplo (que dizia "em D=10/D=100 é uma analogia visual") foi reescrito
+para deixar claro que as três bolas agora são exatas, e que o efeito
+dramático da maldição da dimensionalidade só aparece de fato no cálculo
+numérico já existente para $D=10,30,100$ (que continua logo depois,
+sem mudança).
+
+**2. Bloco "Contando e Somando Vizinhos" (Intuição) reestruturado para
+ser mais algorítmico.** Feedback do usuário: a apresentação das duas
+heurísticas podia ser mais explícita/passo-a-passo, e o gráfico de
+densidade com seu significado deveria ficar num slide separado,
+seguinte às heurísticas (não junto). Reescrito:
+
+- **Heurística 1** mudou de "contar até juntar um número fixo de
+  vizinhos" (que secretamente pré-anunciava $k$-NN) para "definir um
+  raio fixo $r$ e contar quantos pacientes caem dentro da janela
+  $[x-r,x+r]$" — mais literal/algorítmico, e alinhado com o que a
+  Heurística 1 realmente vira depois: a **janela de Parzen** do Bloco 5
+  (KDE), não o $k$-NN do Bloco 4. Adicionada função nova no chunk de
+  setup, `radius_count_1d(x_eval, data, r)`, substituindo o uso de
+  `knn_density_1d` nesse preview.
+- **Heurística 2** manteve a ideia (peso que desconta com a distância),
+  mas com explicação mais detalhada da aspereza que ela resolve (o
+  corte abrupto dentro/fora da Heurística 1).
+- Nos slides, o desafio + as duas heurísticas agora ocupam 3 slides
+  cheios ("O Desafio", "Heurística 1: Contar Dentro de um Raio Fixo",
+  "Heurística 2: Peso Descontado pela Distância") — só depois vem o
+  slide com o gráfico de densidade, seu significado, e os desafios que
+  ficam em aberto (estrutura que já existia, mantida como o "próximo
+  slide").
+- O texto de conexão com o resto da aula foi corrigido para refletir a
+  nova mecânica: agora explicitamente liga Heurística 1 → janela de
+  Parzen (KDE) e Heurística 2 → kernel gaussiano (KDE), com o $k$-NN
+  reaparecendo como "a rota gêmea" que fixa a contagem em vez do raio —
+  consistente com o fork Fixar-$K$-vs-Fixar-$V$ que o Bloco 3
+  ($p(\mathbf{x})=K/(NV)$) já formaliza.
+
+Revalidado com `quarto render --to html` e `--to revealjs` (a
+renderização HTML falhou uma vez por corrida com o serviço
+`homepage-preview.service`, que re-renderiza em segundo plano a cada
+alteração do arquivo — não um erro de conteúdo; sucesso na segunda
+tentativa): sem erro, sem warning de div, sem `<input
+type="checkbox">` real, 7 pares `pergunta`/`resposta` confirmados
+intactos.
+
+## Três correções pontuais de clareza (2026-08-26, mesma sessão)
+
+**1. Slide "O Mesmo Efeito, do Ponto de Vista de um Vizinho" — confuso,
+tornado didático.** O slide era só a citação literal em inglês do ESL
+($e_p(r)=r^{1/p}$) sem nenhuma explicação do que "vizinhança
+hipercúbica" ou "comprimento de aresta" significam. Reescrito nas notas
+e nos slides: explicado o setup (uma caixa de aresta $e$ que precisa
+capturar uma fração $r$ dos dados), por que $e^p=r$ (mesma identidade
+$r^D$ de volume do Bloco 2), e só depois a fórmula/citação — agora
+**traduzida** (tradução nossa), corrigindo também uma citação que
+estava em inglês direto no `index.qmd`, contra a regra do CLAUDE.md de
+sempre traduzir trechos de fonte. *Nota: o restante do arquivo ainda
+tem outras citações de PRML/ESL em inglês não traduzidas — não
+mexidas nesta rodada, fora do pedido específico do usuário, mas
+sinalizado como pendência futura.*
+
+**2. "Premissas Desta Derivação" (bloco $p(\mathbf{x})=K/(NV)$) —
+resumo muito raso, reescrito mais claro.** As 3 premissas (nas notas e
+nos slides) diziam só *o quê*, sem *por quê*. Reescritas para explicar
+o papel de cada premissa na derivação (ex.: a Premissa 2 existe porque
+permite trocar uma integral por multiplicação no Passo 2; a Premissa 3
+existe porque permite tratar a contagem como binomial no Passo 3).
+Aplicada a mesma melhoria às "Premissas desta rota" do bloco de $k$-NN
+(Bloco 4), por consistência de estilo.
+
+**3. Passos 3 e 4 da derivação — explicados por completo.** Pedido
+explícito do usuário: os passos "amostragem independente ⇒
+$K\sim\mathrm{Bin}(N,P)$" e "$N$ grande ⇒ $K\simeq NP$" apareciam sem
+nenhuma justificativa, só a conclusão. Adicionado, nas notas e nos
+slides: o Passo 3 agora explica a analogia com uma moeda viciada
+(cada um dos $N$ pontos "cai dentro de $R$" com probabilidade $P$,
+independente dos demais — contar sucessos em tentativas independentes
+com a mesma probabilidade é, por definição, uma binomial). O Passo 4
+agora explica a concentração da binomial: média $NP$, desvio-padrão
+$\sqrt{NP(1-P)}$, e o desvio *relativo* encolhendo como $1/\sqrt{N}$ —
+por isso $K$ se aproxima de $NP$ para $N$ grande (mesma lógica de "1
+milhão de moedas dá ~50% de caras").
+
+Revalidado com `quarto render --to html` e `--to revealjs`: sem erro,
+sem warning de div, sem `<input type="checkbox">` real, 7 pares
+`pergunta`/`resposta` confirmados intactos.
 
 ## Aulas 3–12
 

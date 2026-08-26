@@ -626,3 +626,83 @@ Aula 3 e, por precaução (o arquivo é compartilhado), também a Aula 1.
 - `fontes/exemplos-estilo/` resolvido com um symlink para `aula01/02-aula.qmd`
   — se a Aula 1 for revisada de novo, o exemplo atualiza automaticamente
   (é link, não cópia).
+
+## Abertura da Aula 2 revisada (2026-08-26)
+
+A pedido do usuário ("na aula 2 de supervisionado, revise a
+introdução"), depois de uma nova revisão do `../CLAUDE.md` que
+detalhou a estrutura da Abertura em 4 elementos distintos (Organizador
+prévio, Revisão rápida, Roteiro explícito, Problema motivador com
+discussão/provocação) mais uma Pausa ativa ao final.
+
+- **Nova seção `# Abertura`** inserida antes de `# Teorema de Bayes e
+  Modelos Generativos` (que passa a ser o primeiro bloco de
+  Desenvolvimento de fato). Antes, a aula pulava direto para a
+  generalização formal de Bayes para $K$ classes, sem recapitular a
+  Aula 1 explicitamente, sem roteiro de perguntas, e sem nenhum
+  momento de discussão/provocação antes do formalismo.
+- Conteúdo novo: recapitulação específica da Aula 1 (Beta 1D, limiares
+  por cauda, erros Tipo I/II, sem teoria da decisão formal); ponte
+  conceitual com as "três peças do curso"; problema motivador
+  (triagem médica com 5 doenças, provocando "o que sobrevive/o que
+  muda" antes de qualquer fórmula); roteiro de 4 perguntas que a aula
+  responde.
+- **1 pausa ativa nova**, fechando a Abertura — pergunta motivadora +
+  dica + V/F de 4 itens (heurísticas: contrafactual, transferência de
+  domínio, caso limite, falsa dicotomia), usando os glifos não-
+  clicáveis `□`/`✔`/`✗` já validados em `unsupervised-learning/aula02`
+  (nunca `☐`/`☒`, que o Pandoc trata como checkbox real).
+- **`_03-respostas-pausas.md` criado** (não existia nesta aula ainda)
+  com a discussão e solução dessa pausa — mesmo padrão de arquivo
+  separado (não publicado) já estabelecido para `unsupervised-learning`.
+- **Nada além da Abertura foi alterado** — o resto da aula (Bayes para
+  $K$ classes, modelo generativo, Naive Bayes, teoria da decisão) segue
+  exatamente como estava; não é uma reescrita geral, só a introdução,
+  conforme pedido.
+- Revalidado com `quarto render --to html` e `--to revealjs`: sem
+  erro, sem warning de div, sem `<input type="checkbox">` real (só uma
+  regra CSS órfã, inofensiva); par `pergunta`/`resposta` confirmado no
+  `slides.html`.
+
+## Conformidade com a nova política de Estratégia Pedagógica (2026-08-26)
+
+A pedido do usuário ("veja como está a nova política de criação de
+aulas e refaça a estrutura... depois refaça as aulas 1 a 3 de
+supervisionado"): `../CLAUDE.md` passou a exigir a declaração explícita
+de qual das duas estratégias macro — **A** (Outside-In, para
+modelos/algoritmos: Árvores, SVM, Gradient Boosting, Regressão
+Logística, K-Means) ou **B** (Inside-Out com Problema-Fio, para
+fundamentação matemática: Representações Matriciais, Derivadas/
+Gradiente, Espaços Vetoriais, SVD) — cada aula segue.
+
+Reli a abertura real (`index.qmd`, não só o plano) das três aulas antes
+de decidir, para não classificar de memória:
+
+- **Aula 1** (classificação 1D por densidades): abre com um preâmbulo
+  obrigatório só de Lesson 1 ("Proposta do Curso", tese do semestre) e
+  só depois o gancho de fato — "duas populações, o formato que os dados
+  assumem", deliberadamente sem fórmula nem família nomeada. Catchy
+  antes do formalismo → **Estratégia A**.
+- **Aula 2** (Naive Bayes): abre com a demonstração "jogue fora os
+  dados" (ajusta por MLE, descarta os 900 pontos originais, regenera só
+  com os parâmetros) antes de a maldição da dimensionalidade aparecer
+  como necessidade teórica que motiva a suposição de independência.
+  Catchy antes do formalismo → **Estratégia A**.
+- **Aula 3** (Árvores de Decisão): citada literalmente como exemplo de
+  Estratégia A no `CLAUDE.md`. Abre pelo modelo mental informal que o
+  aluno já tem ("corte até ficar homogêneo") e usa esse senso comum como
+  gancho para a necessidade teórica (conexão com MLE) → **Estratégia
+  A**.
+
+**Nas três, `_00-plano-aula.md` recebeu uma seção "Estratégia
+Pedagógica" nova, com a classificação e a justificativa de 3-4 linhas
+apontando o trecho real do `index.qmd` que confirma o enquadramento.
+Nenhum `index.qmd` foi alterado** — as três aulas já seguiam a lógica
+Outside-In de fato (o princípio geral "problema motivador antes do
+formalismo" já existia no `CLAUDE.md` antes da nova política nomear as
+duas estratégias explicitamente); faltava só a declaração formal
+exigida agora. Se, numa leitura mais profunda de alguma das três aulas,
+aparecer um trecho que genuinamente destoe do Outside-In (não
+encontrado nesta revisão, que leu as aberturas mas não as ~2000+ linhas
+completas de cada aula), avaliar como um ajuste pontual separado, não
+como reescrita geral.

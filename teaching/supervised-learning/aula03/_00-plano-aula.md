@@ -44,6 +44,20 @@ máximo de uma função de uma variável.
 *(fonte dos objetivos: `../index.md`, Lesson 3 — planejamento fixo do
 semestre)*
 
+### Estratégia Pedagógica
+
+**Estratégia A (Outside-In)** — Árvores de Decisão é o exemplo
+explicitamente citado em `../../CLAUDE.md` para esta estratégia. A aula
+já abre pelo modelo mental informal que o aluno provavelmente já tem
+("corte até ficar homogêneo", tratado como pura heurística por "a
+maioria dos cursos") e usa exatamente esse senso comum como gancho para
+a necessidade teórica ("por baixo do capô, é o mesmo princípio de MLE
+de sempre"), antes de formalizar Gini/entropia/verossimilhança de
+perfil, fechando com síntese e limitações (preço da liberdade
+não-paramétrica). **Adicionado nesta revisão (2026-08-26)** para
+conformidade com a nova política de `../../CLAUDE.md`; sem mudança de
+conteúdo no `index.qmd`.
+
 ### Sobre as fontes
 
 O tratamento de árvores de decisão desta aula é conceitualmente padrão

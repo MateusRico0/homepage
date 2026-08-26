@@ -259,6 +259,186 @@ notas. `_02-solucoes.md` (obrigatório) nunca havia sido criado.
   nossa; resultado de posto citado sem prova) continuam como texto
   simples, não em `callout-note`/`callout-warning`.
 
+## Aula 2 revisada por completo contra a política atual do CLAUDE.md (2026-08-26)
+
+Feedback do usuário: "não está bom" + fonte grande demais nos slides —
+pediu para varrer o `../CLAUDE.md` em detalhe e refazer a aula. O
+CLAUDE.md evoluiu bastante desde a última passada nesta aula (aula
+construída antes de várias convenções mais recentes serem
+estabelecidas em `unsupervised-learning`), então vários pontos da
+política atual não estavam sendo seguidos aqui. Corrigido:
+
+- **Bug de fonte grande identificado e corrigido:** o YAML do
+  `revealjs` desta aula não tinha `smaller: true`/`scrollable: true` —
+  presentes em toda aula mais recente (`unsupervised-learning`,
+  `supervised-learning`), ausentes aqui e em `aula01` (não mexido,
+  fora do pedido desta vez). Confirmado no HTML renderizado:
+  `'smaller': true` agora aparece na config JS do Reveal.
+- **Exercícios (12 blocos de V/F) reescritos no formato correto:**
+  usavam `a. ( )` (parênteses, não clicável mas fora do padrão
+  estabelecido) dentro de `callout-tip`; convertidos para `- □`
+  (bullets) dentro de `callout-note icon=false`, igual ao padrão de
+  toda outra disciplina.
+- **Todas as 5 pausas ativas de bloco convertidas para o glifo
+  `□`/`✔`/`✗`:** os blocos 2, 4 e 5 já tinham V/F + Resposta, mas no
+  formato antigo `a. **Verdadeiro** — texto` (pré-data a descoberta do
+  glifo seguro); convertidos para `- ✔`/`- ✗`. Os blocos 1 ("Definindo
+  a Matriz de Design") e 3 ("Sistemas Lineares") só tinham uma pergunta
+  aberta de reflexão, sem V/F nem slide de Resposta — reescritos do
+  zero com 4 itens por heurística (contrafactual, limite, transferência
+  de domínio, falsa dicotomia) e slide de Resposta completo.
+- **Gap de "o que a variável significa" nos slides (mesmo padrão do
+  `radius_mean` em `unsupervised-learning`):** o slide RevealJS "Da
+  Tabela de Dados à Matriz" seguia direto para a tabela de 6 bairros
+  sem nunca dizer o que `MedInc`/`HouseAge`/`AveRooms`/`AveBedrms`
+  significam fisicamente (as notas diziam, o slide não). Also esse
+  slide estava vazio (só um título, "Dataset - California Housing
+  Dataset", sem nenhum conteúdo antes da figura) — corrigido junto,
+  aproveitando a nova regra de "nenhum slide vazio" do CLAUDE.md.
+- **Abertura reforçada:** só tinha Roteiro Explícito (4 perguntas) e o
+  diagrama TikZ — sem Organizador Prévio, Revisão Rápida da Aula 1, nem
+  Problema Motivador distintos, os três elementos que o CLAUDE.md
+  também exige na Abertura. Adicionados: uma Revisão Rápida cobrindo
+  espaço vetorial/subespaço, normas, produto interno/cosseno e o aviso
+  inicial de maldição da dimensionalidade da Aula 1; um Organizador
+  Prévio fazendo a ponte "de um vetor para N vetores de uma vez"; e um
+  Problema Motivador concreto (prever o preço dos 20.640 bairros de uma
+  vez, sem loop) antes de qualquer formalismo.
+- **`.fig-resize` ausente em toda figura/diagrama do arquivo** — bug já
+  sinalizado como pendência não resolvida numa rodada anterior (ver
+  entrada anterior de V/F), agora corrigido: as 7 figuras Python
+  (tabela de amostra, gráfico de barras de previsões, 2 versões do
+  gráfico de 3 soluções, diagrama de vetores em $\mathbb{R}^2$, 2
+  versões do scatter AveRooms/AveBedrms) e o diagrama TikZ da Abertura
+  agora saem envolvidos em `.fig-resize`, com o `width=`/`.nostretch`
+  inútil removido do bloco `{.tikz}` (não tinha efeito, conforme já
+  documentado no CLAUDE.md).
+- **`_00-plano-aula.md`:** adicionada a declaração de Estratégia
+  Pedagógica que faltava — Estratégia B (Inside-Out com Problema-Fio),
+  por ser aula de fundação matemática de representação.
+
+Revalidado com `quarto render --to html` e `--to revealjs`: sem erro,
+sem warning de div (`:::` balanceado), sem `<input type="checkbox">`
+real, 5 pares `pergunta`/`resposta` confirmados (um por bloco).
+
+**Pendência sinalizada, não resolvida nesta rodada** (fora do escopo
+explícito do pedido — mudança mais invasiva, melhor com aprovação
+antes): o Bloco 1 ainda apresenta a definição formal de matriz (Def.
+2.1, MathML) antes do exemplo concreto dos 6 bairros — na ordem
+inversa da fase "Intuição" (concreto antes do formalismo) que
+`unsupervised-learning/aula02` já adota. Inverter essa ordem exigiria
+reestruturar o bloco inteiro; sinalizado para decisão do usuário antes
+de mexer.
+
+## Slide "Combinações Lineares e Independência" separado em definição + exemplo (2026-08-26)
+
+Feedback do usuário: o slide misturava a definição formal com a
+explicação intuitiva ("sem redundância") — pediu para deixar a
+definição mais formal nesse slide e mover qualquer exemplo/explicação
+intuitiva para o slide seguinte.
+
+- **"Combinações Lineares e Independência"** ficou só com as duas
+  definições formais, com notação de somatório explícita
+  ($\sum_{i=1}^k\lambda_i\mathbf{x}_i$) e separação clara de LD/LI
+  (tradução nossa, MathML, Def. 2.11–2.12) — nada de intuição ou
+  exemplo.
+- **Novo slide "O Que Essa Definição Quer Dizer, na Prática"** reúne a
+  explicação intuitiva ("sem redundância", MathML §2.5) e a introdução
+  do contraexemplo (3 vetores em $\mathbb{R}^2$ nunca são LI) — a ponte
+  entre a definição formal e o código que verifica o contraexemplo,
+  que continua logo em seguida sem mudança.
+
+Revalidado com `quarto render --to html` e `--to revealjs`: sem erro,
+sem warning de div, sem `<input type="checkbox">` real, 5 pares
+`pergunta`/`resposta` confirmados intactos.
+
+## Duas explicações aprofundadas, a pedido do usuário (2026-08-26)
+
+**1. "Da Independência à Multicolinearidade" ganhou um gráfico.**
+Faltava um exemplo visual concreto. Adicionado: um gráfico de dispersão
+de `AveRooms` (original) contra $2\times$`AveRooms` (a mesma cópia
+fabricada que o Bloco 5 usa para derrubar o posto) — todos os pontos
+caem exatamente numa reta, tornando visível que a segunda coluna não
+carrega nenhuma informação que a primeira não tivesse. O texto também
+passou a conectar explicitamente com a Leitura 2 do Bloco 2 (coluna
+redundante = combinação linear das outras = nenhuma direção nova em
+$X\mathbf{w}$), em vez de introduzir a ideia solta.
+
+**2. "O Posto de uma Matriz" ganhou a explicação de $\text{rk}(A|\mathbf{b})$
+e por que o critério de solvabilidade funciona.** Antes, a aula citava
+a fórmula do MathML sem explicar o mecanismo. Adicionado um
+desenvolvimento *principled* completo: $[A|\mathbf{b}]$ definida como
+matriz aumentada; Premissas (Leitura 2 do Bloco 2: resolver
+$A\mathbf{x}=\mathbf{b}$ é perguntar se $\mathbf{b}$ é combinação
+linear das colunas de $A$; posto mede quantas direções essas colunas
+geram); Passo 1 ($\mathbf{b}$ dentro do espaço-coluna → posto não
+muda) e Passo 2 ($\mathbf{b}$ fora → posto sobe 1); conclusão amarrando
+tudo. Conferido numericamente reaproveitando o próprio exemplo
+"nenhuma solução" do Bloco 3 (retas paralelas): $\text{rk}(A)=1$,
+$\text{rk}([A|\mathbf{b}])=2$, confirmado por código
+(`np.linalg.matrix_rank`).
+
+Revalidado com `quarto render --to html` e `--to revealjs`: sem erro,
+sem warning de div, sem `<input type="checkbox">` real, 5 pares
+`pergunta`/`resposta` confirmados intactos.
+
+## Quatro adições de conteúdo para preencher os 100 min reais de aula (2026-08-26)
+
+Feedback do usuário: o conteúdo atual da aula, na prática, se dava em
+~50 min — bem abaixo dos 100 min reais da turma. Diagnóstico corrigido
+em relação a uma sugestão anterior minha (eu tinha lido a situação ao
+contrário, como se faltasse tempo): o problema não era falta de foco,
+era falta de profundidade real nos mesmos blocos. Quatro adições,
+todas no fio condutor já existente, não conteúdo novo desconectado:
+
+1. **Exemplo resolvido de eliminação de Gauss (Bloco 3).** A aula
+   mostrava geometricamente que um sistema pode ter 0/1/∞ soluções, mas
+   nunca como descobrir isso na prática. Adicionado um sistema 3×3
+   resolvido passo a passo (matriz aumentada → eliminação → forma
+   triangular → substituição reversa), verificado com
+   `np.linalg.solve` (solução $(1,2,3)$ confirmada), mais uma explicação
+   de como reconhecer os casos "sem solução" (linha "$0=$ não-zero") e
+   "infinitas soluções" (linha "$0=0$") no mesmo algoritmo — preparando
+   o atalho do posto que vem no Bloco 5.
+
+2. **Espaço-coluna visualizado geometricamente, antes da definição
+   formal de posto (Bloco 5).** Pedido explícito do usuário: a versão
+   anterior desta explicação (do turno passado, sobre
+   $\text{rk}(A|\mathbf{b})$) estava fragmentada em slides pequenos
+   demais e pouco intuitiva. Reescrita do zero: primeiro um gráfico
+   mostrando o espaço-coluna do exemplo do Bloco 3 como uma reta em
+   $\mathbb{R}^2$, com $\mathbf{b}=(3,5)$ fora dela (sem solução) e
+   $\mathbf{b}'=(4,4)$ sobre ela (com solução) — só depois a definição
+   formal do MathML e o critério $\text{rk}(A)=\text{rk}(A|\mathbf{b})$,
+   como *formalização* do que o desenho já respondeu, seguindo o
+   princípio duplo-registro (intuição → formalismo). Consolidado em
+   menos slides, cada um mais completo, em vez de muitos fragmentos
+   rasos.
+
+3. **Walkthrough completo com $\mathbf{w}$ conhecido (Bloco 2).**
+   Expandido o demo antigo (só um gráfico de barras de previsões) para
+   comparar previsão vs. valor real (`MedHouseVal`) dos 6 bairros da
+   amostra, introduzindo o **resíduo** $\hat{\mathbf{y}}-\mathbf{y}$
+   como antecipação direta da pergunta central da Aula 3.
+
+4. **Demonstração numérica de instabilidade por quase-multicolinearidade
+   (Bloco 5).** Em vez de só afirmar "fica instável, assunto da Aula
+   4", mostrado com números: ajuste por mínimos quadrados numa amostra
+   de 20 bairros com `AveRooms`/`AveBedrms` (correlação 0,865),
+   perturbação de apenas 1% em `MedHouseVal` faz o peso de `AveBedrms`
+   variar ~30% — contra <1% de variação no par bem condicionado
+   `MedInc`/`HouseAge` sob o mesmo ruído. Números verificados
+   experimentalmente antes de escrever (`np.linalg.lstsq`,
+   `random_state=7` para a amostra, seed 1 para o ruído — reprodutível).
+
+`_00-plano-aula.md` atualizado: cabeçalho trocado de "carga horária
+estimada: ~115min" para "carga horária real da turma: 100min", com as
+quatro adições anotadas dentro dos blocos 2, 3 e 5.
+
+Revalidado com `quarto render --to html` e `--to revealjs`: sem erro,
+sem warning de div, sem `<input type="checkbox">` real, 5 pares
+`pergunta`/`resposta` confirmados intactos.
+
 ## Aulas 3–15
 
 Não iniciadas.

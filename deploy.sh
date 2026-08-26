@@ -1,14 +1,22 @@
 #!/bin/bash
 #
 # Substitui o fluxo antigo (Hugo) por Quarto:
-#   --render         -> equivalente a `hugo` (build do site) -> `quarto render`
+#   --render         -> renderiza só o que mudou desde o último --render
+#                       bem-sucedido (marcador .last-render — ver
+#                       preview-watch.py). Rápido no dia a dia; NÃO
+#                       garante que TUDO esteja em dia (ver --render-all).
+#   --render-all     -> força um `quarto render` completo do site inteiro,
+#                       sem checar o que mudou. Use antes de publicar de
+#                       verdade, ou se desconfiar que o incremental deixou
+#                       algo pra trás.
 #   --preview        -> equivalente a `hugo server` -> `quarto preview`, na
 #                       porta 2222
 #   --watch          -> mesma porta 2222, mas SEM live-reload nem navegação
 #                       automática (ver preview-watch.py) — usar quando um
 #                       agente estiver editando/renderizando páginas nos
 #                       bastidores, pra não ficar levando a aba do navegador
-#                       pra outra página sozinho a cada render
+#                       pra outra página sozinho a cada render. Também
+#                       renderiza incrementalmente ao subir.
 #   --update-server  -> entra no servidor via SSH e atualiza a pasta do site
 #                       (antes "Hugo", agora "homepage") com o que estiver na
 #                       branch main
@@ -19,11 +27,12 @@
 # no servidor.
 #
 # Uso:
-#   ./deploy.sh --render                  # só renderiza o site localmente
+#   ./deploy.sh --render                  # renderiza só o que mudou desde o último --render
+#   ./deploy.sh --render-all              # força renderizar o site inteiro
 #   ./deploy.sh --preview                 # sobe o preview local na porta 2222
 #   ./deploy.sh --watch                   # servidor estático + auto-rebuild, sem navegar a aba
 #   ./deploy.sh --update-server           # atualiza o servidor com a main
-#   ./deploy.sh --render --update-server  # renderiza local e atualiza o servidor
+#   ./deploy.sh --render-all --update-server  # renderiza tudo local e atualiza o servidor
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -32,21 +41,17 @@ SSH_HOST="mraimundo@ssh.ic.unicamp.br"
 REMOTE_DIR="homepage"
 
 do_render() {
-  echo "🚀 Renderizando o site (quarto render)..."
-  # O quarto tem uma falha conhecida e intermitente neste projeto: um erro
-  # de "rename"/"stat" no fim do render, mesmo com o site inteiro já
-  # construído corretamente (visto repetidamente nesta sessão) — tentamos
-  # de novo automaticamente antes de desistir de verdade.
-  local attempt
-  for attempt in 1 2 3; do
-    if quarto render; then
-      echo "✅ Site renderizado (_site/)."
-      return 0
-    fi
-    echo "⚠️  Falha na tentativa $attempt/3 (pode ser a falha conhecida do quarto ao final do render) — tentando de novo..."
-  done
-  echo "❌ Render falhou 3 vezes seguidas. Confira o erro acima."
-  return 1
+  echo "🚀 Renderizando o que mudou desde o último --render (ver .last-render)..."
+  # Delega pro preview-watch.py: mesma lógica de classificação (por
+  # arquivo/tipo) usada pelo --watch, e o mesmo retry automático pra
+  # falha intermitente conhecida do quarto (erro de "rename"/"stat" no
+  # fim do render).
+  python3 preview-watch.py --once
+}
+
+do_render_all() {
+  echo "🚀 Renderizando o site inteiro (forçado)..."
+  python3 preview-watch.py --render-all
 }
 
 do_preview() {
@@ -66,11 +71,12 @@ do_update_server() {
 }
 
 if [[ $# -eq 0 ]]; then
-  echo "Uso: $0 [--render] [--preview] [--update-server]"
+  echo "Uso: $0 [--render] [--render-all] [--preview] [--watch] [--update-server]"
   exit 1
 fi
 
 RENDER=false
+RENDER_ALL=false
 PREVIEW=false
 WATCH=false
 UPDATE_SERVER=false
@@ -79,6 +85,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --render)
       RENDER=true
+      shift
+      ;;
+    --render-all)
+      RENDER_ALL=true
       shift
       ;;
     --preview)
@@ -100,7 +110,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$RENDER" == true ]]; then
+if [[ "$RENDER_ALL" == true ]]; then
+  do_render_all
+elif [[ "$RENDER" == true ]]; then
   do_render
 fi
 

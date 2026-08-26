@@ -1,93 +1,64 @@
-// Transforma o sumário nativo do Quarto (#TOC, "Nesta página") e a
-// navegação entre aulas (.lesson-nav, "Aulas do curso" — injetada por
-// lesson-nav.js antes deste script rodar) num acordeão de dois painéis:
-// "Nesta aula" (aberto por padrão) e "Outras aulas" (fechado por
-// padrão) — abrir um fecha o outro. Quando a disciplina só tem uma
-// aula (sem .lesson-nav), o TOC ainda fica colapsável, só sem par.
+// Transforma o sumário nativo do Quarto (#TOC, "Nesta página") num
+// painel de acordeão colapsável ("Nesta aula").
 document.addEventListener("DOMContentLoaded", function () {
-  // Move o link "Slides →" (com o ícone, ver styles.css) pra dentro do
-  // cabeçalho de metadados da aula, como uma terceira "coluna" ao lado
-  // de Autor e Data de Publicação — pedido explícito do usuário, no
-  // lugar do botão solto logo abaixo do cabeçalho. Anexado como filho
-  // DIRETO de .quarto-title-meta (não dentro do <div> da data) pra virar
-  // uma terceira caixa quadrada igual às outras duas (ver
+  // Move os links "Slides" e "Lista de aulas" (ícones, ver styles.css)
+  // pra dentro do cabeçalho de metadados da aula, como colunas extras ao
+  // lado de Autor e Data de Publicação — pedido explícito do usuário, no
+  // lugar de botões soltos logo abaixo do cabeçalho. Anexados como
+  // filhos DIRETOS de .quarto-title-meta (não dentro do <div> da data)
+  // pra virarem caixas quadradas iguais às outras duas (ver
   // `.quarto-title-meta > a.see-all` em styles.css). Roda antes/
   // independente do resto do script (acordeão do TOC), que não existe
-  // em toda página.
-  var slidesLink = document.querySelector('a.see-all[href$="slides.html"]');
+  // em toda página. Esta página só tem esses dois links `.see-all` (as
+  // páginas com o pílula "SEE ALL" da home não carregam este script).
   var titleMeta = document.querySelector(".quarto-title-meta");
-  if (slidesLink && titleMeta) {
-    var oldParagraph = slidesLink.parentElement;
-    titleMeta.appendChild(slidesLink);
-    // O <p> que embrulhava o link fica vazio depois do appendChild acima
-    // (que MOVE o nó, não copia) — remove pra não sobrar um espaço em
-    // branco onde o botão costumava estar.
-    if (
-      oldParagraph &&
-      oldParagraph.tagName === "P" &&
-      oldParagraph.childNodes.length === 0
-    ) {
-      oldParagraph.remove();
-    }
-  }
-
-  var sidebar = document.getElementById("quarto-margin-sidebar");
-  var toc = document.getElementById("TOC");
-  if (!sidebar || !toc) return;
-
-  var panels = [];
-
-  function makePanel(header, body, label) {
-    if (!header || !body) return null;
-    header.textContent = label;
-    header.setAttribute("role", "button");
-    header.setAttribute("tabindex", "0");
-
-    var icon = document.createElement("i");
-    icon.className = "bi bi-chevron-down toc-accordion-icon";
-    icon.setAttribute("aria-hidden", "true");
-    header.appendChild(icon);
-
-    var panel = { header: header, body: body };
-
-    function setOpen(open) {
-      header.setAttribute("aria-expanded", String(open));
-      body.style.display = open ? "" : "none";
-      header.classList.toggle("toc-accordion-open", open);
-    }
-
-    function toggle() {
-      var opening = header.getAttribute("aria-expanded") !== "true";
-      panels.forEach(function (p) {
-        p.setOpen(p === panel ? opening : false);
-      });
-    }
-
-    panel.setOpen = setOpen;
-    header.addEventListener("click", toggle);
-    header.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        toggle();
+  if (titleMeta) {
+    document.querySelectorAll("a.see-all").forEach(function (link) {
+      var oldParagraph = link.parentElement;
+      titleMeta.appendChild(link);
+      // O <p> que embrulhava o link fica vazio depois do appendChild
+      // acima (que MOVE o nó, não copia) — remove pra não sobrar um
+      // espaço em branco onde o botão costumava estar.
+      if (
+        oldParagraph &&
+        oldParagraph.tagName === "P" &&
+        oldParagraph.childNodes.length === 0
+      ) {
+        oldParagraph.remove();
       }
     });
-
-    panels.push(panel);
-    return panel;
   }
 
-  var tocHeader = toc.querySelector("#toc-title");
-  var tocBody = toc.querySelector("ul");
-  var tocPanel = makePanel(tocHeader, tocBody, "Nesta aula");
+  var toc = document.getElementById("TOC");
+  if (!toc) return;
 
-  var lessonNav = sidebar.querySelector(".lesson-nav");
-  var lessonPanel = null;
-  if (lessonNav) {
-    var lessonHeader = lessonNav.querySelector(".lesson-nav-title");
-    var lessonBody = lessonNav.querySelector("ol");
-    lessonPanel = makePanel(lessonHeader, lessonBody, "Outras aulas");
+  var header = toc.querySelector("#toc-title");
+  var body = toc.querySelector("ul");
+  if (!header || !body) return;
+
+  header.textContent = "Nesta aula";
+  header.setAttribute("role", "button");
+  header.setAttribute("tabindex", "0");
+  header.setAttribute("aria-expanded", "true");
+  header.classList.add("toc-accordion-open");
+
+  var icon = document.createElement("i");
+  icon.className = "bi bi-chevron-down toc-accordion-icon";
+  icon.setAttribute("aria-hidden", "true");
+  header.appendChild(icon);
+
+  function toggle() {
+    var opening = header.getAttribute("aria-expanded") !== "true";
+    header.setAttribute("aria-expanded", String(opening));
+    body.style.display = opening ? "" : "none";
+    header.classList.toggle("toc-accordion-open", opening);
   }
 
-  if (tocPanel) tocPanel.setOpen(true);
-  if (lessonPanel) lessonPanel.setOpen(false);
+  header.addEventListener("click", toggle);
+  header.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      toggle();
+    }
+  });
 });

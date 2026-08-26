@@ -36,6 +36,21 @@ multivariada elementar.
 *(fonte dos objetivos: `../index.md`, Lesson 2 — planejamento fixo do
 semestre)*
 
+### Estratégia Pedagógica
+
+**Estratégia A (Outside-In)** — Naive Bayes é um modelo/algoritmo
+concreto (mesma categoria de K-Means/Árvores citada em
+`../../CLAUDE.md`), não um idioma matemático de fundação. A aula abre
+de fato com um "Modelo Mental/Catchy" — a demonstração generativa
+("jogue fora os dados": ajusta por MLE, descarta os 900 pontos
+originais, regenera dados novos só com os parâmetros ajustados) — antes
+de a maldição da dimensionalidade aparecer como a "Necessidade
+Teórica" que motiva a suposição de independência do Naive Bayes, que
+então é formalizada, com síntese/limitações (o preço da suposição) ao
+final. **Adicionado nesta revisão (2026-08-26)** para conformidade com
+a nova política de `../../CLAUDE.md`; sem mudança de conteúdo no
+`index.qmd`.
+
 ### Compromissos herdados da Aula 1 (já aprovada)
 
 A ponte de fechamento da Aula 1 promete três coisas que travam a abertura

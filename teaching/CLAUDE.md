@@ -1,20 +1,11 @@
 # Fluxo de trabalho — geração de aulas
 
-Esta pasta (`teaching/`) contém MÚLTIPLAS disciplinas, cada uma em sua
-própria subpasta (ex.: `supervised-learning/`,
-`optimization-linear-algebra/`, `computing-and-society/`,
+Esta pasta (`teaching/`) contém MÚLTIPLAS disciplinas, cada uma em sua própria subpasta (ex.: `supervised-learning/`, `optimization-linear-algebra/`, `computing-and-society/`,
 `unsupervised-learning/`). Este `CLAUDE.md` vale para todas elas.
 
-Este projeto segue um processo de checkpoints POR AULA, com aprovação
-humana obrigatória em cada etapa. NUNCA pule uma etapa, NUNCA gere a
-etapa seguinte sem que o usuário tenha sinalizado aprovação explícita
-(ex: "pode seguir", "próxima etapa", "ok").
+Este projeto segue um processo de checkpoints POR AULA, com aprovação humana obrigatória em cada etapa. NUNCA pule uma etapa, NUNCA gere a etapa seguinte sem que o usuário tenha sinalizado aprovação explícita (ex: "pode seguir", "próxima etapa", "ok"). Após a etapa de planejamento, consulte o usuário se ele deseja já criar a aula direto (passando pelas etapas intermediárias) ou se deseja conferir as outras etapas.
 
-O `index.qmd` de cada disciplina é a página pública do curso no site
-(lista de aulas, objetivos, competências esperadas) e também a
-referência de planejamento do semestre — use-o para identificar tema,
-objetivos de aprendizagem e a sequência das aulas. Não proponha
-alterações nele além de acrescentar/atualizar a entrada da aula em
+O `index.qmd` de cada disciplina é a página pública do curso no site (lista de aulas, objetivos, competências esperadas) e também a referência de planejamento do semestre — use-o para identificar tema, objetivos de aprendizagem e a sequência das aulas. Não proponha alterações nele além de acrescentar/atualizar a entrada da aula em
 questão, a não ser que explicitamente dito ou aprovado pelo usuário.
 
 ---
@@ -46,38 +37,21 @@ teaching/
 └── ...
 ```
 
-Cada disciplina é autocontida na sua subpasta. Cada aula é uma subpasta
-própria dentro da disciplina, nomeada `aulaNN` (`aula01`, `aula02`, ...).
+Cada disciplina é autocontida na sua subpasta. Cada aula é uma subpasta própria dentro da disciplina, nomeada `aulaNN` (`aula01`, `aula02`, ...).
 
-**Por que os nomes com `_` na frente:** o Quarto ignora por convenção
-qualquer arquivo ou pasta cujo nome comece com `_` — nunca é renderizado
-nem copiado para o site publicado. `_fontes/`, `_progresso.md`,
-`_00-plano-aula.md` e `_01-fontes.md` usam esse prefixo de propósito:
-são material de apoio/planejamento (e, no caso de `_fontes/`, PDFs de
-livros com direitos autorais) que nunca deve aparecer no site ao vivo —
-só o `index.qmd` de cada aula (e o `index.qmd` da disciplina) é
-público.
+**Por que os nomes com `_` na frente:** o Quarto ignora por convenção qualquer arquivo ou pasta cujo nome comece com `_` — nunca é renderizado nem copiado para o site publicado. `_fontes/`, `_progresso.md`, `_00-plano-aula.md` e `_01-fontes.md` usam esse prefixo de propósito: são material de apoio/planejamento (e, no caso de `_fontes/`, PDFs de livros com direitos autorais) que nunca deve aparecer no site ao vivo — só o `index.qmd` de cada aula (e o `index.qmd` da disciplina) é público.
 
 ---
 
 ## Etapa 0 — Identificar a disciplina (OBRIGATÓRIA, toda sessão)
 
-Antes de ler, editar ou gerar qualquer arquivo, é preciso saber em qual
-subpasta de disciplina trabalhar nesta sessão.
+Antes de ler, editar ou gerar qualquer arquivo, é preciso saber em qual subpasta de disciplina trabalhar nesta sessão.
 
-- Se o usuário já declarou a disciplina na mensagem (ex: "Disciplina:
-  supervised-learning" ou "trabalhando em optimization-linear-algebra"),
-  usar essa subpasta e confirmar em uma linha antes de prosseguir.
-- Se não declarou e houver mais de uma subpasta de disciplina em
-  `teaching/`, **perguntar qual é a disciplina da sessão** antes de
-  qualquer outra ação. Não adivinhar pela última disciplina usada em
-  sessões anteriores — o estado pode ter mudado.
-- Se o workspace aberto já é a subpasta de uma única disciplina, essa é
-  a disciplina — não perguntar.
+- Se o usuário já declarou a disciplina na mensagem (ex: "Disciplina:   supervised-learning" ou "trabalhando em optimization-linear-algebra"), usar essa subpasta e confirmar em uma linha antes de prosseguir.
+- Se não declarou e houver mais de uma subpasta de disciplina em `teaching/`, **perguntar qual é a disciplina da sessão** antes de   qualquer outra ação. Não adivinhar pela última disciplina usada em sessões anteriores — o estado pode ter mudado.
+- Se o workspace aberto já é a subpasta de uma única disciplina, essa é   a disciplina — não perguntar.
 
-Todos os caminhos de arquivo nas etapas abaixo (`index.qmd`,
-`_fontes/`, `aulaNN/`, `_progresso.md`) são relativos à subpasta da
-disciplina identificada nesta etapa, não à raiz `teaching/`.
+Todos os caminhos de arquivo nas etapas abaixo (`index.qmd`, `_fontes/`, `aulaNN/`, `_progresso.md`) são relativos à subpasta da disciplina identificada nesta etapa, não à raiz `teaching/`.
 
 ---
 
@@ -88,56 +62,102 @@ disciplina identificada nesta etapa, não à raiz `teaching/`.
 Tendo em vista a natureza dos conteúdos do curso, a estrutura da aula deve seguir **uma de duas estratégias pedagogicamente fundamentadas**, a ser escolhida na **Etapa 1 (Plano de Aula)** de acordo com o tipo de objeto de estudo:
 * **Estratégia A: *Outside-In* (Para Aulas de Modelos e Algoritmos)**
   *Uso:* Árvores de Decisão, SVM, Gradient Boosting, Regressão Logística, K-Means.
-  *Lógica:* Guiada do prático para o formal (Modelo Mental/Catchy $\to$ Necessidade Teórica $\to$ Teoria Formal $\to$ Síntese e Limitações).
+  *Lógica:* Guiada do prático para o formal: Modelo Mental/Catchy $\to$ Necessidade Teórica $\to$ Teoria Formal $\to$ Síntese e Limitações.
 * **Estratégia B: *Inside-Out com Problema-Fio* (Para Aulas de Fundamentação Matemática/Linguagem)**
   *Uso:* Representações Matriciais, Derivadas/Gradiente, Espaços Vetoriais, SVD/Decomposição.
-  *Lógica:* Guiada pela necessidade do idioma matemático (Problema-Fio da Engenharia/Geometria $\to$ Mecanismo/Operação $\to$ Diagnóstico Teórico $\to$ Ponte/Limitação para a próxima aula).
+  *Lógica:* Guiada pela necessidade do idioma matemático: Problema-Fio da Engenharia/Geometria $\to$ Mecanismo/Operação $\to$ Diagnóstico Teórico $\to$ Ponte/Limitação para a próxima aula.
 
 Ambas as abordagens devem manter os **3 movimentos fundamentais** (Abertura com problema/roteiro, Desenvolvimento segmentado em blocos de 10–15 min com pausas ativas onde tem perguntas e testes de V/F, e Fechamento retomando os desafios iniciais da aula):
 
 **1. Abertura (5–10 min)** — o objetivo é criar o "gancho" cognitivo:
-- **Organizador prévio** (Ausubel): uma ideia-ponte que conecta o novo conteúdo ao que já se sabe. Ex.: antes de modelos generativos, retomar "estimar densidade" como algo já visto em detecção de anomalias.
+- **Organizador prévio** (Ausubel): Uma ideia-ponte que conecta o novo conteúdo ao que já se sabe. 
+- **Revisão rápida**: Relembre parta da aula anterior para ajudar o aluno a lembrar.
 - **Roteiro explícito**: dizer as 3–4 perguntas que a aula vai responder. Isso reduz carga cognitiva extrínseca porque o aluno para de gastar memória de trabalho tentando adivinhar para onde vai.
-- **Problema motivador** antes do formalismo, não depois. No caso da estratégia A, vale a pena apresentar o core principal do método, sem grandes complicações, de forma intuitiva.
+- **Problema motivador** discuta e provoque os alunos a pensar um pouco Isso vem antes do formalismo, não depois. 
+- **Pausa ativa** veja abaixo.
 
-**2. Desenvolvimento (segmentado)** — o ponto crítico: não é um bloco contínuo.
+**2. Intuição (10 min)** Quando possível, explique em linhas gerais o algoritmo/modelo, sem grandes complicações matemáticas (exemplo: em arvore de decisão dá para explicar que vamos quebrar o espaço recursivamente, e a cada quebra a informação resumida em cada bloco é mais explicativa do que antes), mostre gráficos, algoritmos, diagramas. O aluno deve praticamente entender o que vamos fazer, só vai faltar detalhes mais pesados. Isso deve ser aplicado quase sempre na **Estratégia A** e quando cabível, na **Estratégia B**.
+
+**3. Desenvolvimento (segmentado)** — o ponto crítico: não é um bloco contínuo.
 - **Segmentação em blocos de 10–15 min**, cada um com um único "ponto de aterrissagem". A atenção sustentada em exposição passiva degrada rapidamente; o corte periódico reinicia o ciclo.
-- **Pausas ativas**: crie um slide `Pergunta` entre blocos: peça para o aluno escrever a ideia central com suas palavras, comparar com o colega, ou responder uma pergunta de checagem. É o intervalo que consolida, não a exposição. Apresentar como uma **pergunta direta**, sem rótulo genérico tipo "Pausa ativa" antes dela — o título do `callout-tip` é a própria pergunta:
-  ```
-  ::: {.callout-tip}
-  ## Por que o corte "no cruzamento das curvas" está errado, e o que falta entrar na conta?
-  :::
-  ```
-  **Atenção — no RevealJS isso precisa de um heading real por fora da
-  caixa.** Um `##` usado como título de um `callout-tip` não gera um
-  heading de verdade (vira um `<div class="callout-title">`), e por
-  isso o Reveal.js sozinho não reconhece ali um novo slide — o
-  conteúdo gruda no slide anterior. É por isso que o slide `Pergunta`
-  citado acima precisa de um heading real `## Pergunta`, genérico,
-  ANTES da caixa (fora dela) — só esse heading real garante o corte de
-  slide certo. A pergunta específica continua sendo o título do
-  `callout-tip`, dentro da caixa:
-  ```
-  ::: {.content-visible when-format="revealjs"}
-  ## Pergunta
-
-  ::: {.callout-tip}
-  ## Por que o corte "no cruzamento das curvas" está errado, e o que falta entrar na conta?
-  :::
-  :::
-  ```
-  Nas notas HTML não há esse problema de corte de slide (não é
-  necessário o heading genérico `## Pergunta` por fora) — mas usar o
-  mesmo padrão nos dois formatos não atrapalha.
-
-  Neste slide também coloque uma pergunta de V/F que auxilie a pensar nesse conceito.
-
-  Crie um slide seguinte chamando `Resposta` onde a pergunta direta é repetida e a resposta do VF é dada.
-- **Sinalização verbal**: "isto é o resultado central", "esta hipótese é a que vamos relaxar depois". Marcadores explícitos de hierarquia evitam que tudo pareça igualmente importante.
+- **Use sinalização verbal**: "isto é o resultado central", "esta hipótese é a que vamos relaxar depois". Marcadores explícitos de hierarquia evitam que tudo pareça igualmente importante.
+- **Pausas ativa ao final do bloco**
+- **Desenvolvimento matemático *principled***: uma vez passada a
+  Intuição, o rigor sobe — não apresente a fórmula/técnica final já
+  pronta. Primeiro **anuncie explicitamente as premissas/suposições**
+  que vão ser assumidas (ex.: "vamos assumir que $p(\mathbf{x})$ é
+  aproximadamente constante dentro de uma região pequena $R$"), depois
+  **desenvolva passo a passo** como essas premissas levam à técnica
+  final, deixando visível cada passo lógico/matemático do caminho — o
+  aluno precisa conseguir seguir *como* se chega no resultado, não só
+  receber o resultado e confiar nele.
 
 **3. Fechamento (5 min)** — quase sempre o mais sacrificado e o mais valioso:
 - Retomar as perguntas da abertura e responder cada uma em uma frase.
 - Nomear explicitamente o que ficou em aberto e o que vem na próxima aula.
+
+**Geral - Pausa Ativa (3 min)** - A pausa ativa visa fazer o aluno parar para refletir sobre o problema e confiar que entendeu o que veio antes. Pausas ativas ficam tanto nos slides quanto nas notas.
+- **Pergunta Motivadora** faça uma pergunta provocara que provoque o aluno a pensar sobre o que discutimos, não só guardar, use essa estrutura:
+  
+  ::: {.callout-tip}
+  ## Pergunta provocadora.
+
+  Dica para ajudar a conduzir.
+  :::
+- **V/F condutor** crie perguntas de verdadeiro ou falso que validem o
+  conteúdo anterior e ajudem o aluno a pensar mais profundamente na
+  pergunta motivadora. **Não use a sintaxe de lista de tarefas do
+  Markdown (`- [ ]`)** — o Pandoc renderiza isso como um `<input
+  type="checkbox">` de verdade, clicável no navegador (feedback
+  explícito do usuário: "isso não é bom").
+
+  **Cuidado — nem todo glifo de caixa "parece seguro" realmente é.** A
+  extensão `task_lists` do Pandoc trata alguns glifos Unicode como
+  sinônimos de `[ ]`/`[x]` mesmo fora da sintaxe de colchetes, e os
+  converte no mesmo `<input type="checkbox">` clicável — **`☐`
+  (U+2610) e `☒` (U+2612) são especiais para o Pandoc e viram
+  checkbox mesmo assim** (verificado testando `pandoc -f markdown -t
+  html` isoladamente; `☑` U+2611, por outro lado, não é especial e
+  fica como texto puro — mas é melhor não confiar nessa assimetria).
+  Os glifos **confirmados seguros** (testados, permanecem texto puro)
+  são:
+  - `□` (U+25A1, quadrado vazio) para item ainda não resolvido;
+  - `✔` (U+2714, marca de verificação) para item **Verdadeiro**;
+  - `✗` (U+2717, X) para item **Falso**.
+
+  Use `□` como texto simples no início de cada item:
+  ::: {.callout-tip}
+  ## Tema do V/F.
+
+- □ Afirmação 1.
+- □ Afirmação 2.
+- □ Afirmação 3.
+- □ Afirmação 4.
+
+  :::
+- **Resposta** nos slides crie um novo slide com resposta do V/F e
+  depois coloque de novo a pergunta motivadora e espere a resposta do
+  aluno. Na resposta, reescreva cada item trocando `□` pelo glifo
+  resolvido: `✔` para item **Verdadeiro**, `✗` para item **Falso** — a
+  caixinha "estilizada" já comunica o veredito, sem precisar do rótulo
+  "Verdadeiro"/"Falso" por extenso ao lado (pode manter uma
+  justificativa curta depois do glifo, se ajudar). Exemplo:
+
+  ::: {.callout-tip}
+  ## Tema do V/F — Resposta
+
+- ✔ Afirmação 1 (verdadeira).
+- ✗ Afirmação 2 (falsa) — breve razão.
+
+  :::
+
+  **Nas notas de aula, a resposta NÃO fica no `index.qmd` publicado.**
+  Crie um arquivo novo e não publicado, `aulaNN/_03-respostas-pausas.md`
+  (mesmo prefixo `_` dos demais arquivos de apoio — nunca deve aparecer
+  no site), discutindo cada pergunta motivadora e dando a solução dos
+  V/F com os mesmos glifos `✔`/`✗`. O `index.qmd` das notas só contém a
+  pergunta em si (mesmo bloco `::: {.callout-tip}` usado no slide de
+  Pergunta, sem duplicar), nunca a resolução.
 
 ### Técnicas de nível micro
 
@@ -159,71 +179,73 @@ Cada aula é um **único arquivo `index.qmd`** dentro da sua pasta
 produz duas saídas (HTML e RevealJS) via blocos
 `::: {.content-visible when-format="..."}`:
 
-- **HTML** (`unless-format="revealjs"`): prosa corrida, completa,
-  com as provas/derivações por extenso, citações de página do livro,
-  avisos de leitura e notas de rodapé pedagógicas. Sai como `notas.html`
-  em TODA aula, sem exceção (ver "Nomes de arquivo de saída" abaixo) —
-  o ícone de livro no rodapé dos slides (`../logos-footer.html`) linka
-  direto pra `notas.html` como caminho relativo fixo, contando com esse
-  nome ser sempre o mesmo.
-- **RevealJS**: densa e completa, não um resumo de tópicos — os slides
-  precisam sustentar a aula sozinhos em sala, não só sinalizar
-  *highlights* ("só highlights é complicado para trabalhar", feedback
-  explícito do usuário). Usar bullets/fragmentos (`. . .`,
-  `::: {.fragment}`) para revelar progressivamente e organizar uma ideia
-  por slide, mas sem cortar explicações, derivações e nuances
-  essenciais — o corte em relação à versão HTML é de ritmo e organização
-  visual, não de profundidade de conteúdo. Conceitos não-triviais
-  (ex: teoria kantiana, normas *prima facie*) precisam do mesmo cuidado
-  explicativo nos slides que têm nas notas — não vale simplificar a
-  ponto de distorcer. Sai como `slides.html`.
+**O papel de cada saída não é "completo" vs. "resumido" — é "corrido"
+vs. "itemizado", com quantidade de informação quase igual.** Feedback
+explícito do usuário, depois de revisar slides "muito simplificados"
+de uma aula cujas notas estavam boas: a diferença entre `notas.html` e
+`slides.html` **não é de profundidade de conteúdo**, é de **forma de
+organização**. Antes de aceitar uma versão de slide como pronta,
+pergunte: "se um aluno só tivesse acesso a este slide (nunca às
+notas), ele teria a mesma informação, só organizada de outro jeito —
+ou ele perderia algo que só está na versão em prosa?" Se a resposta for
+"perderia", o slide está simplificado demais.
 
-  **Não abuse de caixas (`callout-tip`/`note`/`important`/`warning`).**
-  Feedback explícito do usuário, depois de uma aula (Aula 3 de
-  `supervised-learning`) acumular slides com pouca informação e caixas
-  demais: virou hábito embrulhar toda frase de destaque — inclusive um
-  simples apontador para o próximo bloco, ou um resumo de uma linha —
-  numa caixa, às vezes uma dentro da outra (`.fragment` > `callout` >
-  frase). O padrão certo é o oposto: a maior parte do conteúdo de um
-  slide é fragmento de texto simples (`::: {.fragment}`); uma caixa só
-  se justifica para (a) o par pergunta/resposta de uma pausa ativa de
-  verdade, ou (b) um aviso de leitura genuíno (uma armadilha prática,
-  uma divergência de convenção entre fontes). Antes de embrulhar uma
-  frase numa caixa, pergunte: "isso é uma pausa ativa ou um aviso, ou é
-  só o conteúdo normal do slide?" — só o primeiro caso justifica a
-  caixa.
+- **HTML** (`unless-format="revealjs"`): prosa corrida, contando a
+  aula como uma **história com detalhes** — com as provas/derivações
+  por extenso, citações de página do livro, avisos de leitura e notas
+  de rodapé pedagógicas. Sai como `notas.html` em TODA aula, sem
+  exceção (ver "Nomes de arquivo de saída" abaixo) — o ícone de livro
+  no rodapé dos slides (`../logos-footer.html`) linka direto pra
+  `notas.html` como caminho relativo fixo, contando com esse nome ser
+  sempre o mesmo.
+- **RevealJS**: a **mesma história, quase o mesmo tanto de detalhe**,
+  só que reorganizada em itens/fragmentos em vez de parágrafos corridos
+  — nunca um resumo de tópicos. Os slides precisam sustentar a aula
+  sozinhos em sala, não só sinalizar *highlights* ("só highlights é
+  complicado para trabalhar", feedback explícito do usuário). Isso
+  inclui coisas fáceis de esquecer de levar para o slide porque "já
+  foram ditas na nota": **o que uma variável/coluna do dataset
+  significa de verdade** (não só o nome da coluna — se as notas
+  explicam que `radius_mean` é o raio médio do tumor medido no exame,
+  o slide também precisa dizer isso, não só usar o nome da variável
+  como se fosse autoexplicativo), o porquê de uma escolha, o
+  contraste com o que veio antes. Usar bullets/fragmentos (`. . .`,
+  `::: {.fragment}`) para revelar progressivamente e organizar uma
+  ideia por slide, mas sem cortar explicações, derivações e nuances
+  essenciais — o corte em relação à versão HTML é de ritmo e
+  organização visual, não de profundidade de conteúdo. Conceitos
+  não-triviais (ex: teoria kantiana, normas *prima facie*) precisam do
+  mesmo cuidado explicativo nos slides que têm nas notas — não vale
+  simplificar a ponto de distorcer. Sai como `slides.html`.
 
-**Os blocos `content-visible` de HTML e de RevealJS devem ficar
-intercalados ao longo do arquivo, seção por seção (ou bloco por
-bloco) — nunca todo o conteúdo HTML primeiro seguido de todos os
-slides RevealJS no fim do arquivo.** Feedback explícito do usuário:
-juntar todos os slides no final obrigou a retrabalhar aulas já prontas
-depois. A ordem certa, dentro de cada seção/bloco de conteúdo, é
-escrever a versão HTML daquele pedaço e, imediatamente em seguida, a
-versão RevealJS do mesmo pedaço, antes de passar para o próximo
-pedaço — não uma passada completa de notas e só depois uma passada
-completa de slides.
+  **Use caixas para destacar informações (`callout-tip`/`note`/`important`/`warning`).**
+  Mas não faz sentido ter mais de uma caixa por slide, 
+
+  **Intercale HTML e RevealJS** Os blocos `content-visible` de HTML e de RevealJS devem ficar intercalados ao longo do arquivo, é importante fazer isso para evitar duplicidade de códigos python que vão ser rodados. Então se eu tenho um código python ou tikz no ponto C, a gente pode colocar A (nota/html), B(slide/revealjs), e C(plot/python/tikz) para evitar reprocessamento
+
+  **Nenhum slide pode ficar vazio/esvaziado de conteúdo.** Um slide com
+  só um título e uma frase curta (ou pior, um título e nada — texto que
+  "sobrou" depois de um gráfico ter ficado no slide anterior) não
+  sustenta um minuto de fala sozinho. Antes de aceitar um slide como
+  pronto, pergunte: "isto ocupa o slide, ou está vazio demais?" Duas
+  saídas, nunca "deixar assim": **(a)** falta conteúdo — adicionar mais
+  explicação, outra citação, uma reafirmação com uma perspectiva nova
+  — não só um enfeite; ou **(b)** o conteúdo é fino demais para
+  justificar um slide próprio — juntar com o slide vizinho (anterior ou
+  seguinte) em vez de espalhar pouca informação por muitos slides. Um
+  caso comum desse problema: um gráfico/diagrama aparece sozinho num
+  slide, e o slide seguinte só comenta esse gráfico em texto, sem o
+  gráfico por perto — nesse caso, prefira manter o comentário no mesmo
+  slide do gráfico (ou repetir/reduzir o gráfico ao lado do comentário)
+  em vez de separar imagem e leitura da imagem em dois slides.
 
 ## Dados: prefira exemplos reais a sintéticos
 
-Feedback explícito do usuário: as aulas têm ficado teóricas demais para
-quem está aprendendo Aprendizado de Máquina/Otimização pela primeira
-vez — sem um dado real e palpável por trás, a matemática fica abstrata
-demais. Ao escolher o dataset que ilustra o fio condutor de uma aula (o
-"problema-fio" que atravessa os blocos), **prefira um dataset real a um
-dataset sintético**, e **prefira ambos a um dataset de brinquedo como
-Iris** — interessante para ensinar sintaxe, mas pouco palpável (poucos
-alunos têm intuição sobre pétalas de flor).
+As aulas têm ficado teóricas demais para quem está aprendendo Aprendizado de Máquina/Otimização pela primeira vez — sem um dado real e palpável por trás, a matemática fica abstrata demais. Ao escolher o dataset que ilustra o fio condutor de uma aula (o
+"problema-fio" que atravessa os blocos), **prefira um dataset real a um dataset sintético**, e **prefira ambos a um dataset de brinquedo como Iris** — interessante para ensinar sintaxe, mas pouco palpável (poucos alunos têm intuição sobre pétalas de flor).
 
-**De onde puxar o dataset: Hugging Face Hub, não pedir arquivo ao
-usuário a cada aula.** Em vez de esperar o usuário trazer um CSV para
-cada aula nova, use a lista curada abaixo — todos os itens foram
-testados com `datasets.load_dataset(repo_id)`, sem token/chave
-(datasets públicos do Hub não exigem autenticação; só datasets
-*gated*/privados exigiriam, via `HF_TOKEN`, o que não é o caso de
-nenhum item desta lista). O kernel Jupyter usado nas aulas
-(`sensibleml-moo`) já tem `datasets` e `huggingface_hub` instalados. Ao
-carregar, aparece um aviso de "unauthenticated requests" — é só um
+**De onde puxar o dataset: Hugging Face Hub, não pedir arquivo ao usuário a cada aula.** Em vez de esperar o usuário trazer um CSV para cada aula nova, use a lista curada abaixo — todos os itens foram testados com `datasets.load_dataset(repo_id)`, sem token/chave
+(datasets públicos do Hub não exigem autenticação; só datasets *gated*/privados exigiriam, via `HF_TOKEN`, o que não é o caso de nenhum item desta lista). O kernel Jupyter usado nas aulas (`sensibleml-moo`) já tem `datasets` e `huggingface_hub` instalados. Ao carregar, aparece um aviso de "unauthenticated requests" — é só um
 aviso de limite de taxa, não um bloqueio; pode ignorar.
 
 | Dataset (repo Hugging Face) | Linhas | Uso recomendado | Observações |
@@ -236,12 +258,7 @@ aviso de limite de taxa, não um bloqueio; pode ignorar.
 | **German Credit Data (Statlog)** — `AiresPucrs/german-credit-data` | 1.000 | Risco de crédito, mistura explícita de categóricos (Sexo, Moradia, Propósito) e numéricos (Idade, Valor, Duração) — bom encaixe para Naive Bayes com atributos de tipos diferentes | Dataset pequeno, bom para uma aula que não quer um treino pesado |
 | **Credit Card Transactions Fraud Detection** — `dazzle-nu/CIS435-CreditCardFraudDetection` | ~1.048.575 | Fraude/anomalia com atributos interpretáveis (valor, categoria, localização) — melhor para a lógica de detecção de anomalia da Aula 1 de `unsupervised-learning` do que o dataset clássico da ULB, cujos atributos são componentes de PCA anônimos, não interpretáveis | Grande: **subamostrar** para uso em aula; descartar colunas `Unnamed: 0`, `Unnamed: 23`, `6006` (artefatos); classe muito desbalanceada (avisar antes de usar) |
 
-Isso não bane dados sintéticos por completo: eles seguem úteis para
-isolar um ponto matemático específico (ex.: um contraexemplo
-controlado, ou uma verificação numérica de uma propriedade, como o
-contraexemplo de Gini/entropia da Aula 3 de `supervised-learning`). Mas
-o **exemplo-fio** que atravessa os blocos de uma aula — o problema que
-dá contexto para tudo o resto — deve, sempre que possível, vir de um
+Isso não bane dados sintéticos por completo: eles seguem úteis para isolar um ponto matemático específico (ex.: um contraexemplo controlado, ou uma verificação numérica de uma propriedade, como o contraexemplo de Gini/entropia da Aula 3 de `supervised-learning`). Mas o **exemplo-fio** que atravessa os blocos de uma aula — o problema que dá contexto para tudo o resto — deve, sempre que possível, vir de um
 dataset real, preferencialmente um da tabela acima.
 
 **Como usar no `.qmd`:** carregar no bloco de setup global, junto com
@@ -258,80 +275,20 @@ from datasets import load_dataset
 ds = load_dataset("scikit-learn/adult-census-income")["train"].to_pandas()
 ```
 
-Sem as duas primeiras linhas, tanto o aviso de "unauthenticated
-requests" quanto a barra de progresso do download vazam para a saída do
-chunk renderizado (mesmo com `echo: false`, que só esconde o código,
-não a saída/stderr) — com elas, a saída fica limpa.
+Sem as duas primeiras linhas, tanto o aviso de "unauthenticated requests" quanto a barra de progresso do download vazam para a saída do chunk renderizado (mesmo com `echo: false`, que só esconde o código, não a saída/stderr) — com elas, a saída fica limpa.
 
-O download é armazenado em cache local (`~/.cache/huggingface/`) —
-renderizações seguintes na mesma máquina não baixam de novo. Se, algum
-dia, um dataset novo (fora desta lista) for necessário, teste o
-`load_dataset(repo_id)` antes de incorporar à aula (confirmar que
-carrega sem token e checar as colunas), e considere adicionar à tabela
+O download é armazenado em cache local (`~/.cache/huggingface/`) — renderizações seguintes na mesma máquina não baixam de novo. Se, algum dia, um dataset novo (fora desta lista) for necessário, teste o `load_dataset(repo_id)` antes de incorporar à aula (confirmar que carrega sem token e checar as colunas), e considere adicionar à tabela
 acima se for reutilizável em outras aulas.
 
 ## Citações e trechos de fontes: sempre traduzidos no `index.qmd`
 
-Fontes bibliográficas em inglês (comum neste projeto) devem ter seus
-trechos **traduzidos para português** no `index.qmd` da aula — tanto
-nas notas quanto nos slides. Deixar a citação em inglês tem um custo
-alto de troca de idioma para quem lê ou apresenta em português
-(feedback explícito do usuário). Evite "copiar e colar" trechos dos
-livros.
+Fontes bibliográficas em inglês (comum neste projeto) devem ter seus trechos **traduzidos para português** no `index.qmd` da aula — tanto nas notas quanto nos slides. Deixar a citação em inglês tem um custo alto de troca de idioma para quem lê ou apresenta em português (feedback explícito do usuário). Evite "copiar e colar" trechos dos livros.
 
-- Em `_01-fontes.md`, o "Trecho" deve ser um overview dos conceitos, a
-  citação literal deve sempre ser traduzida para evitar travas de
-  direitos autorais — a intenção é ter um registro de verificação
-  direta contra o PDF (Etapa 3, não mexer nisso).
-- No `index.qmd` da aula, usar a tradução para português do trecho,
-  deixando claro que é tradução nossa (ex.: "tradução livre"), não uma
-  citação literal de outra fonte. Termos técnicos sem tradução direta e
-  estável (ex.: *prima facie*, em latim) podem ficar no original, com
-  uma explicação ao lado na primeira aparição.
+- Em `_01-fontes.md`, o "Trecho" deve ser um overview dos conceitos, a   citação literal deve sempre ser traduzida para evitar travas de   direitos autorais — a intenção é ter um registro de verificação direta contra o PDF (Etapa 3, não mexer nisso).
+- No `index.qmd` da aula, usar a tradução para português do trecho, deixando claro que é tradução nossa (ex.: "tradução livre"), não uma citação literal de outra fonte. Termos técnicos sem tradução direta e estável (ex.: *prima facie*, em latim) podem ficar no original, com uma explicação ao lado na primeira aparição.
 
-Código Python é embutido nos mesmos chunks, gerando as figuras que
-ilustram tanto a versão HTML quanto a RevealJS.
-
-- Um único bloco de **setup global** no topo (imports, seed do RNG,
-  paleta de cores fixa reutilizada em toda a aula, funções auxiliares).
-  **Cores preferenciais, nesta ordem:** as cores do IC —
-  `#0085CA` (RGB 0,133,202), `#FF5E00` (RGB 255,94,0) e `#E03C31`
-  (RGB 224,60,49). Use essas três primeiro (ex.: `COR_A`, `COR_B`,
-  `COR_LIM`) antes de introduzir qualquer outra cor na paleta da aula;
-  cores adicionais (`COR_NEU`, `COR_ALT`, etc.), se precisar de mais de
-  três, ficam livres, mas as três do IC vêm sempre primeiro. (Essa é a
-  mesma paleta de `../lesson-theme.scss`, que estiliza a própria
-  página — headings/links em azul, código/destaque em laranja, callouts
-  de atenção em vermelho.)
-- Chunks com `#| echo: false` e `#| fig-align: center` para as figuras
-  **cujo código é só plumbing de plot** (montar eixos, cores, layout) —
-  esse código não ensina nada sobre o conceito da aula, só sobre
-  matplotlib, e esconder é o padrão certo. Mas quando o chunk **é** a
-  demonstração — uma verificação numérica, uma função objetivo escrita
-  por extenso, um pequeno loop que testa candidatos e mostra por que um
-  deles vence — use `#| echo: true`: nesse caso o código *é* o conteúdo
-  pedagógico, não um detalhe de implementação a esconder. Exemplo de
-  referência já aprovado: a verificação de MLE gaussiano numa folha em
-  `supervised-learning/aula03/index.qmd` (a função `loglik_gauss` e o
-  loop que testa candidatos a $y_\tau$ ficam visíveis com `echo: true`;
-  o código do gráfico ao redor continua `echo: false`). Ao escrever uma
-  aula nova, para cada chunk pergunte: "se eu esconder este código, o
-  aluno perde uma explicação, ou só perde ruído de matplotlib?" — só o
-  primeiro caso justifica `echo: true`.
-- Numeração de blocos/seções consistente com a numeração usada no
-  planejamento do semestre.
-- Avisos de leitura (`::: {.callout-warning}`, `::: {.callout-note}`,
-  `::: {.callout-important}`) quando a interpretação do curso diverge
-  da referência bibliográfica, ou quando há uma armadilha prática
-  conhecida (ex: zeros exatos quebrando uma verossimilhança).
-
-**Nomes de arquivo de saída:** definir explicitamente no YAML do
-`index.qmd`, já que o padrão do Quarto usaria o nome do próprio arquivo
-(`index`) para ambos os formatos. **`output-file: notas.html` não é só
-convenção — é obrigatório**: o ícone de livro no rodapé dos slides
-(`../logos-footer.html`) linka pra `notas.html` como caminho relativo
-fixo; uma aula sem esse `output-file` sairia como `index.html` e o
-ícone quebraria (404) nela.
+**Nomes de arquivo de saída:** definir explicitamente no YAML do `index.qmd`, já que o padrão do Quarto usaria o nome do próprio arquivo (`index`) para ambos os formatos. **`output-file: notas.html` não é só convenção — é obrigatório**: o ícone de livro no rodapé dos slides (`../logos-footer.html`) linka pra `notas.html` como caminho relativo
+fixo; uma aula sem esse `output-file` sairia como `index.html` e o ícone quebraria (404) nela.
 
 ```yaml
 format:
@@ -341,18 +298,11 @@ format:
     output-file: slides.html
 ```
 
-Além disso, cada aula soma o tema visual e as configurações
-compartilhadas de slide (footer, logos, dimensões) por cima — ver um
-`index.qmd` de aula já existente para o bloco `format:` completo,
-copiando-o em vez de reescrever do zero. **Essas configurações
-compartilhadas vivem no front matter de CADA aula, não no `_quarto.yml`
-do projeto** — um `format: revealjs:` global já quebrou o build do
-site inteiro de forma silenciosa (nem toda página some do render, e o
-erro reportado não aponta pra causa real), então não promova essas
-configurações pro `_quarto.yml`, mesmo que pareça redundante repeti-las
+Além disso, cada aula soma o tema visual e as configurações compartilhadas de slide (footer, logos, dimensões) por cima — ver um `index.qmd` de aula já existente para o bloco `format:` completo, copiando-o em vez de reescrever do zero. **Essas configurações
+compartilhadas vivem no front matter de CADA aula, não no `_quarto.yml` do projeto** — um `format: revealjs:` global já quebrou o build do site inteiro de forma silenciosa (nem toda página some do render, e o erro reportado não aponta pra causa real), então não promova essas configurações pro `_quarto.yml`, mesmo que pareça redundante repeti-las
 em cada aula.
 
-## Sugestão de fluxogramas e diagramas
+## Fluxogramas e diagramas
 
 Ao montar o bloco, se o conteúdo tiver estrutura sequencial, uma árvore de decisão, um processo com ramificações, ou uma comparação de caminhos alternativos (ex: "três saídas honestas para um problema"), **proponha um diagrama TikZ** (` ```{.tikz} `), sem esperar o usuário pedir. O site já está configurado (`_quarto.yml` da raiz do projeto) com o filtro `pandoc-ext/diagram` e o *engine* TikZ (via `pdflatex`), renderizando nativamente nos dois formatos de saída (HTML e RevealJS). Use as cores preferenciais do IC (ver seção acima) nos elementos do diagrama quando fizer sentido. Só pergunte se não estiver claro que o diagrama ajuda mais do que texto.
 
@@ -362,83 +312,47 @@ Ao montar o bloco, se o conteúdo tiver estrutura sequencial, uma árvore de dec
 
 **`out-width`, `fig-width` e `fig-height` (chunk options) não funcionam nas aulas.** Essas três são implementadas só pelo engine `knitr` (R) — confirmado no schema oficial do Quarto (`tags: {engine: knitr}` em cada uma) e testado ao vivo (valores diferentes de `out-width`/`fig-width` num chunk Python não mudavam o tamanho da imagem gerada). Como toda aula usa `jupyter: <kernel>`, essas opções são silenciosamente ignoradas — não proponha nem use nenhuma delas.
 
-Pra mudar o tamanho de uma figura/diagrama numa aula, use uma das duas vias abaixo, dependendo do que se quer:
+**Regra de para figuras e diagramas**: todo chunk Python que gera figura e todo bloco `{.tikz}` devem sair já envolvidos em `.fig-resize`, mesmo que o tamanho padrão (100%) sirva.
 
-- **Mudar o tamanho REAL da imagem gerada** (mais nítida/detalhada, ou com outra proporção): no matplotlib, `figsize=(w, h)` direto na chamada (`fig, ax = plt.subplots(figsize=(5, 5))`); no TikZ, ajuste o próprio código (`scale=` nas opções do `tikzpicture`, ou os `minimum width=`/`minimum height=` dos nós).
-- **Mudar só como a figura APARECE na página** (sem re-gerar nada — útil pra um diagrama já pronto que só está grande/pequeno demais no slide, ou pra centralizar quando não há legenda): envolva o bloco com a classe `.fig-resize` (definida em `../lesson-theme.scss`), que faz a imagem preencher 100% de uma `div` com `width` explícito:
-
-  ```
-  ::: {.fig-resize style="width: 25%; margin: 0 auto;"}
-  ```{python}
-  ...
-  ```
-  :::
-  ```
-
-  Pra ENCOLHER (`width` menor que 100%), `margin: 0 auto` já centraliza sozinho. Pra AUMENTAR além de 100% (ex.: `width: 150%`), use `margin-left` negativo igual à metade do excesso (150% → `-25%`) — `auto` não centraliza uma caixa mais larga que o próprio pai. Esta é também a forma correta de centralizar um diagrama TikZ sem legenda (já que `fig-align` não funciona nesse caso — ver acima), e evita o auto-stretch do RevealJS (que estica pra tela cheia qualquer slide com uma única imagem solta) — o wrapper `.fig-resize` não bate no padrão que o RevealJS procura pra ativar esse comportamento.
-
-  Tabela de referência `width` → `margin-left` (só usar `margin-left` acima de 100%; abaixo disso é sempre `margin: 0 auto`):
-
-  | `width` | `margin-left` |
-  |---|---|
-  | ≤100% | (nenhum — usar `margin: 0 auto`) |
-  | 120% | `-10%` |
-  | 150% | `-25%` |
-  | 170% | `-35%` |
-  | 200% | `-50%` |
-
-  **Cuidado com um efeito colateral: sem o wrapper, toda imagem do site (inclusive figuras de chunk Python) já tem um teto de exibição de 100% do container** — regra CSS genérica do próprio Quarto (`img { max-width: 100% }`), independente de `.fig-resize`. Isso quer dizer que `figsize=(w, h)` maior só muda o tamanho **real/interno** da imagem gerada (resolução, proporção); visualmente ela para de crescer assim que atinge 100% do container — aumentar `figsize` além disso não tem nenhum efeito na tela (foi exatamente essa a origem de "aumento `figsize` e não muda"). `figsize` sozinho só funciona pra ENCOLHER (abaixo do teto); pra crescer além do container, é `.fig-resize` com `width` > 100%, não `figsize`.
-
-  **Regra de autoria (padrão em toda aula nova, pedido explícito do usuário): todo chunk Python que gera figura e todo bloco `{.tikz}` devem sair já envolvidos em `.fig-resize`, mesmo que o tamanho padrão (100%) sirva.** Não espere o usuário reclamar de tamanho pra só então adicionar o wrapper — deixe-o pronto desde a primeira versão da aula, com `width: 100%; margin: 0 auto;` como valor de partida:
-
-  ```
-  ::: {.fig-resize style="width: 100%; margin: 0 auto;"}
-  ```{python}
-  ...
-  ```
-  :::
-  ```
-
-  Motivo: sem o wrapper já presente, o usuário precisa pedir pra você adicioná-lo toda vez que quiser ajustar um tamanho — com ele sempre presente, o ajuste vira só trocar o número do `width` (e, se passar de 100%, calcular o `margin-left` pela tabela acima), sem precisar descobrir de novo qual mecanismo usar.
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+...
+```
+:::
 
 ## Exercícios (obrigatório em toda aula)
 
 Toda aula precisa de exercícios — em dois formatos distintos, um por saída, que não devem ser confundidos entre si:
 
-- **Notas (HTML):** terminar o arquivo com uma seção de **Exercícios** (dentro do bloco `content-visible` exclusivo de HTML), com **exatamente 3 questões discursivas/conceituais** e **12 questões de V/F** (não 12 itens — **12 blocos de 4 itens cada**, ou seja, 48 itens ao todo, cada bloco num tema diferente da aula, cobrindo o conteúdo da aula de ponta a ponta) — quotas fixas, por aula. Pode reaproveitar questões de fim de capítulo das próprias fontes bibliográficas (citando de onde vieram, como já se faz com trechos citados) ou propor questões originais — nesse caso, sinalizar que são originais, não da fonte. Ficam sem solução no arquivo (é trabalho para o aluno resolver por conta, fora da aula). Cada questão de V/F tem 4 itens do mesmo tema, e só é considerada correta se todos os 4 forem acertados (na avaliação, o aluno pode deixar a questão em branco com punição de 20% da nota da questão). Cada uma das 12 questões (os 4 itens de um mesmo tema) fica dentro de um `::: {.callout-tip}` cujo título é o **tema** daquela questão (não um rótulo genérico) — deixa explícito que aquilo é uma unidade de questão.
+- **Notas (HTML):** terminar o arquivo com uma seção de **Exercícios** (dentro do bloco `content-visible` exclusivo de HTML), com **exatamente 3 questões discursivas/conceituais** e **12 questões de V/F** (não 12 itens — **12 blocos de 4 itens cada**, ou seja, 48 itens ao todo, cada bloco num tema diferente da aula, cobrindo o conteúdo da aula de ponta a ponta) — quotas fixas, por aula. Pode reaproveitar questões de fim de capítulo das próprias fontes bibliográficas (citando de onde vieram, como já se faz com trechos citados) ou propor questões originais — nesse caso, sinalizar que são originais, não da fonte. Ficam sem solução no arquivo (é trabalho para o aluno resolver por conta, fora da aula). Cada questão de V/F tem 4 itens do mesmo tema, e só é considerada correta se todos os 4 forem acertados (na avaliação, o aluno pode deixar a questão em branco com punição de 20% da nota da questão). Use esse formato:
 
-- **Slides (RevealJS):** intercalar, **no meio** da sequência de slides (não só ao final), pequenos exercícios de checagem/acompanhamento — uma pergunta objetiva e rápida sobre o que acabou de ser apresentado, para o aluno testar se acompanhou o conteúdo em tempo real. **No mínimo 3 desses exercícios de checagem por aula**, espalhados ao longo dos slides (não concentrados num só bloco). Cada um é um V/F de 4 itens (mesmo tema, mesma lógica das notas), com os 4 itens juntos em **um único slide**, dentro de um `::: {.callout-tip}` cujo título é o **tema** do bloco — seguido **imediatamente** (no slide seguinte) por **um único slide de resposta**, com a solução dos 4 itens junta, também em caixa (`::: {.callout-tip}`, título "*tema* — Resposta"). Não deixar nenhum desses três para o fim da aula.
+::: {.callout-note icon=false}
+## Tema das questões
+
+- □ Afirmação 1.
+- □ Afirmação 2.
+- □ Afirmação 3.
+- □ Afirmação 4.
+:::
+
+**Mesma regra do glifo não-clicável da Pausa Ativa se aplica aqui**:
+nunca usar a sintaxe de lista de tarefas do Markdown (`- [ ]`), nem os
+glifos `☐`/`☒` (ambos especiais para a extensão `task_lists` do
+Pandoc, viram `<input type="checkbox">` clicável mesmo fora dos
+colchetes) — usar sempre `□` (U+25A1) como texto simples.
+
+- **Slides (RevealJS):** como indicado acima, esses exercícios devem ser contínuos sem passar mais de 15 sem um.
 
 ### Metodologia de criação de cada item de V/F (notas e slides)
 
-Feedback explícito do usuário: as quotas acima (12 blocos de 4 itens nas
-notas, ≥3 blocos nos slides) definem **quanto** produzir; esta seção
-define **como** cada item deve ser pensado, e vale igualmente para os
-itens das notas e para os dos slides — um item de checagem de slide não
-tem um padrão de qualidade mais baixo que um item das notas.
+**Objetivo:** cada item deve testar compreensão estrutural, capacidade de síntese e aplicação do conhecimento — não memorização rasa. Um aluno que decorou a aula sem entender a mecânica por trás dela deve errar; um aluno que entendeu deve acertar mesmo nunca tendo visto aquela frase exata antes.
 
-**Objetivo:** cada item deve testar compreensão estrutural, capacidade
-de síntese e aplicação do conhecimento — não memorização rasa. Um aluno
-que decorou a aula sem entender a mecânica por trás dela deve errar; um
-aluno que entendeu deve acertar mesmo nunca tendo visto aquela frase
-exata antes.
+**Toda afirmação precisa nascer de uma das heurísticas abaixo** (a lista não é exaustiva — o importante é a avaliação profunda, não a lista em si):
 
-**Toda afirmação precisa nascer de uma das heurísticas abaixo** (a
-lista não é exaustiva — o importante é a avaliação profunda, não a
-lista em si):
-
-1. **Cenário contrafactual** — inverta uma premissa fundamental ou
-   altere uma condição essencial do conceito, e afirme algo sobre a
-   consequência lógica dessa alteração.
-2. **Caso limite/extremo** — teste o comportamento do conceito num
-   extremo absoluto (uma variável indo a infinito ou a zero, a ausência
-   total de um fator limitante, $N\to\infty$, $\lambda\to 0$, etc.).
-3. **Transferência de domínio** — descreva um cenário prático ou
-   analítico que **não** apareceu na aula, e afirme que o conceito se
-   aplica (ou falha) ali de um jeito específico.
-4. **Falsa dicotomia/falsa equivalência** — construa uma afirmação que
-   soe plausível por usar o jargão certo da aula, mas que erre a
-   relação de causa e efeito de forma sutil e estrutural.
+1. **Cenário contrafactual** — inverta uma premissa fundamental ou altere uma condição essencial do conceito, e afirme algo sobre a consequência lógica dessa alteração.
+2. **Caso limite/extremo** — teste o comportamento do conceito num extremo absoluto (uma variável indo a infinito ou a zero, a ausência total de um fator limitante, $N\to\infty$, $\lambda\to 0$, etc.).
+3. **Transferência de domínio** — descreva um cenário prático ou analítico que **não** apareceu na aula, e afirme que o conceito se aplica (ou falha) ali de um jeito específico.
+4. **Falsa dicotomia/falsa equivalência** — construa uma afirmação que soe plausível por usar o jargão certo da aula, mas que erre a relação de causa e efeito de forma sutil e estrutural.
 
 **Proibido:**
 - Perguntas do tipo "o que é X" ou "X é definido como Y".
@@ -447,35 +361,29 @@ lista em si):
   "sempre" por "nunca", "positivo" por "negativo") sem alterar a
   mecânica do conceito por trás.
 
-**Registro da justificativa — só para as notas, em arquivo separado.**
-As notas continuam saindo **sem solução no `index.qmd` publicado** (é
-trabalho do aluno resolver por conta — isso não muda). Mas a
-justificativa de cada item — por que é V ou F, apontando exatamente
-qual falha conceitual o aluno cometeria ao errar — deve ser escrita num
-arquivo novo e não publicado, `aulaNN/_02-solucoes.md` (mesmo prefixo
-`_` dos demais arquivos de apoio, pelo mesmo motivo: nunca deve
-aparecer no site). Formato, por item:
+**Registro da justificativa — só para as notas, em arquivo separado.**As notas continuam saindo **sem solução no `index.qmd` publicado** (é trabalho do aluno resolver por conta — isso não muda). Mas a justificativa de cada item — por que é V ou F, apontando exatamente qual falha conceitual o aluno cometeria ao errar — deve ser escrita num
+arquivo novo e não publicado, `aulaNN/_02-solucoes.md` (mesmo prefixo `_` dos demais arquivos de apoio, pelo mesmo motivo: nunca deve aparecer no site). Formato, por item:
 
 ```markdown
 ### [Tema do bloco] — item (a)
 
 **Heurística:** Contrafactual | Limite | Transferência | Falsa dicotomia
 
-**Afirmação:** [ ] (o texto exato do item, como aparece no `index.qmd`)
+**Afirmação:** ✔ (o texto exato do item, como aparece no `index.qmd` — ✔ se Verdadeiro, ✗ se Falso)
 
 **Resposta:** Verdadeiro / Falso
 
-**Justificativa:** [explicação analítica e direta de por que é V/F —
-sem meio-termo, apontando o erro conceitual específico que o aluno
-cometeria ao marcar a resposta errada]
+**Justificativa:** [explicação analítica e direta de por que é V/F — sem meio-termo, apontando o erro conceitual específico que o aluno cometeria ao marcar a resposta errada]
 ```
 
-Nos **slides**, a lógica de criação dos itens é a mesma (mesmas quatro
-heurísticas, mesmas proibições), mas **sem justificativa** — a resposta
-de cada V/F continua no slide imediatamente seguinte, só com o
-julgamento (V/F) de cada item, exatamente como já estruturado acima;
-não é necessário nenhum arquivo extra para os slides.
+O glifo (`✔`/`✗`) antes do texto da afirmação já comunica visualmente o
+veredito, além do campo **Resposta** por extenso (redundância
+proposital — o glifo para leitura rápida, o campo por extenso para
+busca em texto). **Não use `☑`/`☒` aqui** — `☒` é um dos glifos
+especiais do Pandoc (vira checkbox clicável mesmo em arquivos que não
+são renderizados, por hábito/cópia-e-cola para um `index.qmd`).
 
+Nos **slides**, a lógica de criação dos itens é a mesma (mesmas quatro heurísticas, mesmas proibições), mas **sem justificativa** — a resposta de cada V/F continua no slide imediatamente seguinte, só com o julgamento (V/F) de cada item marcado pelo glifo `✔`/`✗` (ver "Resposta" na seção da Pausa Ativa, acima); não é necessário nenhum arquivo extra para os slides.
 ---
 
 ## Para cada aula (repetir o ciclo)
@@ -548,8 +456,6 @@ o erro esperado.
 > [trecho copiado literalmente do PDF]
 ```
 
-**PARAR** e esperar aprovação/edição do usuário.
-
 **Fontes como link simbólico:** os arquivos em `_fontes/` podem ser
 links simbólicos apontando para os PDFs/slides originais em outro
 lugar do disco (ex: `ln -s ../../../livros/prml.pdf _fontes/prml.pdf`).
@@ -559,6 +465,8 @@ projeto continuar funcionando se a pasta for movida. **Nunca copie o
 PDF de verdade para dentro do projeto** — o prefixo `_` só garante que
 o Quarto ignore a pasta; um link simbólico garante também que o
 arquivo de direitos autorais nunca é versionado como blob do git.
+
+**PARAR** e esperar aprovação/edição do usuário.
 
 ### 4. Montar a aula completa
 Gerar `aulaNN/index.qmd`: arquivo único com saída dupla HTML/RevealJS,
