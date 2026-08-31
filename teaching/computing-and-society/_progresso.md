@@ -402,6 +402,50 @@ qualquer `quarto render` na raiz do projeto até ser corrigido (por
 quem estiver com esse trabalho em andamento), incluindo o preview
 automático do site. Vale avisar o usuário.
 
+## Correções na Aula 4 (2026-08-31), a pedido do usuário
+
+Feedback do usuário: "a aula está um pouco quebrada" + pedido para
+explicar papéis e elicitação de requisitos com mais cuidado antes dos
+aspectos sociais. Dois problemas reais encontrados e corrigidos:
+
+**1. Bug estrutural/glifo nas 6 pausas ativas** (não percebido na
+verificação anterior, que só checava a contagem agregada de `□`, não
+onde cada um estava): cada pausa tinha o Pergunta+V/F duplicado — uma
+vez nas notas (`content-visible html unless-format=revealjs`, com `□`
+correto) e de novo, reescrito, só nos slides (`content-visible
+revealjs`, usando `a./b./c./d.` sem glifo nenhum — o mesmo formato
+antigo já corrigido em `object-oriented-programming` nesta sessão).
+Corrigido nas 6 pausas: removida a duplicata revealjs-only do
+Pergunta+V/F (agora um único bloco compartilhado, sem
+`content-visible`, usando `□`), mantida só a Resposta como
+revealjs-only, convertida de `a. ✔ Texto` para `- ✔ Texto` (lista com
+glifo, não letra solta).
+
+**2. Conteúdo raso em papéis e elicitação de requisitos, antes da
+virada social** — Bloco 2 (Mapa de Papéis) tinha uma tabela de papéis
+sem explicar por que essa divisão existe; Bloco 4 (Elicitação) nomeava
+as 4 etapas clássicas (Sommerville) em uma frase e já pulava para "cada
+etapa esconde uma decisão social", sem nunca explicar o que cada etapa
+faz de fato. Adicionado: no Bloco 2, um parágrafo sobre por que a
+especialização em papéis existe (raciocínios genuinamente diferentes —
+negócio, percepção humana, corretude, falha em escala) e uma coluna de
+"Artefato que produz" na tabela; no Bloco 4, uma explicação mecânica
+completa das 4 etapas com técnicas reais (elicitação: entrevistas,
+*workshops*, etnografia, protótipos descartáveis; análise/negociação:
+MoSCoW, modelo de Kano, matrizes de trade-off; especificação: casos de
+uso, histórias de usuário com critérios de aceite; validação: revisões
+estruturadas, *walkthroughs*, protótipos de baixa fidelidade) — só
+depois disso a pergunta social ("quem participa, quem fica de fora de
+cada atividade concreta") é apresentada. Espelhado nos slides com
+fragmentos equivalentes (1 slide novo em cada bloco).
+
+**Validação:** balanço de `:::` limpo (script LIFO); `grep`
+`☐|☒|- \[ \]|- \[x\]|^[a-d]\. ` limpo; `quarto render --to html` e
+`--to revealjs` sem erro; termos novos (MoSCoW, Kano) confirmados
+presentes em ambos os HTMLs renderizados; contagem de `Exercícios`
+confirmada intacta (não afetada por essas edições, que ficaram todas
+antes da seção de Exercícios).
+
 ## Aulas 5–16
 
 Não iniciadas.
