@@ -214,6 +214,101 @@ faltam ler `Aula 7.tex` (segunda metade: Liskov + exceções
 estruturadas), `Aula 8.tex`, `9.tex` e `10.tex` — todos ainda não
 conferidos, podem ter o mesmo padrão de densidade.
 
+## Conformidade retroativa — Aulas 7 e 8 (2026-08-30)
+
+Sessão dedicada a trazer `aula07/index.qmd` e `aula08/index.qmd` para
+conformidade com a versão atual do `CLAUDE.md` (regras de Pausa Ativa e
+de Exercícios maturadas depois que essas duas aulas foram escritas).
+Escopo estritamente esses dois arquivos — `aula01`–`aula06` ficaram de
+fora (sendo tratadas em paralelo por outra sessão) e nenhum diagrama
+TikZ existe em nenhuma das duas aulas (`grep -c '{.tikz'` = 0 em ambas),
+então não havia trabalho de diagrama a fazer.
+
+**1. Pausas Ativas (3 por aula) — estrutura unificada.** Nas duas
+aulas, cada pausa tinha a pergunta motivadora num `callout-tip`
+compartilhado (correto), mas o V/F condutor vivia num bloco
+`content-visible when-format="revealjs"` separado, com itens em
+formato solto `a. Texto.`/`b.`/`c.`/`d.` (sem glifo) — violando a regra
+de que o V/F condutor deve aparecer identicamente em notas E slides, só
+a resolução ficando exclusiva do RevealJS. Corrigido nas 6 pausas (3 +
+3): mesclado pergunta motivadora + V/F condutor num único
+`callout-tip` compartilhado (título = a pergunta, itens em `- □
+Texto.`), seguindo o padrão maduro de
+`supervised-learning/aula01/index.qmd`. A Resposta (mantida exclusiva
+do RevealJS) foi convertida de `a. **Verdadeiro** — ...` para `- ✔
+Texto — justificativa.` / `- ✗ Texto — justificativa.`, com um
+fragmento final "Voltando à pergunta" sintetizando a resposta à
+pergunta motivadora, também seguindo o padrão maduro.
+
+**2. Exercícios (12 blocos × 4 itens = 48, por aula) — formato e
+conteúdo.** Wrapper trocado de `::: {.callout-tip}` para `:::
+{.callout-note icon=false}` nos 24 blocos (12 por aula); itens
+convertidos de `a. ( ) Texto.` para `- □ Texto.` em todos os 96 itens.
+As 6 questões discursivas (3 por aula) já estavam corretas, não foram
+tocadas.
+
+**Reescrita de itens que violavam a metodologia de V/F do
+`CLAUDE.md`** (paráfrase literal de frase da aula, ou pergunta
+definicional "X é Y", proibidas pela seção "Metodologia de criação de
+cada item de V/F"): 10 itens na Aula 7 (blocos "O que é Polimorfismo"
+item a; "Late Binding" itens a,b; "Polimorfismo Universal" itens a,c,d;
+"Polimorfismo Ad-hoc" itens a,c,d; "Binding Estático vs. Dinâmico" item
+a) e 17 itens na Aula 8 (blocos "Herança como Identidade" item c; "O
+Modificador `protected`" item c; "O Problema da Classe Base Frágil"
+item a; "Herança por Conveniência" itens a,c; "Invariantes Invisíveis"
+itens a,c,d; "Herança de Estado vs. Comportamento" itens a,b; "Template
+Method: o Esqueleto" item b; "Inversão de Controle" itens a,b,d;
+"Vantagens e Riscos do Template Method" itens a,b; "Síntese" item b).
+Cada reescrita manteve o tema original do item, mas passou a nascer de
+uma das 4 heurísticas exigidas (Contrafactual, Limite, Transferência,
+Falsa dicotomia) — normalmente convertendo uma frase quase idêntica ao
+texto da aula (ex.: "Polimorfismo é a capacidade de uma variável ou
+método assumir comportamentos diferentes...", cópia quase literal da
+definição no corpo do texto) num cenário concreto e testável (ex.:
+"Duas classes que implementam métodos com o mesmo nome, mas sem
+relação de herança ou interface comum entre elas, já caracterizam
+polimorfismo..." — Falso, testando Falsa Dicotomia). Os `git diff`
+completos de `aula07/index.qmd` e `aula08/index.qmd` documentam o
+antes/depois exato de cada item.
+
+**Arquivos novos criados** (primeira resolução destes itens — nunca
+haviam sido resolvidos antes nesta disciplina): `aula07/_02-solucoes.md`
+e `aula08/_02-solucoes.md` (48 entradas cada, heurística + resposta +
+justificativa por item, seguindo o formato de
+`supervised-learning/aula01/_02-solucoes.md`); `aula07/_03-respostas-pausas.md`
+e `aula08/_03-respostas-pausas.md` (discussão em prosa de cada pergunta
+motivadora + V/F resolvido com glifos ✔/✗, seguindo o formato de
+`unsupervised-learning/aula01/_03-respostas-pausas.md`).
+
+**Validação.** (1) `quarto render index.qmd --to html` e `--to
+revealjs` nas duas aulas: zero erros; únicos avisos são pré-existentes
+e não relacionados (`WARN: Unable to read listing item description...`
+de outras disciplinas). (2) Checador de balanceamento de `:::` (pilha
+LIFO, escrito para esta sessão): zero erros, pilha vazia ao final, nas
+duas aulas. (3) `grep '☐\|☒\|- \[ \]\|- \[x\]\|( )'` em `index.qmd`,
+`_02-solucoes.md` e `_03-respostas-pausas.md` das duas aulas: nenhuma
+ocorrência. (4) Contagem programática no `notas.html` renderizado
+(`_site/`): 12 blocos `callout-note`, 4 itens `□` por bloco (48 no
+total), 3 itens na lista de questões discursivas — em ambas as aulas.
+(5) Comparação de texto entre `notas.html` e `slides.html` renderizados:
+os 12 itens `□` de cada pausa (3×4) aparecem verbatim em ambos os
+formatos; `✔`/`✗` aparecem só no `slides.html` (12 ocorrências),
+nunca no `notas.html` (0 ocorrências) — confirmando que a resolução
+nunca vaza para as notas publicadas.
+
+**Achado não relacionado ao escopo desta sessão, verificado e não é
+específico desta disciplina:** o campo `date: today` do YAML virou
+`date: "2026-08-30"` (data literal) em `aula07`/`aula08`. Verificação
+adicional (sessão supervisora) confirma que isso **não é uma anomalia
+isolada** — todas as 8 aulas desta disciplina (incluindo as que nenhum
+agente desta rodada tocou ainda) e ao menos uma aula de cada outra
+disciplina do site (`supervised-learning`, `optimization-linear-algebra`,
+`unsupervised-learning`) têm o mesmo `date: "2026-08-30"` literal.
+É claramente um processo automatizado de todo o site (provável
+candidato: o `homepage-preview.service` persistente), não algo
+introduzido por esta sessão — não precisa de reversão nem investigação
+específica desta disciplina.
+
 ## Aulas 9–12+ (numeração provisória)
 
 Não iniciadas. Cada uma deve ser conferida contra o `Teoria/Aula N.tex`

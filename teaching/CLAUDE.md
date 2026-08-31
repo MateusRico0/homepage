@@ -245,7 +245,7 @@ As aulas têm ficado teóricas demais para quem está aprendendo Aprendizado de 
 "problema-fio" que atravessa os blocos), **prefira um dataset real a um dataset sintético**, e **prefira ambos a um dataset de brinquedo como Iris** — interessante para ensinar sintaxe, mas pouco palpável (poucos alunos têm intuição sobre pétalas de flor).
 
 **De onde puxar o dataset: Hugging Face Hub, não pedir arquivo ao usuário a cada aula.** Em vez de esperar o usuário trazer um CSV para cada aula nova, use a lista curada abaixo — todos os itens foram testados com `datasets.load_dataset(repo_id)`, sem token/chave
-(datasets públicos do Hub não exigem autenticação; só datasets *gated*/privados exigiriam, via `HF_TOKEN`, o que não é o caso de nenhum item desta lista). O kernel Jupyter usado nas aulas (`sensibleml-moo`) já tem `datasets` e `huggingface_hub` instalados. Ao carregar, aparece um aviso de "unauthenticated requests" — é só um
+(datasets públicos do Hub não exigem autenticação; só datasets *gated*/privados exigiriam, via `HF_TOKEN`, o que não é o caso de nenhum item desta lista). O kernel Jupyter usado nas aulas (`homepage-teaching`, declarado como `jupyter: homepage-teaching` no front matter de cada aula — o ambiente vem do grupo opcional `teaching` em `pyproject.toml`, `uv sync --extra teaching`) já tem `datasets` e `huggingface_hub` instalados. Ao carregar, aparece um aviso de "unauthenticated requests" — é só um
 aviso de limite de taxa, não um bloqueio; pode ignorar.
 
 | Dataset (repo Hugging Face) | Linhas | Uso recomendado | Observações |
