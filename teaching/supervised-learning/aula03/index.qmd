@@ -2505,15 +2505,63 @@ quanto um modelo se ajusta ao que já foi visto e o quanto ele generaliza
 — é o tema deste bloco, e reaparece, com nomes diferentes, em
 praticamente todo o resto do curso (regularização, seleção de modelo,
 o vício-variância da Aula 4). Em árvores, o nome que essa tensão ganha é
-**custo-complexidade**, e o mecanismo que a resolve é a **poda**.
+**custo-complexidade**, e existem dois grandes grupos de mecanismo para
+enfrentá-la: limitar o crescimento **enquanto** a árvore é construída
+(os critérios de parada abaixo) ou deixá-la crescer livre e cortar de
+volta **depois** (a **poda**, o resto deste bloco).
+
+## Critérios de Parada: Regularizar Enquanto a Árvore Cresce
+
+Antes de chegar à poda, vale nomear a forma mais direta — e mais usada
+na prática — de limitar uma árvore: um punhado de hiperparâmetros que
+restringem o crescimento nó a nó, à medida que o algoritmo guloso do
+Bloco 2 decide cada corte. Cada um limita um aspecto diferente da
+complexidade $|T|$ que aparece na fórmula de custo-complexidade
+abaixo — só que como uma restrição rígida, decidida antes de ver o
+resultado, em vez de uma penalidade suave decidida depois:
+
+* **Altura máxima** (`max_depth`): limita quantos cortes sucessivos
+  separam a raiz de qualquer folha — ou seja, quantas perguntas a
+  árvore pode fazer sobre um único ponto antes de decidir.
+* **Número mínimo de amostras por folha** (`min_samples_leaf`):
+  impede que uma folha final tenha poucos pontos — sem esse limite, a
+  árvore pode literalmente criar uma folha por ponto (overfitting no
+  extremo), e cada estimativa $\hat\mu_\tau$ ou $\hat p_{\tau k}$ passa
+  a ter uma base amostral mínima garantida.
+* **Número mínimo de amostras para tentar um corte**
+  (`min_samples_split`): parecido, mas verificado **antes** de tentar
+  dividir um nó — se o nó já tem poucos pontos, o algoritmo nem chega a
+  avaliar candidatos a corte ali.
+* **Número máximo de folhas** (`max_leaf_nodes`): limita diretamente
+  $|T|$ — o mesmo termo de complexidade da fórmula de custo-complexidade
+  a seguir, só que como teto fixo em vez de penalidade.
+* **Ganho mínimo de impureza para aceitar um corte**
+  (`min_impurity_decrease`): só aceita um corte se ele reduzir a
+  impureza por pelo menos um valor fixo — é exatamente o critério "pare
+  quando o próximo corte não ajudar muito" que o parágrafo a seguir
+  mostra ser traiçoeiro.
+
+Todos esses critérios agem **durante** a construção, olhando só a
+decisão local de cada nó — por isso são chamados de **pré-poda**
+(*pre-pruning*), em contraste com a poda propriamente dita
+(*post-pruning*), que primeiro deixa a árvore crescer por completo e só
+depois decide o que cortar. O restante deste bloco mostra por que esse
+segundo caminho, mais caro computacionalmente, resolve um problema que
+nenhum critério de parada consegue resolver por conta própria — a
+miopia da busca gulosa:
 
 O Bloco 2 já registrou uma faceta do problema: a busca gulosa decide
 cada corte olhando só o ganho imediato. Isso tem uma consequência
-prática incômoda — **empiricamente**, é comum que nenhum dos cortes
-disponíveis produza uma redução significativa de erro, e ainda assim,
-algumas divisões depois, uma redução substancial apareça. Um critério
-de parada baseado só em "pare quando o próximo corte não ajudar muito"
-cortaria a árvore cedo demais, perdendo esses ganhos adiados.
+prática incômoda para o último critério da lista acima
+(`min_impurity_decrease`) — **empiricamente**, é comum que nenhum dos
+cortes disponíveis produza uma redução significativa de erro, e ainda
+assim, algumas divisões depois, uma redução substancial apareça. Um
+critério de parada baseado só em "pare quando o próximo corte não
+ajudar muito" cortaria a árvore cedo demais, perdendo esses ganhos
+adiados — e o mesmo vale, em menor grau, para qualquer um dos outros
+critérios: um teto fixo (`max_depth`, `max_leaf_nodes`, ...) é o mesmo
+valor para toda a árvore, mesmo que um ramo se beneficiasse de mais
+profundidade e outro, de menos.
 
 A prática recomendada inverte a lógica: cresça uma árvore **grande**
 (baseada só no número de pontos por folha, sem se preocupar com
@@ -2589,7 +2637,62 @@ menos **em dados novos**.
 Essa tensão — custo (erro de treino) vs. complexidade (graus de
 liberdade) — reaparece o curso inteiro (regularização, seleção de
 modelo, vício-variância da Aula 4). Em árvores, o nome é
-**custo-complexidade**; o mecanismo é a **poda**.
+**custo-complexidade**; há dois grupos de mecanismo: limitar o
+crescimento **durante** a construção (critérios de parada) ou deixar
+crescer livre e cortar **depois** (poda).
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Critérios de Parada: Cinco Hiperparâmetros
+
+::: {.fragment}
+**Altura máxima** (`max_depth`) — quantos cortes separam a raiz de
+qualquer folha.
+:::
+::: {.fragment}
+**Mín. amostras por folha** (`min_samples_leaf`) — impede folhas com
+poucos pontos (base amostral mínima para $\hat\mu_\tau$/$\hat p_{\tau k}$).
+:::
+::: {.fragment}
+**Mín. amostras para tentar um corte** (`min_samples_split`) — mesma
+ideia, verificada *antes* de avaliar candidatos a corte no nó.
+:::
+::: {.fragment}
+**Máx. de folhas** (`max_leaf_nodes`) — limita $|T|$ diretamente, como
+teto fixo em vez de penalidade.
+:::
+::: {.fragment}
+**Ganho mínimo de impureza** (`min_impurity_decrease`) — só aceita um
+corte que reduza a impureza por um valor mínimo fixo.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pré-Poda vs. Poda
+
+::: {.fragment}
+Os cinco critérios acima agem **durante** a construção, olhando só a
+decisão local de cada nó — são **pré-poda** (*pre-pruning*).
+:::
+
+::: {.fragment}
+<br/>A poda propriamente dita (*post-pruning*) é o caminho inverso:
+deixar crescer por completo, decidir o corte **depois**.
+:::
+
+::: {.fragment}
+<br/>
+
+::: {.callout-tip icon=false}
+Um teto fixo (`max_depth`, `max_leaf_nodes`, ...) vale igual para toda
+a árvore — mesmo que um ramo se beneficiasse de mais profundidade e
+outro, de menos. A poda não tem essa limitação.
+:::
 :::
 
 :::

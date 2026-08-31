@@ -159,7 +159,46 @@ criar seu próprio "requisito" (o mapa) por fora do canal institucional.
 
 ---
 
-## Pausa 5 (Bloco 5 — Artefato Concreto): O que faltou entre a reunião e o código?
+## Pausa 5 (Bloco 5 — Dark Patterns): Quem decide o quanto de fricção você sente?
+
+**Discussão da pergunta provocadora:** A diferença de fricção entre
+inscrever-se (1–2 cliques) e cancelar (múltiplas telas, várias opções)
+não é limitação técnica — a mesma equipe capaz de construir o primeiro
+fluxo é, tecnicamente, capaz de construir o segundo com a mesma
+simplicidade. O que muda entre os dois fluxos é a métrica que a equipe
+de produto escolheu otimizar: se o sucesso do fluxo de cancelamento é
+medido por "quantos usuários desistem no meio do caminho" (uma métrica
+de retenção), o incentivo estrutural aponta para mais fricção, não
+menos. Voltando à tabela de papéis do Bloco 2: é o papel de
+"Stakeholder de negócio" que tem o poder de vetar/alterar um fluxo "por
+razões que nada têm a ver com o usuário" — aqui, esse poder abstrato
+ganha um mecanismo concreto e um nome (Obstrução).
+
+**V/F — resolução:**
+
+- ✔ Se a métrica interna fosse "tempo até a resolução do pedido do
+  usuário" em vez de "taxa de retenção mensal", o incentivo estrutural
+  para alongar o fluxo desapareceria. **Verdadeiro** — é a mesma lógica
+  de todo o bloco: a métrica otimizada determina o incentivo estrutural
+  sobre o design do fluxo.
+- ✗ Toda tela de confirmação antes de cancelar é, por definição, um
+  exemplo de Obstrução. **Falso** — uma confirmação isolada pode ser
+  proteção legítima contra erro do usuário; o que caracteriza o padrão
+  é a assimetria deliberada entre os dois fluxos (inscrição vs.
+  cancelamento), não a mera existência de uma etapa de confirmação.
+- ✔ A mesma lógica se aplicaria a um contrato de aluguel com assinatura
+  digital instantânea, mas rescisão só por carta registrada em
+  cartório. **Verdadeiro** — mesma estrutura de assimetria entre entrar
+  e sair, em outro domínio contratual.
+- ✗ Como o caso da FTC terminou em acordo bilionário, toda decisão de
+  design que aumenta retenção é necessariamente um dark pattern ilegal.
+  **Falso** — o caso girou em torno de engano e obstrução deliberada
+  documentados, não da otimização de retenção em si; um produto que
+  retém usuários por ser genuinamente melhor não configura o padrão.
+
+---
+
+## Pausa 6 (Bloco 6 — Artefato Concreto): O que faltou entre a reunião e o código?
 
 **Discussão da pergunta provocadora:** Faltaram, no mínimo, dois passos
 concretos entre a intenção declarada em reunião e a proteção real do
@@ -195,7 +234,7 @@ só um mecanismo automatizado no processo faz isso.
 
 ---
 
-## Pausa 6 (Bloco 6 — Fechamento): O que mais deixa marca sem ninguém decidir?
+## Pausa 7 (Bloco 7 — Fechamento): O que mais deixa marca sem ninguém decidir?
 
 **Discussão da pergunta provocadora:** Vários candidatos plausíveis:
 onde a equipe está localizada (fusos horários limitam janelas de

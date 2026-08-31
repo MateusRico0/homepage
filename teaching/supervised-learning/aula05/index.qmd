@@ -1,0 +1,1252 @@
+---
+title: "Revisão Integrada — O Fio Probabilístico das Aulas 1–4"
+subtitle: "Aula 5 — Distribuição, Verossimilhança e Risco: o que as Quatro Primeiras Aulas Tinham em Comum"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-08-31"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    fig-width: 6
+    fig-height: 3.5
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+jupyter: homepage
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse
+from scipy import stats, optimize
+from sklearn.tree import DecisionTreeClassifier, export_text
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
+
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()  # evita o aviso "unauthenticated requests"
+from datasets import disable_progress_bar
+disable_progress_bar()  # evita a barra de progresso do download
+from datasets import load_dataset
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({
+    "figure.dpi": 130,
+    "font.size": 11,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "legend.frameon": True,
+    "legend.framealpha": 0.9,
+})
+
+rng = np.random.default_rng(20260831)
+
+# --- Paleta única, consistente com as Aulas 1-4 --------------------
+COR_A   = "#C0392B"
+COR_B   = "#2471A3"
+COR_LIM = "#117A65"
+COR_NEU = "#5D6D7E"
+COR_ALT = "#B9770E"
+
+# --- Dataset-fio NOVO desta aula: Pima Indians Diabetes -------------
+# (as Aulas 1-4 usaram, respectivamente: Beta sintética; Breast Cancer
+# Wisconsin; California Housing; Breast Cancer Wisconsin de novo — não
+# há um único dataset real comum às quatro. Este é o fio que vai
+# atravessar as quatro lentes hoje.)
+_pima = load_dataset("khoaguin/pima-indians-diabetes-database")["train"].to_pandas()
+# Glucose == 0 e BMI == 0 são códigos de valor ausente deste dataset
+# (nenhuma pessoa viva tem glicose ou IMC zero) — removidos.
+_pima = _pima[(_pima["Glucose"] > 0) & (_pima["BMI"] > 0)].reset_index(drop=True)
+y_pima = _pima["y"].values
+```
+
+# Abertura — Amarrando os Quatro Fios
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A Aula 4 terminou anunciando que a próxima aula construiria o primeiro modelo paramétrico do curso — regressão linear, ajustada por máxima verossimilhança sob ruído gaussiano. Essa aula ainda vai acontecer (agora como Aula 6). Antes dela, vale parar um momento, porque as quatro aulas que já demos — Beta e limiar de decisão, Naive Bayes e teoria da decisão, árvores CART, validação cruzada e Bootstrap — parecem, na superfície, quatro assuntos técnicos distintos, cada um com seu próprio algoritmo e seu próprio jargão. Não são. Por trás da fachada, as quatro usam a mesma estrutura de três peças, anunciada já no primeiro slide do curso: uma **distribuição** assumida sobre os dados, uma **verossimilhança** usada para ajustá-la aos dados observados, e uma **decisão** fundamentada num risco — esperado, quando é calculável exatamente, ou estimado, quando não é.
+
+Esta aula não introduz nada matematicamente novo. É uma revisão organizada em torno de um único fio condutor experimental — o dataset real *Pima Indians Diabetes* — que vai atravessar, em sequência, as quatro lentes já vistas.
+
+**O roteiro de hoje, em cinco perguntas:**
+
+1. O que exatamente as quatro aulas tinham em comum, por trás da fachada de "algoritmos diferentes"?
+2. Como a mesma pergunta — "qual é o formato dos dados?" — aparece disfarçada em Beta, Naive Bayes e árvore de decisão?
+3. Por que "maximizar verossimilhança" e "minimizar impureza/erro" são, estruturalmente, a mesma operação?
+4. Por que nunca observamos o risco de verdade — só conseguimos estimá-lo — e o que a Aula 4 fez sobre isso?
+5. Que peça ainda falta para completar o quadro, e é isso que a Aula 6 resolve?
+
+**O problema motivador.** *Pima Indians Diabetes* é um dataset real de 768 pacientes, com oito atributos clínicos (glicose, pressão, IMC, idade etc.) e um alvo binário — diabético ou não. Nenhuma das Aulas 1–4 usou exatamente este dataset (a Aula 1 usou Beta sintética; as Aulas 2 e 4 usaram *Breast Cancer Wisconsin*; a Aula 3 usou *California Housing*). É precisamente por isso que ele serve bem hoje: vamos usar o **mesmo** par de atributos (Glicose e IMC) nas quatro lentes, uma de cada vez, para deixar visível o que muda entre elas — e, mais importante, o que **não** muda.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Da Aula 4 para Hoje
+
+A Aula 4 prometeu: a próxima aula seria regressão linear, mínimos quadrados como MLE gaussiana.
+
+::: {.fragment}
+**Antes disso — uma pausa.** Beta+limiar, Naive Bayes, árvores, CV/Bootstrap parecem quatro assuntos distintos.
+:::
+
+::: {.fragment}
+**Não são.** Todos usam a mesma estrutura de três peças, anunciada desde o slide 1 do curso: **distribuição → verossimilhança → decisão fundamentada em risco.**
+:::
+
+## Roteiro — Cinco Perguntas
+
+::: {.fragment}
+**1.** O que as quatro aulas tinham em comum, por trás da fachada de "algoritmos diferentes"?
+:::
+
+::: {.fragment}
+**2.** Como "qual é o formato dos dados?" aparece disfarçada em Beta, Naive Bayes e árvore?
+:::
+
+::: {.fragment}
+**3.** Por que "maximizar verossimilhança" $=$ "minimizar impureza/erro"?
+:::
+
+::: {.fragment}
+**4.** Por que nunca observamos o risco de verdade, só o estimamos?
+:::
+
+::: {.fragment}
+**5.** Que peça falta, e é isso que a Aula 6 resolve?
+:::
+
+## O Fio Condutor de Hoje
+
+- ***Pima Indians Diabetes***: 768 pacientes, 8 atributos clínicos, alvo binário (diabético/não).
+- Nenhuma aula anterior usou exatamente este dataset — Aula 1: Beta sintética; Aulas 2 e 4: *Breast Cancer Wisconsin*; Aula 3: *California Housing*.
+
+::: {.fragment}
+Hoje: **o mesmo par (Glicose, IMC)** atravessa as quatro lentes, uma de cada vez — para deixar visível o que muda entre elas, e o que **não** muda.
+:::
+
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+print(f"N após limpeza: {len(_pima)}  "
+      f"(diabéticos: {int(y_pima.sum())}, não-diabéticos: {int((1-y_pima).sum())}, "
+      f"prevalência: {y_pima.mean():.1%})")
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Depois de remover os códigos de valor ausente (`Glucose==0`, `BMI==0` — nenhum paciente vivo tem glicose ou IMC zero, então zero aqui significa "não medido", não "medido e igual a zero"), restam 752 pacientes: 264 diabéticos e 488 não-diabéticos, prevalência de 35,1%. Guarde esse número — ele vai reaparecer no Bloco 1 como a priori real deste problema, contrastando com a priori sintética de 95%/5% que a Aula 1 usou para deixar o efeito bem exagerado e visível.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Dado, Limpo
+
+- Removidos códigos de ausência (`Glucose==0`, `BMI==0`).
+- Restam **752 pacientes**: 264 diabéticos, 488 não-diabéticos.
+- **Prevalência real: 35,1%** — guardar esse número para o Bloco 1.
+
+:::
+
+# Bloco 1 — Distribuição e Decisão (revisão da Aula 1)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A Aula 1 nunca mencionou "diabetes": trabalhou com duas populações sintéticas em uma única variável $x \in [0,1]$, geradas por $\text{Beta}(2,5)$ (classe A) e $\text{Beta}(6,3)$ (classe B), numa proporção deliberadamente extrema de $\pi_A=0{,}95$ contra $\pi_B=0{,}05$. A turma respondeu, intuitivamente, que o corte ótimo entre as duas classes deveria ficar **no cruzamento das curvas condicionais** $p(x\mid\mathcal{C}_A)$ e $p(x\mid\mathcal{C}_B)$ — e essa resposta se revelou errada: o corte que minimiza o erro total é o cruzamento das **conjuntas** $p(x\mid\mathcal{C}_k)\,\pi_k$, que pondera cada densidade pela frequência real da sua classe. A mesma lição reapareceu, no caso discreto, na triagem médica de DLFC: com sensibilidade $90\%$, falso positivo $3\%$ e prevalência de apenas $1\%$, um teste positivo ainda deixa a probabilidade de doença em apenas $23\%$ — a priori baixa, não a verossimilhança alta, é quem decide.
+
+Hoje, a mesma máquina — ajuste de Beta por classe, comparação de cruzamentos — roda sobre um dado real: a coluna **Glicose** do Pima Indians Diabetes, separada por diabético/não-diabético.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Aula 1, em síntese:** duas populações sintéticas, $\text{Beta}(2,5)$ vs. $\text{Beta}(6,3)$, prioris $95\%/5\%$.
+
+::: {.fragment}
+Resposta intuitiva da turma — **corte no cruzamento das condicionais** — estava **errada**.
+:::
+
+::: {.fragment}
+Corte correto: cruzamento das **conjuntas** $p(x\mid\mathcal{C}_k)\pi_k$. Mesma lição na triagem médica: sensibilidade $90\%$ + prevalência $1\%$ $\Rightarrow$ só $23\%$ de chance de doença.
+:::
+
+::: {.fragment}
+**Hoje:** mesma máquina, dado real — **Glicose** do Pima, por diabético/não-diabético.
+:::
+
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+g = _pima["Glucose"].values.astype(float)
+gmin, gmax = g.min() - 1, g.max() + 1
+gn = (g - gmin) / (gmax - gmin)
+
+g0 = gn[y_pima == 0]
+g1 = gn[y_pima == 1]
+
+a0, b0, _, _ = stats.beta.fit(g0, floc=0, fscale=1)
+a1, b1, _, _ = stats.beta.fit(g1, floc=0, fscale=1)
+
+DIST0 = stats.beta(a0, b0)
+DIST1 = stats.beta(a1, b1)
+
+pi0 = float((y_pima == 0).mean())
+pi1 = float((y_pima == 1).mean())
+
+grade = np.linspace(1e-4, 1 - 1e-4, 1000)
+
+fig, ax = plt.subplots(figsize=(6, 3.5))
+ax.hist(g0, bins=28, density=True, color=COR_A, alpha=0.30, edgecolor="white",
+        linewidth=0.6, label="não-diabéticos (dado real)")
+ax.hist(g1, bins=22, density=True, color=COR_B, alpha=0.30, edgecolor="white",
+        linewidth=0.6, label="diabéticos (dado real)")
+ax.plot(grade, DIST0.pdf(grade), color=COR_A, lw=2.6, label="Beta ajustada — não-diabético")
+ax.plot(grade, DIST1.pdf(grade), color=COR_B, lw=2.6, label="Beta ajustada — diabético")
+ax.set_xlabel("Glicose normalizada em [0,1]")
+ax.set_ylabel("densidade")
+ax.set_title("A mesma máquina da Aula 1, sobre dado real")
+ax.legend(loc="upper right", fontsize=8)
+ax.set_xlim(0, 1)
+plt.tight_layout()
+plt.show()
+
+print(f"Beta ajustada | não-diabético: a={a0:.2f}, b={b0:.2f}   |   diabético: a={a1:.2f}, b={b1:.2f}")
+print(f"priori real: pi(não-diabético)={pi0:.3f}, pi(diabético)={pi1:.3f}")
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O ajuste (via `scipy.stats.beta.fit`, o mesmo estimador de máxima verossimilhança usado na Aula 1 — sem forma fechada simples, porque as estatísticas suficientes da Beta são $\sum\ln x_n$ e $\sum\ln(1-x_n)$, não a média aritmética) dá $\text{Beta}(3{,}49,\,4{,}50)$ para não-diabéticos e $\text{Beta}(3{,}18,\,1{,}78)$ para diabéticos: a curva dos diabéticos é visivelmente deslocada para glicoses mais altas, exatamente como o exame clínico sugere.
+
+A priori real aqui é $\pi(\text{não-diabético}) \approx 0{,}649$ e $\pi(\text{diabético}) \approx 0{,}351$ — assimétrica, mas **muito** menos extrema do que os $0{,}95/0{,}05$ sintéticos da Aula 1. Isso já é uma primeira lição sobre a diferença entre laboratório e mundo real: a Aula 1 escolheu uma assimetria extrema de propósito, para que o efeito do deslocamento do corte fosse visualmente óbvio; o mundo real raramente é tão gentil.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Ajuste, sobre Dado Real
+
+- $\text{Beta}(3{,}49,\,4{,}50)$ — não-diabético; $\text{Beta}(3{,}18,\,1{,}78)$ — diabético.
+- Ajuste por `scipy.stats.beta.fit` — mesmo MLE da Aula 1 (sem forma fechada; estatísticas suficientes $\sum\ln x_n,\ \sum\ln(1-x_n)$, não a média).
+
+::: {.fragment}
+Priori real: $\pi(\text{não-diab.})\approx 0{,}649$, $\pi(\text{diab.})\approx 0{,}351$ — assimétrica, mas **bem menos extrema** que os $95\%/5\%$ sintéticos da Aula 1.
+:::
+
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+def cruzamento(f, lo, hi):
+    return optimize.brentq(f, lo, hi)
+
+t_cond = cruzamento(lambda x: DIST0.pdf(x) - DIST1.pdf(x), 0.05, 0.95)
+t_conj = cruzamento(lambda x: pi0 * DIST0.pdf(x) - pi1 * DIST1.pdf(x), 0.05, 0.95)
+
+def contagem(t):
+    fa = int(np.sum(g0 > t))
+    esc = int(np.sum(g1 <= t))
+    return fa, esc, fa + esc
+
+fa1, esc1, tot1 = contagem(t_cond)
+fa2, esc2, tot2 = contagem(t_conj)
+
+t_cond_real = t_cond * (gmax - gmin) + gmin
+t_conj_real = t_conj * (gmax - gmin) + gmin
+
+fig, ax = plt.subplots(figsize=(6, 3.5))
+ax.plot(grade, DIST0.pdf(grade), color=COR_A, lw=2.2, label="não-diabético")
+ax.plot(grade, DIST1.pdf(grade), color=COR_B, lw=2.2, label="diabético")
+ax.axvline(t_cond, color=COR_NEU, lw=2.0, ls=":",
+           label=f"cruzamento condicionais ({t_cond_real:.0f} mg/dL)")
+ax.axvline(t_conj, color=COR_LIM, lw=2.2, ls="--",
+           label=f"cruzamento conjuntas ({t_conj_real:.0f} mg/dL)")
+ax.set_xlabel("Glicose normalizada em [0,1]")
+ax.set_ylabel("densidade")
+ax.set_title("Cruzamento das condicionais vs. das conjuntas — dado real")
+ax.legend(loc="upper right", fontsize=8)
+ax.set_xlim(0, 1)
+plt.tight_layout()
+plt.show()
+
+print(f"t_cond = {t_cond_real:.1f} mg/dL -> {fa1} alarmes falsos + {esc1} escapes = {tot1} erros")
+print(f"t_conj = {t_conj_real:.1f} mg/dL -> {fa2} alarmes falsos + {esc2} escapes = {tot2} erros")
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O cruzamento das condicionais cai em $134{,}2$ mg/dL, produzindo $81$ alarmes falsos e $116$ escapes ($197$ erros no total). Pesando cada curva pela priori real, o cruzamento das conjuntas se desloca para $148{,}3$ mg/dL — mais alarmes falsos evitados às custas de mais escapes, mas o total cai para $194$ erros. O princípio geométrico é *idêntico* ao da Aula 1 ($x \in \mathcal{R}_A \iff p(x,\mathcal{C}_A) > p(x,\mathcal{C}_B)$, PRML eqs. 1.78–1.79): decidir pela conjunta maior é decidir pela posteriori maior, porque a evidência $p(x)$ não depende de $k$. A diferença é de **magnitude**, não de mecanismo: com prioris $65\%/35\%$, o deslocamento do corte e o ganho em erros totais são modestos ($197 \to 194$), bem mais discretos do que a virada dramática que a razão $19$ para $1$ da Aula 1 produzia. Isso não é uma falha do princípio — é exatamente o que se espera quando a assimetria de classes é ela mesma mais moderada.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Corte se Desloca — Mas Pouco
+
+::: {.fragment}
+$t_{\text{cond}} = 134{,}2$ mg/dL $\to$ $81$ alarmes falsos $+$ $116$ escapes $=$ **197 erros**.
+:::
+
+::: {.fragment}
+$t_{\text{conj}} = 148{,}3$ mg/dL $\to$ $37$ alarmes falsos $+$ $157$ escapes $=$ **194 erros**.
+:::
+
+::: {.fragment}
+Mesmo princípio da Aula 1 ($x\in\mathcal{R}_A \iff p(x,\mathcal{C}_A)>p(x,\mathcal{C}_B)$) — mas com prioris $65/35$ (não $95/5$), o ganho é **modesto**, não uma virada dramática. Diferença de magnitude, não de mecanismo.
+:::
+
+:::
+
+::: {.callout-tip}
+## Se a prevalência de diabetes nesta população fosse exatamente $50\%$, o que aconteceria com a distância entre o cruzamento das condicionais e o cruzamento das conjuntas?
+
+Dica: pense no papel exato que $\pi_k$ desempenha na equação $p(x,\mathcal{C}_k) = p(x\mid\mathcal{C}_k)\,\pi_k$ quando $\pi_A=\pi_B$.
+:::
+
+::: {.callout-tip}
+## Prioris, Cruzamentos e o Caso Real
+
+- □ Se a prevalência real fosse exatamente $50\%/50\%$, o cruzamento das condicionais e o cruzamento das conjuntas coincidiriam exatamente, e a distinção entre os dois deixaria de ter qualquer efeito prático.
+- □ Como a razão de prioris hoje ($65/35 \approx 1{,}86$) é muito menor que a da Aula 1 ($95/5 = 19$), o deslocamento do corte hoje é necessariamente menor em termos absolutos de mg/dL, mas o argumento matemático que o produz é o mesmo.
+- □ Num exame de triagem para uma doença ainda mais rara que a prevalência de $1\%$ usada no exemplo da DLFC — digamos, $0{,}01\%$ — o efeito "sensibilidade alta não implica probabilidade pós-teste alta" ficaria ainda mais pronunciado, não menos.
+- □ Já que o corte pela conjunta reduziu o número total de erros ($197 \to 194$), ele necessariamente reduziu tanto o número de alarmes falsos quanto o número de escapes, individualmente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Prioris, Cruzamentos e o Caso Real — Resposta
+
+::: {.callout-tip}
+- ✔ Com $\pi_A=\pi_B$, a ponderação $p(x\mid\mathcal{C}_k)\,\pi_k$ vira só um fator comum $\pi \cdot p(x\mid\mathcal{C}_k)$, e comparar conjuntas volta a ser exatamente comparar condicionais — os dois cruzamentos coincidem.
+- ✔ A magnitude do deslocamento (em mg/dL, ou em erros totais evitados) depende da razão de prioris; o mecanismo — ponderar cada densidade pela frequência da sua classe — é idêntico em qualquer razão.
+- ✔ Prevalência ainda menor $\Rightarrow$ priori $p(D)$ ainda menor no denominador de Bayes $\Rightarrow$ a probabilidade pós-teste cai ainda mais em relação à sensibilidade nominal, exatamente na mesma direção do exemplo dos $23\%$.
+- ✗ O corte pela conjunta trocou uma coisa pela outra: **caiu** o número de alarmes falsos ($81\to37$) mas **subiu** o número de escapes ($116\to157$); só o *total* caiu. Reduzir o total nunca garante reduzir as duas parcelas.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** com prioris iguais, os dois cruzamentos colapsam num só — é a assimetria de classes, e só ela, que os separa.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Se a Prevalência Fosse 50%? — Retomando
+
+::: {.callout-tip}
+::: {.fragment}
+*(Agora responda: o que sobra da distinção condicional/conjunta quando as duas classes são igualmente frequentes?)*
+:::
+:::
+
+:::
+
+# Bloco 2 — Independência e Teoria da Decisão (revisão da Aula 2)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A Aula 2 generalizou o Bloco 1 de duas formas ao mesmo tempo: de uma variável para $d$ variáveis, e de um limiar simples para uma teoria da decisão completa (perda $L(k,a)$, risco posterior $\rho(a\mid x) = \sum_k L(k,a)\,p(\mathcal{C}_k\mid x)$, risco de Bayes $R^\star$). A ponte entre as duas foi o Naive Bayes: assumir independência condicional entre atributos dado a classe, $p(\mathbf{x}\mid\mathcal{C}_k) = \prod_i p(x_i\mid\mathcal{C}_k)$, para não precisar estimar uma densidade conjunta em $d$ dimensões com poucos dados. No *Breast Cancer Wisconsin*, essa suposição teve um preço mensurável: os atributos `smoothness_mean` e `concavity_mean` tinham correlação intra-classe de $0{,}64$ nos tumores malignos e $0{,}22$ nos benignos, e ignorar essa correlação (covariância diagonal, Naive Bayes) custou cerca de $2$ pontos percentuais de acurácia ($85\%$ contra $87\%$ da Gaussiana de covariância plena).
+
+Hoje, acrescentamos **IMC** à Glicose do Pima e repetimos exatamente essa comparação.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Aula 2, em síntese:** de $1$ variável para $d$; de um limiar para teoria da decisão completa ($\rho(a\mid x) = \sum_k L(k,a)\,p(\mathcal{C}_k\mid x)$).
+
+::: {.fragment}
+Ponte: Naive Bayes $\Rightarrow$ $p(\mathbf{x}\mid\mathcal{C}_k) = \prod_i p(x_i\mid\mathcal{C}_k)$ — independência condicional assumida.
+:::
+
+::: {.fragment}
+No *Breast Cancer Wisconsin*: correlação intra-classe $0{,}64$/$0{,}22$ $\Rightarrow$ preço de $2$ pontos percentuais ($85\%$ vs. $87\%$).
+:::
+
+::: {.fragment}
+**Hoje:** acrescentar **IMC** à Glicose no Pima, repetir a mesma comparação.
+:::
+
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+X = _pima[["Glucose", "BMI"]].values.astype(float)
+X0, X1 = X[y_pima == 0], X[y_pima == 1]
+
+corr0 = float(np.corrcoef(X0.T)[0, 1])
+corr1 = float(np.corrcoef(X1.T)[0, 1])
+
+mu0, mu1 = X0.mean(axis=0), X1.mean(axis=0)
+cov0_full, cov1_full = np.cov(X0.T), np.cov(X1.T)
+cov0_diag, cov1_diag = np.diag(np.diag(cov0_full)), np.diag(np.diag(cov1_full))
+
+def acc_gaussiana(cov0, cov1):
+    d0 = stats.multivariate_normal(mu0, cov0, allow_singular=True)
+    d1 = stats.multivariate_normal(mu1, cov1, allow_singular=True)
+    pred = (d1.pdf(X) * pi1 > d0.pdf(X) * pi0).astype(int)
+    return float((pred == y_pima).mean())
+
+acc_full = acc_gaussiana(cov0_full, cov1_full)
+acc_diag = acc_gaussiana(cov0_diag, cov1_diag)
+
+def elipse(mu, cov, cor, ax):
+    vals, vecs = np.linalg.eigh(cov)
+    ang = np.degrees(np.arctan2(vecs[1, -1], vecs[0, -1]))
+    w, h = 4 * np.sqrt(vals[-1]), 4 * np.sqrt(vals[0])
+    ax.add_patch(Ellipse(mu, w, h, angle=ang, fill=False, lw=2, color=cor))
+
+fig, axes = plt.subplots(1, 2, figsize=(8.6, 3.8), sharex=True, sharey=True)
+
+ax = axes[0]
+ax.scatter(X0[:, 0], X0[:, 1], s=8, color=COR_A, alpha=0.35, label="não-diabético")
+ax.scatter(X1[:, 0], X1[:, 1], s=8, color=COR_B, alpha=0.35, label="diabético")
+elipse(mu0, cov0_full, COR_A, ax); elipse(mu1, cov1_full, COR_B, ax)
+ax.set_title(f"Covariância plena\nacc={acc_full:.1%}")
+ax.set_xlabel("Glicose"); ax.set_ylabel("IMC")
+
+ax = axes[1]
+ax.scatter(X0[:, 0], X0[:, 1], s=8, color=COR_A, alpha=0.35, label="não-diabético")
+ax.scatter(X1[:, 0], X1[:, 1], s=8, color=COR_B, alpha=0.35, label="diabético")
+elipse(mu0, cov0_diag, COR_A, ax); elipse(mu1, cov1_diag, COR_B, ax)
+ax.set_title(f"Covariância diagonal (Naive Bayes)\nacc={acc_diag:.1%}")
+ax.set_xlabel("Glicose")
+ax.legend(loc="upper right", fontsize=8)
+
+fig.suptitle("O preço da independência depende dos dados", fontweight="bold")
+plt.tight_layout()
+plt.show()
+
+print(f"correlação Glicose x IMC | não-diabético: {corr0:.3f}   |   diabético: {corr1:.3f}")
+print(f"acurácia cov. plena: {acc_full:.4f}   |   acurácia Naive Bayes (diagonal): {acc_diag:.4f}")
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A correlação intra-classe entre Glicose e IMC é $0{,}123$ nos não-diabéticos e $0{,}057$ nos diabéticos — bem mais baixa do que os $0{,}64/0{,}22$ do *Breast Cancer Wisconsin*. E o resultado bate com a expectativa: as acurácias de covariância plena e diagonal são **idênticas até a quarta casa decimal** ($76{,}46\%$), porque com correlação tão baixa, as elipses de covariância plena já são quase circulares — a covariância diagonal não está descartando quase nenhuma informação real. Este é o ponto que a Aula 2 já havia adiantado, citando Domingos & Pazzani (1997) via PRML §8.2.2: "classifica bem, estima mal". Aqui completamos a lição: o preço da suposição de independência **não é uma constante do método** — é uma função de quanto os atributos realmente covariam dentro de cada classe. No *Breast Cancer Wisconsin* o preço foi de $2$ pontos; aqui, foi de zero.
+
+Vale também lembrar a peça que a Aula 2 empilhou por cima do Naive Bayes: a teoria da decisão geral. Numa triagem de diabetes, o custo de um **escape** (diabético não identificado, que não recebe tratamento) tipicamente excede o custo de um **alarme falso** (paciente saudável encaminhado para um exame extra). O limiar de decisão ótimo sob essa assimetria de custos não é o de $0{,}5$ de probabilidade posterior — desloca-se para favorecer detectar mais diabéticos às custas de mais alarmes falsos, exatamente pela mesma lógica de $\rho(a\mid x) = \sum_k L(k,a)\,p(\mathcal{C}_k\mid x)$ que a Aula 2 formalizou.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Preço é dos Dados, Não do Método
+
+::: {.fragment}
+Correlação Glicose $\times$ IMC: $0{,}123$ (não-diab.) e $0{,}057$ (diab.) — bem mais baixa que os $0{,}64/0{,}22$ do *Breast Cancer Wisconsin*.
+:::
+
+::: {.fragment}
+Acurácias: covariância plena $=$ diagonal (Naive Bayes) $=$ **$76{,}46\%$**, idênticas até a 4ª casa decimal.
+:::
+
+::: {.fragment}
+"Classifica bem, estima mal" (Domingos & Pazzani, 1997) — no *Breast Cancer* o preço foi $2$ pontos; **aqui foi zero**. O preço da independência é do **dado**, não do método.
+:::
+
+::: {.fragment}
+**Teoria da decisão (Aula 2):** custo de escape $>$ custo de alarme falso em triagem $\Rightarrow$ limiar ótimo $\ne 0{,}5$, via $\rho(a\mid x)=\sum_k L(k,a)\,p(\mathcal{C}_k\mid x)$.
+:::
+
+:::
+
+::: {.callout-tip}
+## Se Glicose e IMC fossem perfeitamente correlacionados dentro de cada classe ($\rho=1$), a Gaussiana de covariância plena e o Naive Bayes ainda coincidiriam?
+
+Dica: pense no que a covariância diagonal literalmente descarta, e no que sobra quando ela descarta tudo que existe para descartar.
+:::
+
+::: {.callout-tip}
+## Naive Bayes: Quando a Independência Custa Caro
+
+- □ Se Glicose e IMC fossem perfeitamente correlacionados ($\rho=1$) dentro de cada classe, a Gaussiana diagonal (Naive Bayes) descartaria uma informação real e relevante, ao contrário do caso desta aula onde $\rho\approx0$.
+- □ Num problema com $100$ atributos em que apenas dois são fortemente correlacionados entre si e os outros $98$ são praticamente independentes uns dos outros, o Naive Bayes pagaria um preço de acurácia comparável ao preço pago quando todos os $100$ atributos são fortemente correlacionados entre si.
+- □ Num sistema de recomendação que assume, para simplificar, que o interesse de um usuário por "filmes de ação" e por "filmes com efeitos especiais" são condicionalmente independentes dado o gênero preferido do usuário, o mesmo tipo de preço de correlação ignorada se aplica, mesmo fora do domínio médico desta aula.
+- □ Como a suposição de independência do Naive Bayes é sempre uma simplificação da realidade, conclui-se que ela sempre reduz a acurácia do classificador em relação a um modelo de covariância plena, ainda que por uma margem pequena.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Naive Bayes: Quando a Independência Custa Caro — Resposta
+
+::: {.callout-tip}
+- ✔ Com $\rho=1$, a covariância diagonal ignora toda a estrutura de dependência real que existe entre as duas variáveis — o preço da suposição de independência seria máximo, não nulo como no caso de hoje.
+- ✗ O preço de correlação ignorada concentra-se nos atributos correlacionados; ter $98$ atributos independentes ao lado dos $2$ correlacionados não piora o preço pago por ignorar a correlação **desses dois** — é aproximadamente o mesmo problema em miniatura, não amplificado por atributos irrelevantes ao efeito.
+- ✔ Mesma estrutura (independência condicional assumida entre atributos, dado uma variável latente), fora do domínio médico — a mecânica de "classifica razoavelmente, estima mal a conjunta" se transfere.
+- ✗ O caso desta aula (Glicose/IMC) é uma contraprova direta: correlação quase nula $\Rightarrow$ preço de acurácia **zero**, não "pequeno mas sempre presente". O preço pode ser genuinamente nulo, não apenas pequeno.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** com $\rho=1$, a covariância diagonal jogaria fora exatamente a informação que faz a diferença — as duas abordagens deixariam de coincidir.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Correlação Perfeita? — Retomando
+
+::: {.callout-tip}
+::: {.fragment}
+*(Agora responda: com $\rho=1$, o que exatamente a covariância diagonal descarta?)*
+:::
+:::
+
+:::
+
+# Bloco 3 — Partição Gulosa e Verossimilhança Categórica (revisão da Aula 3)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A Aula 3 abandonou a suposição de família paramétrica: em vez de assumir Beta ou Gaussiana, a árvore de decisão deixa o próprio dado escolher a forma da partição, greedy, um split por vez. A tese central daquela aula foi mostrar que "reduzir impureza" (entropia ou Gini) **é**, matematicamente, maximizar verossimilhança — para uma folha de classificação, a categórica $\hat p_{\tau k} = n_{\tau k}/N_\tau$ que maximiza a log-verossimilhança é exatamente a que minimiza a entropia daquela folha, porque $\ell_\tau(\hat p_\tau) = -N_\tau H(\hat p_\tau)$. A árvore construída sobre o *California Housing* (regressão, `MedInc`/`HouseAge`, cinco folhas) tornou esse processo concreto, split por split.
+
+Hoje, crescemos uma árvore pequena — mas de **classificação**, não de regressão, o que deixa a conexão entropia/Gini/MLE ainda mais direta — sobre Glicose e IMC no Pima.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Aula 3, em síntese:** sem família paramétrica — o dado escolhe a partição, greedy, split por split.
+
+::: {.fragment}
+Tese central: **reduzir impureza $=$ maximizar verossimilhança.** Para folha categórica, $\hat p_{\tau k} = n_{\tau k}/N_\tau$ maximiza $\ell_\tau(\hat p_\tau) = -N_\tau H(\hat p_\tau)$.
+:::
+
+::: {.fragment}
+Árvore do *California Housing* (regressão, $5$ folhas) tornou isso concreto.
+:::
+
+::: {.fragment}
+**Hoje:** árvore pequena de **classificação** (não regressão) sobre Glicose+IMC — conexão entropia/Gini/MLE ainda mais direta.
+:::
+
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+Xtr, Xte, ytr, yte = train_test_split(
+    X, y_pima, test_size=0.3, stratify=y_pima, random_state=20260831
+)
+
+arvore = DecisionTreeClassifier(max_leaf_nodes=4, random_state=20260831)
+arvore.fit(Xtr, ytr)
+
+acc_tr = arvore.score(Xtr, ytr)
+acc_te = arvore.score(Xte, yte)
+
+print(export_text(arvore, feature_names=["Glicose", "IMC"]))
+print(f"N treino={len(ytr)}, N teste={len(yte)}")
+print(f"acurácia treino={acc_tr:.4f}, acurácia teste={acc_te:.4f}")
+```
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{nodecolor}{RGB}{93,109,126}
+\definecolor{nodeborder}{RGB}{55,65,81}
+\definecolor{leafcolor}{RGB}{17,122,101}
+\definecolor{leafborder}{RGB}{11,74,63}
+
+\begin{tikzpicture}[
+  decision/.style={rectangle, rounded corners, fill=nodecolor, draw=nodeborder, line width=1pt, text=white, minimum width=3.2cm, minimum height=1cm, align=center, font=\small},
+  leaf/.style={rectangle, rounded corners, fill=leafcolor, draw=leafborder, line width=1pt, text=white, minimum width=2.8cm, minimum height=1.2cm, align=center, font=\scriptsize},
+  elabel/.style={font=\scriptsize, fill=white, inner sep=1pt},
+  edge from parent/.style={draw, thick, ->},
+  level distance=19mm,
+  level 1/.style={sibling distance=62mm},
+  level 2/.style={sibling distance=34mm},
+  level 3/.style={sibling distance=34mm}
+]
+
+\node[decision] {Glicose $\le 123{,}5$?}
+  child { node[leaf] {A\\$n=302,\ \hat p=17{,}2\%$} edge from parent node[elabel] {sim} }
+  child { node[decision] {Glicose $\le 154{,}5$?}
+    child { node[decision] {IMC $\le 41{,}65$?}
+      child { node[leaf] {B\\$n=116,\ \hat p=39{,}7\%$} edge from parent node[elabel] {sim} }
+      child { node[leaf] {C\\$n=15,\ \hat p=93{,}3\%$} edge from parent node[elabel] {não} }
+      edge from parent node[elabel] {sim}
+    }
+    child { node[leaf] {D\\$n=93,\ \hat p=78{,}5\%$} edge from parent node[elabel] {não} }
+    edge from parent node[elabel] {não}
+  };
+
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A árvore, limitada a $4$ folhas para caber num quadro didático, chega a $77{,}4\%$ de acurácia de treino e $75{,}2\%$ de teste — guarde os dois números, eles voltam no Bloco 4. As folhas contam uma história clinicamente sensata: quem tem Glicose $\le 123{,}5$ mg/dL raramente é diabético ($\hat p=17{,}2\%$, folha A, $n=302$); quem tem Glicose $>154{,}5$ quase sempre é ($\hat p=78{,}5\%$, folha D); a faixa intermediária ($123{,}5$ a $154{,}5$) se divide pelo IMC — abaixo de $41{,}65$ ainda majoritariamente não-diabético ($\hat p=39{,}7\%$, folha B), acima disso fortemente diabético ($\hat p=93{,}3\%$, folha C, mas só $n=15$ pacientes — um lembrete de que folhas pequenas merecem menos confiança).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Árvore, Split por Split
+
+- $4$ folhas: acurácia treino $77{,}4\%$, teste $75{,}2\%$ — **guardar para o Bloco 4**.
+- Folha A (Glicose $\le 123{,}5$): $n=302$, $\hat p(\text{diab.})=17{,}2\%$.
+- Folha D (Glicose $>154{,}5$): $n=93$, $\hat p=78{,}5\%$.
+- Faixa intermediária dividida pelo IMC: folha B ($\hat p=39{,}7\%$) vs. folha C ($\hat p=93{,}3\%$, mas $n=15$ — cautela com folhas pequenas).
+
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+def entropy(p):
+    p = np.asarray(p); p = p[p > 0]
+    return float(-np.sum(p * np.log(p)))
+
+def gini(p):
+    p = np.asarray(p)
+    return float(np.sum(p * (1 - p)))
+
+p_root = [np.mean(ytr == 0), np.mean(ytr == 1)]
+H_root, G_root = entropy(p_root), gini(p_root)
+
+m_esq = Xtr[:, 0] <= 123.5
+n_esq, n_dir = int(m_esq.sum()), int((~m_esq).sum())
+p_esq = [np.mean(ytr[m_esq] == 0), np.mean(ytr[m_esq] == 1)]
+p_dir = [np.mean(ytr[~m_esq] == 0), np.mean(ytr[~m_esq] == 1)]
+H_esq, H_dir = entropy(p_esq), entropy(p_dir)
+G_esq, G_dir = gini(p_esq), gini(p_dir)
+
+H_dps = (n_esq * H_esq + n_dir * H_dir) / len(ytr)
+G_dps = (n_esq * G_esq + n_dir * G_dir) / len(ytr)
+IG = H_root - H_dps
+GG = G_root - G_dps
+
+erro_antes = 1 - max(p_root)
+erro_dps = (n_esq * (1 - max(p_esq)) + n_dir * (1 - max(p_dir))) / len(ytr)
+
+fig, ax = plt.subplots(figsize=(6, 3.5))
+xs = ["raiz\n(antes)", "após\n'Glicose≤123,5'"]
+ax.bar([0, 1], [H_root, H_dps], width=0.35, color=COR_ALT, alpha=0.85, label="entropia (nats)")
+ax.bar([0.4, 1.4], [G_root, G_dps], width=0.35, color=COR_LIM, alpha=0.85, label="Gini")
+ax.set_xticks([0.2, 1.2]); ax.set_xticklabels(xs)
+ax.set_title("A raiz reduz impureza — em ambas as medidas")
+ax.legend(fontsize=9)
+plt.tight_layout()
+plt.show()
+
+print(f"Raiz: H={H_root:.3f} nats, Gini={G_root:.3f}, erro bruto={erro_antes:.3f}")
+print(f"Após split: H={H_dps:.3f} nats (IG={IG:.3f}), Gini={G_dps:.3f} (ganho={GG:.3f}), erro bruto={erro_dps:.3f}")
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O primeiro split (`Glicose ≤ 123,5`) reduz a entropia de $0{,}648$ para $0{,}551$ nats — um ganho de informação $IG=0{,}097$ nats, exatamente $I(S;\mathcal{C})$ na notação da Aula 3, onde $S$ é o lado do split. O Gini cai de $0{,}456$ para $0{,}369$ (ganho de $0{,}087$), e o erro bruto (se cada folha previsse sua classe majoritária) cai de $35{,}2\%$ para $27{,}2\%$. As três medidas concordam em direção — o split ajuda — porque, ao contrário do contraexemplo deliberado que a Aula 3 construiu (dois splits com erro bruto empatado em $0{,}25$ mas $IG$ bem diferente: $0{,}216$ contra $0{,}131$ nats), este split real não empata as três métricas por acidente de construção.
+
+E vale reencontrar aqui o contraste geométrico com o Bloco 2: a fronteira desta árvore é **axis-aligned** — cada split corta perpendicular a um eixo (Glicose ou IMC), nunca na diagonal. As elipses de covariância do Bloco 2, por outro lado, podem se inclinar livremente. Nenhuma das duas fronteiras é "melhor" em abstrato — cada uma paga um preço estrutural diferente, exatamente a limitação que a Aula 3 nomeou explicitamente ao fechar aquele bloco.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Impureza Cai — Nas Três Medidas
+
+::: {.fragment}
+$H$: $0{,}648 \to 0{,}551$ nats ($IG=0{,}097 = I(S;\mathcal{C})$, notação da Aula 3).
+:::
+
+::: {.fragment}
+Gini: $0{,}456 \to 0{,}369$ (ganho $0{,}087$). Erro bruto: $35{,}2\% \to 27{,}2\%$.
+:::
+
+::: {.fragment}
+Aqui as três métricas concordam — diferente do contraexemplo da Aula 3 ($IG=0{,}216$ vs. $0{,}131$ nats com erro bruto empatado em $0{,}25$).
+:::
+
+::: {.fragment}
+**Contraste geométrico com o Bloco 2:** árvore $=$ fronteira *axis-aligned*; elipses Gaussianas podem inclinar livremente — a limitação estrutural que a Aula 3 nomeou ao final.
+:::
+
+:::
+
+::: {.callout-tip}
+## Um médico usa a regra manual "Glicose acima de 140 mg/dL $\Rightarrow$ suspeita de diabetes" — isso é, estruturalmente, uma árvore de decisão? Se for, por que a árvore do algoritmo é "melhor" (ou não é)?
+
+Dica: pense no que faz algo ser uma árvore de decisão — é o algoritmo de ajuste, ou a forma da regra final?
+:::
+
+::: {.callout-tip}
+## Árvore, Impureza e a Regra do Médico
+
+- □ A regra manual do médico ("Glicose $>140 \Rightarrow$ suspeita") é estruturalmente uma árvore de decisão degenerada, com uma única folha de decisão e nenhum critério de impureza envolvido na sua escolha.
+- □ Se um split greedy reduzisse a impureza de uma folha, mas o split seguinte (dentro da mesma sub-árvore) só fosse vantajoso se combinado com um terceiro split ainda não considerado, o algoritmo guloso da Aula 3 identificaria essa combinação de qualquer forma, porque avalia globalmente todos os splits futuros antes de escolher o atual.
+- □ Num sistema de recomendação de crédito que decide "aprovar automaticamente" só quando o escore de crédito supera um limiar único, a mesma lógica de "regra de um único corte" do médico se aplica, com a mesma limitação de não capturar interações entre atributos.
+- □ Como o algoritmo guloso da árvore encontrou um split com $IG$ positivo na raiz, conclui-se que esse split individual é necessariamente parte da árvore de profundidade ilimitada (sem limite de folhas) que minimizaria globalmente a impureza total.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Árvore, Impureza e a Regra do Médico — Resposta
+
+::: {.callout-tip}
+- ✔ Uma regra de corte único é o caso degenerado de uma árvore com uma folha de decisão — só que ajustada "à mão", sem otimizar impureza sobre dados, e sem nenhuma folha alternativa.
+- ✗ É exatamente a **miopia gulosa** que a Aula 3 apontou como limitação: o algoritmo escolhe o melhor split *imediato*, sem simular combinações futuras — pode perder uma combinação de splits que só compensa em conjunto.
+- ✔ Mesma limitação estrutural (corte único, sem interação entre atributos), transferida para outro domínio — crédito em vez de diagnóstico.
+- ✗ Um split com $IG>0$ na raiz é ótimo *localmente*, não necessariamente parte da árvore globalmente ótima — a busca gulosa não garante otimalidade global, mesma advertência da Aula 3.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** sim, é uma árvore degenerada — mas sem o processo de ajuste por impureza que dá à árvore do algoritmo a chance de encontrar um corte melhor do que um número "redondo" escolhido a olho.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Regra do Médico — Retomando
+
+::: {.callout-tip}
+::: {.fragment}
+*(Agora responda: o que a árvore do algoritmo tem que a regra manual do médico não tem?)*
+:::
+:::
+
+:::
+
+# Bloco 4 — Estimando o Risco que Nunca Observamos (revisão da Aula 4)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A Aula 4 mudou de assunto: em vez de um modelo, o objeto de estudo passou a ser o *procedimento* de medir o desempenho de um modelo. A tese central foi que o erro de treino $\hat R(\theta)$ é uma estimativa **enviesada para baixo** do risco esperado $R(\theta) = \mathbb{E}_{(X,Y)\sim P}[\mathcal{L}(Y,f_\theta(X))]$ — no *Breast Cancer Wisconsin*, a acurácia de treino chegou a $100\%$ a partir da profundidade $6$, enquanto a de teste tinha seu pico em $92{,}98\%$ na profundidade $5$. A validação cruzada de $5$ ou $10$ folds foi apresentada como uma simulação de amostragem repetida de $P(X,Y)$ (ESL §7.10) — e, honestamente, o experimento daquela aula mostrou LOOCV (sem viés teórico, mas caro) produzindo uma estimativa *menor* ($89{,}4\%$) do que $5$-fold e $10$-fold repetidos ($\sim92$–$93\%$), um resultado específico daquela amostra, não uma garantia geral. A CV escolheu, por custo-complexidade, uma árvore de $4$ folhas empatando com a de $19$ folhas em $91{,}8\%$ de teste; a regra de $1$ desvio-padrão levou a uma árvore de só $2$ folhas, com um custo real de $1{,}7$ ponto percentual ($90{,}1\%$). O Bootstrap, por fim, respondeu uma pergunta *diferente* da CV: não "qual é o risco esperado do procedimento", mas "quão incerta é uma estatística já calculada" — com intervalos de confiança de $[87{,}7\%,95{,}9\%]$ (reamostrando o teste) e $[88{,}9\%,93{,}6\%]$ (reamostrando e reajustando o treino).
+
+Hoje, aplicamos exatamente esse arsenal — CV e Bootstrap — para avaliar honestamente a árvore de $4$ folhas do Bloco 3.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Aula 4, em síntese:** $\hat R(\theta)$ enviesado para baixo; *Breast Cancer*: treino $100\%$ na profundidade $6$, teste no pico em $92{,}98\%$ (profundidade $5$).
+
+::: {.fragment}
+CV $=$ simulação de amostragem repetida de $P(X,Y)$. Honestidade: LOOCV ($89{,}4\%$) *abaixo* de $5$-/$10$-fold ($\sim92$–$93\%$) nessa amostra específica.
+:::
+
+::: {.fragment}
+CV escolheu árvore de $4$ folhas empatando com $19$ folhas em $91{,}8\%$; regra de $1$ desvio-padrão $\to$ $2$ folhas, custo real de $1{,}7$ p.p. ($90{,}1\%$).
+:::
+
+::: {.fragment}
+Bootstrap $\ne$ CV: pergunta diferente. IC$_{95\%}$: $[87{,}7\%,95{,}9\%]$ (teste) e $[88{,}9\%,93{,}6\%]$ (treino reajustado).
+:::
+
+::: {.fragment}
+**Hoje:** o mesmo arsenal, sobre a árvore de $4$ folhas do Bloco 3.
+:::
+
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=20260831)
+cv_scores = cross_val_score(
+    DecisionTreeClassifier(max_leaf_nodes=4, random_state=20260831), Xtr, ytr, cv=skf
+)
+
+preds_te = arvore.predict(Xte)
+acerto_te = (preds_te == yte).astype(int)
+
+B1 = 2000
+boot_teste = np.array([
+    acerto_te[rng.integers(0, len(yte), len(yte))].mean() for _ in range(B1)
+])
+ci_teste = np.percentile(boot_teste, [2.5, 97.5])
+
+B2 = 300
+boot_refit = []
+for _ in range(B2):
+    idx = rng.integers(0, len(ytr), len(ytr))
+    Xb, yb = Xtr[idx], ytr[idx]
+    if len(np.unique(yb)) < 2:
+        continue
+    arv_b = DecisionTreeClassifier(max_leaf_nodes=4, random_state=20260831)
+    arv_b.fit(Xb, yb)
+    boot_refit.append(arv_b.score(Xte, yte))
+boot_refit = np.array(boot_refit)
+ci_refit = np.percentile(boot_refit, [2.5, 97.5])
+
+fig, axes = plt.subplots(1, 2, figsize=(8.6, 3.6))
+
+ax = axes[0]
+ax.bar(range(1, 6), cv_scores, color=COR_ALT, alpha=0.85)
+ax.axhline(cv_scores.mean(), color=COR_LIM, lw=2, ls="--", label=f"média CV={cv_scores.mean():.1%}")
+ax.axhline(acc_te, color=COR_B, lw=2, ls=":", label=f"split único={acc_te:.1%}")
+ax.set_xlabel("fold"); ax.set_ylabel("acurácia")
+ax.set_title("5-fold CV no treino")
+ax.legend(fontsize=8)
+
+ax = axes[1]
+ax.hist(boot_teste, bins=30, color=COR_B, alpha=0.5, density=True, label="reamostra teste")
+ax.hist(boot_refit, bins=30, color=COR_ALT, alpha=0.5, density=True, label="reamostra+reajusta treino")
+ax.axvline(ci_teste[0], color=COR_B, ls="--", lw=1.4)
+ax.axvline(ci_teste[1], color=COR_B, ls="--", lw=1.4)
+ax.set_xlabel("acurácia de teste"); ax.set_ylabel("densidade")
+ax.set_title("Bootstrap: duas perguntas diferentes")
+ax.legend(fontsize=8)
+
+plt.tight_layout()
+plt.show()
+
+print(f"CV 5-fold: {np.round(cv_scores,3)}  média={cv_scores.mean():.4f}  dp={cv_scores.std():.4f}")
+print(f"split único (teste): {acc_te:.4f}")
+print(f"Bootstrap (reamostra teste): média={boot_teste.mean():.4f}  IC95=[{ci_teste[0]:.4f},{ci_teste[1]:.4f}]")
+print(f"Bootstrap (reamostra+reajusta treino): média={boot_refit.mean():.4f}  IC95=[{ci_refit[0]:.4f},{ci_refit[1]:.4f}]")
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A $5$-fold CV no conjunto de treino dá uma média de $71{,}3\%$ com desvio-padrão de $2{,}2\%$ — no formato "média$\pm$desvio" que a Aula 4 insistiu ser obrigatório, $71{,}3\%\pm2{,}2\%$. A acurácia do nosso único split de teste, $75{,}2\%$, cai perto do **topo** da faixa revelada pelos cinco folds (que vão de $69{,}5\%$ a $75{,}5\%$) — não porque a CV esteja "errada", mas porque um único split é, como a Aula 4 insistiu, um único sorteio de uma distribuição, e o sorteio de hoje calhou de ser um dos mais favoráveis dessa distribuição. É exatamente o motivo de reportar CV com desvio-padrão, não um único número: o número isolado do split de teste, sem esse contexto, sugeriria um desempenho mais otimista do que a média honesta.
+
+O Bootstrap reafirma a distinção conceitual da Aula 4: reamostrar as previsões do teste (mantendo o modelo fixo) mede a **incerteza de medição** daquele número específico ($75{,}2\%$, IC$_{95\%}=[69{,}0\%,81{,}0\%]$); reamostrar e reajustar o treino mede a **instabilidade do procedimento** de ajuste em si ($74{,}3\%$, IC$_{95\%}=[69{,}2\%,77{,}9\%]$) — duas perguntas relacionadas, mas não idênticas, exatamente como a Aula 4 separou.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Um Único Número Nunca Basta
+
+::: {.fragment}
+CV $5$-fold: **$71{,}3\%\pm2{,}2\%$** (formato obrigatório da Aula 4: média $\pm$ desvio).
+:::
+
+::: {.fragment}
+Split único de teste: $75{,}2\%$ — perto do **topo** da faixa dos $5$ folds ($69{,}5\%$–$75{,}5\%$). Não é "CV errada": é um sorteio favorável de uma distribuição.
+:::
+
+::: {.fragment}
+**Bootstrap teste** (modelo fixo): incerteza de *medição* — IC$_{95\%}=[69{,}0\%,81{,}0\%]$.
+:::
+
+::: {.fragment}
+**Bootstrap treino+reajuste**: incerteza do *procedimento* — IC$_{95\%}=[69{,}2\%,77{,}9\%]$. Perguntas relacionadas, **não** idênticas.
+:::
+
+:::
+
+::: {.callout-tip}
+## A média de CV ($71{,}3\%$) ficou abaixo da acurácia do nosso split único de teste ($75{,}2\%$). Isso significa que o split de teste foi "escolhido a dedo" ou está errado de algum jeito?
+
+Dica: pense na CV como cinco sorteios de uma distribuição, e o split de teste como um sexto sorteio independente da mesma distribuição.
+:::
+
+::: {.callout-tip}
+## CV, Split Único e o que "Discrepância" Significa
+
+- □ Se a acurácia do split único estivesse dentro da faixa observada nos cinco folds de CV, isso por si só já seria evidência de que o split de teste não foi selecionado de forma tendenciosa.
+- □ No limite em que o conjunto de teste tivesse infinitos pontos, a acurácia medida nele convergiria para o risco esperado verdadeiro $R(\theta)$, e a distância entre essa acurácia e a média de CV desapareceria.
+- □ Numa pesquisa eleitoral por amostragem, duas pesquisas com metodologias igualmente corretas podem legitimamente divergir por alguns pontos percentuais só por acaso de amostragem — a mesma lógica estatística que explica a diferença entre CV e o split único desta aula.
+- □ Como a CV usa $5$ vezes mais "medições" do que um único split de teste, a média de CV é sempre mais próxima do risco esperado verdadeiro do que qualquer split único poderia ser, em qualquer amostra particular.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## CV, Split Único e o que "Discrepância" Significa — Resposta
+
+::: {.callout-tip}
+- ✔ Estar dentro da faixa observada é compatível com "não foi escolhido a dedo" — é a assinatura de um sorteio comum, não incomum, da mesma distribuição de acurácias.
+- ✔ Com teste infinito, a variância amostral do estimador de teste vai a zero, e ele converge para $R(\theta)$ — a mesma lógica de "mais dados, menos ruído" que explica o desvio-padrão da CV encolher com $N$ maior.
+- ✔ Mesma mecânica estatística (ruído de amostragem finita produzindo divergência legítima entre estimativas igualmente válidas), fora do domínio de aprendizado de máquina.
+- ✗ "Mais medições" reduz a variância da *média* de CV em relação a uma única medição, mas não torna a média de CV automaticamente mais próxima do risco verdadeiro **nesta amostra particular** — em qualquer sorteio específico, o número com menos ruído teórico ainda pode, por acaso, estar mais distante da verdade do que um número mais ruidoso.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não, a discrepância é o comportamento esperado de dois sorteios independentes da mesma distribuição de acurácias — nenhum dos dois precisa estar "errado".
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## CV Abaixo do Split Único? — Retomando
+
+::: {.callout-tip}
+::: {.fragment}
+*(Agora responda: o split de teste foi "escolhido a dedo", ou é só ruído de amostragem?)*
+:::
+:::
+
+:::
+
+# Bloco 5 — Síntese: As Quatro Peças, Uma Estrutura
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Chegou a hora de desenhar o mapa completo. Nas quatro aulas, a mesma sequência de três perguntas se repete, só que respondida por máquinas diferentes:
+
+| | **Distribuição assumida** | **Verossimilhança usada para ajustar** | **Decisão / risco** |
+|---|---|---|---|
+| **Aula 1** | Beta$(x\mid a,b)$ por classe | $\sum\ln x_n,\ \sum\ln(1-x_n)$ (sem forma fechada; `scipy.stats.beta.fit`) | corte no cruzamento das **conjuntas** $p(x,\mathcal{C}_k)$ |
+| **Aula 2** | Gaussiana com $\Sigma$ diagonal (Naive Bayes) ou plena | fatoração $\prod_i p(x_i\mid\mathcal{C}_k)$ assumida | risco posterior $\rho(a\mid x)=\sum_k L(k,a)\,p(\mathcal{C}_k\mid x)$ |
+| **Aula 3** | categórica $\hat p_{\tau k}$ por folha | MLE categórica $=-N_\tau H(\hat p_\tau)$ | partição greedy por ganho de informação (IG) |
+| **Aula 4** | amostra i.i.d. de $P(X,Y)$ (suposição sobre o *processo gerador*, não sobre $x$) | $\hat R(\theta)$ recalculado em cada fold/réplica | $R(\theta)$: nunca observado, só estimado (CV, Bootstrap) |
+
+A coluna do meio é o ponto que mais se disfarça: em toda aula, algum objeto foi **maximizado** — uma log-verossimilhança, ainda que às vezes escrita como "minimizar entropia" ou "minimizar soma de quadrados". Na Aula 3, a equivalência foi provada explicitamente ($-N_\tau H(\hat p_\tau)$); nas Aulas 1 e 2, é a definição padrão de MLE; na Aula 4, o objeto que se maximiza (ajustar $\theta$ ao treino) é justamente o que se torna **enganoso** como medida de risco — a mesma operação de ajuste que funciona bem na coluna do meio se torna a fonte do viés otimista que a coluna da direita precisa corrigir.
+
+Vale registrar, com a mesma honestidade que a Aula 4 pediu para os resultados numéricos, um cuidado de **notação**: o símbolo $k$ significa índice de classe ($\mathcal{C}_k$) nas Aulas 1–3, mas número de *folds* na Aula 4 — dois usos completamente distintos do mesmo símbolo. E o custo/penalidade de complexidade aparece como multiplicador de custo assimétrico na Aula 2 ($L(k,a)$, $c_I/c_{II}$) e como penalidade de custo-complexidade ($\lambda$, ou `ccp_alpha`) nas Aulas 3–4 — parentes conceituais (ambos trocam "ajuste" por "algum outro objetivo"), mas não a mesma quantidade. Não é um erro do curso: é a colisão natural de um alfabeto finito de símbolos sendo reciclado ao longo de quatro aulas — mas vale a pena nomear explicitamente, porque confundir os dois usos de $k$ é exatamente o tipo de erro que "decorar a fórmula sem entender a mecânica" produz.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Mapa Completo
+
+| | Distribuição | Verossimilhança | Decisão/Risco |
+|---|---|---|---|
+| Aula 1 | Beta por classe | log-momentos (sem forma fechada) | cruzamento das conjuntas |
+| Aula 2 | Gaussiana ($\Sigma$ diag./plena) | $\prod_i p(x_i\mid\mathcal{C}_k)$ | risco posterior $\rho(a\mid x)$ |
+| Aula 3 | categórica por folha | MLE $=-N_\tau H(\hat p_\tau)$ | partição greedy por IG |
+| Aula 4 | amostra i.i.d. de $P(X,Y)$ | $\hat R(\theta)$ por fold/réplica | $R(\theta)$ estimado, não observado |
+
+::: {.fragment}
+**A coluna do meio se disfarça:** "minimizar entropia" e "minimizar soma de quadrados" **são** maximizar verossimilhança.
+:::
+
+::: {.fragment}
+**Cuidado de notação:** $k$ $=$ índice de classe (Aulas 1–3) $\ne$ $k$ $=$ número de *folds* (Aula 4). $\lambda$/custo $=$ multiplicador de custo assimétrico (Aula 2) $\ne$ penalidade de custo-complexidade (Aulas 3–4). Colisão de símbolos, não erro — mas vale nomear.
+:::
+
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{coletapa}{RGB}{93,109,126}
+\definecolor{coletapaborda}{RGB}{55,65,81}
+\definecolor{coldist}{RGB}{192,57,43}
+\definecolor{colvero}{RGB}{185,119,14}
+\definecolor{coldec}{RGB}{17,122,101}
+\definecolor{coldecborda}{RGB}{11,74,63}
+
+\begin{tikzpicture}[
+  etapa/.style={rectangle, rounded corners, fill=coletapa, draw=coletapaborda, line width=1pt, text=white, minimum width=3.6cm, minimum height=1cm, align=center, font=\small\bfseries},
+  dist/.style={rectangle, rounded corners, draw=coldist, line width=1.2pt, fill=white, text=coldist, minimum width=3.4cm, minimum height=1.5cm, align=center, font=\scriptsize},
+  vero/.style={rectangle, rounded corners, draw=colvero, line width=1.2pt, fill=white, text=colvero, minimum width=3.4cm, minimum height=1.5cm, align=center, font=\scriptsize},
+  dec/.style={rectangle, rounded corners, fill=coldec, draw=coldecborda, line width=1pt, text=white, minimum width=3.4cm, minimum height=1.5cm, align=center, font=\scriptsize},
+  rotulo/.style={font=\small\bfseries, align=center, text=black}
+]
+
+\node[etapa] (E1) at (0,9)  {Distribuição\\ $p(x\mid\mathcal{C}_k)$};
+\node[etapa] (E2) at (6,9)  {Verossimilhança\\ $L(\theta;\mathcal{D})$};
+\node[etapa] (E3) at (12,9) {Decisão / Risco};
+\draw[thick,->] (E1) -- (E2);
+\draw[thick,->] (E2) -- (E3);
+
+\node[rotulo] at (-4.2,6.5) {Aula 1\\[1pt]Beta};
+\node[rotulo] at (-4.2,4.3) {Aula 2\\[1pt]Naive Bayes};
+\node[rotulo] at (-4.2,2.1) {Aula 3\\[1pt]CART};
+\node[rotulo] at (-4.2,-0.1) {Aula 4\\[1pt]CV/Bootstrap};
+
+\node[dist] (A1) at (0,6.5)  {Beta$(x\mid a,b)$\\ ajustada por classe};
+\node[vero] (A2) at (6,6.5)  {$\sum \ln x_n,\ \sum\ln(1-x_n)$\\ (\texttt{beta.fit})};
+\node[dec]  (A3) at (12,6.5) {corte no cruzamento\\ das \emph{conjuntas}};
+\draw[thick,->] (A1) -- (A2); \draw[thick,->] (A2) -- (A3);
+
+\node[dist] (B1) at (0,4.3)  {Gaussiana c/ $\Sigma$\\ diagonal (Naive Bayes)};
+\node[vero] (B2) at (6,4.3)  {$\prod_i p(x_i\mid\mathcal{C}_k)$\\ fatoração assumida};
+\node[dec]  (B3) at (12,4.3) {risco posterior\\ $\rho(a\mid x)$};
+\draw[thick,->] (B1) -- (B2); \draw[thick,->] (B2) -- (B3);
+
+\node[dist] (C1) at (0,2.1)  {$\hat p_{\tau k}$\\ categórica por folha};
+\node[vero] (C2) at (6,2.1)  {MLE categórica $=$\\ $-N_\tau H(\hat p_\tau)$};
+\node[dec]  (C3) at (12,2.1) {partição greedy\\ por ganho de informação};
+\draw[thick,->] (C1) -- (C2); \draw[thick,->] (C2) -- (C3);
+
+\node[dist] (D1) at (0,-0.1)  {amostra i.i.d.\\ de $P(X,Y)$};
+\node[vero] (D2) at (6,-0.1)  {$\hat R(\theta)$ recalculado\\ em cada fold/réplica};
+\node[dec]  (D3) at (12,-0.1) {$R(\theta)$: estimado,\\ nunca observado};
+\draw[thick,->] (D1) -- (D2); \draw[thick,->] (D2) -- (D3);
+
+\end{tikzpicture}
+```
+:::
+
+::: {.callout-tip}
+## A Aula 6 vai construir regressão linear com sua própria distribuição, verossimilhança e decisão. Isso significa que regressão linear "é a mesma coisa" que uma árvore de decisão, só escrita com notação diferente?
+
+Dica: pense na diferença entre "usar os mesmos ingredientes" e "fazer o mesmo prato".
+:::
+
+::: {.callout-tip}
+## Mesma Estrutura, Técnicas Diferentes
+
+- □ Se dois algoritmos compartilham a mesma estrutura de três peças (distribuição, verossimilhança, decisão), isso implica que eles vão sempre produzir a mesma fronteira de decisão sobre o mesmo dado.
+- □ No limite em que a distribuição assumida por um modelo está completamente errada (por exemplo, assumir Beta quando os dados são multimodais e não têm nada a ver com Beta), a etapa de verossimilhança ainda maximiza alguma coisa, mas o resultado da etapa de decisão pode ser sistematicamente ruim, mesmo com a maximização executada "corretamente".
+- □ Um estudante que aprende primeiro a estrutura de três peças desta aula, antes de ver o algoritmo específico de regressão linear na Aula 6, deveria ser capaz de prever que existirá algo desempenhando o papel de "distribuição assumida" ali também — mesmo sem ainda saber qual é.
+- □ Como as quatro aulas revisadas hoje compartilham a mesma estrutura de três peças, conclui-se que a escolha de qual distribuição assumir (Beta, Gaussiana, categórica, i.i.d. de $P(X,Y)$) é um detalhe secundário que pouco afeta o resultado final de cada técnica.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Mesma Estrutura, Técnicas Diferentes — Resposta
+
+::: {.callout-tip}
+- ✗ Compartilhar a estrutura (três peças) não implica compartilhar a distribuição assumida, a forma da verossimilhança, ou a regra de decisão específica — os "ingredientes" são análogos, o "prato" final é diferente em cada aula.
+- ✔ É exatamente o erro de "qual das três peças está errada?" citado desde o slide 1 do curso: a maximização pode estar tecnicamente correta e o resultado ainda ser ruim, porque a peça errada foi a suposição distributiva, não o processo de ajuste.
+- ✔ Reconhecer a estrutura antes do conteúdo específico é a competência que esta aula pretende deixar — antecipar "vai existir uma peça assim" é, precisamente, o que significa ter entendido o padrão, não só as quatro instâncias dele.
+- ✗ A escolha da distribuição assumida é, ao contrário, a peça que a Aula 1 chamou de "quase sempre a que está errada" quando um modelo falha — ela é central, não secundária, para o resultado final.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** mesmos ingredientes (distribuição, verossimilhança, decisão), pratos diferentes — reconhecer a receita não elimina a diferença entre os pratos.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Mesma Estrutura? — Retomando
+
+::: {.callout-tip}
+::: {.fragment}
+*(Agora responda: compartilhar a estrutura torna as quatro técnicas intercambiáveis?)*
+:::
+:::
+
+:::
+
+# Fechamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando ao roteiro de abertura, com uma frase cada:
+
+1. **O que as quatro aulas tinham em comum:** a mesma estrutura de três peças — uma distribuição assumida, uma verossimilhança maximizada para ajustá-la, e uma decisão fundamentada em risco.
+2. **Como "qual é o formato dos dados?" se disfarça:** como parâmetros de uma Beta, como uma fatoração de independência condicional, e como a proporção categórica dentro de uma folha — três respostas diferentes à mesma pergunta.
+3. **Por que maximizar verossimilhança $=$ minimizar impureza/erro:** porque, para uma categórica, a log-verossimilhança é literalmente $-N_\tau H(\hat p_\tau)$ — não uma analogia, uma identidade algébrica.
+4. **Por que nunca observamos o risco de verdade:** porque $R(\theta)$ é uma esperança sobre a distribuição populacional desconhecida $P(X,Y)$; a Aula 4 respondeu simulando repetidamente essa amostragem via CV, e quantificando a incerteza remanescente via Bootstrap.
+5. **Que peça falta:** todas as quatro verossimilhanças de hoje foram sobre densidades, fatorações ou frequências categóricas — nenhuma foi sobre um alvo contínuo ligado linearmente aos atributos. Essa é exatamente a peça que a Aula 6 (Regressão Linear e Máxima Verossimilhança) adiciona: mínimos quadrados como MLE sob um modelo de ruído gaussiano — o mesmo princípio de sempre, agora aplicado a um modelo paramétrico contínuo em vez de uma densidade, uma árvore, ou um esquema de reamostragem.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos Hoje
+
+1. Mesma estrutura de três peças em toda aula: **distribuição $\to$ verossimilhança $\to$ decisão/risco**.
+2. "Qual é o formato dos dados?" reaparece como parâmetros de Beta, fatoração de independência, ou proporção categórica.
+3. Maximizar verossimilhança $=$ minimizar impureza — identidade algébrica, não analogia ($-N_\tau H(\hat p_\tau)$).
+4. $R(\theta)$ nunca é observado; CV simula amostragem repetida, Bootstrap quantifica a incerteza remanescente.
+
+::: {.fragment}
+**Próxima aula:** Regressão Linear — mínimos quadrados como máxima verossimilhança sob ruído gaussiano, o mesmo princípio agora sobre um modelo paramétrico contínuo.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. A Aula 1 usou prioris sintéticas de $95\%/5\%$; hoje, no Pima Indians Diabetes, as prioris reais são de aproximadamente $65\%/35\%$. Explique, usando a equação da conjunta $p(x,\mathcal{C}_k)=p(x\mid\mathcal{C}_k)\,\pi_k$, por que o deslocamento do corte ótimo em relação ao cruzamento das condicionais é menor quando a assimetria de prioris é menor — e por que isso não contradiz o princípio geométrico da Aula 1.
+
+2. No Bloco 2, a suposição de independência condicional do Naive Bayes teve preço zero (Glicose/IMC no Pima) mas preço de $2$ pontos percentuais no Breast Cancer Wisconsin (Aula 2). Explique por que o preço dessa suposição não é uma propriedade fixa do método Naive Bayes, relacionando sua resposta à correlação intra-classe medida em cada caso.
+
+3. A Aula 4 mostrou que a CV de $5$ folds no Bloco 4 desta aula produziu uma média de $71{,}3\%$, enquanto o split único de teste da árvore do Bloco 3 deu $75{,}2\%$. Discuta por que essa diferença não é evidência de erro em nenhuma das duas medidas, e proponha um experimento (com dados novos ou reamostrados) que ajudaria a decidir se $75{,}2\%$ é um valor tipicamente otimista para este procedimento.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-note icon=false}
+## Prioris Reais vs. Sintéticas (Aula 1)
+
+- □ Se a prevalência real de diabetes nesta população fosse de $0{,}1\%$ em vez de $35{,}1\%$, o cruzamento das conjuntas se deslocaria ainda mais em direção à cauda da distribuição dos diabéticos, tornando o corte ótimo mais extremo do que o observado hoje.
+
+- □ Como a Aula 1 usou uma razão de prioris de $19$ para $1$ e esta aula usa uma razão de aproximadamente $1{,}86$ para $1$, conclui-se que o cruzamento das conjuntas de hoje está estruturalmente mais próximo do cruzamento das condicionais do que estava na Aula 1.
+
+- □ Num problema de detecção de fraude em que apenas $0{,}5\%$ das transações são fraudulentas, o mesmo argumento do cruzamento de conjuntas (em vez de condicionais) se aplica, mesmo que a variável observada não seja glicose nem tenha suporte em $[0,1]$.
+
+- □ Já que a Beta ajustada aos diabéticos ($a=3{,}18,\ b=1{,}78$) tem parâmetros diferentes da Beta ajustada aos não-diabéticos ($a=3{,}49,\ b=4{,}50$), isso por si só garante que as duas curvas nunca se cruzam mais de uma vez no intervalo $[0,1]$.
+:::
+
+::: {.callout-note icon=false}
+## Beta como Estimador de Densidade (Aula 1)
+
+- □ No limite em que $a=b=1$, a distribuição Beta se reduz à uniforme em $[0,1]$, e o ajuste por máxima verossimilhança deixaria de conseguir distinguir as duas classes por qualquer diferença de forma.
+
+- □ Se, em vez de ajustar uma Beta por máxima verossimilhança, alguém decidisse usar a média e o desvio-padrão amostrais para "adivinhar" $a$ e $b$ por um método de momentos, o resultado coincidiria exatamente com o obtido por `scipy.stats.beta.fit`, porque ambos otimizam a mesma função.
+
+- □ Num sensor industrial que mede uma proporção (por exemplo, fração de peças defeituosas por lote, sempre em $[0,1]$), o mesmo ajuste de Beta por classe (lote bom vs. lote ruim) se aplicaria naturalmente, sem exigir Gaussiana ou outra família com suporte ilimitado.
+
+- □ Como a Beta ajustada aos não-diabéticos tem $b_0=4{,}50 > a_0=3{,}49$, conclui-se que essa distribuição é necessariamente simétrica em torno de $0{,}5$.
+:::
+
+::: {.callout-note icon=false}
+## Erro Tipo I/II e Assimetria de Custos (Aula 1)
+
+- □ No limite em que o custo de um escape (diabético não identificado) tende a infinito relativamente ao custo de um alarme falso, o limiar de decisão ótimo se deslocaria para a esquerda, classificando cada vez mais pacientes como diabéticos até declarar quase todos positivos.
+
+- □ Se um exame de triagem fosse ajustado para ter exatamente zero alarmes falsos, isso garantiria automaticamente que ele também tem poucos escapes, já que os dois tipos de erro tendem a se mover na mesma direção quando o limiar muda.
+
+- □ Num sistema de moderação de conteúdo automatizado que decide entre "remover" e "manter" uma postagem, a mesma lógica de troca entre Erro Tipo I (remover conteúdo legítimo) e Erro Tipo II (manter conteúdo problemático) se aplica, com custos claramente diferentes conforme o contexto da plataforma.
+
+- □ Como o corte pela conjunta (Bloco 1 desta aula) reduziu o número total de erros em relação ao corte pelas condicionais, conclui-se que ele é a escolha certa independentemente de qualquer consideração sobre o custo relativo de alarmes falsos e escapes.
+:::
+
+::: {.callout-note icon=false}
+## Independência Condicional: Preço Variável (Aula 2)
+
+- □ Se, em vez de Glicose e IMC, o Bloco 2 tivesse usado dois atributos definidos de forma redundante (por exemplo, "IMC em kg/m²" e "IMC em unidades arbitrárias que são o dobro do IMC em kg/m²"), a correlação intra-classe entre eles seria próxima de $1$, e a suposição de independência do Naive Bayes pagaria um preço bem maior do que o observado hoje.
+
+- □ Como o Naive Bayes produziu exatamente a mesma acurácia que a Gaussiana de covariância plena no Pima (Glicose/IMC), conclui-se que, para qualquer par de atributos deste dataset, a suposição de independência condicional nunca custaria nada.
+
+- □ Num modelo de triagem de spam que assume independência condicional entre a presença das palavras "grátis" e "promoção" dado o rótulo (spam/não-spam), o preço dessa suposição dependeria de quão correlacionadas essas duas palavras realmente são dentro de cada classe — a mesma lógica do Bloco 2, fora do domínio médico.
+
+- □ Se duas variáveis fossem independentes tanto na classe A quanto na classe B, mas com médias diferentes entre as classes, a Gaussiana de covariância diagonal (Naive Bayes) ainda poderia separar as duas classes razoavelmente bem, sem qualquer prejuízo vindo da suposição de independência.
+:::
+
+::: {.callout-note icon=false}
+## Teoria da Decisão e Risco Posterior (Aula 2)
+
+- □ Se a matriz de perdas $L(k,a)$ atribuísse custo zero a todo acerto e custo idêntico a qualquer tipo de erro (Tipo I ou Tipo II), o limiar de decisão que minimiza o risco posterior $\rho(a\mid x)$ coincidiria com o limiar de $0{,}5$ de probabilidade posterior.
+
+- □ Num cenário em que o custo de um escape é dez vezes o custo de um alarme falso, o limiar ótimo de probabilidade posterior para declarar "diabético" seria maior do que $0{,}5$, tornando mais difícil, não mais fácil, declarar a classe rara.
+
+- □ Numa seguradora que decide entre "aceitar apólice" e "recusar apólice" com custos assimétricos entre aceitar um mau pagador e recusar um bom pagador, a mesma estrutura de risco posterior $\rho(a\mid x)=\sum_k L(k,a)p(\mathcal{C}_k\mid x)$ se aplica, com a mesma lógica de deslocamento de limiar por assimetria de custo.
+
+- □ Como o risco de Bayes $R^\star$ é definido como o valor esperado do risco posterior mínimo sobre a distribuição de $X$, ele é sempre estritamente positivo, mesmo quando as classes não se sobrepõem em nenhum ponto do espaço de atributos.
+:::
+
+::: {.callout-note icon=false}
+## Naive Bayes: Generativo, Não Discriminativo (Aula 2)
+
+- □ Se um modelo generativo (como o Naive Bayes Gaussiano) estimar $p(\mathbf{x}\mid\mathcal{C}_k)$ e $\pi_k$ corretamente para cada classe, ele automaticamente também é capaz de gerar novos exemplos sintéticos plausíveis de cada classe, amostrando dessas densidades — capacidade que um classificador puramente discriminativo, que só estima $p(\mathcal{C}_k\mid\mathbf{x})$ diretamente, não tem por construção.
+
+- □ Como o Naive Bayes é um modelo generativo, ele necessariamente tem acurácia de classificação igual ou maior do que qualquer modelo discriminativo treinado com os mesmos dados.
+
+- □ Num cenário de poucos dados de treino, a estrutura extra imposta por um modelo generativo (como a fatoração de independência do Naive Bayes) pode compensar a falta de dados o suficiente para superar um modelo discriminativo mais flexível mas sem essa estrutura — o mesmo tipo de troca "menos flexibilidade, mais parcimônia" discutida no Bloco 3 desta aula sobre árvores.
+
+- □ Se duas classes tiverem exatamente a mesma densidade condicional $p(\mathbf{x}\mid\mathcal{C}_k)$, mas prioris diferentes, um modelo generativo ainda conseguiria, em princípio, produzir uma fronteira de decisão não trivial entre elas, baseada só na diferença de prioris.
+:::
+
+::: {.callout-note icon=false}
+## Impureza como Verossimilhança (Aula 3)
+
+- □ Se todas as folhas de uma árvore de classificação tivessem exatamente $\hat p_{\tau k}=1$ para alguma classe $k$ e $0$ para as demais (pureza total), a entropia de cada folha seria zero e a log-verossimilhança do modelo, avaliada nos próprios dados de treino, seria a maior possível ($0$, já que $\ln 1=0$).
+
+- □ Como reduzir entropia é equivalente a maximizar a log-verossimilhança categórica ($\ell_\tau(\hat p_\tau)=-N_\tau H(\hat p_\tau)$), qualquer split que reduza a entropia ponderada também reduz necessariamente o erro bruto de classificação (proporção de pontos mal classificados pela regra de majoritária).
+
+- □ Num modelo de regressão logística ajustado por máxima verossimilhança (fora do escopo desta aula, mas análogo em espírito), a mesma lógica de "ajustar parâmetros para maximizar a probabilidade dos dados observados" se aplicaria, ainda que a forma funcional da verossimilhança seja diferente da categórica usada nas folhas de uma árvore.
+
+- □ Se duas folhas tivessem o mesmo número de pontos $N_\tau$ e a mesma proporção majoritária $\hat p_{\tau,\text{maj}}$, elas teriam necessariamente a mesma entropia e o mesmo Gini, independentemente de qualquer outra diferença entre elas.
+:::
+
+::: {.callout-note icon=false}
+## Miopia Gulosa e Interações (Aula 3)
+
+- □ Se dois atributos só forem informativos em **combinação** (por exemplo, "Glicose alta E IMC alto" prediz diabetes, mas nenhum dos dois isoladamente prediz bem), um algoritmo guloso de árvore pode demorar mais splits — ou nunca — para capturar essa interação, comparado a um cenário em que cada atributo já é informativo isoladamente.
+
+- □ Como a árvore do Bloco 3 encontrou um split de raiz com ganho de informação positivo, isso garante que esse mesmo split apareceria na raiz de qualquer árvore treinada com um subconjunto diferente, mas ainda representativo, dos mesmos pacientes.
+
+- □ Num algoritmo de busca de rotas que escolhe, a cada cruzamento, a rua que parece mais rápida sem simular o trajeto completo até o destino, a mesma limitação de miopia gulosa das árvores de decisão se aplica — a melhor escolha local não garante a melhor rota global.
+
+- □ Se a árvore permitisse profundidade ilimitada (uma folha por paciente), a miopia gulosa deixaria de ser um problema, porque toda combinação de atributos relevante acabaria sendo capturada em algum nível suficientemente profundo da árvore.
+:::
+
+::: {.callout-note icon=false}
+## Axis-Aligned vs. Elipses (Aulas 2 e 3)
+
+- □ Se a fronteira de decisão verdadeira entre duas classes fosse exatamente uma reta na diagonal do espaço de atributos (não paralela a nenhum eixo), uma árvore de decisão precisaria, em geral, de mais splits para aproximá-la do que uma Gaussiana com covariância plena adequadamente ajustada.
+
+- □ Como a árvore do Bloco 3 e a Gaussiana do Bloco 2 usam exatamente os mesmos dois atributos (Glicose e IMC), suas fronteiras de decisão são necessariamente muito parecidas visualmente, independentemente da forma funcional de cada modelo.
+
+- □ Num problema de visão computacional em que a fronteira de decisão relevante depende de uma combinação linear de pixels vizinhos (não alinhada aos eixos originais da imagem), a mesma limitação estrutural das árvores axis-aligned se aplicaria, favorecendo modelos capazes de fronteiras oblíquas.
+
+- □ Se um conjunto de dados tiver uma fronteira de decisão verdadeiramente alinhada aos eixos (por exemplo, "diabético se, e somente se, Glicose $>140$"), a árvore de decisão deveria, em geral, precisar de menos splits para representá-la do que uma Gaussiana de covariância plena precisaria de parâmetros ajustados para aproximá-la bem.
+:::
+
+::: {.callout-note icon=false}
+## Erro de Treino e Validação (Aula 4)
+
+- □ Se a árvore do Bloco 3 tivesse sido avaliada apenas nos dados de treino usados para ajustá-la, a acurácia relatada ($77{,}4\%$) seria uma estimativa otimista do desempenho esperado em pacientes novos, mesmo sem qualquer intenção de enganar.
+
+- □ Como a acurácia de teste ($75{,}2\%$) desta árvore é menor que a acurácia de treino ($77{,}4\%$), a diferença de $2{,}2$ pontos percentuais garante, por si só, que este modelo está sofrendo de overfitting severo, no mesmo grau do experimento de profundidade $15$ da Aula 4.
+
+- □ Num sistema de aprovação de crédito treinado com dados históricos e nunca reavaliado com clientes novos, o mesmo viés otimista do erro de treino se aplicaria à métrica interna de acurácia usada pela equipe de desenvolvimento.
+
+- □ Se um modelo tivesse acurácia de treino e de teste exatamente iguais, isso provaria que o modelo generaliza perfeitamente para qualquer paciente futuro, não só para os presentes no conjunto de teste usado.
+:::
+
+::: {.callout-note icon=false}
+## Duas Perguntas do Bootstrap (Aula 4)
+
+- □ Se o objetivo fosse responder "quão confiável é a acurácia de $75{,}2\%$ medida no meu conjunto de teste fixo, sem retreinar nada", a técnica correta seria reamostrar as previsões do teste com reposição, não reamostrar e reajustar o conjunto de treino.
+
+- □ Como as duas aplicações do Bootstrap desta aula (reamostrar teste vs. reamostrar+reajustar treino) produziram intervalos de confiança parcialmente sobrepostos ($[69{,}0\%,81{,}0\%]$ e $[69{,}2\%,77{,}9\%]$), conclui-se que elas estão, na prática, respondendo à mesma pergunta estatística.
+
+- □ Numa pesquisa médica que quer saber não só "qual é a acurácia deste modelo específico" mas "quão instável é o processo de treinar este tipo de modelo nesta população", reamostrar e reajustar o conjunto de treino é a técnica mais adequada, não reamostrar só as previsões de um modelo já fixo.
+
+- □ Se o intervalo de confiança do Bootstrap para uma estatística for muito largo, isso significa necessariamente que o código do Bootstrap tem um erro de implementação, já que reamostragem com reposição deveria sempre produzir intervalos estreitos.
+:::
+
+::: {.callout-note icon=false}
+## Vazamento de Dados e Relato Honesto (Aula 4)
+
+- □ No limite em que a normalização de atributos (subtrair a média, dividir pelo desvio-padrão) for calculada usando a amostra inteira antes do split de validação cruzada, em vez de dentro de cada fold, a estimativa de erro produzida se aproxima da estimativa otimista do erro de treino, mesmo que nenhum rótulo seja usado diretamente nesse cálculo.
+
+- □ Como o experimento de vazamento do ESL (Aula 4) usou rótulos artificialmente aleatórios só para tornar o efeito visível com clareza didática, conclui-se que esse tipo de vazamento não ocorre em datasets reais, onde o rótulo tem relação genuína com os atributos.
+
+- □ Numa competição de previsão de preços de imóveis em que os participantes normalizam os atributos usando toda a base disponível antes de fazer sua própria validação cruzada interna, o mesmo mecanismo de vazamento de informação da Aula 4 se aplica, mesmo fora do domínio médico desta aula.
+
+- □ Reportar somente a média da acurácia de validação cruzada, sem o desvio-padrão, produz um número tecnicamente correto (a média está certa), então essa prática não constitui um problema de honestidade estatística — é apenas uma escolha de estilo de relatório, sem custo prático.
+:::
+:::

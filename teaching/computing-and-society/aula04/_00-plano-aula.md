@@ -61,14 +61,14 @@ explicitamente no `index.qmd` que não é citação literal verificada
 contra a página do livro** (regra de precisão de conteúdo do
 `CLAUDE.md`) até que o PDF real esteja disponível.
 
-## Plano de aula — Aula 4 (carga horária nominal: ~60–70min)
+## Plano de aula — Aula 4 (carga horária nominal: ~70–80min)
 
 > Mesmo padrão das Aulas 1–2 (nominal ~50min, cresce se o professor
-> aprofundar exemplos "na prática"): esta aula tem 2 blocos técnicos
-> centrais (Conway + Requisitos), então arredondei a estimativa um
-> pouco acima do nominal-base da disciplina. Candidatos naturais a
+> aprofundar exemplos "na prática"): esta aula tem 3 blocos técnicos
+> centrais (Conway + Requisitos + Dark Patterns), então arredondei a
+> estimativa acima do nominal-base da disciplina. Candidatos naturais a
 > cortar ao vivo, se a carga real for menor: o detalhamento de exemplos
-> "na prática" do Bloco 5, não a estrutura dos 6 blocos.
+> "na prática" do Bloco 6, não a estrutura dos 7 blocos.
 
 1.  **Abertura — Um sistema quebrado por comunicação, não por código**
     (~8 min) — Organizador prévio: a Aula 3 tratou responsabilidade
@@ -127,7 +127,21 @@ contra a página do livro** (regra de precisão de conteúdo do
     dados/requisitos já embute estruturas de poder existentes, antes de
     qualquer modelo ou código ser escrito.
 
-5.  **Da Responsabilidade Social ao Artefato de Engenharia Concreto**
+5.  **Quando a Assimetria É Deliberada: Dark Patterns** (~10 min) —
+    Bloco adicionado após revisão do usuário (2026-08-31): os Blocos 2–4
+    tratam de resultado indesejado por **ausência** estrutural (ninguém
+    decidiu excluir, faltou representação). Este bloco mostra o caso
+    irmão: às vezes a fricção que o usuário sente é **presença**
+    deliberada — alguém, no papel de "Stakeholder de negócio" do Bloco
+    2, escolhe otimizar por uma métrica (retenção, receita) contra o
+    interesse do usuário. Taxonomia de Gray et al. (2018): Insistência,
+    Obstrução, Sonegação, Interferência de Interface, Ação Forçada.
+    Caso concreto e bem documentado: FTC vs. Amazon (2023–2025), o
+    "Iliad Flow" de cancelamento do Prime. Fecha perguntando se o mesmo
+    maquinário de tradução pode apontar a favor do usuário — pergunta
+    que o Bloco 6 responde.
+
+6.  **Da Responsabilidade Social ao Artefato de Engenharia Concreto**
     (~15 min) — Fechar o "gap" entre principío e prática: um exemplo
     guiado, passo a passo, de como um compromisso social/ético abstrato
     (ex.: "o sistema deve ser acessível a usuários com baixa visão")
@@ -139,7 +153,7 @@ contra a página do livro** (regra de precisão de conteúdo do
     o requisito tende a "cair no buraco" entre equipes, do mesmo jeito
     que uma interface técnica sem dono cai.
 
-6.  **Fechamento e Ponte para a Aula 5** (~8 min) — Retomar as quatro
+7.  **Fechamento e Ponte para a Aula 5** (~8 min) — Retomar as cinco
     perguntas da abertura, uma frase cada. O que fica em aberto: hoje
     vimos que decisões de processo/organização têm consequência técnica
     e social — mas essa consequência também é **material**: a Aula 5

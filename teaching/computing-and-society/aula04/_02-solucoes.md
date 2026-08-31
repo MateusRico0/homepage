@@ -689,7 +689,7 @@ não menos.
 
 **Justificativa:** É uma aplicação direta do mesmo mecanismo — ausência
 de um dono claro de uma responsabilidade compartilhada tende a produzir
-negligência estrutural, seja para um requisito ético (Bloco 5) ou para
+negligência estrutural, seja para um requisito ético (Bloco 6) ou para
 código legado técnico.
 
 ---
@@ -698,7 +698,7 @@ código legado técnico.
 
 **Heurística:** Falsa dicotomia
 
-**Afirmação:** ✗ Como a Lei de Conway trata de módulos técnicos e o Bloco 5 trata de requisitos éticos, a analogia entre os dois é apenas estética/retórica, sem nenhum mecanismo causal real em comum entre as duas situações.
+**Afirmação:** ✗ Como a Lei de Conway trata de módulos técnicos e o Bloco 6 trata de requisitos éticos, a analogia entre os dois é apenas estética/retórica, sem nenhum mecanismo causal real em comum entre as duas situações.
 
 **Resposta:** Falso
 
@@ -732,7 +732,7 @@ de décadas e contextos diferentes.
 
 **Heurística:** Limite
 
-**Afirmação:** ✔ No limite em que uma equipe de desenvolvimento segue rigorosamente todo o processo de tradução ético descrito no Bloco 5 (NFR, ADR, gate de CI) para todo compromisso social identificado, essa equipe ainda poderia produzir um sistema com uma arquitetura que espelha disfuncionalmente seu organograma, pelo mecanismo do Bloco 3.
+**Afirmação:** ✔ No limite em que uma equipe de desenvolvimento segue rigorosamente todo o processo de tradução ético descrito no Bloco 6 (NFR, ADR, gate de CI) para todo compromisso social identificado, essa equipe ainda poderia produzir um sistema com uma arquitetura que espelha disfuncionalmente seu organograma, pelo mecanismo do Bloco 3.
 
 **Resposta:** Verdadeiro
 
@@ -764,7 +764,7 @@ domínio organizacional (Aula 4) para o domínio material/ambiental
 
 **Heurística:** Falsa dicotomia
 
-**Afirmação:** ✗ Como esta aula mostrou dois mecanismos pelos quais a prática social de construir software afeta o resultado técnico, conclui-se que qualquer falha técnica de um sistema deve ser explicada primariamente por causas organizacionais, nunca por erros técnicos comuns (bugs, escolhas de algoritmo etc.).
+**Afirmação:** ✗ Como esta aula mostrou três mecanismos pelos quais a prática social de construir software afeta o resultado técnico, conclui-se que qualquer falha técnica de um sistema deve ser explicada primariamente por causas organizacionais, nunca por erros técnicos comuns (bugs, escolhas de algoritmo etc.).
 
 **Resposta:** Falso
 

@@ -118,6 +118,7 @@ Esta aula muda o objeto de estudo. Em vez de um modelo específico, o assunto é
 :::
 
 ::: {.content-visible when-format="revealjs"}
+## Revisão
 
 **A Aula 3 podou uma árvore "olhando o gráfico".** Como fazer isso de forma sistemática?
 
@@ -141,7 +142,7 @@ Hoje muda o objeto de estudo: não um modelo, mas o **procedimento** de escolher
 
 Vamos treinar árvores de decisão de profundidade crescente no Breast Cancer Wisconsin, medindo a acurácia tanto nos dados usados para treinar quanto numa fatia de 30% nunca vista durante o ajuste.
 
-::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
 
 ```{python}
 #| echo: false
@@ -207,24 +208,84 @@ Treino: 100% a partir da profundidade 6. Teste: pico em 93,0% na profundidade 5,
 ## Por Que o Erro de Treino Engana
 
 ::: {.fragment}
-$\hat{R}(\theta)$ é calculado nos **mesmos dados** que escolheram $\theta$.
+**O que calculamos: Erro de Treino (Risco Empírico)**
+$$ \hat{R}(\theta) = \frac{1}{N}\sum_{i=1}^{N} \mathcal{L}(y_i, f_\theta(x_i)) $$
+É a média de erros medida nos **mesmos pontos** usados para ajustar os parâmetros $\theta$.
 :::
 
 ::: {.fragment}
-$\hat{R}(\theta)$ é enviesado para baixo como estimador do risco esperado $R(\theta) = \mathbb{E}_{(X,Y)\sim P}[\mathcal{L}(Y,f_\theta(X))]$.
+**O que realmente queremos: Risco Esperado**
+$$ R(\theta) = \mathbb{E}_{(X,Y)\sim P}[\mathcal{L}(Y,f_\theta(X))] $$
+É o erro que o modelo cometerá no mundo real, sobre dados **novos e nunca vistos** da população $P(X,Y)$.
+:::
+
+::: {.fragment}
+**A Ilusão da Memorização**
+$\hat{R}(\theta)$ é um estimador **enviesado para baixo** (otimista) de $R(\theta)$. Como $\theta$ foi escolhido *especificamente* para minimizar $\hat{R}(\theta)$, o modelo está literalmente com o gabarito da prova antes de fazê-la.
 :::
 
 :::
+
+## O Split como Simulação do Mundo Real
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Entender que o erro de treino é enviesado nos leva imediatamente à necessidade de separar um conjunto de teste. Mas *como* fazer essa separação é uma decisão estatística, não apenas chamar uma função de embaralhamento aleatório.
+
+O conjunto de teste serve a um propósito rigoroso: **simular o ambiente em que o modelo será efetivamente usado**. Quando colocamos um modelo na rua, o processo gerador de dados (DGP — *Data Generating Process*) não para; ele continua operando, produzindo novos exemplos. A sua métrica de teste só será confiável se o particionamento dos dados mimetizar a forma como esses novos exemplos chegarão na realidade.
+
+Se o seu particionamento não refletir essa mecânica, a estimativa de erro voltará a ser otimista, sofrendo de vazamento de informações. A regra central é alinhar o split ao eixo de generalização desejado:
+
+* **Generalização no tempo:** Se o objetivo é prever o amanhã, um sorteio aleatório contamina o modelo com informações do "futuro". O particionamento deve ser cronológico: treina-se com dados do passado (ex: 2023 a 2025) e testa-se estritamente no período subsequente (ex: 2026).
+* **Generalização espacial ou de contexto:** Se queremos saber se um modelo funciona para hospitais, escolas ou fazendas diferentes das usadas no treino, o split deve agrupar essas entidades. Treinar com dados da localidade A e testar com a localidade A esconde a queda de desempenho que ocorrerá ao chegar na localidade B.
+* **Generalização por indivíduo:** Em exames médicos longitudinais ou com múltiplas amostras, um mesmo paciente pode ter dezenas de registros. O particionamento deve ser feito pelo ID do paciente. Separar por registro isolado permite que o modelo decore características anatômicas daquele paciente no treino e as use no teste, resolvendo o problema por reconhecimento de identidade, não por diagnóstico real.
+
+A suposição tradicional de que os dados são perfeitamente independentes e identicamente distribuídos (i.i.d.) num sorteio aleatório é conveniente matematicamente, mas frequentemente perigosa. O design metodológico do seu conjunto de teste define exatamente qual pergunta de pesquisa você está de fato respondendo.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+Separar dados não é apenas jogar uma moeda. O teste representa o **processo gerador de dados** continuando na vida real.
+
+::: {.fragment}
+A regra de ouro: **o split deve mimetizar o eixo de generalização desejado.**
+:::
+
+::: {.fragment}
+
+* **No Tempo (Prever o amanhã):**
+* **Erro:** Sorteio aleatório (vaza correlações do futuro para o treino).
+* **Certo:** Treinar no passado (ex: 2023-2025), testar no futuro (ex: 2026).
+:::
+
+
+
+::: {.fragment}
+
+* **No Espaço (Novas localidades):**
+* **Erro:** Misturar dados de uma mesma cidade/fazenda em treino e teste.
+* **Certo:** Treinar nos locais A e B, testar exclusivamente no local C.
+:::
+
+
+
+::: {.fragment}
+
+* **Por Indivíduo (Novos pacientes):**
+* **Erro:** Separar por exame (imagens do mesmo paciente caem nos dois lados).
+* **Certo:** Separar por ID do paciente (avalia se o modelo reconhece a doença, não a pessoa).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Erro de Treino vs. Erro de Generalização
 
 ::: {.callout-tip}
 ## Se a árvore de profundidade 15 tem a mesma acurácia de teste da árvore de profundidade 6, por que ainda preferimos uma árvore mais rasa?
 
 Escreva sua resposta e compare com um colega antes de avançar (2 min).
 :::
-
-::: {.content-visible when-format="revealjs"}
-
-## Erro de Treino vs. Erro de Generalização
 
 ::: {.callout-tip}
 Julgue V ou F — a questão só conta se acertar os 4 itens:
@@ -261,7 +322,14 @@ Julgue V ou F — a questão só conta se acertar os 4 itens:
 
 :::
 
-# Train/Validation/Test, e o Pecado de Espiar
+
+::: {.fragment}
+O design do split define rigorosamente qual pergunta você está respondendo.
+:::
+
+:::
+
+## Train/Validation/Test, e o Pecado de Espiar
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
@@ -278,9 +346,6 @@ O restante desta aula formaliza a etapa de **validação** — e o problema prá
 :::
 
 ::: {.content-visible when-format="revealjs"}
-
-## Três Papéis, Não Dois
-
 - **Treino** — ajusta os parâmetros do modelo
 - **Validação** — escolhe hiperparâmetros (pode ser consultada várias vezes)
 - **Teste** — usado **uma única vez**, no final
@@ -291,15 +356,15 @@ Consultar o teste repetidamente durante o desenvolvimento contamina o que ele de
 
 :::
 
+::: {.content-visible when-format="revealjs"}
+
+## O Pecado de Espiar o Teste
+
 ::: {.callout-tip}
 ## Um colega ajusta hiperparâmetros usando só a validação, mas de vez em quando "espia rapidinho" o teste para decidir se vale a pena continuar tentando profundidades maiores. Ele nunca usou o teste para *ajustar* nada — o que exatamente ele perdeu ao fazer isso?
 
 Escreva sua resposta e compare com um colega antes de avançar (2 min).
 :::
-
-::: {.content-visible when-format="revealjs"}
-
-## O Pecado de Espiar o Teste
 
 ::: {.callout-tip}
 Julgue V ou F — a questão só conta se acertar os 4 itens:
@@ -393,7 +458,7 @@ Cada fold preserva a proporção original (~37%) dentro de uma margem pequena �
 Cada fold = uma aproximação de "coletar uma nova amostra de teste".
 :::
 
-## O Procedimento k-fold
+### O Procedimento k-fold
 
 $$
 \text{CV}(\hat f) = \frac{1}{N}\sum_{i=1}^{N} \mathcal{L}\bigl(y_i,\, \hat f^{-\kappa(i)}(x_i)\bigr)
@@ -403,7 +468,7 @@ $$
 $k$ rodadas, cada uma treinando sem um bloco e avaliando nele. A média estima $\mathbb{E}_{(X,Y)\sim P}[\mathcal{L}]$.
 :::
 
-## Por Que Estratificar
+### Por Que Estratificar
 
 ```{python}
 #| echo: false
@@ -419,15 +484,15 @@ Sem estratificação, um fold pequeno pode, por azar, concentrar poucos ou muito
 
 :::
 
+::: {.content-visible when-format="revealjs"}
+
+## Validação Cruzada
+
 ::: {.callout-tip}
 ## Por que a média de k avaliações de validação é uma estimativa melhor do erro esperado do que um único split treino/validação?
 
 Escreva sua resposta e compare com um colega antes de avançar (2 min).
 :::
-
-::: {.content-visible when-format="revealjs"}
-
-## Validação Cruzada
 
 ::: {.callout-tip}
 Julgue V ou F — a questão só conta se acertar os 4 itens:
@@ -522,13 +587,51 @@ $k=5$ ou $k=10$ seguem sendo a escolha prática padrão: bem mais baratos que LO
 
 ::: {.content-visible when-format="revealjs"}
 
-## LOOCV: Quase Sem Viés, Mas...
+## O Efeito de $k$: Viés vs. Variância
+
+Escolher o número de partições ($k$) é equilibrar as propriedades estatísticas do próprio estimador de validação cruzada.
 
 ::: {.fragment}
-"[Com K=N] pode ter alta variância, porque os N 'conjuntos de treino' são tão parecidos uns com os outros" (ESL).
+**1. O Efeito no Viés (Bias)**
+
+* **$k$ pequeno (ex: $k=2$):** Cada rodada usa apenas $50\%$ dos dados para treinar. O modelo ajustado será visivelmente pior do que o modelo final (que usará $100\%$). Isso gera uma estimativa **pessimista** do desempenho real (alto viés).
+* **$k$ grande (ex: $k=N$):** Treinamos com $N-1$ amostras. O modelo é quase idêntico ao modelo final. A estimativa reflete o desempenho real (viés quase zero).
 :::
 
-## k-fold Varia com a Partição — LOOCV Não
+::: {.fragment}
+**2. O Efeito na Variância (Variance)**
+
+* Pode parecer contra-intuitivo, mas **$k$ muito grande aumenta a variância** da estimativa.
+* Quando $k=N$, os conjuntos de treino são **quase idênticos** (diferem por apenas 1 ponto).
+* Modelos treinados em dados quase iguais geram predições altamente **correlacionadas**. A teoria estatística demonstra que a média de muitas variáveis altamente correlacionadas não reduz a variância tão bem quanto a média de variáveis independentes.
+:::
+
+::: {.fragment}
+**O Ponto de Equilíbrio:** $k=5$ ou $10$ garante dados de treino suficientes (baixo viés) e diversidade suficiente entre os folds (variância controlada).
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Caso Extremo: LOOCV ($k=N$)
+
+
+::: {.fragment}
+**O que é o Leave-One-Out Cross-Validation?**
+
+É a validação cruzada levada ao limite: particionamos os dados em $k = N$ partes. 
+Em cada rodada, o modelo treina com $N-1$ amostras e valida na **única** amostra deixada de fora.
+:::
+
+::: {.fragment}
+*   **Vantagem (Baixo Viés):** Como o treino usa quase todos os dados (99.7% no nosso caso), o modelo avaliado é praticamente idêntico ao modelo treinado com a base inteira.
+*   **Desvantagem (Alta Variância):** Os $N$ conjuntos de treino são quase idênticos entre si. Além disso, o custo computacional explode ($N$ treinamentos completos).
+:::
+
+## k-fold Varia com a Partição; LOOCV Não
+
+Se rodarmos o 5-fold e o 10-fold múltiplas vezes (mudando apenas a "semente" do sorteio), o resultado muda. O LOOCV não tem sorteio: o resultado é um só.
 
 ::: {.fig-resize style="width: 80%; margin: 0 auto;"}
 
@@ -548,29 +651,34 @@ plt.show()
 
 :::
 
+## Lendo o Gráfico: Achados Contraintuitivos
+
 ::: {.fragment}
-Achado honesto: aqui, LOOCV (89,4%) ficou **abaixo** de 5-fold e 10-fold (~92–93%) — estimativas diferentes, ambas com ruído.
+**1. Por que o LOOCV ficou pior que o k-fold?**
+Teoricamente ele tem menos viés, mas "menos viés" não significa "número maior". Significa que ele estima a realidade mais de perto. As estimativas de 5 e 10-fold podem estar ligeiramente otimistas para este dataset.
 :::
 
 ::: {.fragment}
-Segundo achado honesto: o **10-fold**, apesar de teoricamente mais próximo do LOOCV, teve **mais** variação entre repetições do que o 5-fold nesta amostra — "mais $k$, mais estável" é uma tendência média, não uma garantia caso a caso.
+**2. Por que o 10-fold variou mais que o 5-fold?**
+Isso parece contrariar a intuição de que "mais $k$ = mais estabilidade". Mas em $k$ maiores, o conjunto de *validação* fica muito pequeno. Avaliar um modelo numa amostra minúscula gera saltos grandes na métrica de erro dependendo de *quem* caiu ali.
 :::
 
 ::: {.fragment}
-$k=5$ ou $10$: escolha prática padrão — muito mais barato que LOOCV ($N$ ajustes), qualidade competitiva.
+**Conclusão Prática:**
+O livro-texto (ESL) recomenda **$k=5$ ou $k=10$**. O custo-benefício computacional é imbatível, e a estabilidade da estimativa costuma ser excelente na prática.
 :::
 
 :::
+
+::: {.content-visible when-format="revealjs"}
+
+## Viés e Variância do Estimador de CV
 
 ::: {.callout-tip}
 ## Se LOOCV é "quase sem viés", por que ele não é sempre a escolha certa — e por que, nesta amostra específica, ele produziu uma estimativa MENOR do que 5-fold e 10-fold, em vez de simplesmente "mais precisa"?
 
 Escreva sua resposta e compare com um colega antes de avançar (2 min).
 :::
-
-::: {.content-visible when-format="revealjs"}
-
-## Viés e Variância do Estimador de CV
 
 ::: {.callout-tip}
 Julgue V ou F — a questão só conta se acertar os 4 itens:
@@ -921,15 +1029,15 @@ Ponto: 91,8%. IC 95%: [87,7%, 95,9%] — largo, com só 171 pacientes de teste.
 
 :::
 
+::: {.content-visible when-format="revealjs"}
+
+## O Bootstrap
+
 ::: {.callout-tip}
 ## Por que reamostrar o conjunto de teste e reamostrar+reajustar no conjunto de treino respondem perguntas diferentes, mesmo usando a mesma técnica de reamostragem com reposição?
 
 Escreva sua resposta e compare com um colega antes de avançar (2 min).
 :::
-
-::: {.content-visible when-format="revealjs"}
-
-## O Bootstrap
 
 ::: {.callout-tip}
 Julgue V ou F — a questão só conta se acertar os 4 itens:
@@ -1086,15 +1194,15 @@ Nossa poda: CV = 92,97% ± **2,43%**. O número sozinho, sem o desvio, sugere pr
 
 :::
 
+::: {.content-visible when-format="revealjs"}
+
+## Vazamento de Dados
+
 ::: {.callout-tip}
 ## Por que selecionar os atributos mais correlacionados usando a amostra inteira, antes do split de CV, é uma forma de vazamento de dados mesmo que o classificador final só veja os dados de treino de cada fold?
 
 Escreva sua resposta e compare com um colega antes de avançar (2 min).
 :::
-
-::: {.content-visible when-format="revealjs"}
-
-## Vazamento de Dados
 
 ::: {.callout-tip}
 Julgue V ou F — a questão só conta se acertar os 4 itens:

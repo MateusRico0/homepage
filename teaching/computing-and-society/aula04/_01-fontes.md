@@ -164,10 +164,10 @@ Deliberation" corrigido para o Cap. 16 real). Nenhuma leitura deste
 capítulo tinha sido feita ainda nesta disciplina; excertos extraídos
 nesta sessão.
 
-**Uso pretendido:** ponte do Bloco 5 (de compromisso ético a artefato
+**Uso pretendido:** ponte do Bloco 6 (de compromisso ético a artefato
 de engenharia concreto) — a ligação literal entre "investigação
 empírica de valores" e "requisito (tentativo) do sistema" é exatamente
-o passo que o Bloco 5 formaliza com um exemplo guiado (NFR → ADR →
+o passo que o Bloco 6 formaliza com um exemplo guiado (NFR → ADR →
 gate de CI).
 
 **Trecho:**
@@ -184,3 +184,53 @@ gate de CI).
 > example, by conducting interviews or workshops with relevant
 > stakeholders. [...] These investigations result in (tentative)
 > requirements for the system that is being developed." (pp. 155–156)
+
+---
+
+### Fonte 8: FTC v. Amazon.com, Inc. (denúncia original, jun/2023; acordo, set/2025) — adicionada em 2026-08-31
+
+**Contexto da adição:** bloco novo (Bloco 5, "Dark Patterns"),
+solicitado pelo usuário depois de revisar a aula ("faltou uma seção
+sobre decisões que visam atrapalhar o usuário... os botões de cancelar
+do Uber são insuportáveis"). O exemplo do Uber, dado pelo próprio
+usuário, é usado no `index.qmd` só como gancho informal de abertura
+(experiência pessoal, não um caso verificado); o caso formal e citado é
+o processo da FTC contra a Amazon, mais documentado.
+
+**⚠️ Nota de acesso:** o PDF da denúncia, hospedado em `ftc.gov`,
+retornou HTTP 403 a toda tentativa de acesso automatizado nesta
+sessão — **não foi lido diretamente**. A frase abaixo ("four-page,
+six-click, fifteen-option") e os fatos que a acompanham (o nome interno
+"Iliad Flow", o valor do acordo de US\$ 2,5 bilhões em 2025) foram
+verificados por **triangulação de múltiplas fontes secundárias
+independentes** (cobertura jornalística e jurídica: Quartz, Fast
+Company, Katten/Davis+Gilbert, About Lawsuits, Economic Liberties,
+entre outras, todas citando a mesma passagem da denúncia de forma
+consistente) — não é o mesmo padrão de verificação (leitura direta do
+PDF/livro) das Fontes 1–7 desta aula, e está sinalizado como tal no
+`index.qmd`.
+
+**Uso pretendido:** exemplo concreto e verificável de *dark pattern* da
+categoria "Obstrução" (Bloco 5) — a assimetria deliberada entre um
+fluxo de inscrição (1–2 cliques) e um fluxo de cancelamento (4 páginas,
+6 cliques, 15 opções) para o mesmo serviço, pela mesma empresa.
+
+**Trecho (via triangulação de fontes secundárias, ver nota acima):**
+> "[Amazon] designed the Prime cancellation process to be labyrinthine
+> [...] Amazon named that process 'Iliad,' which refers to Homer's epic
+> about the long, arduous Trojan War. [...] the Iliad Flow required
+> consumers intending to cancel to navigate a four-page, six-click,
+> fifteen-option cancellation process."
+
+**Também usada:** Gray, C. M., Kou, Y., Battles, B., Hoggatt, J., &
+Toombs, A. L. (2018), "The Dark (Patterns) Side of UX Design", *CHI
+'18* — usada só para os **nomes e definições das cinco categorias**
+(Nagging/Insistência, Obstruction/Obstrução, Sneaking/Sonegação,
+Interface Interference/Interferência de Interface, Forced
+Action/Ação Forçada). Texto integral atrás do paywall da ACM; nenhuma
+cópia de acesso aberto legítima encontrada (nem no site pessoal do
+autor, Colin M. Gray/Purdue, que hospeda outros artigos correlatos mas
+não este). Descrições reconstruídas via cobertura secundária confiável
+sobre o artigo (ex.: `deceptive.design`, o site sucessor do
+darkpatterns.org de Harry Brignull) — **sinalizado como conhecimento
+geral, não citação literal**, no `index.qmd`.

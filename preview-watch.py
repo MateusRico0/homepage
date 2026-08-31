@@ -22,7 +22,7 @@ CLASSIFY_HELP abaixo) e só o subconjunto de páginas realmente afetado é
 renderizado — a maioria das mudanças (uma aula, uma pessoa, um projeto)
 afeta só 1-2 páginas, não as 200+ do site inteiro.
 
-Modos de linha de comando (usados por deploy.sh):
+Modos de linha de comando (usados por site-manager.sh):
   python3 preview-watch.py            # modo live: render incremental + servidor + observação contínua
   python3 preview-watch.py --once     # um único render incremental (desde o último) e sai, sem servidor
   python3 preview-watch.py --render-all  # um render completo forçado e sai, sem servidor
@@ -172,7 +172,7 @@ def find_discipline_index_files():
 
 def run_render(cmd):
     # Mesma falha intermitente de fim-de-render já observada com
-    # `quarto render` neste projeto (ver deploy.sh) — tenta de novo antes
+    # `quarto render` neste projeto (ver site-manager.sh) — tenta de novo antes
     # de reportar erro de verdade.
     for attempt in (1, 2, 3):
         result = subprocess.run(cmd, cwd=ROOT)
@@ -416,7 +416,7 @@ def request_render_all_from_running_service(timeout=1200):
     escuta pra rodar o render completo, e volta a escutar sozinho
     depois (ver o bloco RENDER_ALL_TRIGGER em plan_and_render()). Essa
     função só espera esse ciclo terminar, pra manter o mesmo contrato
-    de antes pra quem chama (ex.: deploy.sh): só retorna depois do
+    de antes pra quem chama (ex.: site-manager.sh): só retorna depois do
     render terminar, com sucesso/falha refletido no código de saída."""
     sentinel = os.path.join(ROOT, RENDER_ALL_TRIGGER)
     t0 = time.time()

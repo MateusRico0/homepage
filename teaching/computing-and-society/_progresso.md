@@ -446,6 +446,81 @@ presentes em ambos os HTMLs renderizados; contagem de `Exercícios`
 confirmada intacta (não afetada por essas edições, que ficaram todas
 antes da seção de Exercícios).
 
+## Segunda rodada de correções na Aula 4 (2026-08-31), a pedido do usuário
+
+Feedback do usuário: "faltam alguns conceitos que não foram
+introduzidos previamente: ticket, backlog, Wireframes/protótipos", "o
+diagrama em lei de Conway está sobreposto", e "faltou uma seção (antes
+da 5, que discute o impacto social) sobre decisões que visam
+atrapalhar o usuário — *dark patterns* (os botões de cancelar do Uber
+são insuportáveis)". Três problemas reais, todos corrigidos:
+
+**1. Diagrama TikZ da Lei de Conway sobreposto** — no diagrama do Bloco
+3 (notas), as caixas "Equipe A"/"Equipe B" (e "Módulo A"/"Módulo B",
+"Equipe C"/"Equipe D", "Módulo C"/"Módulo D") tinham largura de 3cm
+centradas a 3cm de distância uma da outra — ou seja, encostavam
+exatamente, sem nenhum espaço entre elas, o que fazia a linha de
+conexão e os rótulos ficarem colados/sobrepostos às bordas. Corrigido
+aumentando o espaçamento dos centros para 3.6cm (mantendo a largura em
+3cm), abrindo um respiro de 0.6cm entre cada par de caixas; posições
+dos rótulos e do segundo grupo (Equipe C/D) recalculadas para manter a
+simetria do layout.
+
+**2. Jargão não explicado (`ticket`, `backlog`, `wireframe`/`protótipo`)**
+— esses três termos apareciam na tabela de papéis do Bloco 2 (coluna
+"Artefato que produz", adicionada na rodada anterior) sem nunca serem
+explicados, e o mesmo conteúdo faltava por completo no espelho em
+slides (a versão RevealJS da "Cadeia de Tradução de um Pedido" nem
+tinha a coluna de artefato, só a ação de cada papel). Corrigido com um
+parágrafo de glossário nas notas, logo depois da tabela ("um *ticket*
+é... um item de *backlog* é... um *wireframe* é... um *protótipo*
+é..."), e os artefatos + glosses curtos adicionados a cada fragmento
+correspondente do slide "A Cadeia de Tradução de um Pedido".
+
+**3. Bloco novo sobre *dark patterns*, antes do bloco de impacto social**
+— inserido como **Bloco 5** ("Quando a Assimetria É Deliberada: *Dark
+Patterns*"), entre a Elicitação de Requisitos (Bloco 4) e "Da
+Responsabilidade Social ao Artefato de Engenharia Concreto" (que virou
+**Bloco 6**, renumerado de 5; a numeração em cadeia de todas as
+referências cruzadas — `index.qmd`, `_00-plano-aula.md`,
+`_01-fontes.md`, `_02-solucoes.md`, `_03-respostas-pausas.md` — foi
+atualizada de ponta a ponta). O bloco novo distingue explicitamente do
+mecanismo dos Blocos 3–4 (resultado indesejado por **ausência**
+estrutural, sem decisão explícita de excluir) o caso em que o resultado
+indesejado nasce de **presença** deliberada — alguém no papel de
+"Stakeholder de negócio" (tabela do Bloco 2) escolhe otimizar por uma
+métrica de negócio contra o interesse do usuário. Conteúdo: taxonomia
+de Gray, Kou, Battles, Hoggatt & Toombs (2018), "The Dark (Patterns)
+Side of UX Design" (Insistência, Obstrução, Sonegação, Interferência de
+Interface, Ação Forçada); caso real e bem documentado, FTC vs. Amazon
+(2023–2025), o fluxo de cancelamento do Prime batizado internamente de
+"Iliad Flow" ("quatro páginas, seis cliques, quinze opções", acordo de
+US\$ 2,5 bilhões). O exemplo do Uber dado pelo próprio usuário é usado
+só como gancho informal de abertura do bloco (experiência pessoal, não
+citação verificada) — o caso citado e verificado é o da FTC. Nova
+pausa ativa (4 V/F pelas 4 heurísticas) com resolução em
+`_03-respostas-pausas.md` (agora "Pausa 5"); roteiro de abertura da
+aula ganhou uma 5ª pergunta, e o Fechamento ganhou uma 5ª resposta.
+
+**Nota de precisão sobre as fontes novas:** o artigo de Gray et al.
+(2018) está atrás do paywall da ACM, sem cópia de acesso aberto
+legítima encontrada — a taxonomia é reconstruída de coberturas
+secundárias confiáveis, sinalizado como conhecimento geral (não
+citação literal) no `index.qmd` e em `_01-fontes.md` (Fonte 8). Já a
+frase "quatro páginas, seis cliques, quinze opções" da denúncia da FTC
+foi verificada por triangulação de múltiplas fontes jornalísticas e
+jurídicas independentes, mas **não** por leitura direta do PDF da
+denúncia (`ftc.gov` bloqueou o acesso automatizado, HTTP 403 a toda
+tentativa) — diferente do padrão de verificação (leitura direta) das
+Fontes 1–7 desta aula; sinalizado como tal.
+
+**Validação:** balanço de `:::` limpo (script LIFO); `grep`
+`☐|☒|- \[ \]|- \[x\]|^[a-d]\. ` limpo; `quarto render --to html` e
+`--to revealjs` sem erro; termos novos ("Iliad", "Dark Pattern",
+"Obstrução", "ticket", "backlog", "wireframe") confirmados presentes em
+ambos os HTMLs renderizados; contagem de `Exercícios` confirmada
+intacta.
+
 ## Aulas 5–16
 
 Não iniciadas.

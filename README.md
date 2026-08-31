@@ -204,7 +204,7 @@ de perfil/projeto/aula:
 | `teaching/lesson-theme.scss`, `teaching/toc-accordion.js` | Visual e comportamento específicos das aulas (paleta própria, slides, acordeão do sumário) — carregados só dentro de `teaching/`. |
 | `band-sections.lua`, `links.lua`, `participants.lua` | Filtros Pandoc que preenchem automaticamente certas seções (faixas da home, ícones de contato, cards de participantes) a partir do front matter YAML — nunca editam o `.qmd`, e o HTML que geram nunca deve ser escrito à mão. |
 | `people/`, `projects/`, `publications/`, `teaching/` | Conteúdo, um por seção do site — ver seções 3–6 acima. |
-| `preview-watch.py`, `deploy.sh` | Infraestrutura de build/preview/deploy usada pelo mantenedor do site. Não é necessária para contribuir com conteúdo (use `quarto preview`, seção 2). |
+| `preview-watch.py`, `site-manager.sh` | Infraestrutura de build/preview/deploy usada pelo mantenedor do site. Não é necessária para contribuir com conteúdo (use `quarto preview`, seção 2). |
 | `_site/`, `_freeze/`, `.quarto/` | Saída renderizada e cache de execução do Quarto. Alguns desses arquivos ficam versionados de propósito (ver comentários em `.gitignore`) e mudam sozinhos quando você roda o preview — normal, não precisa se preocupar em revertê-los; só nunca edite o HTML/SVG gerado ali diretamente, edite sempre a fonte (`.qmd`/`.py`). |
 
 ## 8. Enviando suas alterações

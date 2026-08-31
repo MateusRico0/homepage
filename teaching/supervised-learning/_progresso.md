@@ -934,3 +934,91 @@ da Lesson 4 trocada de texto plano para link (`[**Lesson 4: Model
 Selection and Resampling Techniques**](./aula04/index.qmd)`), mesmo
 formato das Lessons 1–3. Aula 4 está, portanto, completa e publicada
 no planejamento do semestre.
+
+## Aula 5 — Revisão Integrada das Aulas 1–4 (2026-08-31)
+
+Aula pedida pelo professor como **revisão** das quatro primeiras aulas,
+com foco nos conceitos de probabilidade comuns a elas, não em
+algoritmos novos. Inserida como a nova Aula 5 oficial da disciplina,
+fechando a "Parte 1: Fundamentos de Probabilidade e Particionamento"
+antes da "Parte 2: A História Linear Paramétrica" (Lessons 5–8
+existentes no planejamento do `index.qmd`, ainda não construídas como
+pastas, tornam-se 6–9 — renumeração e atualização do `index.qmd` da
+disciplina ficam a cargo do professor, não feitas aqui).
+
+**Checkpoints seguidos:** Etapa 1 (confirmada em conversa) e Etapa 2
+(`_00-plano-aula.md`, Estratégia B — Inside-Out com Problema-Fio,
+justificada por ser aula de revisão/fundamentação, não de modelo novo).
+**Etapa 3 (`_01-fontes.md`) dispensada explicitamente pelo professor**
+— não há fonte bibliográfica nova; é síntese do que já foi ensinado e
+aprovado nas Aulas 1–4. Aprovação entre planejamento e construção também
+dispensada — aula construída direto até o fim (Etapa 4).
+
+**Fio condutor:** dataset novo e real, *Pima Indians Diabetes*
+(`khoaguin/pima-indians-diabetes-database`, HF Hub, 752 pacientes após
+limpeza de zeros-como-ausência em `Glucose`/`BMI`), escolhido porque
+nenhuma das quatro aulas originais compartilha um único dataset real
+comum (Aula 1: Beta sintética; Aulas 2 e 4: Breast Cancer Wisconsin;
+Aula 3: California Housing). O par Glicose+IMC atravessa as quatro
+lentes em sequência, com números genuinamente recomputados a cada
+bloco (não inventados): Beta$(3{,}49,4{,}50)$/Beta$(3{,}18,1{,}78)$ e
+cruzamento condicional/conjunto em $134{,}2$/$148{,}3$ mg/dL (Bloco 1,
+revisão Aula 1); correlação Glicose×IMC de $0{,}123$/$0{,}057$ e
+acurácias idênticas ($76{,}46\%$) entre Gaussiana plena e Naive Bayes
+(Bloco 2, revisão Aula 2, contrastado com o preço de $2$ p.p. do Breast
+Cancer Wisconsin); árvore de $4$ folhas (acc. treino $77{,}4\%$/teste
+$75{,}2\%$) com ganho de informação de $0{,}097$ nats no split de raiz
+(Bloco 3, revisão Aula 3); CV de $5$ folds ($71{,}3\%\pm2{,}2\%$) e
+Bootstrap (duas aplicações, IC$_{95\%}=[69{,}0\%,81{,}0\%]$ e
+$[69{,}2\%,77{,}9\%]$) avaliando essa mesma árvore (Bloco 4, revisão
+Aula 4). Bloco 5 é a síntese: tabela + diagrama TikZ unificador
+(Distribuição → Verossimilhança → Decisão/Risco) e um alerta explícito
+de colisão notacional ($k$ = índice de classe nas Aulas 1–3 vs. número
+de *folds* na Aula 4; $\lambda$/custo = multiplicador de custo
+assimétrico na Aula 2 vs. penalidade de custo-complexidade nas Aulas
+3–4).
+
+**Decisão de formato divergente do padrão das Aulas 1–4:** por
+instrução explícita para esta aula, a Pergunta provocadora e o bloco de
+V/F de cada pausa ativa aparecem **compartilhados** (não envolvidos em
+`content-visible` de formato único) — visíveis tanto em `notas.html`
+quanto em `slides.html`. Só a Resposta resolvida (✔/✗) continua
+exclusiva de `slides.html`, como no padrão das aulas anteriores. Total:
+5 pausas ativas (uma por bloco, incluindo a síntese).
+
+**Exercícios:** 3 questões discursivas + 12 blocos de V/F (48 itens),
+3 blocos por aula revisada, cobrindo as quatro aulas de ponta a ponta
+sem duplicar os tópicos de V/F já usados nas aulas originais nem nas
+pausas ativas desta aula.
+
+**Validação realizada:**
+- Balanceamento de divs por pilha (LIFO) limpo em `index.qmd`.
+- `grep` de glifos proibidos (`☐`, `☒`, `- [ ]`, `- [x]`, `^[a-d]\.`)
+  sem nenhuma ocorrência em `index.qmd`, `_02-solucoes.md` e
+  `_03-respostas-pausas.md`.
+- `quarto render index.qmd --to html` e `--to revealjs`: ambos sem
+  erro, produzindo `notas.html` e `slides.html` em
+  `_site/teaching/supervised-learning/aula05/`.
+- `grep` nos HTMLs renderizados confirmando: os 5 títulos de bloco
+  presentes em ambos os formatos; a seção "Exercícios" e os 12 títulos
+  de bloco de V/F presentes só em `notas.html` (ausentes de
+  `slides.html`, como esperado); a Pergunta+V/F de uma pausa ativa
+  presentes em ambos os formatos; a Resposta resolvida presente só em
+  `slides.html`; os números computados (Beta, correlação, acurácias,
+  CV, Bootstrap) idênticos entre o texto narrativo e a saída impressa
+  pelos chunks Python.
+- Pasta `aula05/` conferida contra `aula04/` — só os 4 arquivos-fonte
+  esperados (`index.qmd`, `_00-plano-aula.md`, `_02-solucoes.md`,
+  `_03-respostas-pausas.md`), nenhum artefato de build solto.
+
+**Pendente (fora do escopo desta rodada, reservado ao professor):**
+atualização de `../index.qmd` (listagem de aulas da disciplina) para
+linkar a Aula 5 e renumerar as Lessons 5–8 existentes para 6–9.
+
+**Atualização de `index.qmd` (2026-08-31), aprovada pelo professor:**
+adicionada a entrada da Lesson 5 (linkada a `./aula05/index.qmd`),
+com nova seção "Part 1 wrap-up" antes da Parte 2. Lessons 5–12
+(ainda não construídas como pastas) renumeradas para 6–13, incluindo a
+referência cruzada interna da Lesson 10 (Ensemble Theory) à "Lesson 8"
+(decomposição bias-variância), corrigida para "Lesson 9". Verificado
+`quarto render index.qmd --to html` sem erro.
