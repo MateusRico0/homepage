@@ -6,6 +6,8 @@ Esta aula muda o objeto de estudo: em vez de um modelo específico, o assunto é
 
 **Dataset-fio:** Breast Cancer Wisconsin (`scikit-learn/breast-cancer-wisconsin`, 569 pacientes, diagnóstico binário) — mesmo domínio de classificação binária médica já familiar da Aula 1, mas com múltiplos atributos contínuos, adequado para treinar as árvores de decisão da Aula 3 e reaproveitar a mesma `cost_complexity_pruning_path` já usada lá, agora escolhendo o parâmetro por validação cruzada em vez de inspeção visual.
 
+**Estratégia Pedagógica:** Estratégia A (Outside-In) — embora o objeto de estudo seja um *procedimento* (avaliar e escolher modelos), não um modelo/algoritmo específico nem um idioma matemático de fundação, a lógica de exposição do Bloco 0/2 é a mesma do Outside-In: a aula abre mostrando primeiro o resultado empírico concreto (a acurácia de treino subindo a 100% enquanto a de teste estagna, no gráfico de profundidade da árvore) e só depois formaliza $\hat R(\theta)$ como estimador enviesado de $R(\theta)$ — prático antes do formal, não o contrário.
+
 ## Plano de aula — Aula 4 (carga horária estimada: ~135min)
 
 1. **Bloco 0 — Abertura: o problema que a Aula 3 deixou em aberto** (~10

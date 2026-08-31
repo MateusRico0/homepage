@@ -17,6 +17,7 @@ from resolve_authors import (  # noqa: E402
     render_authors_block,
     resolve_author_ids,
 )
+from sync_symlinks import SOLO_AUTHOR_FOLDERS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 PUBLICATIONS_DIR = ROOT / "publications"
@@ -35,6 +36,11 @@ PUBLICATIONS_DIR = ROOT / "publications"
 # visíveis no site.
 EXTERNAL_DIR = PUBLICATIONS_DIR / "_external"
 
+# As duas pastas canônicas do acervo oficial (ver SOLO_AUTHOR_FOLDERS em
+# sync_symlinks.py para o porquê): group/ pra publicação com 2+ autores
+# registrados no site, <solo>/ pra autoria solo dessa pessoa.
+CANONICAL_SUBDIRS = ("group", *SOLO_AUTHOR_FOLDERS)
+
 TEMPLATE = (Path(__file__).parent / "TEMPLATE.qmd").read_text(encoding="utf-8")
 
 
@@ -46,15 +52,18 @@ def slugify(text: str) -> str:
 
 
 def existing_titles() -> set[str]:
-    """Títulos (minúsculos) já presentes em publications/*.qmd — usado
-    para não recriar um artigo que já foi migrado/cadastrado manualmente."""
+    """Títulos (minúsculos) já presentes no acervo oficial (ver
+    CANONICAL_SUBDIRS) — usado para não recriar um artigo que já foi
+    migrado/cadastrado manualmente."""
     titles = set()
-    for path in PUBLICATIONS_DIR.glob("*.qmd"):
-        if path.name == "index.qmd":
+    for sub in CANONICAL_SUBDIRS:
+        folder = PUBLICATIONS_DIR / sub
+        if not folder.exists():
             continue
-        match = re.search(r'^title:\s*"([^"]+)"', path.read_text(encoding="utf-8"), re.MULTILINE)
-        if match:
-            titles.add(match.group(1).strip().lower())
+        for path in folder.glob("*.qmd"):
+            match = re.search(r'^title:\s*"([^"]+)"', path.read_text(encoding="utf-8"), re.MULTILINE)
+            if match:
+                titles.add(match.group(1).strip().lower())
     return titles
 
 
@@ -164,12 +173,14 @@ def find_existing_publication(title_key: str, person_slug: str) -> Path | None:
     """Acha o arquivo (oficial ou externo dessa pessoa) cujo título bate
     com title_key (já em minúsculas) — usado por backfill_scholar_ids pra
     atualizar um arquivo já existente sem precisar re-raspar nada dele."""
-    for path in PUBLICATIONS_DIR.glob("*.qmd"):
-        if path.name == "index.qmd":
+    for sub in CANONICAL_SUBDIRS:
+        folder = PUBLICATIONS_DIR / sub
+        if not folder.exists():
             continue
-        match = re.search(r'^title:\s*"([^"]+)"', path.read_text(encoding="utf-8"), re.MULTILINE)
-        if match and match.group(1).strip().lower() == title_key:
-            return path
+        for path in folder.glob("*.qmd"):
+            match = re.search(r'^title:\s*"([^"]+)"', path.read_text(encoding="utf-8"), re.MULTILINE)
+            if match and match.group(1).strip().lower() == title_key:
+                return path
     directory = EXTERNAL_DIR / person_slug
     if directory.exists():
         for path in directory.glob("*.qmd"):
@@ -262,8 +273,26 @@ def backfill_scholar_ids(path: Path, coauthor_scholar_map: dict) -> bool:
     return True
 
 
+AUTHOR_IDS_LINE_RE = re.compile(r"^author-ids:\s*\[(.*?)\]", re.MULTILINE)
+
+
+def _canonical_folder_for(rendered_text: str) -> Path:
+    """group/ pra publicação com 2+ autores registrados no site, ou a
+    pasta homônima da pessoa se ela for a única autora registrada (ver
+    SOLO_AUTHOR_FOLDERS) — senão (nenhum author-ids, ou o único autor não
+    está na lista de quem já tem publicação solo) cai em group/ também,
+    já que toda publicação oficial envolve o dono do site."""
+    match = AUTHOR_IDS_LINE_RE.search(rendered_text)
+    author_ids = [a.strip() for a in match.group(1).split(",") if a.strip()] if match else []
+    if len(author_ids) == 1 and author_ids[0] in SOLO_AUTHOR_FOLDERS:
+        return PUBLICATIONS_DIR / author_ids[0]
+    return PUBLICATIONS_DIR / "group"
+
+
 def write_publication(slug: str, rendered_text: str) -> Path:
-    out_path = PUBLICATIONS_DIR / f"{slug}.qmd"
+    folder = _canonical_folder_for(rendered_text)
+    folder.mkdir(parents=True, exist_ok=True)
+    out_path = folder / f"{slug}.qmd"
     out_path.write_text(rendered_text, encoding="utf-8")
     return out_path
 

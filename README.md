@@ -1,9 +1,17 @@
 # 🎓 Guia de Colaboração do Laboratório
 
-Este guia explica como você, aluno(a) do grupo, pode atualizar o site
-(perfil, projetos e publicações) sem precisar pedir para o Marcos mexer em
-nada manualmente. O site é feito em [Quarto](https://quarto.org/) — não é
-mais o site antigo em Hugo, então algumas coisas mudaram de lugar.
+Este guia explica como você, aluno(a) do grupo (ou qualquer colaborador
+externo), pode atualizar o site (perfil, projetos, publicações e aulas)
+sem precisar pedir para o Marcos mexer em nada manualmente. O site é feito
+em [Quarto](https://quarto.org/) — não é mais o site antigo em Hugo, então
+algumas coisas mudaram de lugar.
+
+**Toda mudança entra pelo GitHub, via Pull Request — nunca por push
+direto.** A branch `main` é protegida: ninguém (nem o Marcos) dá push
+direto nela. O fluxo é sempre fork (ou branch, se você já tem acesso de
+escrita ao repositório) → commit → `git push` → abrir um Pull Request →
+revisão → merge pela própria interface do GitHub. As seções abaixo
+mostram esse fluxo passo a passo.
 
 ## 1. Fork e ambiente de trabalho
 
@@ -33,6 +41,11 @@ quarto preview --port 2222
 - O preview atualiza automaticamente sempre que você salva um arquivo
   (`Ctrl+S` / `Cmd+S`) — não precisa parar e rodar de novo.
 - Para parar o preview, `Ctrl+C` no terminal.
+- Esse é o fluxo recomendado para quem está contribuindo de fora. O
+  mantenedor do site usa uma variante própria (`preview-watch.py`, rodando
+  como serviço em segundo plano) para renderizar só o que muda em
+  projetos grandes — não é necessário reproduzir isso para enviar um PR,
+  `quarto preview` é suficiente.
 
 ## 3. Editando seu perfil
 
@@ -115,7 +128,7 @@ links:
 
 A ordem em que você lista os campos é a ordem em que os ícones aparecem.
 Use só os campos que fizerem sentido para você — não precisa preencher
-todos.
+todos. (Esses campos são interpretados por `links.lua` — ver seção 7.)
 
 ### ⚠️ Não edite à mão
 
@@ -146,7 +159,8 @@ participants: [mraimundo, gvaldrighi, seu-usuario]
 
 Isso já é suficiente para o seu card (foto + nome, linkando para o seu
 perfil) aparecer automaticamente na seção "Participants" da página do
-projeto, e para o projeto aparecer na sua própria página de perfil.
+projeto, e para o projeto aparecer na sua própria página de perfil. (Quem
+faz esse preenchimento é `participants.lua` — ver seção 7.)
 
 ## 5. Publicações
 
@@ -155,7 +169,45 @@ Você **não precisa (e não deve)** criar ou editar arquivos em
 partir do Google Scholar. Se notar um artigo seu faltando ou com alguma
 informação errada, avise o Marcos em vez de editar o arquivo diretamente.
 
-## 6. Enviando suas alterações
+## 6. Editando aulas (`teaching/`)
+
+Conteúdo de disciplinas e aulas fica em `teaching/<disciplina>/`. Cada
+disciplina tem seu próprio `index.qmd` (a página pública do curso — tema,
+objetivos, lista de aulas) e uma subpasta `aulaNN/` por aula, cujo
+`index.qmd` único gera **duas saídas** a partir do mesmo arquivo: as notas
+em HTML (`notas.html`) e os slides em RevealJS (`slides.html`).
+
+Esta é a parte do site com a regra mais detalhada e específica — antes de
+editar ou criar uma aula, leia **`teaching/CLAUDE.md`**, que descreve a
+estrutura pedagógica esperada (abertura/desenvolvimento/fechamento,
+pausas ativas, exercícios obrigatórios), convenções de formatação (nomes
+de arquivo de saída, como redimensionar figuras/diagramas, datasets
+preferidos) e o processo de checkpoints por aula. Não é opcional pular
+essa leitura: um PR que não siga essas convenções provavelmente vai
+precisar de retrabalho na revisão.
+
+Algumas disciplinas também têm uma pasta `PDD/` com o Plano de
+Desenvolvimento da Disciplina oficial (PDF protocolado na Unicamp) e uma
+página `pdd.qmd` que o reproduz — esses PDFs não devem ser editados
+diretamente; qualquer atualização deve vir acompanhada da atualização
+correspondente em `pdd.qmd`.
+
+## 7. Estrutura do projeto (visão geral)
+
+Um mapa rápido de onde as coisas ficam, útil se seu PR mexe em algo além
+de perfil/projeto/aula:
+
+| Caminho | O que é |
+|---|---|
+| `_quarto.yml` | Configuração global do site: tema, navbar, filtros ativos, formato padrão de saída. |
+| `styles.css` / `custom.scss` | Visual do site inteiro (layout, listagens, cabeçalhos, cartão de perfil). `custom.scss` só ajusta variáveis do tema Bootstrap (cor primária, etc.); o grosso das regras está em `styles.css`. |
+| `teaching/lesson-theme.scss`, `teaching/toc-accordion.js` | Visual e comportamento específicos das aulas (paleta própria, slides, acordeão do sumário) — carregados só dentro de `teaching/`. |
+| `band-sections.lua`, `links.lua`, `participants.lua` | Filtros Pandoc que preenchem automaticamente certas seções (faixas da home, ícones de contato, cards de participantes) a partir do front matter YAML — nunca editam o `.qmd`, e o HTML que geram nunca deve ser escrito à mão. |
+| `people/`, `projects/`, `publications/`, `teaching/` | Conteúdo, um por seção do site — ver seções 3–6 acima. |
+| `preview-watch.py`, `deploy.sh` | Infraestrutura de build/preview/deploy usada pelo mantenedor do site. Não é necessária para contribuir com conteúdo (use `quarto preview`, seção 2). |
+| `_site/`, `_freeze/`, `.quarto/` | Saída renderizada e cache de execução do Quarto. Alguns desses arquivos ficam versionados de propósito (ver comentários em `.gitignore`) e mudam sozinhos quando você roda o preview — normal, não precisa se preocupar em revertê-los; só nunca edite o HTML/SVG gerado ali diretamente, edite sempre a fonte (`.qmd`/`.py`). |
+
+## 8. Enviando suas alterações
 
 Depois de editar e conferir no preview que está tudo certo:
 
@@ -168,7 +220,9 @@ git push
 Depois vá até a página do **seu fork** no GitHub — vai aparecer um aviso
 "This branch is X commits ahead of marcosmrai:main". Clique em
 **Contribute → Open pull request**, escreva uma descrição curta do que
-mudou, e envie. O Marcos revisa e faz o merge.
+mudou, e envie. O Marcos revisa e faz o merge — lembrando que `main` é
+protegida, então mesmo uma mudança pequena e óbvia precisa passar por
+esse fluxo de PR, nunca por push direto.
 
 ---
 

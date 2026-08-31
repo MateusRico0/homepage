@@ -38,10 +38,22 @@ necessário).
 
 | Pasta | Conteúdo | Aparece no site? |
 |---|---|---|
-| `publications/*.qmd` (nível superior) | a lista **oficial** — só papers em que o dono do site é coautor | Sim — página de Publications, home, e o listing de cada coautor |
+| `publications/group/*.qmd` | a lista **oficial** com 2+ autores registrados no site (arquivos de verdade, não symlink) | Sim — página de Publications, home, e o listing de cada coautor |
+| `publications/<solo>/*.qmd` (ex.: `mraimundo/`, ver `SOLO_AUTHOR_FOLDERS` em `sync_symlinks.py`) | a lista **oficial** de autoria solo dessa pessoa (arquivos de verdade, não symlink) | Sim — mesmos três lugares acima |
 | `publications/_external/<username>/` | o resto das publicações de uma pessoa específica (sem o dono do site) | Não diretamente (prefixo `_`), mas ver `publications/<username>/` abaixo |
-| `publications/<username>/` (uma por pessoa, gerada automaticamente) | links simbólicos pras publicações dessa pessoa (oficiais + as próprias de `_external/<username>/`) | **Sim** — é isso que faz o listing nativo do perfil dela funcionar |
+| `publications/<username>/` (uma por pessoa SEM publicação solo, gerada automaticamente) | links simbólicos pras publicações dessa pessoa (`group/` + as próprias de `_external/<username>/`) | **Sim** — é isso que faz o listing nativo do perfil dela funcionar |
+| `publications/<solo>-external/` (ex.: `mraimundo-external/`) | o equivalente de `publications/<username>/` acima, mas pra quem tem pasta canônica solo — só os links das externas, nunca dos oficiais (que já vivem nativamente em `<solo>/` e `group/`) | **Sim** — só no perfil dessa pessoa, que soma as três pastas (ver `person_bibliography.py`) |
 | `coauthors/` | `coauthors.json` (scholar_id → foto em cache), os arquivos de foto, e `not_found.json` (nomes buscados sem resultado) | Não é uma pasta do site — um cache de dados/imagens lido por `render_authors_block` |
+
+`publications/*.qmd` deixou de ser um monte flat: um `contents:` de
+listing com glob cruza diretório mesmo sem `**` explícito (testado ao
+vivo), então uma pasta oficial compartilhada com as pastas de symlink por
+pessoa arriscava sempre listar cada publicação em grupo mais de uma vez
+nas duas páginas principais. As duas pastas canônicas acima (`group/` e
+`<solo>/`) resolvem isso: `publications/index.qmd` e a home apontam
+direto pra elas com um glob estático (`publications/group/*.qmd` +
+`publications/<solo>/*.qmd`), sem precisar de uma lista `contents:`
+regenerada a cada render.
 
 `username` é o padrão usado em todo `people/*.qmd`: iniciais de cada parte
 do nome exceto a última, mais o sobrenome, minúsculo, sem separador (ex.:
@@ -75,8 +87,10 @@ da forma de duas iniciais que a regra normalmente produziria.
    Abre o perfil dessa pessoa, pula publicações já cadastradas (oficiais
    ou externas, por título — ainda que `scholar-ids:` do arquivo existente
    seja atualizado, ver abaixo), e para cada uma nova: escreve direto em
-   `publications/<slug>.qmd` se o dono do site é coautor, senão em
-   `publications/_external/<username>/<slug>.qmd`.
+   `publications/group/<slug>.qmd` (2+ autores registrados) ou
+   `publications/<solo>/<slug>.qmd` (autoria solo, ver
+   `_canonical_folder_for` em `render_publication.py`) se o dono do site é
+   coautor, senão em `publications/_external/<username>/<slug>.qmd`.
 
 4. **`resolve_authors.py`** — resolve cada autor de um paper oficial pra
    um link + imagem e mantém o cache em `coauthors/`. O único acesso à
@@ -91,19 +105,25 @@ da forma de duas iniciais que a regra normalmente produziria.
    real).
 
 5. **`render_publication.py`** — preenche `TEMPLATE.qmd`, compartilhado
-   pelos dois fetchers. Define `PUBLICATIONS_DIR` (oficial, nível
-   superior) e `EXTERNAL_DIR` (`_external/`). Também tem
+   pelos dois fetchers. Define `PUBLICATIONS_DIR` e `CANONICAL_SUBDIRS`
+   (`group/` + `SOLO_AUTHOR_FOLDERS`, ver `sync_symlinks.py`) e
+   `EXTERNAL_DIR` (`_external/`). `_canonical_folder_for` decide em qual
+   das duas pastas canônicas uma publicação nova é escrita, a partir do
+   `author-ids:` já preenchido no texto renderizado. Também tem
    `backfill_scholar_ids`/`find_existing_publication` (atualiza
    `scholar-ids:` num arquivo já existente sem reabrir a página de
    citação) e `looks_like_preprint`/`update_venue_if_published` (ver
    "Atualizando um preprint" abaixo).
 
 6. **`sync_symlinks.py`** — a fonte única da verdade de "quais
-   publicações são de quem": varre `publications/*.qmd` (`author-ids:`) e
+   publicações são de quem": varre `publications/group/*.qmd` +
+   `publications/<solo>/*.qmd` (`author-ids:`) e
    `publications/_external/<username>/*.qmd`, e cria/atualiza
-   `publications/<username>/` com um link simbólico pra cada
-   correspondência, removendo os que não valem mais. Roda sozinho, sem
-   precisar de um `quarto render` completo:
+   `publications/<username>/` (ou, pra quem está em
+   `SOLO_AUTHOR_FOLDERS`, só `publications/<username>-external/`, já que a
+   pasta homônima é canônica e nunca ganha symlink) com um link simbólico
+   pra cada correspondência, removendo os que não valem mais. Roda
+   sozinho, sem precisar de um `quarto render` completo:
 
        python3 sync_symlinks.py
 
@@ -219,9 +239,12 @@ suficiente pra não bater mais.
 `../generate_person_bibliographies.py` (em `publications/`, chamado pelo
 `project.pre-render` em `_quarto.yml`) chama `sync_symlinks.py` e depois
 atualiza o front matter de cada `people/<username>.qmd` (o bloco
-`listing:` delimitado) e a lista `contents:` das duas páginas de listing
-principais (Publications e home) — a cada `quarto render`/`quarto
-preview`, sem nenhum passo manual além de rodar um dos fetchers acima.
+`listing:` delimitado) — a cada `quarto render`/`quarto preview`, sem
+nenhum passo manual além de rodar um dos fetchers acima. As duas páginas
+de listing principais (Publications e home) não são mais tocadas por
+esse script: apontam direto, como glob estático, pras pastas canônicas
+(`publications/group/*.qmd` + `publications/<solo>/*.qmd`), então uma
+publicação nova já aparece sozinha ali assim que cai numa dessas pastas.
 
 ## Depois de rodar um fetcher
 

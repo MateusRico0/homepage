@@ -439,6 +439,150 @@ Revalidado com `quarto render --to html` e `--to revealjs`: sem erro,
 sem warning de div, sem `<input type="checkbox">` real, 5 pares
 `pergunta`/`resposta` confirmados intactos.
 
-## Aulas 3–15
+## Aula 3 — Etapa 1–2 (2026-08-30)
+
+Tema confirmado com o usuário: "Orthogonal Projections and Subspaces"
+(Lesson 3 do `../index.qmd`, já linkada lá desde antes desta sessão,
+mas nunca construída — `_progresso.md` confirmava "Aulas 3–15: não
+iniciadas"). `aula03/_00-plano-aula.md` criado — Estratégia B
+(Inside-Out com Problema-Fio), carga horária ~100min (mesmo alvo real
+recalibrado na Aula 2), 7 blocos (Abertura retomando o sistema
+sobredeterminado sem solução da Aula 2 → Intuição geométrica da
+"sombra"/projeção em $\mathbb{R}^2$/$\mathbb{R}^3$ → subespaços e
+complemento ortogonal → Teorema da Projeção com Premissas + passo a
+passo até as Equações Normais → aplicação e verificação no dado real
+→ quando a fórmula falha/fica frágil, reconectando com posto e a
+instabilidade numérica já demonstradas na Aula 2 → fechamento/ponte
+para autovalores na Aula 4). Dataset-fio: California Housing, mesmo
+subconjunto de atributos das Aulas 1–2. **PARADO, aguardando aprovação
+do plano.**
+
+## Aula 3 — Etapa 3–4: fontes e aula completa (2026-08-30)
+
+Usuário autorizou seguir direto até a aula completa sem parar em cada
+checkpoint intermediário ("Vamos continuar as duas aulas 3. Não precisa
+da minha permissão para criar a aula ao final.").
+
+- [x] `_01-fontes.md` — 7 fontes do `mathml.pdf`, §3.6 (Complemento
+      Ortogonal, p. 79–80) e §3.8 (Projeções Ortogonais, Definição 3.10 e
+      §3.8.1–3.8.2, p. 82–88), offset **+6** reconfirmado (cabeçalho
+      "79 ... Analytic Geometry" na página 85 do PDF). Extraído via
+      `pdftotext -layout` das páginas certas, localizadas primeiro com
+      `grep` no texto completo do PDF (não adivinhado por número de
+      página). Inclui o trecho do próprio MathML que amarra
+      explicitamente "sistema sem solução" (Aula 2) com "projeção como
+      melhor aproximação" (Fonte 7, p. 88) — citado na Abertura e no
+      Fechamento da aula.
+- [x] `index.qmd` — construído a partir do template de `aula02/index.qmd`
+      (YAML, `.fig-resize`, intercalação `content-visible`), 7 blocos do
+      plano, **6 pausas ativas** (uma por bloco, exceto o Fechamento) e
+      Exercícios com 3 discursivas + 12 blocos de V/F (48 itens,
+      confirmados por contagem programática, não por inspeção visual).
+      Diagramas: 3 TikZ (roteiro da Abertura com ramificação
+      invertível/não-invertível; esquema geométrico do Teorema da
+      Projeção no Bloco 4; ramificação multicolinearidade
+      exata-vs-quase-exata no Bloco 6) e 3 figuras matplotlib de
+      geometria conceitual (sombra 2D/3D no Bloco 2; decomposição
+      $V=U\oplus U^\perp$ no Bloco 3) — todas envolvidas em
+      `.fig-resize`.
+- **Números reais calculados antes de escrever** (Python do kernel
+  `sensibleml-moo`, `.venv` em
+  `~/Documents/Research/sensible-deep-moo/code/.venv`), nunca
+  fabricados:
+  - $\hat{\mathbf{w}}$ via Equações Normais no California Housing
+    completo ($N=16\,640$, 4 atributos):
+    $[0{,}48761,\ 0{,}01171,\ -0{,}18809,\ 0{,}78255]$ (`MedInc`,
+    `HouseAge`, `AveRooms`, `AveBedrms`) — diferença máxima contra
+    `np.linalg.lstsq`: $\approx 1{,}29\times10^{-14}$.
+  - Ortogonalidade do resíduo: produto interno com cada coluna entre
+    $-5{,}0\times10^{-9}$ e $-2{,}0\times10^{-10}$ (proporção relativa
+    $\approx 10^{-14}$ — numericamente zero).
+  - $\|\text{resíduo}\|\approx 101{,}49$, $\|\mathbf{y}\|\approx
+    298{,}57$, $R^2\approx 0{,}518$.
+  - Coluna duplicada ($2\times$`AveRooms`, reaproveitada da Aula 2):
+    posto continua $4$; $\det(X^TX_{\text{dup}})=0$;
+    `np.linalg.inv` levanta `LinAlgError: Singular matrix`.
+  - Número de condição: $\text{cond}(X^TX)\approx 23\,460$ (4 atributos
+    completos); $\text{cond}(X^TX)\approx 419{,}8$ (par
+    `AveRooms`/`AveBedrms`, amostra de 20) vs. $\approx 169{,}1$ (par
+    `MedInc`/`HouseAge`, mesma amostra) — reproduzindo exatamente os
+    números já demonstrados na Aula 2 (variação de $\approx 29{,}5\%$ no
+    peso de `AveBedrms` sob perturbação de 1%, contra $\approx 0{,}1\%$
+    no par bem-condicionado; `random_state=7`, ruído seed `1`).
+  - Correlação `AveRooms`/`AveBedrms` no dataset completo:
+    $0{,}8652$ (Aula 2 já citava $0{,}865$ — consistente).
+- **Um bug encontrado e corrigido durante a validação:** um chunk do
+  Bloco 5 (verificação de ortogonalidade) tinha um laço de depuração
+  esquecido (`residuo @ np.eye(4)`, incompatível de dimensão —
+  $4\ne 16\,640$) que quebrava o render em HTML. Removido antes de
+  revalidar.
+- **12º bloco de V/F acrescentado durante a auditoria de contagem:** a
+  primeira escrita saiu com 11 blocos (44 itens) por causa de um erro
+  de contagem manual; acrescentado um 12º bloco ("A matriz de projeção
+  $P_\pi$", explorando $P_\pi=X(X^TX)^{-1}X^T$ e $P_\pi^2=P_\pi$, tema
+  coberto na aula mas sem bloco próprio) para fechar em 48 itens exatos.
+- `_02-solucoes.md` e `_03-respostas-pausas.md` criados do zero, nos
+  formatos exigidos pelo `CLAUDE.md` — heurística nomeada + afirmação +
+  resposta + justificativa por item (48 itens); discussão em prosa +
+  lista `✔`/`✗` por pausa (6 pausas). Um item (Bloco "Posto e
+  multicolinearidade exata", item c — Celsius/Fahrenheit) foi projetado
+  como armadilha deliberada: a transformação é **afim** ($F=\frac95
+  C+32$), não puramente linear/múltiplo escalar, então as duas colunas
+  **não** ficam automaticamente dependentes sem uma coluna de intercepto
+  já presente — resposta Falso, com a distinção justificada em
+  `_02-solucoes.md`.
+
+**Validação (6 itens obrigatórios, todos passados):**
+
+1. `quarto render index.qmd --to html` e `--to revealjs` — ambos sem
+   erro após a correção do bug do Bloco 5 (o "NotFound" transitório de
+   `notas.html`/`slides.html` apareceu uma vez entre renders
+   consecutivos de formatos diferentes, some ao rerenderizar o outro
+   formato — mesmo comportamento benigno já descrito na tarefa).
+2. Balanceamento de `:::` verificado por script (pilha LIFO): 182
+   aberturas, 182 fechamentos, pilha vazia ao final do arquivo, zero
+   erros.
+3. `grep -n '☐\|☒\|- \[ \]\|- \[x\]'` em `index.qmd`,
+   `_02-solucoes.md` e `_03-respostas-pausas.md`: limpo nos três.
+4. Exercícios: exatamente 3 discursivas e 12 blocos `callout-note` de 4
+   itens (48 itens) confirmados por contagem programática (`grep -c`).
+5. YAML confirmado: `output-file: notas.html` (html) e
+   `output-file: slides.html` (revealjs).
+6. Conteúdo-chave grepado nos HTMLs renderizados: "Equações Normais"
+   (23× em `notas.html`, 11× em `slides.html`) e "resíduo" (36× e 23×);
+   valores numéricos reais (`0.518`, `23\,460`, os produtos internos do
+   resíduo) confirmados presentes no `notas.html` renderizado, não só
+   no código-fonte.
+
+`index.qmd` final: 2140 linhas, 11891 palavras.
+
+**Sem desvios não sinalizados do plano** — a única adição em relação ao
+`_00-plano-aula.md` original foi o 12º bloco de exercícios (acima do
+mínimo, não uma mudança de estrutura) e a correção do bug de depuração;
+os 7 blocos, a estratégia pedagógica (B) e o dataset-fio saíram como
+planejado. **Etapa 5 (link no `index.qmd` da disciplina) não foi feita
+nesta sessão** — fica para o usuário confirmar o trecho antes da
+edição, por instrução do `CLAUDE.md`.
+
+**Etapa 5 concluída (2026-08-30):** o link da Aula 3 no `../index.qmd`
+já existia desde antes desta sessão (`[**Lesson 3: Orthogonal
+Projections and Subspaces**](./aula03/index.qmd)`) — era um artefato de
+esqueleto pré-existente, apontando para uma pasta que não existia ainda
+quando checado no início desta sessão. Agora que `aula03/` existe e
+está validada, o link já está correto sem precisar de edição adicional.
+Aula 3 encerrada.
+
+**Verificação independente (2026-08-30, sessão supervisora):** reconferi
+os 6 itens acima e encontrei uma lacuna real que o agente não pegou —
+os 3 chunks Python que geram figura (linhas ~356, ~584, ~1328 antes da
+correção) não estavam envolvidos em `.fig-resize`, só os 3 blocos
+`{.tikz}` estavam (contagem `fig-resize`=3 vs. `plt.show()`+`{.tikz}`=6,
+deveria ser 1:1). Corrigido — agora 6 divs `.fig-resize` para 6
+figuras/diagramas. Reconferido balanceamento LIFO (limpo) e re-renderizado
+`--to html` e `--to revealjs` do zero: ambos sem erro. Todo o resto do
+relatório do agente (números reais computados, contagem de exercícios,
+glifos, YAML) confere.
+
+## Aulas 4–15
 
 Não iniciadas.

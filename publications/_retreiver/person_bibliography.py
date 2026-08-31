@@ -55,6 +55,7 @@ PEOPLE_DIR = ROOT / "people"
 
 sys.path.insert(0, str(Path(__file__).parent))
 from listing_blocks import set_listing_item  # noqa: E402
+from sync_symlinks import SOLO_AUTHOR_FOLDERS  # noqa: E402
 
 LISTING_START = "# publications-listing:start (gerado por generate_person_bibliographies.py — não editar)"
 LISTING_END = "# publications-listing:end"
@@ -79,10 +80,25 @@ def _ensure_blank_line_before_headings(text: str) -> str:
 
 
 def _listing_item(person_slug: str) -> str:
+    if person_slug in SOLO_AUTHOR_FOLDERS:
+        # Pra quem tem publicação solo, a própria pasta homônima só guarda
+        # o acervo canônico nativo (solo) + externas — as publicações em
+        # grupo (group/) e as externas (numa pasta irmã, ver
+        # sync_symlinks.py) ficam de fora dela de propósito, pra não
+        # duplicar entradas na listagem principal (publications/index.qmd
+        # e a home, que somam group/ + <solo>/). O perfil da pessoa soma
+        # as três pastas pra mostrar tudo.
+        contents = (
+            f'["../publications/{person_slug}/*.qmd", '
+            '"../publications/group/*.qmd", '
+            f'"../publications/{person_slug}-external/*.qmd"]'
+        )
+    else:
+        contents = f'"../publications/{person_slug}/*.qmd"'
     return (
         f"  {LISTING_START}\n"
         "  - id: publications\n"
-        f'    contents: "../publications/{person_slug}/*.qmd"\n'
+        f"    contents: {contents}\n"
         "    type: default\n"
         '    sort: "date desc"\n'
         "    fields: [title, description]\n"

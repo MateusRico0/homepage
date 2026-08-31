@@ -45,9 +45,16 @@ def project_files() -> list[Path]:
 
 
 def publication_files() -> list[Path]:
-    """Oficiais (nível superior) + externas (_external/<username>/*.qmd) —
-    qualquer publicação pode ter um campo `projects:`, não só as oficiais."""
-    files = [p for p in PUBLICATIONS_DIR.glob("*.qmd") if p.name != "index.qmd"]
+    """Oficiais (publications/group/*.qmd + publications/<solo>/*.qmd —
+    ver SOLO_AUTHOR_FOLDERS em publications/_retreiver/sync_symlinks.py,
+    manter em sincronia com a constante de lá) + externas
+    (_external/<username>/*.qmd) — qualquer publicação pode ter um campo
+    `projects:`, não só as oficiais."""
+    files = []
+    for sub in ("group", "mraimundo"):
+        folder = PUBLICATIONS_DIR / sub
+        if folder.exists():
+            files.extend(folder.glob("*.qmd"))
     files += list((PUBLICATIONS_DIR / "_external").glob("*/*.qmd"))
     return sorted(files)
 

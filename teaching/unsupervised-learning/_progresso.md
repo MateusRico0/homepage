@@ -651,6 +651,190 @@ Revalidado com `quarto render --to html` e `--to revealjs`: sem erro,
 sem warning de div, sem `<input type="checkbox">` real, 7 pares
 `pergunta`/`resposta` confirmados intactos.
 
-## Aulas 3–12
+## Bug crítico encontrado e corrigido: Exercícios da Aula 2 não apareciam no site (2026-08-28)
+
+Feedback do usuário: os exercícios de nenhuma das duas aulas já dadas
+apareciam no site. Investigação:
+
+- **Aula 2 JÁ TINHA a seção de Exercícios no `index.qmd`** (48 itens de
+  V/F + 3 discursivas), criada em rodada anterior desta sessão — mas
+  ela nunca aparecia no `notas.html` publicado. Causa raiz: um `:::`
+  de fechamento faltando, introduzido durante a reestruturação do
+  bloco "$k$-NN vs. KDE" mais adiante nesta sessão (a fusão de um
+  fragmento de slide com um heading dentro dele, sem fechar o bloco
+  `::: {.content-visible when-format="revealjs"}` externo). O bug era
+  **silencioso**: o Pandoc emite só um aviso ("Div ... unclosed...
+  closing implicitly"), fecha implicitamente no fim do arquivo, e como
+  o div não fechado era `when-format="revealjs"`, o filtro de
+  `content-visible` escondia **todo o resto do arquivo** (incluindo a
+  seção de Exercícios, que é `when-format="html"`) ao renderizar para
+  HTML — sem gerar erro, só um aviso fácil de não notar entre dezenas
+  de outros avisos de LaTeX/citação.
+  - **Como foi encontrado:** meu próprio script de verificação de
+    balanceamento de `:::` (usado em toda validação desta sessão) tinha
+    um bug — permitia "casar" um fechamento com qualquer abertura de
+    mesmo número de dois-pontos em qualquer posição da pilha, não só a
+    mais recente (LIFO). Isso mascarava desbalanceamentos reais. Regra
+    correta do Pandoc para divs indistintos por comprimento (todos
+    usando exatamente 3 dois-pontos, como neste projeto): sempre LIFO —
+    todo fechamento encerra o div mais recentemente aberto. Reescrito o
+    script de verificação com essa regra; ele imediatamente apontou a
+    linha exata do bug.
+  - **Corrigido:** heading solto reintroduzido corretamente fora do
+    fragmento, com o `:::` de fechamento do bloco externo restaurado.
+    Revalidado com `quarto render --to html`, sem nenhum aviso de div,
+    e confirmado que a seção de Exercícios agora aparece (76 glifos
+    `□` no total: 48 dos exercícios + 28 das 7 pausas ativas × 4 itens
+    — antes do fix, só os 28 das pausas apareciam).
+  - **Lição para o futuro:** ao validar qualquer aula nesta sessão,
+    sempre checar avisos de `[WARNING] Div ... unclosed` na saída do
+    `quarto render` (não só o meu script de contagem), e sempre grep
+    por conteúdo esperado no HTML final (ex.: `grep -c "Exerc"`), não
+    só contar `:::`/checkboxes — um div mal fechado pode esconder
+    seções inteiras sem gerar erro.
+
+## Exercícios da Aula 1 criados do zero (2026-08-28)
+
+A Aula 1 nunca teve seção de Exercícios — não fazia parte do arquivo
+original. Criados, seguindo exatamente o mesmo padrão das demais aulas:
+
+- **`index.qmd`:** seção "# Exercícios" (bloco `content-visible`
+  exclusivo de HTML) com 3 questões discursivas (distribuição empírica
+  vs. família teórica; geometria de Mahalanobis nos pontos B/C;
+  aplicar os objetos matemáticos da aula a uma das duas rachaduras não
+  resolvidas) e 12 blocos de V/F × 4 itens (48 itens), cobrindo a aula
+  de ponta a ponta: profiling/distribuição empírica, geometria da
+  Gaussiana multivariada, por que a Gaussiana (entropia máxima/TCL),
+  ajuste por máxima verossimilhança, a armadilha $N\le d$, distância de
+  Mahalanobis, geometria dos pontos B/C, do limiar ao $p$-valor,
+  armadilha de interpretação do $p$-valor, conjunta vs. por dimensão,
+  multimodalidade, outliers no ajuste/ponte para a Aula 2. Todos os
+  itens nascem de uma das 4 heurísticas (contrafactual, limite,
+  transferência de domínio, falsa dicotomia), usando sempre `□` como
+  glifo (nunca `☐`/`☒`).
+- **`_02-solucoes.md` criado do zero**, com heurística nomeada e
+  justificativa analítica por item, mesmo formato padronizado das
+  outras disciplinas.
+
+Revalidado com `quarto render --to html` e `--to revealjs`: sem erro,
+sem warning de div, sem `<input type="checkbox">` real, 48 glifos `□`
+confirmados no HTML renderizado (0 pausas ativas nesta aula — não fazem
+parte do escopo deste pedido, e a Aula 1 nunca teve essa estrutura).
+
+## Aula 3 — Etapa 1–2 (2026-08-30)
+
+Tema confirmado com o usuário: "Density Topography and Graphs:
+Hierarchical Clustering and HDBSCAN" (Lesson 3 do `../index.qmd`).
+`aula03/_00-plano-aula.md` criado — Estratégia A (Outside-In), carga
+horária ~120min, 8 blocos (Abertura → Intuição com contraexemplo
+sintético de duas luas/anéis → conjuntos de nível → alcançabilidade
+mútua → MST/single-linkage → árvore condensada e persistência →
+síntese → fechamento/ponte para GMM). Dataset-fio: Breast Cancer
+Wisconsin (sem rótulos durante o clustering). Verificado nesta sessão:
+`sklearn.cluster.HDBSCAN` disponível no kernel `sensibleml-moo`
+(scikit-learn 1.8.0) — usar essa implementação, não o pacote `hdbscan`
+externo (não instalado). **PARADO, aguardando aprovação do plano.**
+
+## Aula 3 — Etapas 3–4 concluídas e validadas (2026-08-30)
+
+Continuação da sessão anterior: `_01-fontes.md` e `index.qmd` já
+tinham sido escritos por uma sessão interrompida antes da validação e
+dos arquivos de apoio. Fechado nesta sessão:
+
+- **Diagrama TikZ que faltava, adicionado.** O plano previa 3 diagramas
+  (montanhas/conjuntos de nível no Bloco 3; construção da
+  alcançabilidade mútua no Bloco 4; MST→árvore condensada no Bloco 6),
+  mas só 2 existiam no `index.qmd` (`grep -c '{.tikz}'` = 2) — faltava o
+  esqueleto abstrato do Bloco 3. Adicionado um diagrama novo (corte
+  transversal 1D da "paisagem" de densidade, duas montanhas e um vale,
+  com um limiar $\lambda$ e as duas componentes de $L_\lambda$
+  destacadas), inserido antes da definição formal, seguindo o mesmo
+  padrão de intercalação HTML/RevealJS/diagrama-compartilhado já usado
+  nos outros dois. Contagem final: **3 diagramas TikZ**, confirmados no
+  `slides.html` e no `notas.html` renderizados (3 SVGs em
+  `index_files/mediabag/`).
+- **Bug de TikZ pré-existente encontrado e corrigido**: o diagrama do
+  Bloco 4 (alcançabilidade mútua) definia um estilo de nó chamado
+  `out` (`out/.style={...}`, usado como `\node[out] (M) at (...)`) —
+  `out` é uma chave reservada do TikZ (ângulo de saída de curvas
+  Bézier), então o `pdflatex` falhava com `Package pgfkeys Error: The
+  key '/tikz/out' requires a value`, ignorando o estilo (o nó
+  compilava, mas sem a caixa/cor pretendida) e reportando erro no log,
+  mesmo com o render geral "funcionando". Renomeado para `outbox` —
+  confirmado sem erro no render depois da correção.
+- **`_02-solucoes.md` criado do zero** — 48 itens (12 blocos × 4),
+  heurística nomeada e justificativa analítica por item, no formato
+  padrão do `../CLAUDE.md`. Texto de cada item extraído literalmente
+  do `index.qmd` (não reinventado); V/F determinado por mim nesta
+  sessão (as respostas não estavam em lugar nenhum, por design — só as
+  8 pausas ativas já tinham "Resposta" no próprio `.qmd`, dentro do
+  bloco RevealJS).
+- **`_03-respostas-pausas.md` criado do zero** — as 8 pausas ativas
+  (uma por bloco), discussão em prosa + resolução V/F com
+  `✔`/`✗`, reaproveitando as respostas já escritas no `index.qmd`
+  (dentro dos blocos `Resposta` exclusivos de RevealJS, nunca
+  publicados nas notas HTML).
+- **Validação por render completo**, usando o workaround de projeto
+  isolado (`_quarto.yml` local com `project: {type: default}` +
+  `filters: [diagram]`, e symlink `_extensions` local) para contornar o
+  `FilesystemLoop` de `publications/mraimundo/` na raiz do projeto —
+  ambos removidos ao final, junto com `notas.html`, `slides.html`,
+  `.gitignore` e `.quarto/` que o render isolado deixou na pasta (só
+  `_00-plano-aula.md`, `_01-fontes.md`, `_02-solucoes.md`,
+  `_03-respostas-pausas.md`, `index.qmd` e `index_files/` — restrito a
+  `figure-html/` e `mediabag/` — permanecem, mesmo padrão das Aulas
+  1-2). Uma corrida com o `homepage-preview.service` (o mesmo problema
+  já registrado na Aula 2) apagou um `notas.html` recém-gerado no meio
+  da verificação; resolvido rodando os dois renders (`--to html` e
+  `--to revealjs`) em sequência sem nenhuma edição de arquivo entre
+  eles, evitando novo disparo do watcher.
+  - `quarto render --to html` e `--to revealjs`: **ambos com exit
+    code 0, sem nenhum `[WARNING]`/erro** (só ruído inofensivo de
+    stderr do Inkscape na conversão PDF→SVG dos TikZ).
+  - Balanço de `:::` (regra LIFO) limpo antes e depois de todas as
+    edições.
+  - `grep -n '☐\|☒\|- \[ \]\|- \[x\]'` sem nenhuma ocorrência em
+    `index.qmd`, `_02-solucoes.md` e `_03-respostas-pausas.md`.
+  - Exercícios confirmados no `notas.html` renderizado (não só no
+    `.qmd` fonte) — 3 discursivas + 12 blocos de V/F (48 itens),
+    80 glifos `□` no total (48 dos exercícios + 32 das 8 pausas
+    ativas × 4), 0 `<input type="checkbox">` real.
+  - 8 pares `id="pergunta"`/`id="resposta"` (mais `-1`...`-7`)
+    confirmados no `slides.html`.
+  - `output-file: notas.html`/`slides.html` confirmados no YAML.
+- **Número real HDBSCAN-vs-diagnóstico, confirmado no `notas.html`
+  renderizado** (não só no código-fonte): sobre os dois atributos
+  `radius_worst`/`concave points_worst` do Breast Cancer Wisconsin,
+  sem usar o rótulo — HDBSCAN encontra 2 clusters + 168/569
+  ($\approx 29{,}5\%$) de ruído; Cluster 0 (54 pacientes) é 100%
+  maligno; Cluster 1 (347 pacientes) é $\approx 90{,}8\%$ benigno (315
+  benignos, 32 malignos); dos 212 malignos totais, 126
+  ($\approx 59{,}4\%$) caem em ruído. ARI $=0{,}644$ excluindo ruído,
+  $0{,}493$ incluindo ruído como rótulo próprio.
+- `index.qmd` final: **2440 linhas**.
+
+**Verificação independente (2026-08-30, sessão supervisora):** reconferi
+tudo acima — balanço LIFO limpo, glifos limpos, 3 `{.tikz}`, estilo
+`outbox` confirmado (não mais `out`), 80 `□` / 13 `callout-note
+icon=false`. Rerenderei eu mesma (`--to html` depois `--to revealjs`)
+usando o mesmo workaround de projeto isolado: peguei a mesma corrida com
+o `homepage-preview.service` já registrada acima (`notas.html`
+desapareceu entre um render e o outro) — confirmada de novo, mesma
+causa, resolvida do mesmo jeito. `notas.html` renderizado mostra os
+números reais do ARI ($0{,}644$/$0{,}493$) e a seção Exercícios
+completa. **Limpeza adicional:** a pasta ainda tinha `index_files/libs/`
+(artefato só do render isolado — nenhuma outra aula deste projeto tem
+essa subpasta, porque o projeto real `type: website` centraliza esses
+assets fora de `index_files/`) — removida. Diretório final de
+`aula03/` bate exatamente com o conjunto de arquivos de toda outra
+aula do projeto.
+
+**Etapa 5 concluída (2026-08-30):** usuário aprovou ("pode seguir e
+fechar"). Entrada da Lesson 3 no `../index.qmd` convertida de texto
+simples para link: `*   [**Lesson 3: Density Topography and Graphs:
+Hierarchical Clustering and HDBSCAN**](./aula03/index.qmd)`. Aula 3
+encerrada.
+
+## Aulas 4–12
 
 Não iniciadas.

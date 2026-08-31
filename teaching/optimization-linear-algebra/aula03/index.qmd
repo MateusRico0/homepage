@@ -1,0 +1,2146 @@
+---
+title: "Aula 3: Projeções Ortogonais e Subespaços"
+subtitle: "Álgebra Linear e Otimização para Aprendizado de Máquina"
+author: "Prof. Marcos Medeiros Raimundo"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    fig-width: 8
+    fig-height: 4.5
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    theme: [simple, ../../lesson-theme.scss]
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    fig-width: 8
+    fig-height: 4.5
+jupyter: sensibleml-moo
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar
+disable_progress_bar()
+from datasets import load_dataset
+
+plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+plt.rcParams.update({"figure.dpi": 120, "font.size": 11})
+
+# Paleta preferencial do IC
+COR_A   = "#0085CA"   # azul — elemento principal / classe A
+COR_B   = "#FF5E00"   # laranja — elemento de contraste / destaque
+COR_C   = "#E03C31"   # vermelho — alerta / segunda classe
+COR_NEU = "#5D6D7E"   # neutro
+
+# --- Problema-fio da aula: mesmo dataset real das Aulas 1-2 ----------
+_housing = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+COLS = ["MedInc", "HouseAge", "AveRooms", "AveBedrms"]
+```
+
+# O Problema Que a Aula 2 Deixou em Aberto
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Revisão Rápida: Onde a Aula 2 Parou
+
+A Aula 2 generalizou "um vetor" para "um dataset inteiro" via a matriz de
+design $X\in\mathbb{R}^{N\times d}$, deu duas leituras ao produto
+$A\mathbf{x}$ (por linha: previsão; por coluna: combinação linear), e
+terminou classificando os sistemas lineares $A\mathbf{x}=\mathbf{b}$ em
+três casos — nenhuma, exatamente uma, ou infinitas soluções — via o
+critério do posto, $\text{rk}(A)=\text{rk}(A|\mathbf{b})$. A peça central
+que fica: em Regressão Linear Múltipla, o sistema $X\mathbf{w}=\mathbf{y}$
+tem $N$ equações e $d$ incógnitas, e como $N\gg d$ em praticamente todo
+problema real, o sistema é **sobredeterminado** — genericamente, **nenhuma
+solução exata**.
+
+## Organizador Prévio: De "Sem Solução" Para "Melhor Aproximação"
+
+A Aula 2 fechou com essa constatação como um beco aparentemente sem
+saída: exigir que $X\mathbf{w}$ alcance $\mathbf{y}$ exatamente é pedir
+demais quando há milhares de observações reais e ruidosas. Mas "sem
+solução exata" não é "sem solução nenhuma que preste". O próprio livro
+que citamos nas Aulas 1-2 (MathML) já aponta a saída, no capítulo sobre
+projeções: quando um sistema $A\mathbf{x}=\mathbf{b}$ não pode ser
+resolvido exatamente, ainda é possível perguntar qual é a melhor
+aproximação — "a ideia é encontrar o vetor no subespaço gerado pelas
+colunas de $A$ que está mais próximo de $\mathbf{b}$" (tradução nossa,
+MathML, §3.8.2, p. 88). Essa pergunta — "mais próximo, mas dentro de
+onde?" — é geométrica antes de ser algébrica, e é exatamente o fio que
+esta aula segue.
+
+## Roteiro da Aula
+
+Quatro perguntas guiam esta aula:
+
+1. O que significa, geometricamente, "a melhor aproximação possível" de
+   $\mathbf{y}$ por um $X\mathbf{w}$ alcançável?
+2. O que é projetar um vetor sobre um subespaço, e por que essa operação
+   resolve exatamente o problema da pergunta 1?
+3. Como essa ideia geométrica vira uma fórmula calculável — as **Equações
+   Normais**?
+4. Quando essa fórmula falha, ou fica numericamente frágil, e por quê?
+
+## Problema Motivador
+
+Volte ao *California Housing Dataset* das Aulas 1-2: $N=16\,640$ bairros
+(a partição de treino), 4 atributos (`MedInc`, `HouseAge`, `AveRooms`,
+`AveBedrms`), e o alvo `MedHouseVal`. O sistema $X\mathbf{w}=\mathbf{y}$
+tem $16\,640$ equações e $4$ incógnitas — sobredeterminado por uma margem
+enorme. Sem resolver nada ainda, pense por um instante: se $X\mathbf{w}$
+nunca alcança $\mathbf{y}$ exatamente, **qual** $X\mathbf{w}$ alcançável
+está mais perto? E "mais perto" — medido como, exatamente?
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Revisão Rápida: Onde a Aula 2 Parou
+
+::: {.fragment}
+Aula 2: matriz de design $X\in\mathbb{R}^{N\times d}$, duas leituras de
+$A\mathbf{x}$ (linha = previsão, coluna = combinação linear), sistemas
+lineares com 0, 1 ou $\infty$ soluções via o posto.
+:::
+
+::: {.fragment}
+Peça central: $X\mathbf{w}=\mathbf{y}$ tem $N$ equações, $d$ incógnitas.
+Em ML real, $N\gg d$ — **sobredeterminado**, genericamente **sem solução
+exata**.
+:::
+
+### De "Sem Solução" Para "Melhor Aproximação"
+
+::: {.fragment}
+"Sem solução exata" não é "sem solução que preste". O próprio MathML
+aponta a saída: "a ideia é encontrar o vetor no subespaço gerado pelas
+colunas de $A$ que está mais próximo de $\mathbf{b}$" (tradução nossa,
+§3.8.2).
+:::
+
+::: {.fragment}
+"Mais próximo, mas dentro de onde?" — geométrico antes de algébrico. É o
+fio desta aula.
+:::
+
+## Roteiro da Aula
+
+::: {.fragment}
+**1.** O que significa "a melhor aproximação possível" de $\mathbf{y}$?
+:::
+
+::: {.fragment}
+**2.** O que é projetar sobre um subespaço, e por que resolve o
+problema 1?
+:::
+
+::: {.fragment}
+**3.** Como isso vira uma fórmula calculável — as **Equações Normais**?
+:::
+
+::: {.fragment}
+**4.** Quando essa fórmula falha, ou fica frágil, e por quê?
+:::
+
+## Problema Motivador
+
+::: {.fragment}
+California Housing: $N=16\,640$ bairros, 4 atributos. Sistema
+$X\mathbf{w}=\mathbf{y}$: $16\,640$ equações, $4$ incógnitas —
+sobredeterminado por uma margem enorme.
+:::
+
+::: {.fragment}
+Se $X\mathbf{w}$ nunca alcança $\mathbf{y}$ exatamente, **qual**
+$X\mathbf{w}$ alcançável está mais perto? "Mais perto" — medido como?
+:::
+:::
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=0.7cm and 0.9cm,
+  block/.style={rectangle, draw=icblue, fill=icblue!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=2.9cm, minimum height=1.1cm},
+  decision/.style={diamond, draw=icorange, fill=icorange!10, align=center,
+                    font=\small, inner sep=1pt, text width=2.5cm, aspect=1.9},
+  concl/.style={rectangle, draw=icred, fill=icred!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=2.9cm, minimum height=1.1cm},
+  arrow/.style={-Stealth, thick, color=gray!70}
+]
+  \node (A) [block] {$\mathbf{y}$ fora de $\text{col}(X)$};
+  \node (B) [block, right=of A] {projeção ortogonal $\hat{\mathbf{y}}$};
+  \node (C) [block, right=of B] {Equações Normais\\$X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$};
+  \node (Q) [decision, right=of C] {$X^TX$ invertível?};
+  \node (D) [concl, above=1.1cm of Q] {sim: $\hat{\mathbf{w}}$ único,\\fórmula fechada};
+  \node (E) [concl, below=1.1cm of Q] {não: $\hat{\mathbf{y}}$ único,\\$\hat{\mathbf{w}}$ não-único (Bloco 6)};
+
+  \draw [arrow] (A) -- (B);
+  \draw [arrow] (B) -- (C);
+  \draw [arrow] (C) -- (Q);
+  \draw [arrow] (Q) -- (D);
+  \draw [arrow] (Q) -- (E);
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se $X\mathbf{w}=\mathbf{y}$ nunca é alcançado exatamente, existe sempre exatamente uma "melhor" aproximação, ou pode haver várias igualmente boas?
+
+Dica: pense em como a Aula 2 já classificou o **número** de soluções de
+um sistema exato — nenhuma, uma, ou infinitas. A pergunta agora troca
+"solução exata" por "solução aproximada". O número de "melhores
+aproximações" muda de natureza?
+
+- □ Se o sistema $X\mathbf{w}=\mathbf{y}$ fosse subdeterminado ($N<d$) em
+  vez de sobredeterminado, ainda faria sentido perguntar qual
+  $X\mathbf{w}$ é "mais próximo" de $\mathbf{y}$, mas a pergunta mudaria
+  de natureza: deixaria de ser sobre um erro irredutível e passaria a
+  ser sobre escolher entre infinitas soluções exatas.
+- □ No caso-limite $N=d$ com $X$ de posto completo, a "melhor
+  aproximação" $X\hat{\mathbf{w}}$ coincide exatamente com $\mathbf{y}$
+  (erro zero).
+- □ Num sistema de posicionamento por GPS, com mais satélites (equações)
+  do que coordenadas a estimar (incógnitas), a mesma lógica de "melhor
+  aproximação por projeção" se aplica, ainda que o contexto seja
+  localização geográfica, não preço de imóvel.
+- □ Como nenhum $X\mathbf{w}$ alcança $\mathbf{y}$ exatamente num sistema
+  sobredeterminado, a Regressão Linear Múltipla deixa de fornecer
+  qualquer informação útil sobre a relação entre atributos e alvo.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Se $X\mathbf{w}=\mathbf{y}$ nunca é alcançado exatamente, existe sempre exatamente uma "melhor" aproximação, ou pode haver várias igualmente boas?
+
+Dica: a Aula 2 já classificou o número de soluções **exatas** de um
+sistema — 0, 1 ou $\infty$. Trocar "exata" por "aproximada" muda essa
+contagem?
+
+- □ Se o sistema fosse subdeterminado ($N<d$), a pergunta "qual é mais
+  próximo?" mudaria de natureza: de erro irredutível para escolha entre
+  infinitas soluções exatas.
+- □ No caso-limite $N=d$ com $X$ de posto completo, a melhor
+  aproximação coincide exatamente com $\mathbf{y}$ (erro zero).
+- □ GPS com mais satélites que coordenadas: mesma lógica de projeção se
+  aplica, outro domínio.
+- □ Sem solução exata, a Regressão Linear Múltipla perde toda utilidade.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Se $X\mathbf{w}=\mathbf{y}$ nunca é alcançado exatamente, existe sempre uma "melhor" aproximação? — Resposta
+
+- ✔ Subdeterminado: se solúvel, há $\infty$ soluções exatas — a pergunta
+  vira "qual escolher", não "qual erro minimizar".
+- ✔ $N=d$, posto completo: sistema quadrado invertível, erro zero.
+- ✔ GPS: mesma matemática, outro domínio (localização em vez de preço).
+- ✗ Falta de solução exata não implica falta de utilidade — é
+  exatamente o problema que esta aula resolve com projeção.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** no regime sobredeterminado desta aula (posto
+completo), existe **exatamente uma** melhor aproximação — é isso que o
+Bloco 4 vai provar, via projeção ortogonal.
+:::
+:::
+
+# Intuição: A Sombra no Chão, Não no Ar
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Ideia Antes da Álgebra
+
+Antes de qualquer fórmula, uma imagem concreta. Imagine um ponto
+$\mathbf{y}$ flutuando no espaço, e um subespaço $U$ — uma reta ou um
+plano passando pela origem — como se fosse o chão. Se uma fonte de luz
+vier exatamente **perpendicular** ao chão, a sombra de $\mathbf{y}$ sobre
+$U$ é um ponto específico: chame-o $\hat{\mathbf{y}}$. Essa sombra tem
+duas propriedades que, juntas, definem tudo o que este bloco precisa:
+
+1. **É o ponto de $U$ mais próximo de $\mathbf{y}$** — nenhum outro ponto
+   do chão está a uma distância menor de $\mathbf{y}$ do que a própria
+   sombra.
+2. **O segmento (ponto → sombra) é perpendicular a $U$** — a "haste" que
+   liga $\mathbf{y}$ à sua sombra $\hat{\mathbf{y}}$ faz ângulo reto com
+   o chão inteiro, não só com a direção da luz.
+
+Essas duas propriedades não são independentes — a segunda é a razão pela
+qual a primeira é verdade, algo que o Bloco 4 vai provar formalmente. Por
+ora, olhe para o desenho: projetar sobre uma reta (subespaço de dimensão
+1) e projetar sobre um plano (subespaço de dimensão 2) são a mesma
+operação, só que o "chão" tem mais dimensões.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Ideia Antes da Álgebra
+
+::: {.fragment}
+Um ponto $\mathbf{y}$ flutuando no espaço; um subespaço $U$ (reta ou
+plano pela origem) como "o chão". Luz perpendicular ao chão $\Rightarrow$
+sombra $\hat{\mathbf{y}}$.
+:::
+
+::: {.fragment}
+**Propriedade 1:** $\hat{\mathbf{y}}$ é o ponto de $U$ mais próximo de
+$\mathbf{y}$ — nenhum outro ponto do chão está mais perto.
+:::
+
+::: {.fragment}
+**Propriedade 2:** o segmento $\mathbf{y}\to\hat{\mathbf{y}}$ é
+perpendicular a **todo** $U$, não só à direção da luz.
+:::
+
+::: {.fragment}
+A Propriedade 2 é a *razão* pela qual a Propriedade 1 é verdade — Bloco 4
+prova isso formalmente. Por ora: reta ou plano, mesma operação, "chão"
+com mais dimensões.
+:::
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig = plt.figure(figsize=(11, 4.6))
+
+# Painel 1: projeção sobre uma reta em R^2
+ax1 = fig.add_subplot(1, 2, 1)
+t = np.linspace(-1, 4, 50)
+direcao = np.array([2.0, 1.0])
+direcao_u = direcao / np.linalg.norm(direcao)
+y_pt = np.array([1.0, 3.2])
+lam = y_pt @ direcao_u
+y_hat = lam * direcao_u
+
+ax1.plot(t*direcao_u[0], t*direcao_u[1], color=COR_A, lw=2.5, label="$U$ (reta = chão)")
+ax1.plot(*y_pt, "o", color=COR_C, ms=11, label=r"$\mathbf{y}$")
+ax1.plot(*y_hat, "s", color=COR_B, ms=10, label=r"$\hat{\mathbf{y}}$ (sombra)")
+ax1.plot([y_pt[0], y_hat[0]], [y_pt[1], y_hat[1]], "--", color=COR_NEU, lw=1.8, label="resíduo $\\perp U$")
+ax1.set_xlim(-1, 4); ax1.set_ylim(-1, 4)
+ax1.set_aspect("equal")
+ax1.set_title("Projeção sobre uma reta (dim $U=1$)", fontsize=10.5, fontweight="bold")
+ax1.legend(fontsize=8, loc="upper left")
+ax1.set_xlabel("$x_1$"); ax1.set_ylabel("$x_2$")
+
+# Painel 2: projeção sobre um plano em R^3 (o plano z=0, "o chão" de verdade)
+ax2 = fig.add_subplot(1, 2, 2, projection="3d")
+xx, yy = np.meshgrid(np.linspace(-1, 3, 5), np.linspace(-1, 3, 5))
+zz = np.zeros_like(xx)
+ax2.plot_surface(xx, yy, zz, color=COR_A, alpha=0.25, edgecolor=COR_A, linewidth=0.3)
+y3 = np.array([1.5, 1.8, 2.3])
+y3_hat = np.array([1.5, 1.8, 0.0])
+ax2.scatter(*y3, color=COR_C, s=70, label=r"$\mathbf{y}$")
+ax2.scatter(*y3_hat, color=COR_B, s=60, label=r"$\hat{\mathbf{y}}$ (sombra)")
+ax2.plot([y3[0], y3_hat[0]], [y3[1], y3_hat[1]], [y3[2], y3_hat[2]], "--", color=COR_NEU, lw=2)
+ax2.set_title("Projeção sobre um plano (dim $U=2$)", fontsize=10.5, fontweight="bold")
+ax2.set_xlabel("$x_1$"); ax2.set_ylabel("$x_2$"); ax2.set_zlabel("$x_3$")
+ax2.legend(fontsize=8, loc="upper left")
+ax2.view_init(elev=18, azim=-50)
+
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+No painel esquerdo, $U$ é a reta gerada pela direção $(2,1)$, e
+$\mathbf{y}=(1{,}0,\,3{,}2)$ está fora dela. A sombra $\hat{\mathbf{y}}$
+(quadrado laranja) é o ponto da reta mais próximo de $\mathbf{y}$, e o
+segmento tracejado (o "resíduo") encontra a reta em ângulo reto — não em
+qualquer ângulo. No painel direito, o "chão" já é um plano
+bidimensional (o plano $x_3=0$) dentro de um espaço tridimensional:
+$\mathbf{y}=(1{,}5,\,1{,}8,\,2{,}3)$ tem sombra
+$\hat{\mathbf{y}}=(1{,}5,\,1{,}8,\,0)$ — a projeção simplesmente "zera" a
+componente perpendicular ao chão, e o segmento tracejado (puramente na
+direção $x_3$) é, de novo, perpendicular a todo o plano, não só a uma
+direção dentro dele. É essa segunda observação — perpendicular a **todo**
+o subespaço — que vai generalizar para o espaço-coluna de $X$, que tem
+$d=4$ dimensões, não $1$ ou $2$: a "álgebra" muda, a geometria não.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que os Dois Painéis Mostram
+
+::: {.fragment}
+Esquerda: $U$ = reta na direção $(2,1)$; $\mathbf{y}=(1{,}0,3{,}2)$ fora
+dela. Sombra $\hat{\mathbf{y}}$ = ponto da reta mais próximo; o
+tracejado encontra a reta em ângulo reto.
+:::
+
+::: {.fragment}
+Direita: "chão" = plano $x_3=0$ em $\mathbb{R}^3$. Projeção só "zera" a
+componente perpendicular: $(1{,}5,1{,}8,2{,}3)\to(1{,}5,1{,}8,0)$.
+:::
+
+::: {.fragment}
+Em ambos, o tracejado é perpendicular a **todo** o subespaço — essa
+observação generaliza para $\text{col}(X)$, com $d=4$ dimensões, não $1$
+ou $2$. A álgebra muda; a geometria, não.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se a "luz" da projeção não viesse perpendicular ao chão, mas num ângulo oblíquo fixo, o ponto resultante ainda seria o mais próximo de $\mathbf{y}$?
+
+Dica: pense no desenho da reta acima. Se você inclinasse a direção da
+"luz" (a direção da haste que liga $\mathbf{y}$ à sua sombra), o ponto
+de chegada na reta mudaria — ele continuaria sendo o ponto mais próximo?
+
+- □ Se a luz não viesse perpendicular ao chão, mas em um ângulo oblíquo
+  fixo, o ponto resultante ainda seria o ponto do subespaço mais
+  próximo de $\mathbf{y}$.
+- □ Se o ponto $\mathbf{y}$ já pertencesse ao subespaço $U$, a "sombra"
+  de $\mathbf{y}$ sobre $U$ coincidiria com o próprio $\mathbf{y}$, e o
+  resíduo teria norma zero.
+- □ Comprimir uma imagem mantendo só suas componentes principais é,
+  geometricamente, projetar cada vetor-pixel sobre um subespaço de
+  menor dimensão — a mesma lógica da sombra perpendicular discutida
+  aqui, aplicada a outro tipo de dado.
+- □ Como a sombra perpendicular minimiza a distância até $\mathbf{y}$,
+  ela também é, necessariamente, o ponto do subespaço com a **maior**
+  norma possível entre os candidatos considerados.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Se a "luz" da projeção não viesse perpendicular ao chão, o ponto resultante ainda seria o mais próximo de $\mathbf{y}$?
+
+Dica: incline a direção da haste que liga $\mathbf{y}$ à sua sombra — o
+ponto de chegada continuaria sendo o mais próximo?
+
+- □ Luz oblíqua (não perpendicular): o ponto resultante ainda seria o
+  ponto do subespaço mais próximo de $\mathbf{y}$.
+- □ Se $\mathbf{y}$ já pertencesse a $U$, a sombra coincidiria com o
+  próprio $\mathbf{y}$, resíduo de norma zero.
+- □ Compressão de imagem via componentes principais é, geometricamente,
+  a mesma projeção perpendicular discutida aqui, outro tipo de dado.
+- □ A sombra perpendicular, por minimizar distância, também maximiza a
+  norma do ponto do subespaço.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## A "luz" da projeção — Resposta
+
+- ✗ Só a luz perpendicular garante o ponto mais próximo; qualquer
+  ângulo oblíquo fixo geralmente erra o mínimo (é a mesma lógica do
+  Teorema de Pitágoras: a hipotenusa de um triângulo oblíquo é maior
+  que o cateto perpendicular).
+- ✔ $\mathbf{y}\in U \Rightarrow \hat{\mathbf{y}}=\mathbf{y}$, resíduo
+  nulo — caso trivial, mas consistente.
+- ✔ Mesma operação geométrica (projeção ortogonal), outro domínio
+  (compressão/PCA, tema da disciplina de Aprendizado Não Supervisionado).
+- ✗ Minimizar distância a $\mathbf{y}$ não tem relação com a norma do
+  próprio ponto do subespaço — são duas quantidades independentes.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** só a perpendicular funciona — é exatamente a
+Propriedade 2 que o Bloco 4 vai provar ser *equivalente* à Propriedade 1
+(mais próximo $\iff$ perpendicular), não só uma coincidência do desenho.
+:::
+:::
+
+# Subespaços e Complemento Ortogonal
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Recapitulando: Subespaço e Espaço-Coluna
+
+A Aula 1 definiu **subespaço** como um subconjunto fechado sob soma e
+multiplicação por escalar; a Aula 2 deu um exemplo concreto e central
+para este curso — o **espaço-coluna** $\text{col}(X)$, o conjunto de
+tudo que $X\mathbf{w}$ alcança quando $\mathbf{w}$ varia livremente por
+$\mathbb{R}^d$. Com $X\in\mathbb{R}^{16640\times 4}$ de posto completo
+(verificado na Aula 2), $\text{col}(X)$ é um subespaço de dimensão $4$
+dentro de um espaço ambiente de dimensão $16\,640$ — geometricamente,
+como um plano finíssimo boiando dentro de um espaço gigantesco, e
+$\mathbf{y}$ (o vetor com as $16\,640$ observações de `MedHouseVal`)
+quase certamente não está dentro dele.
+
+## O Complemento Ortogonal
+
+A pergunta natural — "o que dizer sobre a parte de $\mathbf{y}$ que
+**não** está em $\text{col}(X)$?" — tem uma resposta com nome: o
+**complemento ortogonal**. Dado um subespaço $U$ de um espaço $V$ de
+dimensão $D$, com $U$ de dimensão $M$, o MathML define (tradução nossa,
+§3.6, p. 79):
+
+> "seu complemento ortogonal $U^\perp$ é um subespaço de $V$ de dimensão
+> $(D-M)$ e contém todos os vetores em $V$ que são ortogonais a todo
+> vetor em $U$. Além disso, $U\cap U^\perp=\{\mathbf{0}\}$, de modo que
+> qualquer vetor $\mathbf{x}\in V$ pode ser decomposto de forma única"
+$$
+\mathbf{x} = \sum_{m=1}^{M}\lambda_m\mathbf{b}_m + \sum_{j=1}^{D-M}\psi_j\mathbf{b}_j^\perp,
+\qquad \lambda_m,\psi_j\in\mathbb{R} \qquad \text{(MathML, eq. 3.36)},
+$$
+onde $(\mathbf{b}_1,\dots,\mathbf{b}_M)$ é uma base de $U$ e
+$(\mathbf{b}_1^\perp,\dots,\mathbf{b}_{D-M}^\perp)$ é uma base de
+$U^\perp$. Em notação compacta, isso se escreve $V = U \oplus U^\perp$:
+todo vetor de $V$ é a soma de **uma única** parte dentro de $U$ com
+**uma única** parte dentro de $U^\perp$ — nunca duas formas diferentes de
+fazer essa soma, nunca nenhuma parte sobrando de fora.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Recapitulando: Subespaço e Espaço-Coluna
+
+::: {.fragment}
+Aula 1: subespaço = fechado sob soma/escalar. Aula 2: **espaço-coluna**
+$\text{col}(X)$ = tudo que $X\mathbf{w}$ alcança.
+:::
+
+::: {.fragment}
+$X\in\mathbb{R}^{16640\times 4}$, posto completo: $\text{col}(X)$ tem
+dimensão $4$ dentro de um ambiente de dimensão $16\,640$ — um "plano"
+finíssimo boiando num espaço gigantesco. $\mathbf{y}$ quase certamente
+fora dele.
+:::
+
+## O Complemento Ortogonal
+
+::: {.fragment}
+**Definição (MathML, §3.6, tradução nossa):** dado $U\subseteq V$ com
+$\dim U = M$, $\dim V = D$, seu complemento ortogonal $U^\perp$ é um
+subespaço de dimensão $(D-M)$: todos os vetores de $V$ ortogonais a
+**todo** vetor de $U$.
+:::
+
+::: {.fragment}
+$U\cap U^\perp=\{\mathbf{0}\}$; todo $\mathbf{x}\in V$ se decompõe de
+forma **única**:
+$$\mathbf{x} = \underbrace{\sum_m \lambda_m\mathbf{b}_m}_{\in\, U} + \underbrace{\sum_j \psi_j\mathbf{b}_j^\perp}_{\in\, U^\perp}$$
+:::
+
+::: {.fragment}
+Notação compacta: $V = U\oplus U^\perp$ — uma única parte em $U$, uma
+única parte em $U^\perp$, nada sobra de fora.
+:::
+:::
+
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(5.6, 5.2))
+u_dir = np.array([2.0, 1.0]) / np.sqrt(5)
+u_perp_dir = np.array([-1.0, 2.0]) / np.sqrt(5)
+t = np.linspace(-1.5, 3.5, 50)
+
+x_vec = np.array([1.0, 3.0])
+lam = x_vec @ u_dir
+psi = x_vec @ u_perp_dir
+comp_U = lam * u_dir
+comp_Uperp = psi * u_perp_dir
+
+ax.plot(t*u_dir[0], t*u_dir[1], color=COR_A, lw=2.3, label="$U$ (reta)")
+ax.plot(t*u_perp_dir[0], t*u_perp_dir[1], color=COR_B, lw=2.3, ls="--", label="$U^\\perp$ (reta ortogonal)")
+ax.annotate("", xy=x_vec, xytext=(0,0), arrowprops=dict(arrowstyle="->", color=COR_C, lw=2.5))
+ax.text(x_vec[0]+0.1, x_vec[1]+0.1, r"$\mathbf{x}$", fontsize=13, color=COR_C, fontweight="bold")
+ax.annotate("", xy=comp_U, xytext=(0,0), arrowprops=dict(arrowstyle="->", color=COR_A, lw=2.2))
+ax.text(comp_U[0]-0.35, comp_U[1]-0.35, r"parte em $U$", fontsize=9, color=COR_A)
+ax.annotate("", xy=comp_Uperp, xytext=(0,0), arrowprops=dict(arrowstyle="->", color=COR_B, lw=2.2))
+ax.text(comp_Uperp[0]-1.0, comp_Uperp[1]+0.1, r"parte em $U^\perp$", fontsize=9, color=COR_B)
+ax.plot([x_vec[0], comp_U[0]], [x_vec[1], comp_U[1]], ":", color=COR_NEU, lw=1.3)
+ax.plot([x_vec[0], comp_Uperp[0]], [x_vec[1], comp_Uperp[1]], ":", color=COR_NEU, lw=1.3)
+
+ax.set_xlim(-2, 3); ax.set_ylim(-1, 4)
+ax.set_aspect("equal")
+ax.legend(fontsize=8.5, loc="upper left")
+ax.set_title(r"$\mathbf{x} = \text{(parte em } U\text{)} + \text{(parte em } U^\perp\text{)}$", fontsize=10.5, fontweight="bold")
+ax.set_xlabel("$x_1$"); ax.set_ylabel("$x_2$")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Em $\mathbb{R}^2$ ($D=2$), com $U$ a reta de dimensão $M=1$, o
+complemento ortogonal $U^\perp$ também tem dimensão $D-M=1$ — a reta
+perpendicular. O vetor $\mathbf{x}=(1,3)$ se decompõe de forma única em
+uma parte sobre $U$ e uma parte sobre $U^\perp$ (linhas pontilhadas): some
+as duas setas azul/laranja e você recupera exatamente $\mathbf{x}$, sem
+sobra e sem ambiguidade — não existe uma segunda forma de fazer essa
+soma. Em $\mathbb{R}^3$, se $U$ fosse um plano ($M=2$), $U^\perp$ teria
+dimensão $D-M=1$ — é exatamente o "vetor normal" do MathML: "o vetor
+$\mathbf{w}$ com $\|\mathbf{w}\|=1$, ortogonal ao plano $U$, é o vetor de
+base de $U^\perp$" (tradução nossa, §3.6, p. 80). No caso da regressão
+que fecha esta aula, $D=16\,640$ e $M=4$: $U^\perp=\text{col}(X)^\perp$
+tem a dimensão gigantesca $16\,636$, mas isso não importa para o que
+vamos usar dele — só importa que o resíduo $\mathbf{y}-\hat{\mathbf{y}}$
+vai viver exatamente ali dentro.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que o Desenho Mostra
+
+::: {.fragment}
+$D=2$, $U$ = reta ($M=1$) $\Rightarrow$ $U^\perp$ = reta perpendicular
+($D-M=1$). $\mathbf{x}=(1,3)$ decompõe-se de forma única: soma das duas
+setas recupera $\mathbf{x}$, sem sobra, sem ambiguidade.
+:::
+
+::: {.fragment}
+Em $\mathbb{R}^3$ com $U$ = plano ($M=2$): $U^\perp$ tem dimensão $1$ —
+o **vetor normal** do MathML, "$\mathbf{w}$ com $\|\mathbf{w}\|=1$,
+ortogonal ao plano $U$" (tradução nossa, §3.6).
+:::
+
+::: {.fragment}
+Na regressão: $D=16\,640$, $M=4$. $U^\perp=\text{col}(X)^\perp$ tem
+dimensão $16\,636$ — irrelevante em si; o que importa é que o resíduo
+$\mathbf{y}-\hat{\mathbf{y}}$ vive exatamente ali.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se $U$ fosse o subespaço trivial $\{\mathbf{0}\}$, o que seria $U^\perp$?
+
+Dica: releia a definição — $U^\perp$ contém todo vetor ortogonal a
+**todo** vetor de $U$. Se o único vetor de $U$ for $\mathbf{0}$, quantos
+vetores de $V$ são ortogonais a ele?
+
+- □ Se $U$ fosse o subespaço trivial $\{\mathbf{0}\}$, seu complemento
+  ortogonal $U^\perp$ seria igual ao espaço $V$ inteiro.
+- □ Se $U=V$ (o subespaço é o espaço inteiro), então
+  $U^\perp=\{\mathbf{0}\}$.
+- □ Num modelo de regressão em que o resíduo $\mathbf{y}-\hat{\mathbf{y}}$
+  é ortogonal a todo vetor do espaço-coluna de $X$, esse resíduo não é
+  apenas "ortogonal a ele" informalmente — ele satisfaz a própria
+  definição formal de pertencer a $\text{col}(X)^\perp$.
+- □ Como todo vetor de $V$ se decompõe de forma única numa parte de $U$
+  e uma parte de $U^\perp$, isso implica que $U$ e $U^\perp$ têm,
+  necessariamente, a mesma dimensão.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Se $U$ fosse o subespaço trivial $\{\mathbf{0}\}$, o que seria $U^\perp$?
+
+Dica: $U^\perp$ contém todo vetor ortogonal a **todo** vetor de $U$. Com
+$U=\{\mathbf{0}\}$, quantos vetores de $V$ cumprem isso?
+
+- □ $U=\{\mathbf{0}\}$ $\Rightarrow$ $U^\perp = V$ (o espaço inteiro).
+- □ $U=V$ $\Rightarrow$ $U^\perp=\{\mathbf{0}\}$.
+- □ O resíduo ortogonal ao espaço-coluna de $X$ satisfaz a própria
+  definição formal de pertencer a $\text{col}(X)^\perp$, não só
+  "ortogonal" informalmente.
+- □ Decomposição única de $V$ em $U\oplus U^\perp$ implica $\dim U =
+  \dim U^\perp$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Subespaço trivial e seu complemento — Resposta
+
+- ✔ Todo vetor de $V$ é ortogonal a $\mathbf{0}$ (produto interno com o
+  vetor nulo é sempre $0$); logo $U^\perp=V$.
+- ✔ Caso simétrico do anterior: só $\mathbf{0}$ é ortogonal a todo
+  vetor de $V=U$.
+- ✔ É exatamente a definição de $U^\perp$ aplicada a $U=\text{col}(X)$
+  — antecipa o Bloco 4.
+- ✗ $\dim U=M$, $\dim U^\perp=D-M$; iguais só se $D=2M$, não em geral
+  (na regressão, $M=4 \ne D-M=16\,636$).
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** o complemento ortogonal de $\{\mathbf{0}\}$ é o
+espaço todo — caso extremo que confirma a definição, não uma exceção a
+ela.
+:::
+:::
+
+# O Teorema da Projeção: Premissas e Passo a Passo
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Enunciando o Problema com Precisão
+
+Antes de derivar qualquer fórmula, vamos deixar explícitas as premissas
+— seguindo a diretriz deste curso de nunca saltar direto para o
+resultado final.
+
+::: {.callout-note}
+## Premissas
+
+1. Temos um subespaço $U=\text{col}(X)\subseteq\mathbb{R}^N$, o
+   espaço-coluna da matriz de design (Aula 2).
+2. Temos um vetor $\mathbf{y}\in\mathbb{R}^N$ que, em geral, **não**
+   pertence a $U$ (o caso sobredeterminado da Aula 2 e do Bloco 1 desta
+   aula).
+3. Definimos $\hat{\mathbf{y}}\in U$ como o ponto de $U$ **mais próximo**
+   de $\mathbf{y}$ — o que minimiza $\|\mathbf{y}-\hat{\mathbf{y}}\|$
+   (a formalização da "sombra" do Bloco 2).
+:::
+
+O objetivo dos quatro passos seguintes é ir de "$\hat{\mathbf{y}}$
+minimiza a distância" até uma fórmula fechada e calculável para
+$\hat{\mathbf{w}}$ tal que $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Enunciando o Problema com Precisão
+
+::: {.callout-note icon=false}
+**Premissas.**
+1. Subespaço $U=\text{col}(X)\subseteq\mathbb{R}^N$ (Aula 2).
+2. $\mathbf{y}\in\mathbb{R}^N$, em geral **fora** de $U$ (sobredeterminado).
+3. $\hat{\mathbf{y}}\in U$ = ponto de $U$ mais próximo de $\mathbf{y}$
+   (minimiza $\|\mathbf{y}-\hat{\mathbf{y}}\|$) — a "sombra" formalizada.
+:::
+
+::: {.fragment}
+Objetivo: dessas premissas até uma fórmula fechada e calculável para
+$\hat{\mathbf{w}}$, com $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Passo (i): "Mais Próximo" Equivale a "Ortogonal"
+
+O MathML caracteriza exatamente essa condição de mínimo, primeiro no
+caso de uma reta e depois generalizando (tradução nossa, §3.8.1, p. 82,
+adaptando a notação para $\hat{\mathbf{y}}$ em vez de $\pi_U(x)$):
+
+> "A projeção $\hat{\mathbf{y}}$ é a mais próxima de $\mathbf{y}$, onde
+> 'mais próxima' implica que a distância $\|\mathbf{y}-\hat{\mathbf{y}}\|$
+> é mínima. Disso segue que o segmento $\hat{\mathbf{y}}-\mathbf{y}$ [...]
+> é ortogonal a $U$."
+
+Ou seja: minimizar a distância **não é uma condição separada** de
+"ortogonal a $U$" — são a mesma condição, vista de dois ângulos. Por quê?
+Intuitivamente (o argumento completo usa cálculo, fora do escopo desta
+aula): se o resíduo $\mathbf{y}-\hat{\mathbf{y}}$ tivesse qualquer
+componente **não** ortogonal a $U$ — ou seja, alguma componente dentro de
+$U$ —, seria possível mover $\hat{\mathbf{y}}$ um pouco dentro de $U$,
+na direção dessa componente, e diminuir ainda mais a distância. Isso
+contradiz $\hat{\mathbf{y}}$ já ser o ponto mais próximo. Logo, no
+mínimo, não pode sobrar componente alguma do resíduo dentro de $U$ — o
+resíduo inteiro tem que estar em $U^\perp$ (Bloco 3):
+$$
+\mathbf{y}-\hat{\mathbf{y}} \;\perp\; U \qquad\Longleftrightarrow\qquad
+\mathbf{y}-\hat{\mathbf{y}} \in U^\perp .
+$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Passo (i): "Mais Próximo" Equivale a "Ortogonal"
+
+::: {.fragment}
+**MathML (tradução nossa, §3.8.1):** "a projeção é a mais próxima [...]
+disso segue que o segmento [...] é ortogonal a $U$." Minimizar distância
+e ser ortogonal a $U$ são a **mesma condição**.
+:::
+
+::: {.fragment}
+**Por quê:** se o resíduo tivesse componente **dentro** de $U$, dava
+para mover $\hat{\mathbf{y}}$ nessa direção e diminuir ainda mais a
+distância — contradiz mínimo. Logo, no mínimo, resíduo inteiro em
+$U^\perp$:
+$$\mathbf{y}-\hat{\mathbf{y}} \perp U \iff \mathbf{y}-\hat{\mathbf{y}}\in U^\perp$$
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Passo (ii): Escrevendo $\hat{\mathbf{y}}$ em Termos de $X$
+
+$\hat{\mathbf{y}}$ é um elemento de $U=\text{col}(X)$ — e a Leitura 2 do
+produto matriz-vetor (Aula 2, Bloco 2) já disse exatamente o que isso
+significa: todo elemento do espaço-coluna de $X$ é uma combinação linear
+das colunas de $X$, ou seja, é $X\mathbf{w}$ para algum vetor de pesos
+$\mathbf{w}\in\mathbb{R}^d$. Chame esse vetor $\hat{\mathbf{w}}$:
+$$
+\hat{\mathbf{y}} = X\hat{\mathbf{w}}, \qquad \hat{\mathbf{w}}\in\mathbb{R}^d.
+$$
+Substituindo no resultado do Passo (i):
+$$
+\mathbf{y}-X\hat{\mathbf{w}} \;\perp\; \text{col}(X).
+$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Passo (ii): Escrevendo $\hat{\mathbf{y}}$ em Termos de $X$
+
+::: {.fragment}
+$\hat{\mathbf{y}}\in\text{col}(X)$: pela Leitura 2 (Aula 2), é
+$X\mathbf{w}$ para algum $\mathbf{w}$. Chame esse vetor
+$\hat{\mathbf{w}}$:
+$$\hat{\mathbf{y}} = X\hat{\mathbf{w}}$$
+:::
+
+::: {.fragment}
+Substituindo no Passo (i):
+$$\mathbf{y}-X\hat{\mathbf{w}} \perp \text{col}(X)$$
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Passo (iii): Ortogonal a *Cada Coluna* de $X$
+
+"Ortogonal a $\text{col}(X)$ inteiro" parece, à primeira vista, uma
+condição gigantesca — $\text{col}(X)$ tem infinitos vetores. Mas o
+MathML mostra que basta checar a ortogonalidade **coluna a coluna**
+(tradução nossa, §3.8.2, p. 85-86, adaptando $B\to X$,
+$\mathbf{b}_i\to$ coluna $i$ de $X$):
+
+> "Como 'mais próxima' significa 'distância mínima', isso implica que o
+> vetor ligando $\hat{\mathbf{y}}\in U$ e $\mathbf{y}$ deve ser ortogonal
+> a todos os vetores de base de $U$. Portanto, obtemos $m$ condições
+> simultâneas [...] o que, [...] pode ser escrito como um sistema linear
+> homogêneo [...] $B^T(\mathbf{x}-B\lambda)=\mathbf{0}$"
+
+Por que basta checar as **colunas** de $X$ (uma base de $\text{col}(X)$),
+em vez de todo vetor de $\text{col}(X)$? Porque qualquer vetor de
+$\text{col}(X)$ é uma combinação linear das colunas (de novo, a Leitura
+2); se o resíduo é ortogonal a cada coluna individualmente, ele é
+ortogonal a **qualquer** combinação linear delas — a ortogonalidade
+"passa" pela combinação linear sem se perder. Aplicando isso ao nosso
+caso ($X$ no lugar de $B$, $\hat{\mathbf{w}}$ no lugar de $\lambda$):
+$$
+X^T\big(\mathbf{y}-X\hat{\mathbf{w}}\big) = \mathbf{0}.
+$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Passo (iii): Ortogonal a *Cada Coluna* de $X$
+
+::: {.fragment}
+"Ortogonal a $\text{col}(X)$ inteiro" parece gigantesco, mas o MathML
+mostra que basta checar coluna a coluna (tradução nossa, §3.8.2):
+$m$ condições simultâneas $\Rightarrow$ sistema $B^T(\mathbf{x}-B\lambda)=\mathbf{0}$.
+:::
+
+::: {.fragment}
+**Por quê basta as colunas:** toda combinação linear delas herda a
+ortogonalidade — a ortogonalidade "passa" pela combinação sem se
+perder.
+:::
+
+::: {.fragment}
+Aplicando ao nosso caso:
+$$X^T(\mathbf{y}-X\hat{\mathbf{w}}) = \mathbf{0}$$
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Passo (iv): Isolando $\hat{\mathbf{w}}$ — as Equações Normais
+
+Distribuindo o produto do Passo (iii):
+$$
+X^T\mathbf{y} - X^TX\hat{\mathbf{w}} = \mathbf{0}
+\qquad\Longleftrightarrow\qquad
+X^TX\hat{\mathbf{w}} = X^T\mathbf{y}.
+$$
+O MathML batiza essa equação (tradução nossa, §3.8.2, p. 86, eq. 3.56):
+"a última expressão é chamada **equação normal**". Isso ainda não é a
+fórmula fechada de $\hat{\mathbf{w}}$ — é um sistema linear em
+$\hat{\mathbf{w}}$, com $X^TX\in\mathbb{R}^{d\times d}$ no papel de "$A$"
+e $X^T\mathbf{y}\in\mathbb{R}^d$ no papel de "$\mathbf{b}$" (a mesma
+estrutura $A\mathbf{x}=\mathbf{b}$ da Aula 2, agora numa matriz derivada
+de $X$, não em $X$ diretamente).
+
+**Quando esse sistema tem solução única.** O MathML completa a derivação
+notando exatamente a condição que faz $X^TX$ invertível (tradução nossa,
+§3.8.2, p. 86): "como $b_1,\dots,b_m$ são uma base de $U$ e, portanto,
+linearmente independentes, $B^TB\in\mathbb{R}^{m\times m}$ é regular e
+pode ser invertida." Traduzido para o nosso caso: as colunas de $X$ são
+linearmente independentes exatamente quando $X$ tem **posto completo**
+($\text{rk}(X)=d$) — o mesmo critério provado na Aula 2, Bloco 5. Quando
+isso vale, $X^TX$ é invertível, e podemos isolar
+$\hat{\mathbf{w}}$:
+$$
+\hat{\mathbf{w}} = (X^TX)^{-1}X^T\mathbf{y}.
+$$
+O MathML chama a matriz $(X^TX)^{-1}X^T$ de **pseudo-inversa** de $X$
+(tradução nossa, §3.8.2, p. 86) — um nome que vai voltar quando o curso
+tratar de decomposições matriciais (SVD), mais adiante. Por ora, a peça
+que fecha o ciclo aberto na Aula 2: o sistema $X\mathbf{w}=\mathbf{y}$
+sobredeterminado não tem solução exata, mas **tem**, sob posto completo,
+uma única melhor aproximação — e ela tem fórmula fechada.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Passo (iv): Isolando $\hat{\mathbf{w}}$ — as Equações Normais
+
+::: {.fragment}
+Distribuindo o Passo (iii):
+$$X^T\mathbf{y} - X^TX\hat{\mathbf{w}} = \mathbf{0} \iff X^TX\hat{\mathbf{w}} = X^T\mathbf{y}$$
+:::
+
+::: {.fragment}
+**Equações Normais** (MathML, eq. 3.56, tradução nossa) — um sistema
+linear em $\hat{\mathbf{w}}$: $X^TX$ no papel de "$A$", $X^T\mathbf{y}$
+no papel de "$\mathbf{b}$" — mesma estrutura $A\mathbf{x}=\mathbf{b}$ da
+Aula 2.
+:::
+
+## Quando o Sistema Tem Solução Única
+
+::: {.fragment}
+MathML (tradução nossa, §3.8.2): colunas de $X$ linearmente
+independentes $\Rightarrow$ $X^TX$ "regular, pode ser invertida" —
+exatamente o **posto completo** ($\text{rk}(X)=d$) da Aula 2, Bloco 5.
+:::
+
+::: {.fragment}
+Sob posto completo:
+$$\hat{\mathbf{w}} = (X^TX)^{-1}X^T\mathbf{y}$$
+$(X^TX)^{-1}X^T$ = **pseudo-inversa** de $X$ (MathML) — nome que volta
+quando o curso tratar de SVD.
+:::
+
+::: {.fragment}
+Fecha o ciclo da Aula 2: sobredeterminado sem solução exata, mas **com**
+uma única melhor aproximação sob posto completo — com fórmula fechada.
+:::
+:::
+
+::: {.fig-resize style="width: 65%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[scale=1.0]
+  \draw[icblue, thick] (-2.6,0) -- (2.6,0.9) node[right] {\small $\text{col}(X)$};
+  \fill[icblue] (-2.6,0) circle (0pt);
+  \node (yhat) at (0.4,0.14) {};
+  \fill[icorange] (0.4,0.14) circle (2.4pt);
+  \node[icorange, below=2pt of yhat, font=\small] {$\hat{\mathbf{y}}=X\hat{\mathbf{w}}$};
+  \node (y) at (1.1,2.1) {};
+  \fill[icred] (1.1,2.1) circle (2.4pt);
+  \node[icred, right=2pt of y, font=\small] {$\mathbf{y}$};
+  \draw[gray!70, dashed, thick, -{Stealth}] (1.1,2.1) -- (0.4,0.14) node[midway, right, font=\small, black] {resíduo $\perp\, \text{col}(X)$};
+  \draw[icblue, -{Stealth}, thick] (-0.3,-0.11) -- (0.4,0.14);
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O esquema resume os quatro passos: $\text{col}(X)$ é a "reta" azul (uma
+representação necessariamente simplificada de um subespaço de dimensão
+$4$), $\mathbf{y}$ está fora dele, $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$ é
+o ponto mais próximo dentro de $\text{col}(X)$, e o resíduo (tracejado)
+encontra o subespaço em ângulo reto — a mesma "sombra" do Bloco 2, agora
+com nome de variável de regressão.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Esquema Fecha o Ciclo
+
+::: {.fragment}
+$\text{col}(X)$ (simplificado como reta — na verdade dimensão $4$),
+$\mathbf{y}$ fora dele, $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$ mais
+próximo, resíduo em ângulo reto — a mesma sombra do Bloco 2, agora com
+nomes de regressão.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## A condição $(\mathbf{y}-X\hat{\mathbf{w}})\perp\text{col}(X)$ garante que o resíduo seja zero?
+
+Dica: releia o Passo (i) — "mais próximo" e "ortogonal" são a mesma
+condição. Isso é o mesmo que dizer "o erro desaparece"?
+
+- □ Se, em vez de minimizar $\|\mathbf{y}-X\mathbf{w}\|$ (norma $L_2$),
+  o critério de "melhor" fosse minimizar $\|\mathbf{y}-X\mathbf{w}\|_1$
+  (norma $L_1$), a condição de ortogonalidade
+  $(\mathbf{y}-X\hat{\mathbf{w}})\perp\text{col}(X)$ ainda garantiria a
+  solução.
+- □ No caso em que $\mathbf{y}$ já pertence ao espaço-coluna de $X$, as
+  Equações Normais $X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$ têm como
+  solução um $\hat{\mathbf{w}}$ tal que $X\hat{\mathbf{w}}=\mathbf{y}$
+  exatamente (erro zero).
+- □ Num problema de calibração de sensores, em que $\mathbf{y}$ são
+  leituras redundantes de $N$ sensores e $X$ mapeia $d<N$ parâmetros
+  físicos verdadeiros para essas leituras, a mesma derivação das
+  Equações Normais forneceria a melhor estimativa desses parâmetros por
+  mínimos quadrados.
+- □ Como a condição $(\mathbf{y}-X\hat{\mathbf{w}})\perp\text{col}(X)$
+  equivale a $X^T(\mathbf{y}-X\hat{\mathbf{w}})=\mathbf{0}$, isso
+  significa que o resíduo $\mathbf{y}-X\hat{\mathbf{w}}$ deve ser o
+  vetor nulo sempre que $X$ tiver posto completo.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## A condição $(\mathbf{y}-X\hat{\mathbf{w}})\perp\text{col}(X)$ garante resíduo zero?
+
+Dica: "mais próximo" e "ortogonal" são a mesma condição (Passo i) — isso
+é o mesmo que "erro desaparece"?
+
+- □ Se o critério fosse minimizar $\|\mathbf{y}-X\mathbf{w}\|_1$ em vez
+  de $L_2$, a mesma condição de ortogonalidade ainda garantiria a
+  solução.
+- □ Se $\mathbf{y}\in\text{col}(X)$, as Equações Normais dão
+  $\hat{\mathbf{w}}$ com $X\hat{\mathbf{w}}=\mathbf{y}$ exatamente.
+- □ Calibração de sensores ($N$ leituras, $d<N$ parâmetros físicos):
+  mesma derivação das Equações Normais, outro domínio.
+- □ Ortogonalidade do resíduo $\Rightarrow$ resíduo nulo sempre que $X$
+  tem posto completo.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## A condição de ortogonalidade garante resíduo zero? — Resposta
+
+- ✗ A equivalência "mínimo $\iff$ ortogonal" (Passo i) é específica da
+  norma $L_2$/produto interno; a norma $L_1$ não tem essa geometria de
+  ângulo reto, e minimizá-la leva a uma condição diferente (subgradiente
+  nulo, não ortogonalidade).
+- ✔ $\mathbf{y}\in\text{col}(X)$: a melhor aproximação é o próprio
+  $\mathbf{y}$, erro zero — caso trivial consistente com a teoria.
+- ✔ Mesma estrutura matemática (mínimos quadrados via projeção), outro
+  domínio (calibração em vez de preço de imóvel).
+- ✗ Ortogonalidade a $\text{col}(X)$ não força resíduo nulo — só força
+  que o resíduo esteja em $\text{col}(X)^\perp$; ele é zero apenas se
+  $\mathbf{y}$ já estivesse em $\text{col}(X)$, o que é a exceção, não a
+  regra, no caso sobredeterminado.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não — ortogonal ao subespaço é bem mais fraco
+que "igual a zero"; é só a direção do erro que fica fixada
+($U^\perp$), não o seu tamanho.
+:::
+:::
+
+# Aplicação e Verificação no Dado Real
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Calculando $\hat{\mathbf{w}}$ de Verdade
+
+Chegou a hora de aplicar a fórmula fechada do Passo (iv) ao problema
+motivador do Bloco 1: os $N=16\,640$ bairros do California Housing, com
+$X\in\mathbb{R}^{16640\times 4}$ (as colunas `MedInc`, `HouseAge`,
+`AveRooms`, `AveBedrms`) e $\mathbf{y}\in\mathbb{R}^{16640}$
+(`MedHouseVal`). Como a Aula 2 já verificou que $X$ tem posto completo
+($\text{rk}(X)=4$), $X^TX$ é invertível, e a fórmula
+$\hat{\mathbf{w}}=(X^TX)^{-1}X^T\mathbf{y}$ se aplica diretamente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Calculando $\hat{\mathbf{w}}$ de Verdade
+
+::: {.fragment}
+Aplicando a fórmula fechada ao problema motivador: $N=16\,640$ bairros,
+$X\in\mathbb{R}^{16640\times 4}$, $\mathbf{y}=$ `MedHouseVal`. Posto
+completo (Aula 2) $\Rightarrow$ $X^TX$ invertível.
+:::
+:::
+
+```{python}
+#| echo: true
+
+X_completo = _housing[COLS].to_numpy()
+y_completo = _housing["MedHouseVal"].to_numpy()
+
+# Equações Normais, resolvidas diretamente pela fórmula fechada
+XtX = X_completo.T @ X_completo
+Xty = X_completo.T @ y_completo
+w_hat = np.linalg.inv(XtX) @ Xty
+
+print("w_hat (Equações Normais):", np.round(w_hat, 5))
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para cada dólar (em dezenas de milhares) de renda mediana adicional
+(`MedInc`), o modelo associa um aumento de $\approx 0{,}488$ (centenas de
+milhares de dólares) no preço previsto — o maior peso em módulo entre os
+quatro, plausível: `MedInc` é o atributo com a relação mais direta com o
+valor do imóvel. Note que `AveRooms` recebe um peso **negativo**
+($\approx -0{,}188$), o que parece contraintuitivo, mas se explica pela
+Leitura 2 do produto matriz-vetor (Aula 2): o peso de `AveRooms` é
+estimado **na presença** de `AveBedrms`, um atributo fortemente
+correlacionado (Bloco 6 volta a isso) — o modelo pode estar
+"compensando" a superposição de informação entre os dois, não afirmando
+que mais cômodos por domicílio reduza o preço isoladamente.
+
+## Conferência Independente: `numpy.linalg.lstsq`
+
+A fórmula fechada é uma forma de calcular $\hat{\mathbf{w}}$, mas não a
+única — `numpy.linalg.lstsq` resolve o mesmo problema de mínimos
+quadrados por um algoritmo numérico diferente (decomposição, não
+inversão explícita de $X^TX$). Se a nossa derivação do Bloco 4 estiver
+certa, as duas contas devem coincidir:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que os Pesos Dizem
+
+::: {.fragment}
+`MedInc`: peso $\approx 0{,}488$ — maior em módulo, plausível (renda tem
+relação direta com preço).
+:::
+
+::: {.fragment}
+`AveRooms`: peso **negativo** ($\approx -0{,}188$), contraintuitivo à
+primeira vista — mas é estimado **na presença** de `AveBedrms`
+(correlacionados, Bloco 6); o modelo pode estar "compensando"
+superposição de informação, não afirmando causalidade isolada.
+:::
+
+## Conferência Independente
+
+::: {.fragment}
+Fórmula fechada não é a única forma de calcular $\hat{\mathbf{w}}$ —
+`numpy.linalg.lstsq` resolve o mesmo problema por outro algoritmo
+(decomposição, sem inverter $X^TX$ explicitamente). As duas contas
+devem coincidir:
+:::
+:::
+
+```{python}
+#| echo: true
+
+w_lstsq, *_ = np.linalg.lstsq(X_completo, y_completo, rcond=None)
+print("w_hat (lstsq):           ", np.round(w_lstsq, 5))
+print("maior diferença absoluta:", np.max(np.abs(w_hat - w_lstsq)))
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A diferença máxima entre os dois vetores é da ordem de $10^{-14}$ —
+zero, a menos de erro de arredondamento de ponto flutuante. Dois
+algoritmos completamente diferentes (inversão explícita de uma matriz
+$4\times 4$ vs. decomposição numérica) chegam ao mesmo $\hat{\mathbf{w}}$
+— evidência de que a derivação do Bloco 4 não é só elegante no quadro,
+funciona com dados reais.
+
+## Verificando a Ortogonalidade do Resíduo
+
+A promessa central do Passo (iii) foi que o resíduo
+$\mathbf{y}-X\hat{\mathbf{w}}$ é ortogonal a **cada coluna** de $X$ — não
+uma afirmação vaga, uma igualdade numérica exata (até erro de
+arredondamento) que podemos checar:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que a Comparação Confirma
+
+::: {.fragment}
+Diferença máxima entre os dois $\hat{\mathbf{w}}$: ordem de $10^{-14}$ —
+zero, a menos de arredondamento de ponto flutuante.
+:::
+
+::: {.fragment}
+Dois algoritmos completamente diferentes (inversão explícita $4\times 4$
+vs. decomposição numérica) chegam ao mesmo resultado — a derivação do
+Bloco 4 funciona com dados reais, não só no quadro.
+:::
+
+## Verificando a Ortogonalidade do Resíduo
+
+::: {.fragment}
+Promessa do Passo (iii): resíduo $\perp$ cada coluna de $X$ — não vago,
+uma igualdade numérica exata (a menos de arredondamento). Vamos checar:
+:::
+:::
+
+```{python}
+#| echo: true
+
+residuo = y_completo - X_completo @ w_hat
+
+print("Produto interno do resíduo com cada coluna de X:")
+for j, nome in enumerate(COLS):
+    prod = residuo @ X_completo[:, j]
+    print(f"  {nome:10s}: {prod:.3e}")
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Cada produto interno é da ordem de $10^{-9}$ ou menor — e, colocado em
+perspectiva (dividindo pelas normas de cada vetor envolvido, para
+comparar "zero relativo" e não só "zero absoluto"), a proporção é da
+ordem de $10^{-14}$: numericamente zero, exatamente como o Passo (iii)
+exigia. Não é coincidência — é a própria equação
+$X^T(\mathbf{y}-X\hat{\mathbf{w}})=\mathbf{0}$ (Passo iii) verificada
+numericamente, coluna a coluna.
+
+## O Tamanho do Resíduo — o Que a Ortogonalidade *Não* Diz
+
+Ortogonalidade garante a **direção** do erro (ele mora em
+$\text{col}(X)^\perp$), mas nada diz sobre o **tamanho** do erro. Vale a
+pena medir:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Zero, em Perspectiva
+
+::: {.fragment}
+Cada produto interno: ordem de $10^{-9}$ ou menor. Em proporção (dividido
+pelas normas): ordem de $10^{-14}$ — numericamente zero, exatamente como
+o Passo (iii) exigia.
+:::
+
+::: {.fragment}
+Não é coincidência: é $X^T(\mathbf{y}-X\hat{\mathbf{w}})=\mathbf{0}$
+(Passo iii) verificada numericamente, coluna a coluna.
+:::
+
+## O Tamanho do Resíduo
+
+::: {.fragment}
+Ortogonalidade fixa a **direção** do erro ($\in\text{col}(X)^\perp$),
+não o **tamanho**. Vale medir:
+:::
+:::
+
+```{python}
+#| echo: true
+
+norma_residuo = np.linalg.norm(residuo)
+norma_y = np.linalg.norm(y_completo)
+r2 = 1 - np.sum(residuo**2) / np.sum((y_completo - y_completo.mean())**2)
+
+print(f"||resíduo|| = {norma_residuo:.2f}")
+print(f"||y||       = {norma_y:.2f}")
+print(f"||resíduo||/||y|| = {norma_residuo/norma_y:.3f}")
+print(f"R² = {r2:.3f}")
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O resíduo tem norma $\approx 101{,}5$ contra $\|\mathbf{y}\|\approx
+298{,}6$ — não é pequeno; em termos de $R^2$ (a fração da variação de
+`MedHouseVal` "explicada" pelo modelo), o ajuste é $R^2\approx 0{,}518$:
+o modelo explica um pouco mais da metade da variação do preço usando só
+4 atributos. Isso não é uma falha da matemática do Bloco 4 — a projeção
+ortogonal *garante* a melhor aproximação **possível dentro do espaço-coluna
+de $X$**, não uma boa aproximação em termos absolutos. Com só 4
+atributos (faltam localização, qualidade da construção, proximidade da
+costa, etc.), $\text{col}(X)$ é um subespaço pequeno demais para chegar
+perto de $\mathbf{y}$ — a projeção é ótima *dentro das opções
+disponíveis*, e as opções disponíveis são limitadas pelos atributos
+escolhidos, não pela matemática da projeção.
+
+## Vendo o Ajuste numa Amostra Concreta
+
+Voltando à amostra de 6 bairros usada na Aula 2 (mesma semente,
+`random_state=7`) — agora com o $\hat{\mathbf{w}}$ de verdade, ajustado a
+partir de todos os $16\,640$ bairros, não mais um $\mathbf{w}$
+inventado:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que os Números Dizem
+
+::: {.fragment}
+$\|\text{resíduo}\|\approx 101{,}5$ contra $\|\mathbf{y}\|\approx
+298{,}6$: $R^2\approx 0{,}518$ — o modelo explica pouco mais da metade
+da variação do preço com só 4 atributos.
+:::
+
+::: {.fragment}
+**Não é falha da matemática do Bloco 4** — a projeção garante a melhor
+aproximação **dentro de $\text{col}(X)$**, não uma boa aproximação em
+termos absolutos. Faltam atributos (localização, qualidade, costa); o
+subespaço disponível é pequeno demais para chegar perto de
+$\mathbf{y}$.
+:::
+
+## Vendo o Ajuste numa Amostra Concreta
+
+::: {.fragment}
+Amostra de 6 bairros da Aula 2 (`random_state=7`), agora com
+$\hat{\mathbf{w}}$ de verdade — ajustado nos $16\,640$ bairros, não mais
+inventado:
+:::
+:::
+
+::: {.fig-resize style="width: 85%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+_amostra_6 = _housing.sample(n=6, random_state=7)
+X_amostra = _amostra_6[COLS].to_numpy()
+y_amostra = _amostra_6["MedHouseVal"].to_numpy()
+y_hat_amostra = X_amostra @ w_hat
+
+fig, ax = plt.subplots(figsize=(7.5, 3.4))
+xpos = np.arange(6)
+ax.bar(xpos - 0.18, y_hat_amostra, width=0.35, color=COR_A, alpha=0.85, label=r"previsto $\hat{y}=X\hat{\mathbf{w}}$ (ajustado)")
+ax.bar(xpos + 0.18, y_amostra, width=0.35, color=COR_NEU, alpha=0.85, label="real (MedHouseVal)")
+ax.set_xticks(xpos)
+ax.set_xticklabels([f"bairro {i+1}" for i in range(6)])
+ax.set_ylabel("preço (centenas de milhares de US\\$)")
+ax.set_title(r"Previsto com $\hat{\mathbf{w}}$ ajustado vs. real (mesma amostra da Aula 2)", fontsize=10.5, fontweight="bold")
+ax.legend(fontsize=8.5)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Compare com o gráfico da Aula 2 (mesmos 6 bairros, $\mathbf{w}$
+inventado): os erros ali eram grandes e sem padrão claro; aqui, ainda há
+erro (esperado, dado o $R^2\approx 0{,}518$), mas o modelo já captura a
+tendência geral — o bairro 1 (renda mais alta) continua sendo o de
+previsão mais alta entre os seis, por exemplo. É a diferença entre "um
+$\mathbf{w}$ qualquer" e "o $\hat{\mathbf{w}}$ que resolve as Equações
+Normais": o segundo não é perfeito, mas é **matematicamente o melhor
+possível** dentro do que os 4 atributos permitem.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Comparando com a Aula 2
+
+::: {.fragment}
+Aula 2 (mesmos 6 bairros, $\mathbf{w}$ **inventado**): erros grandes,
+sem padrão. Agora, com $\hat{\mathbf{w}}$ **ajustado**: ainda há erro
+(esperado, $R^2\approx 0{,}518$), mas a tendência geral já aparece.
+:::
+
+::: {.fragment}
+Diferença entre "um $\mathbf{w}$ qualquer" e "o $\hat{\mathbf{w}}$ das
+Equações Normais": o segundo não é perfeito, mas é **matematicamente o
+melhor possível** dentro do que os 4 atributos permitem.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se comparássemos $\hat{\mathbf{w}}$ com uma resolução por eliminação de Gauss do sistema $X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$, esperaríamos o mesmo resultado da comparação com `lstsq`?
+
+Dica: o que muda entre `lstsq` e eliminação de Gauss é o **algoritmo**,
+não a **equação** que ambos resolvem. Isso muda a resposta?
+
+- □ Comparar $\hat{\mathbf{w}}$ (Equações Normais) com uma resolução por
+  eliminação de Gauss do mesmo sistema $X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$
+  daria, a menos de erro de arredondamento, exatamente o mesmo vetor
+  encontrado com `lstsq`.
+- □ Se o produto interno do resíduo com cada coluna de $X$ fosse
+  exatamente zero (não apenas próximo de zero, mas matematicamente
+  exato), isso seria uma coincidência numérica desta amostra específica,
+  não uma consequência necessária da teoria.
+- □ Num ajuste de crescimento populacional, com atributos em escalas
+  bem diferentes das usadas nesta aula, a mesma verificação (produto
+  interno do resíduo com cada coluna $\approx 0$) continuaria sendo um
+  teste válido de que $\hat{\mathbf{w}}$ foi calculado corretamente.
+- □ Como o resíduo é ortogonal a cada coluna de $X$, isso implica que o
+  modelo ajustado explica quase toda a variação de $\mathbf{y}$ (um
+  $R^2$ próximo de $1$).
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Eliminação de Gauss em $X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$ daria o mesmo resultado que `lstsq`?
+
+Dica: o que muda entre `lstsq` e eliminação de Gauss é o algoritmo, não
+a equação resolvida.
+
+- □ Eliminação de Gauss no mesmo sistema $X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$
+  daria, a menos de arredondamento, o mesmo vetor de `lstsq`.
+- □ Produto interno do resíduo com cada coluna exatamente zero seria
+  coincidência numérica desta amostra, não consequência da teoria.
+- □ Em outro domínio, com outras escalas, a mesma verificação de
+  ortogonalidade continuaria válida como teste de correção.
+- □ Resíduo ortogonal a cada coluna $\Rightarrow$ $R^2$ próximo de $1$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Comparando algoritmos e o que a ortogonalidade garante — Resposta
+
+- ✔ Mesma equação, algoritmos diferentes (inversão, eliminação,
+  decomposição) — todos resolvem o mesmo sistema linear, mesmo
+  resultado a menos de arredondamento.
+- ✗ É consequência **necessária** de $X^T(\mathbf{y}-X\hat{\mathbf{w}})=\mathbf{0}$
+  (Passo iii), não coincidência — vale para qualquer amostra em que
+  $\hat{\mathbf{w}}$ resolva as Equações Normais.
+- ✔ A verificação é uma identidade algébrica geral (Passo iii),
+  independente de domínio ou escala dos atributos.
+- ✗ Vimos $R^2\approx 0{,}518$ com resíduo ortogonal — ortogonalidade
+  fixa a *direção* do erro, não seu *tamanho*; um ajuste ruim pode ter
+  resíduo perfeitamente ortogonal.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** sim — qualquer método correto que resolva
+$X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$ chega ao mesmo $\hat{\mathbf{w}}$; a
+diferença entre métodos é robustez numérica, não o resultado matemático
+em si (tema que volta na Aula 4).
+:::
+:::
+
+# Quando a Fórmula Falha, ou Fica Frágil
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Reconectando com a Aula 2: Posto Completo
+
+O Passo (iv) do Bloco 4 usou uma hipótese específica: $X^TX$ é
+invertível **se, e somente se**, as colunas de $X$ são linearmente
+independentes — ou seja, $X$ tem posto completo, $\text{rk}(X)=d$
+(critério provado na Aula 2, Bloco 5). Essa não é uma hipótese técnica
+qualquer: é a única coisa que separa "$\hat{\mathbf{w}}$ tem fórmula
+fechada" de "$\hat{\mathbf{w}}$ não é sequer único". Vamos ver os dois
+jeitos como essa hipótese pode falhar — um exato, um só numericamente
+frágil — reaproveitando exatamente os exemplos da Aula 2.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Reconectando com a Aula 2: Posto Completo
+
+::: {.fragment}
+Passo (iv): $X^TX$ invertível $\iff$ colunas de $X$ linearmente
+independentes $\iff$ $\text{rk}(X)=d$ (Aula 2, Bloco 5).
+:::
+
+::: {.fragment}
+Não é hipótese técnica qualquer: é o que separa "$\hat{\mathbf{w}}$ tem
+fórmula fechada" de "$\hat{\mathbf{w}}$ não é nem único". Dois jeitos de
+falhar — um exato, um só frágil — reaproveitando os exemplos da Aula 2.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Caso 1: Multicolinearidade Exata — $\hat{\mathbf{y}}$ Único, $\hat{\mathbf{w}}$ Não
+
+A Aula 2 fabricou uma quinta coluna, $2\times$`AveRooms`, e mostrou que o
+posto da matriz de design **não sobe** de 4 para 5 — a nova coluna não
+traz direção independente. Repetindo o experimento, agora olhando
+diretamente para a invertibilidade de $X^TX$:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Caso 1: Multicolinearidade Exata
+
+::: {.fragment}
+Aula 2: quinta coluna $2\times$`AveRooms` — posto **não sobe** de 4 para
+5. Repetindo, olhando para $X^TX$:
+:::
+:::
+
+```{python}
+#| echo: true
+
+X_com_duplicata = np.column_stack([X_completo, 2.0 * X_completo[:, 2]])
+print("posto de X:              ", np.linalg.matrix_rank(X_completo))
+print("posto de X com duplicata:", np.linalg.matrix_rank(X_com_duplicata))
+
+XtX_dup = X_com_duplicata.T @ X_com_duplicata
+print("det(X^T X com duplicata):", np.linalg.det(XtX_dup))
+try:
+    np.linalg.inv(XtX_dup)
+except np.linalg.LinAlgError as erro:
+    print("np.linalg.inv falha:", erro)
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+$\det(X^TX)=0$: a matriz é singular, e `np.linalg.inv` recusa
+explicitamente ("Singular matrix") — não há fórmula fechada
+$\hat{\mathbf{w}}=(X^TX)^{-1}X^T\mathbf{y}$ possível. Mas note a
+distinção crucial, já anunciada no Passo (i) do Bloco 4: a *projeção*
+$\hat{\mathbf{y}}$ continua perfeitamente bem definida — é o ponto de
+$\text{col}(X)$ mais próximo de $\mathbf{y}$, e $\text{col}(X)$ não
+mudou (a coluna redundante não acrescenta nenhuma direção nova, Aula 2).
+O que deixou de ser único é **como distribuir o crédito** entre
+`AveRooms` e sua cópia $2\times$`AveRooms` — infinitos $\hat{\mathbf{w}}$
+diferentes produzem exatamente o mesmo $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$.
+A sombra é única; a "receita" para chegar nela, não.
+
+## Caso 2: Quase-Multicolinearidade — $X^TX$ Mal-Condicionada
+
+Multicolinearidade **exata** é rara em dados reais. O problema mais
+comum, já visto na Aula 2, é a quase-dependência entre `AveRooms` e
+`AveBedrms` (correlação $0{,}865$) — posto continua completo ($4$), a
+fórmula fechada ainda existe, mas fica **numericamente frágil**.
+Reaproveitando exatamente a amostra de 20 bairros e a perturbação de 1%
+da Aula 2, agora olhando para o número de condição de $X^TX$ em cada
+par:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Distinção Crucial
+
+::: {.fragment}
+$\det(X^TX)=0$: `np.linalg.inv` recusa ("Singular matrix") — sem fórmula
+fechada para $\hat{\mathbf{w}}$.
+:::
+
+::: {.fragment}
+**Mas:** a *projeção* $\hat{\mathbf{y}}$ continua bem definida —
+$\text{col}(X)$ não mudou (coluna redundante não traz direção nova). O
+que se perde é **como distribuir o crédito** entre `AveRooms` e sua
+cópia: infinitos $\hat{\mathbf{w}}$ dão o mesmo $\hat{\mathbf{y}}$.
+:::
+
+::: {.fragment}
+A sombra é única; a "receita" para chegar nela, não.
+:::
+
+## Caso 2: Quase-Multicolinearidade
+
+::: {.fragment}
+Multicolinearidade exata é rara em dados reais. Mais comum (Aula 2):
+`AveRooms`/`AveBedrms`, correlação $0{,}865$ — posto completo, fórmula
+existe, mas **numericamente frágil**.
+:::
+
+::: {.fragment}
+Reaproveitando a amostra de 20 bairros e a perturbação de 1% da Aula 2,
+agora olhando o número de condição de $X^TX$:
+:::
+:::
+
+```{python}
+#| echo: true
+
+_amostra_20 = _housing.sample(n=20, random_state=7)
+X_quase_dep = _amostra_20[["AveRooms", "AveBedrms"]].to_numpy()
+X_bem_cond = _amostra_20[["MedInc", "HouseAge"]].to_numpy()
+
+cond_quase_dep = np.linalg.cond(X_quase_dep.T @ X_quase_dep)
+cond_bem_cond = np.linalg.cond(X_bem_cond.T @ X_bem_cond)
+
+print(f"número de condição de X^TX (AveRooms, AveBedrms):  {cond_quase_dep:,.1f}")
+print(f"número de condição de X^TX (MedInc, HouseAge):     {cond_bem_cond:,.1f}")
+print(f"\nnúmero de condição de X^TX completo (4 atributos): {np.linalg.cond(XtX):,.1f}")
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O par quase-dependente tem número de condição $\approx 420$ contra
+$\approx 169$ do par bem-condicionado — mais de o dobro, um sinal
+numérico direto de fragilidade (definição formal na Aula 4). E lembrando
+o resultado já demonstrado na Aula 2, reproduzido aqui como consequência
+direta desse número de condição alto: perturbar `MedHouseVal` em apenas
+$1\%$ do seu desvio-padrão muda o peso de `AveBedrms` em $\approx 29{,}5\%$
+no par quase-dependente, contra $\approx 0{,}1\%$ no par bem-condicionado
+sob a mesma perturbação — quase 300 vezes mais sensível. O número de
+condição do $X^TX$ com os 4 atributos completos ($\approx 23\,460$) é
+ainda maior, porque combina a informação redundante de `AveRooms`/
+`AveBedrms` com a escala natural de todos os atributos — mas o efeito é
+o mesmo em espécie: $X^TX$ tecnicamente invertível, porém perto o
+suficiente de singular para que pequenos erros nos dados produzam
+grandes oscilações no $\hat{\mathbf{w}}$ calculado.
+
+**A mesma distinção do Caso 1, com um grau de intensidade menor:** a
+projeção $\hat{\mathbf{y}}$ (a previsão do modelo) muda pouco com a
+perturbação — é a *decomposição* dos pesos $\hat{\mathbf{w}}$ entre as
+duas colunas quase-redundantes que oscila. Medir e nomear essa
+sensibilidade com precisão — o número de condição, calculado a partir
+dos autovalores de $X^TX$, não só estimado por um experimento de
+perturbação — é exatamente o que abre a Aula 4.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que os Números Confirmam
+
+::: {.fragment}
+Número de condição: $\approx 420$ (quase-dependente) vs. $\approx 169$
+(bem-condicionado) — mais que o dobro. Sinal numérico de fragilidade.
+:::
+
+::: {.fragment}
+Perturbação de 1% em `MedHouseVal`: peso de `AveBedrms` muda
+$\approx 29{,}5\%$ no par quase-dependente, contra $\approx 0{,}1\%$ no
+bem-condicionado — quase 300× mais sensível (Aula 2, reproduzido aqui
+como consequência do número de condição).
+:::
+
+::: {.fragment}
+$X^TX$ completo (4 atributos): número de condição $\approx 23\,460$ —
+ainda maior, combinando a redundância `AveRooms`/`AveBedrms` com a
+escala de todos os atributos.
+:::
+
+## A Mesma Distinção do Caso 1, Mais Sutil
+
+::: {.fragment}
+A projeção $\hat{\mathbf{y}}$ (previsão) muda pouco com a perturbação —
+é a **decomposição** de $\hat{\mathbf{w}}$ entre colunas
+quase-redundantes que oscila.
+:::
+
+::: {.fragment}
+Medir essa sensibilidade com precisão — o **número de condição**,
+via autovalores de $X^TX$ — é o que abre a Aula 4.
+:::
+:::
+
+::: {.fig-resize style="width: 78%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=0.6cm and 0.8cm,
+  block/.style={rectangle, draw=icblue, fill=icblue!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=3.1cm, minimum height=1.0cm},
+  concl/.style={rectangle, draw=icred, fill=icred!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=3.4cm, minimum height=1.3cm},
+  arrow/.style={-Stealth, thick, color=gray!70}
+]
+  \node (M) [block] {multicolinearidade\\entre colunas de $X$};
+  \node (E) [block, above right=0.4cm and 1.3cm of M] {\textbf{exata}\\(ex.: $2\times$AveRooms)};
+  \node (Q) [block, below right=0.4cm and 1.3cm of M] {\textbf{quase-exata}\\(ex.: AveRooms/AveBedrms, $r=0{,}865$)};
+  \node (CE) [concl, right=1.1cm of E] {$X^TX$ singular\\$\hat{\mathbf{w}}$ não-único\\$\hat{\mathbf{y}}$ ainda único};
+  \node (CQ) [concl, right=1.1cm of Q] {$X^TX$ mal-condicionada\\$\hat{\mathbf{w}}$ instável\\número de condição (Aula 4)};
+
+  \draw [arrow] (M) -- (E);
+  \draw [arrow] (M) -- (Q);
+  \draw [arrow] (E) -- (CE);
+  \draw [arrow] (Q) -- (CQ);
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O diagrama resume os dois caminhos: multicolinearidade exata quebra a
+invertibilidade de $X^TX$ (posto deficiente), enquanto multicolinearidade
+quase-exata preserva o posto completo mas deixa $X^TX$ mal-condicionada
+— dois sintomas de gravidade diferente, mas da mesma causa raiz
+(colunas de $X$ carregando informação redundante), com o mesmo alívio
+parcial em comum: a projeção $\hat{\mathbf{y}}$ nunca é o problema; o
+problema mora inteiramente em como $\hat{\mathbf{w}}$ tenta descrevê-la.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Diagrama Resume os Dois Caminhos
+
+::: {.fragment}
+Mesma causa raiz (colunas redundantes), gravidade diferente. Em ambos:
+a projeção $\hat{\mathbf{y}}$ nunca é o problema — o problema mora em
+como $\hat{\mathbf{w}}$ tenta descrevê-la.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se $X^TX$ está mal-condicionada, a previsão $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$ também fica proporcionalmente instável sob a mesma perturbação dos dados?
+
+Dica: releia o que os números do Caso 2 mostraram sobre $\hat{\mathbf{w}}$
+vs. $\hat{\mathbf{y}}$ — a instabilidade tem o mesmo tamanho nos dois?
+
+- □ Se a coluna duplicada fabricada no Caso 1 fosse uma combinação de
+  duas colunas originais (não um múltiplo de uma única coluna), em vez
+  de exatamente $2\times$`AveRooms`, o posto de $X$ ainda cairia da
+  mesma forma ao ser adicionada.
+- □ No caso-limite em que a correlação entre `AveRooms` e `AveBedrms`
+  fosse exatamente $1$ (em vez de $0{,}865$), $X^TX$ deixaria de ser
+  invertível, e a fórmula fechada
+  $\hat{\mathbf{w}}=(X^TX)^{-1}X^T\mathbf{y}$ deixaria de estar
+  definida.
+- □ Num modelo de crédito com dois atributos quase redundantes (ex.:
+  "renda mensal" e "renda anual dividida por 12", com pequena diferença
+  por arredondamento), o mesmo sintoma de instabilidade numérica no peso
+  estimado apareceria, mesmo sem nenhuma coluna exatamente duplicada.
+- □ Como $X^TX$ mal-condicionada torna $\hat{\mathbf{w}}$ instável, isso
+  implica que a previsão $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$ também se
+  torna proporcionalmente instável sob a mesma perturbação dos dados.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## $X^TX$ mal-condicionada torna $\hat{\mathbf{y}}$ proporcionalmente instável também?
+
+Dica: os números do Caso 2 mostraram a instabilidade em $\hat{\mathbf{w}}$
+vs. em $\hat{\mathbf{y}}$ — mesmo tamanho?
+
+- □ Coluna duplicada como combinação de duas colunas originais (não um
+  múltiplo de uma só): posto de $X$ ainda cairia igual.
+- □ Correlação AveRooms/AveBedrms exatamente $1$: $X^TX$ deixaria de
+  ser invertível, fórmula fechada indefinida.
+- □ Crédito com "renda mensal"/"renda anual÷12" (quase redundantes por
+  arredondamento): mesmo sintoma de instabilidade, sem duplicata exata.
+- □ $X^TX$ mal-condicionada $\Rightarrow$ $\hat{\mathbf{y}}$ também
+  proporcionalmente instável.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Mal-condicionamento e o que permanece estável — Resposta
+
+- ✔ Qualquer coluna que seja combinação linear exata das demais não
+  acrescenta direção nova ao espaço gerado — o posto cai da mesma
+  forma, com múltiplo único ou combinação.
+- ✔ Correlação $1$ = dependência linear exata $\Rightarrow$ $X^TX$
+  singular, mesma consequência do Caso 1.
+- ✔ Mesma mecânica de quase-dependência, outro domínio (crédito em vez
+  de imóveis).
+- ✗ É o oposto do que os números mostraram: a *projeção*
+  $\hat{\mathbf{y}}$ (o ponto mais próximo de $\mathbf{y}$ em
+  $\text{col}(X)$) é geometricamente determinada e muda pouco; é a
+  **decomposição** em $\hat{\mathbf{w}}$ entre colunas quase-redundantes
+  que oscila descontroladamente.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não — é exatamente o padrão "sombra estável,
+receita instável" do Caso 1, só que aqui sem quebra total de posto,
+apenas fragilidade numérica.
+:::
+:::
+
+# Fechamento e Ponte para a Aula 4
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### Retomando as perguntas de abertura {.unnumbered}
+
+1. **O que significa "a melhor aproximação possível"?** O ponto
+   $\hat{\mathbf{y}}\in\text{col}(X)$ que minimiza
+   $\|\mathbf{y}-\hat{\mathbf{y}}\|$ — e essa minimização é equivalente
+   a uma condição geométrica exata: o resíduo ortogonal a todo o
+   subespaço.
+2. **O que é projetar sobre um subespaço, e por que resolve o
+   problema?** É encontrar exatamente esse $\hat{\mathbf{y}}$ — a
+   "sombra" perpendicular do Bloco 2, formalizada no Teorema da
+   Projeção do Bloco 4.
+3. **Como isso vira uma fórmula calculável?** As **Equações Normais**,
+   $X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$, e sob posto completo,
+   $\hat{\mathbf{w}}=(X^TX)^{-1}X^T\mathbf{y}$ — verificado com números
+   reais no Bloco 5 (comparação com `lstsq`, ortogonalidade do resíduo).
+4. **Quando essa fórmula falha, ou fica frágil?** Multicolinearidade
+   exata quebra a invertibilidade de $X^TX$ ($\hat{\mathbf{w}}$
+   não-único, $\hat{\mathbf{y}}$ ainda único); quase-multicolinearidade
+   preserva o posto completo, mas deixa $X^TX$ mal-condicionada
+   ($\hat{\mathbf{w}}$ instável).
+
+### O Que Fica em Aberto {.unnumbered}
+
+A fórmula fechada $\hat{\mathbf{w}}=(X^TX)^{-1}X^T\mathbf{y}$ é a forma
+mais simples de **descrever** a solução — mas não é a forma mais
+**estável** de calculá-la quando $X^TX$ está mal-condicionada, como o
+Bloco 6 acabou de mostrar. O número de condição foi usado aqui de forma
+empírica (perturbar os dados e medir o efeito) — a Aula 4 dá a ferramenta
+exata para medi-lo diretamente a partir da estrutura de $X^TX$ (seus
+**autovalores** e **autovetores**), sem precisar perturbar nada. Essa
+mesma ferramenta é o que vai motivar, mais adiante no curso, métodos
+numéricos mais estáveis do que inverter $X^TX$ diretamente — decomposição
+$QR$ e $SVD$ — que resolvem as Equações Normais sem nunca formar
+$X^TX$ explicitamente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as Perguntas de Abertura
+
+::: {.fragment}
+**1.** "Melhor aproximação" = $\hat{\mathbf{y}}\in\text{col}(X)$ que
+minimiza $\|\mathbf{y}-\hat{\mathbf{y}}\|$ — equivalente a resíduo
+ortogonal ao subespaço.
+:::
+
+::: {.fragment}
+**2.** Projetar = encontrar esse $\hat{\mathbf{y}}$ — a sombra
+perpendicular, formalizada no Teorema da Projeção.
+:::
+
+::: {.fragment}
+**3.** Fórmula: Equações Normais $X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$;
+sob posto completo, $\hat{\mathbf{w}}=(X^TX)^{-1}X^T\mathbf{y}$ —
+verificado com dados reais.
+:::
+
+::: {.fragment}
+**4.** Falha: multicolinearidade exata quebra invertibilidade
+($\hat{\mathbf{w}}$ não-único); quase-exata deixa $X^TX$
+mal-condicionada ($\hat{\mathbf{w}}$ instável).
+:::
+
+## Ponte para a Aula 4
+
+::: {.fragment}
+Fórmula fechada = mais simples de **descrever**, não mais **estável** de
+**calcular** quando $X^TX$ é mal-condicionada.
+:::
+
+::: {.fragment}
+Aqui, número de condição foi medido empiricamente (perturbar e ver o
+efeito). Aula 4: ferramenta exata via **autovalores/autovetores** de
+$X^TX$ — sem precisar perturbar nada.
+:::
+
+::: {.fragment}
+Motiva, mais adiante, métodos mais estáveis que inverter $X^TX$
+diretamente: decomposição $QR$ e $SVD$.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+# Exercícios
+
+## Questões discursivas
+
+1. Explique, com suas próprias palavras e usando a linguagem geométrica
+   do Bloco 2 (a "sombra"), por que minimizar $\|\mathbf{y}-X\mathbf{w}\|$
+   é equivalente à condição de ortogonalidade
+   $(\mathbf{y}-X\hat{\mathbf{w}})\perp\text{col}(X)$. Por que essa
+   equivalência é o que permite transformar um problema de otimização
+   (minimizar uma distância) numa equação linear (as Equações Normais)?
+
+2. Compare os dois casos do Bloco 6 — multicolinearidade exata (posto
+   deficiente) e quase-multicolinearidade (posto completo, mas
+   mal-condicionada) — explicando, para cada um, o que acontece com a
+   projeção $\hat{\mathbf{y}}$ e o que acontece com o vetor de pesos
+   $\hat{\mathbf{w}}$. Por que a distinção entre essas duas grandezas é
+   a chave para entender os dois casos?
+
+3. A Aula 2 provou que $X^TX$ é invertível se, e somente se, $X$ tem
+   posto completo. Explique como essa condição de invertibilidade entra
+   exatamente no Passo (iv) da derivação das Equações Normais desta
+   aula, e o que aconteceria à derivação (não só ao resultado final) se
+   essa condição não fosse satisfeita.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada
+correta se todos os 4 itens forem julgados corretamente (deixar em
+branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-note icon=false}
+## Sistemas sobredeterminados e a melhor aproximação
+
+- □ Se um sistema $A\mathbf{x}=\mathbf{b}$ fosse subdeterminado ($n>m$)
+  em vez de sobredeterminado, ainda haveria um sentido útil para
+  "melhor aproximação" via projeção, mas ele coincidiria trivialmente
+  com uma das infinitas soluções exatas, não com um ponto fora do
+  espaço-coluna de $A$.
+- □ No caso-limite em que $\mathbf{y}$ está exatamente sobre o
+  espaço-coluna de $X$, a "melhor aproximação"
+  $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$ coincide com $\mathbf{y}$, e o
+  problema de mínimos quadrados se reduz ao caso já resolvido pela
+  Aula 2 (sistema com solução exata).
+- □ Num problema de previsão de demanda de energia elétrica, com muito
+  mais medições horárias (equações) do que parâmetros do modelo físico
+  a estimar (incógnitas), a mesma lógica de "sistema sobredeterminado
+  sem solução exata, resolvido por projeção" se aplicaria.
+- □ Como um sistema sobredeterminado não tem solução exata, isso
+  implica que qualquer $\mathbf{w}$ escolhido produzirá um erro de
+  magnitude semelhante — a escolha de $\mathbf{w}$ não afetaria
+  significativamente a qualidade da aproximação.
+:::
+
+::: {.callout-note icon=false}
+## A intuição da sombra
+
+- □ Se a fonte de luz da analogia da sombra viesse de um ângulo
+  oblíquo fixo (não perpendicular ao subespaço), o ponto de chegada no
+  subespaço, em geral, não seria mais o ponto mais próximo do ponto
+  original.
+- □ No caso-limite em que o subespaço $U$ tem a mesma dimensão do
+  espaço ambiente ($U=V$), a "sombra" de qualquer ponto sobre $U$
+  coincide com o próprio ponto, para qualquer ponto escolhido.
+- □ A ideia de reduzir a dimensionalidade de dados de alta dimensão
+  para visualização (ex.: reduzir atributos de um dataset para 2
+  dimensões e plotar um gráfico de dispersão) usa, na essência, a mesma
+  operação geométrica de projeção perpendicular discutida nesta aula.
+- □ Como a projeção perpendicular minimiza a distância ao subespaço,
+  ela produz sempre o ponto de menor norma dentro do subespaço, entre
+  todos os candidatos.
+:::
+
+::: {.callout-note icon=false}
+## Subespaços e o complemento ortogonal
+
+- □ Se $U$ e $W$ são dois subespaços distintos de mesma dimensão $M$
+  dentro de um espaço $V$ de dimensão $D$, seus complementos ortogonais
+  $U^\perp$ e $W^\perp$ têm, necessariamente, a mesma dimensão entre si
+  ($D-M$), ainda que $U^\perp \ne W^\perp$ como conjuntos.
+- □ No caso-limite $M=D$ (o subespaço é o espaço inteiro), o
+  complemento ortogonal se reduz ao subespaço trivial $\{\mathbf{0}\}$.
+- □ Em processamento de sinais, decompor um sinal de áudio em uma
+  componente dentro de uma banda de frequência específica (um
+  subespaço) e uma componente fora dela usa a mesma lógica de
+  decomposição única $V=U\oplus U^\perp$ discutida nesta aula.
+- □ Como todo vetor de $V$ se decompõe de forma única em $U\oplus
+  U^\perp$, isso implica que essa decomposição é a única forma possível
+  de escrever qualquer vetor de $V$ como soma de dois vetores de $V$.
+:::
+
+::: {.callout-note icon=false}
+## Definição formal de projeção
+
+- □ Se $\pi:V\to U$ satisfaz $\pi^2=\pi$, então, para qualquer vetor
+  $\mathbf{u}$ que já pertença a $U$, necessariamente $\pi(\mathbf{u}) =
+  \mathbf{u}$.
+- □ No caso-limite em que a matriz de projeção $P_\pi$ é a matriz
+  identidade, o subespaço $U$ sobre o qual ela projeta é o espaço
+  ambiente $V$ inteiro.
+- □ Num sistema de compressão de vídeo que descarta certas componentes
+  de frequência (mantendo só um subconjunto), a operação de manter as
+  componentes retidas e descartar as demais pode ser descrita, de
+  forma exata, por uma matriz de projeção $P_\pi$ com $P_\pi^2=P_\pi$.
+- □ Como toda matriz de projeção satisfaz $P_\pi^2=P_\pi$, isso
+  significa que qualquer matriz quadrada que satisfaça essa condição
+  algébrica também é, necessariamente, simétrica.
+:::
+
+::: {.callout-note icon=false}
+## Derivação das Equações Normais
+
+- □ Se a condição de ortogonalidade fosse verificada apenas para
+  algumas colunas de $X$ (não todas), em vez de todas as $d$ colunas,
+  isso não seria suficiente, em geral, para garantir que o resíduo é
+  ortogonal a todo o espaço-coluna de $X$.
+- □ No caso-limite $d=1$ (uma única coluna, isto é, $X$ é um vetor-coluna
+  $\mathbf{x}\in\mathbb{R}^N$), as Equações Normais
+  $X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$ se reduzem a uma única equação
+  escalar, $\hat{w}=\dfrac{\mathbf{x}^T\mathbf{y}}{\mathbf{x}^T\mathbf{x}}$.
+- □ Num problema de estimar um único parâmetro físico (temperatura
+  média) a partir de $N$ leituras redundantes de um termômetro (cada
+  leitura sendo $y_i = \theta + \text{ruído}$), a mesma derivação das
+  Equações Normais levaria a uma estimativa que é, essencialmente, a
+  média das leituras.
+- □ Como as Equações Normais são obtidas impondo ortogonalidade
+  coluna a coluna, isso implica que, se duas colunas de $X$ forem
+  ortogonais entre si, a equação normal correspondente a cada uma delas
+  pode ser resolvida de forma totalmente independente da outra, sem
+  nenhum termo cruzado.
+:::
+
+::: {.callout-note icon=false}
+## Invertibilidade de $X^TX$ e a pseudo-inversa
+
+- □ Se $X$ tivesse posto deficiente (colunas linearmente dependentes),
+  $X^TX$ deixaria de ser invertível, mas isso não impediria, por si só,
+  que existisse **algum** $\hat{\mathbf{w}}$ satisfazendo as Equações
+  Normais — apenas deixaria de haver um único.
+- □ No caso-limite em que $X$ tem uma única coluna não-nula
+  ($d=1$, $\mathbf{x}\ne\mathbf{0}$), $X^TX$ é sempre invertível
+  (é um escalar positivo).
+- □ Num problema de reconstrução de sinais com uma matriz de
+  observação $X$ de posto deficiente, a pseudo-inversa
+  $(X^TX)^{-1}X^T$ não pode ser calculada da forma usual, mas existem
+  generalizações (pseudo-inversa de Moore-Penrose, via SVD) que
+  contornam exatamente esse problema.
+- □ Como $(X^TX)^{-1}X^T$ é chamada de pseudo-inversa de $X$, isso
+  significa que ela satisfaz $X\cdot(X^TX)^{-1}X^T = I$ (a identidade),
+  do mesmo jeito que uma inversa de matriz quadrada de verdade.
+:::
+
+::: {.callout-note icon=false}
+## Aplicação numérica e verificação de ortogonalidade
+
+- □ Se, em vez de comparar $\hat{\mathbf{w}}$ obtido pela fórmula
+  fechada com `np.linalg.lstsq`, comparássemos com uma resolução por
+  eliminação de Gauss do sistema $X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$,
+  esperaríamos, a menos de erro de arredondamento, o mesmo vetor.
+- □ No caso-limite em que $\mathbf{y}$ é o vetor nulo, o
+  $\hat{\mathbf{w}}$ que resolve as Equações Normais (com $X$ de posto
+  completo) é necessariamente o vetor nulo também.
+- □ Num experimento de física em que um pesquisador mede a mesma
+  grandeza $N$ vezes com ruído aleatório, verificar que o resíduo entre
+  o valor estimado e as medições é ortogonal aos "atributos" do modelo
+  é um teste válido de correção, do mesmo jeito que foi usado nesta
+  aula para o California Housing.
+- □ Como o resíduo é ortogonal a cada coluna de $X$, isso implica que
+  o modelo captura toda a informação relevante contida nos dados
+  disponíveis para prever $\mathbf{y}$.
+:::
+
+::: {.callout-note icon=false}
+## $R^2$ e o que a ortogonalidade do resíduo garante
+
+- □ Se o $R^2$ do ajuste fosse exatamente $0$ (o modelo não explica
+  nada da variação de $\mathbf{y}$ além da média), o resíduo ainda
+  seria ortogonal a cada coluna de $X$, contanto que $\hat{\mathbf{w}}$
+  resolva as Equações Normais.
+- □ No caso-limite $R^2=1$ (ajuste perfeito), o resíduo
+  $\mathbf{y}-X\hat{\mathbf{w}}$ é o vetor nulo.
+- □ Num modelo de previsão de nota de estudantes usando só o número de
+  horas de sono (um único atributo, claramente insuficiente para
+  prever notas), seria possível obter um $R^2$ baixo e, ainda assim, um
+  resíduo perfeitamente ortogonal a essa única coluna — exatamente como
+  ocorreu com os 4 atributos do California Housing nesta aula.
+- □ Como o resíduo é sempre ortogonal ao espaço-coluna de $X$ quando
+  $\hat{\mathbf{w}}$ resolve as Equações Normais, um $R^2$ baixo indica
+  necessariamente um erro no cálculo de $\hat{\mathbf{w}}$, não uma
+  limitação dos atributos escolhidos.
+:::
+
+::: {.callout-note icon=false}
+## Posto e multicolinearidade exata (conexão com a Aula 2)
+
+- □ Se a coluna redundante fabricada no Bloco 6 fosse
+  $-5\times$`AveRooms` em vez de $2\times$`AveRooms`, o posto de $X$
+  ainda cairia da mesma forma ao ser adicionada (permaneceria em 4, não
+  subiria para 5).
+- □ No caso-limite em que todas as $d$ colunas de $X$ fossem
+  múltiplos escalares de uma única coluna não-nula, o posto de $X$
+  seria exatamente $1$, independentemente do valor de $d$.
+- □ Num dataset de sensores IoT em que um atributo é reportado tanto em
+  Celsius quanto em Fahrenheit (uma transformação linear afim exata da
+  outra, não apenas um múltiplo escalar), a inclusão de ambas as
+  colunas na matriz de design também produziria posto deficiente, pelo
+  mesmo princípio da coluna duplicada exata desta aula.
+- □ Como a coluna redundante fabricada não acrescenta nenhuma direção
+  independente ao espaço-coluna de $X$, isso implica que removê-la
+  necessariamente reduz a qualidade das previsões do modelo ajustado.
+:::
+
+::: {.callout-note icon=false}
+## Quase-multicolinearidade e número de condição (preview da Aula 4)
+
+- □ Se, em vez de perturbar `MedHouseVal` em 1% do desvio-padrão,
+  perturbássemos em 10 vezes esse valor (10% do desvio-padrão), a
+  variação relativa esperada no peso de `AveBedrms` no par
+  quase-dependente seria, ao menos aproximadamente, também maior do
+  que a observada com a perturbação de 1% — o número de condição alto
+  amplifica perturbações maiores tanto quanto amplifica as pequenas.
+- □ No caso-limite em que o número de condição de $X^TX$ tende a
+  infinito, $X^TX$ se torna, no limite, singular (não invertível).
+- □ Num modelo de precificação de opções financeiras com duas
+  variáveis de entrada quase redundantes (ex.: duas medidas de
+  volatilidade calculadas por métodos ligeiramente diferentes), a mesma
+  fragilidade numérica (pesos instáveis sob pequena perturbação dos
+  dados) apareceria, mesmo com o posto de $X$ tecnicamente completo.
+- □ Como o número de condição de $X^TX$ com os 4 atributos completos
+  ($\approx 23\,460$) é maior do que o do par isolado
+  `AveRooms`/`AveBedrms` ($\approx 420$), isso implica que a previsão
+  $\hat{\mathbf{y}}$ do modelo completo é proporcionalmente mais
+  instável do que a previsão do modelo com só esse par de atributos.
+:::
+
+::: {.callout-note icon=false}
+## A matriz de projeção $P_\pi$
+
+- □ Se, em vez de projetar $\mathbf{y}$ sobre $\text{col}(X)$,
+  quiséssemos projetar sobre um subespaço diferente gerado pelas
+  colunas de outra matriz $Z$ (mesmas dimensões de $X$), a matriz de
+  projeção correspondente seria $P_\pi'=Z(Z^TZ)^{-1}Z^T$, com a mesma
+  propriedade $P_\pi'^2=P_\pi'$.
+- □ No caso-limite em que as colunas de $X$ já são ortonormais
+  ($X^TX=I$), a matriz de projeção se simplifica para $P_\pi=XX^T$.
+- □ Em compressão de imagem via PCA, manter apenas as $k$ componentes
+  principais mais informativas e descartar as demais pode ser descrito
+  por uma matriz de projeção $P_\pi$ com as mesmas propriedades
+  ($P_\pi^2=P_\pi$, simétrica) discutidas nesta aula.
+- □ Como $P_\pi=X(X^TX)^{-1}X^T\in\mathbb{R}^{N\times N}$ e toda matriz
+  quadrada invertível que satisfaz $P^2=P$ só pode ser a identidade,
+  isso implica que $P_\pi$ só pode ser a matriz identidade quando $X$
+  tem posto completo.
+:::
+
+::: {.callout-note icon=false}
+## Síntese: da falta de solução à ponte para a Aula 4
+
+- □ Se a Aula 4 mostrasse que o número de condição de $X^TX$ pode ser
+  calculado exatamente a partir da razão entre o maior e o menor
+  autovalor de $X^TX$, isso tornaria desnecessário o tipo de
+  experimento de perturbação numérica usado no Bloco 6 desta aula para
+  *detectar* fragilidade — mas o experimento de perturbação continuaria
+  sendo uma forma válida de *demonstrar* o efeito prático dessa
+  fragilidade.
+- □ No caso-limite em que $X$ tem colunas mutuamente ortogonais e
+  todas de norma $1$ (uma base ortonormal do espaço-coluna), o número
+  de condição de $X^TX$ é exatamente $1$ — o melhor condicionamento
+  numérico possível.
+- □ Num pipeline de aprendizado de máquina em que os atributos de
+  entrada são primeiro padronizados (média 0, desvio-padrão 1) antes do
+  ajuste, essa etapa de pré-processamento pode, dependendo dos dados,
+  influenciar o número de condição de $X^TX$ resultante, mesmo sem
+  alterar o posto de $X$.
+- □ Como as Equações Normais fornecem uma fórmula fechada exata para
+  $\hat{\mathbf{w}}$ sempre que $X$ tem posto completo, isso implica que
+  essa fórmula é sempre o método numericamente mais recomendado para
+  calcular $\hat{\mathbf{w}}$ na prática, independentemente do número
+  de condição de $X^TX$.
+:::
+
+## Aviso
+
+As questões de Verdadeiro/Falso e discursivas ficam sem solução neste
+arquivo — são para resolução autônoma do aluno, fora do horário de aula.
+
+:::

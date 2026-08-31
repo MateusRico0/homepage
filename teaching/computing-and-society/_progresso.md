@@ -231,6 +231,177 @@ volte ao valor antigo — vale confirmar com o usuário antes de publicar.
 - **Pendente:** Etapa 5 (link no `index.md` da disciplina) — só depois
   de aprovação do usuário sobre o conteúdo final desta rodada.
 
-## Aulas 4–15
+## Renumeração do semestre (2026-08-30)
+
+A pedido do usuário, uma nova Aula 4 ("Human, Social, and Ethical
+Dimensions of Software Engineering") foi inserida no `index.qmd` entre
+a Aula 3 (atual) e a antiga Aula 4 ("Architecture, Energy, and the
+Material Cost of Digital Infrastructure") — usuário escolheu
+explicitamente **inserir**, não substituir. Todas as aulas 4–15
+antigas foram renumeradas +1 (agora 5–16); nenhuma pasta `aulaNN/`
+precisou ser renomeada, pois só `aula01`–`aula03` existiam até aqui.
+**Correção em cascata:** a Aula 3 já construída/aprovada tinha, em duas
+passagens (notas e slides), uma ponte de fechamento dizendo "A Aula 4
+abre a Parte 2... custo material e ambiental" — isso ficou factualmente
+errado com a nova Aula 4 (que continua na Parte 1). Corrigido nas duas
+passagens de `aula03/index.qmd` para apontar a ponte imediata para a
+nova Aula 4 (engenharia de software como prática sociotécnica) e só
+depois, na Aula 5, para a Parte 2.
+
+## Aula 4: Human, Social, and Ethical Dimensions of Software Engineering
+
+- Etapa 1 (identificação) confirmada pelo usuário — texto completo do
+  `index.qmd` (objetivos, competências, leituras) fornecido por ele.
+- Etapa 2: `_00-plano-aula.md` criado — 6 blocos, ~60–70min nominal
+  (mesmo padrão de Aulas 1–2), sem rótulo de Estratégia A/B (convenção
+  já não usada nesta disciplina humanidades/não-STEM).
+- **Fontes ausentes resolvidas (2026-08-30), a pedido do usuário
+  ("Pode seguir para buscar os materiais sozinho"):**
+  - Conway (1968), "How Do Committees Invent?": PDF completo baixado
+    do site oficial do autor (melconway.com/Home/pdf/committees.pdf,
+    3.081.567 bytes, confirmado via `Content-Length`) e symlinkado em
+    `_fontes/conway1968.pdf`.
+  - D'Ignazio & Klein (2020), *Data Feminism*, Cap. 2: edição de
+    acesso aberto da MIT Press, baixada de um mirror legítimo hospedado
+    pela Rutgers University (`sites.rutgers.edu/critical-ai/`) e
+    symlinkada em `_fontes/datafeminism_cap2.pdf`.
+  - **Primeira tentativa de symlink usou caminho relativo com
+    profundidade errada (`../../../` em vez de caminho absoluto) e
+    ficou quebrado silenciosamente** — Bash confirmou com `ls -la`
+    (mostra o link "existindo"), mas `readlink -f`/`cat` revelaram que
+    o destino não existia. Corrigido usando caminho absoluto, igual à
+    convenção já usada pelos outros symlinks de `_fontes/` desta
+    disciplina. **Lição:** sempre confirmar um symlink novo com
+    `readlink -f` ou lendo o arquivo de verdade, não só com `ls -la`.
+  - Ian Sommerville, *Software Engineering* (10ª ed.): **nenhuma fonte
+    gratuita legítima encontrada** — as únicas cópias completas
+    online são não autorizadas (ex.: PDF do livro comercial hospedado
+    em `archive.org` sob o acervo de outro curso universitário);
+    decidi não usar. Blocos 2 e 4 usam conhecimento geral consolidado
+    desses capítulos, sinalizado como tal no `index.qmd`, sem citação
+    literal.
+  - Todos os trechos literais extraídos e documentados em
+    `aula04/_01-fontes.md`, incluindo uma correção de ementa (Steen,
+    "Chapter 5: Value Sensitive Design and Responsible Innovation" não
+    existe no livro real — são dois capítulos distintos, 18 e 19).
+- Etapa 3 (fontes) concluída.
+
+## Aula 4: `index.qmd` completo, exercícios e pausas construídos (2026-08-30)
+
+- **`index.qmd` escrito por completo** (2100 linhas), 6 blocos do
+  `_00-plano-aula.md`, seguindo a Estratégia B-like sem rótulo formal
+  (convenção de humanidades desta disciplina): Abertura (caso
+  COBOL/ALGOL de Conway) → Mapa de Papéis da Indústria (sinalizado como
+  conhecimento geral, sem citação literal de Sommerville) → Lei de
+  Conway (premissas + Manobra Inversa) → Elicitação de Requisitos como
+  Processo Social (Data Feminism + caso DGEI) → Da Responsabilidade
+  Social ao Artefato Concreto (VSD de Steen + cadeia NFR→ADR→gate de
+  CI) → Fechamento e ponte para a Aula 5. Todos os 7 trechos citados de
+  `_01-fontes.md` traduzidos para português ("tradução livre") no
+  `index.qmd`, nunca deixados em inglês.
+- **2 diagramas TikZ**, cada um com versão para notas (maior, mais
+  legendas) e versão condensada para slides (`.fragment .fig-resize`
+  fundidos num único div, seguindo a lição já registrada na Aula 3):
+  (a) Lei de Conway — dois painéis lado a lado (equipes que se
+  comunicam → interface bem definida; equipes que não se comunicam →
+  interface inconsistente), redesenho da ideia do artigo, não
+  reprodução literal de nenhuma figura de Conway; (b) cadeia
+  compromisso ético → NFR testável → ADR → gate de CI, com uma caixa de
+  alerta conectando de volta ao mecanismo da Lei de Conway ("requisito
+  cai no buraco sem dono da fronteira").
+- **6 pausas ativas** (uma por bloco, incluindo Abertura e Fechamento —
+  cobertura mais completa que a Aula 3, que só tinha 4, nos Blocos
+  2–5), cada uma com Pergunta Motivadora + dica (idêntica em notas e
+  slides) e V/F de 4 itens com `□`; resposta nos slides com `✔`/`✗`
+  reexibindo a pergunta motivadora, conforme `../CLAUDE.md`. Discussão
+  completa das 6 perguntas + resolução dos 24 itens em
+  `aula04/_03-respostas-pausas.md` (novo).
+- **Exercícios**: exatamente 3 discursivas + 12 blocos de V/F (48
+  itens), cobrindo a aula de ponta a ponta (papéis da indústria, Lei de
+  Conway — premissas/manobra/caso concreto, requisitos como processo
+  social, Data Feminism, caso DGEI, processo do Sommerville, VSD,
+  cadeia NFR/ADR/CI, conexão Conway+requisito sem dono, síntese/ponte
+  para a Aula 5). Todo item construído a partir de uma das 4
+  heurísticas do `../CLAUDE.md` (contrafactual/limite/transferência/
+  falsa dicotomia), nenhuma pergunta definicional. Justificativa dos 48
+  itens em `aula04/_02-solucoes.md` (novo).
+- **Bug real encontrado e corrigido: `<br/>` imediatamente seguido de
+  `::: {.callout-tip icon=false}` sem linha em branco entre eles faz o
+  Pandoc engolir a fence de abertura como texto/HTML bruto**, deixando
+  o `:::` de fechamento correspondente sem par — ele sobra como texto
+  literal `<p>:::</p>` no HTML renderizado. Diferente do bug já
+  registrado na Aula 3 (`.fig-resize` aninhado em `.fragment` como dois
+  divs separados — aqui os dois já estavam corretamente fundidos em um
+  só). Ocorria em exatamente 1 dos vários usos de `<br/>` seguido de
+  fence no arquivo (bloco de resposta do diagrama da Lei de Conway nos
+  slides). Diagnosticado isolando com `pandoc -f markdown -t html`
+  puro (sem os filtros do Quarto) e buscando por `:::` literal no HTML
+  de saída — biseção rápida, sem precisar rodar o pipeline completo a
+  cada tentativa. Corrigido inserindo uma linha em branco entre o
+  `<br/>` e a fence seguinte. **Lição para diagramas/callouts futuros
+  nesta e em outras disciplinas:** nunca deixar um `<br/>` colado
+  (sem linha em branco) imediatamente antes de uma fence de abertura
+  `::: {...}` — o problema não é o aninhamento em si (fundir classes já
+  resolve o caso da Aula 3), é a ausência de linha em branco separando
+  HTML bruto de uma fence nova.
+- **Achado de infraestrutura, não relacionado a esta aula:** durante a
+  validação, `quarto render` falhou no projeto inteiro com
+  `FilesystemLoop: Too many levels of symbolic links`, apontando para
+  `publications/ahmoliveira/*.qmd` — dois arquivos com `git status`
+  modificado (não committado), evidentemente de uma sessão concorrente
+  trabalhando em outra parte do site ao mesmo tempo. Não toquei nesses
+  arquivos (fora do escopo desta tarefa). Contornado criando um
+  `_quarto.yml` local temporário em `aula04/` (`project: type:
+  default` + só o filtro `diagram`, sem os filtros `participants.lua`/
+  `links.lua`, irrelevantes para uma aula) e um symlink local
+  `_extensions -> ../../../_extensions`, para que o Quarto tratasse
+  `aula04/` como raiz de projeto isolada e não precisasse enumerar o
+  projeto inteiro (onde estava o link quebrado). **Os dois — o
+  `_quarto.yml` temporário e o symlink `_extensions` — foram removidos
+  depois da validação**; não fazem parte do commit desta aula. Se o
+  link quebrado em `publications/ahmoliveira/` ainda existir numa
+  sessão futura, o mesmo contorno serve.
+- **Validado:** `quarto render --to html` e `--to revealjs`, sem erro
+  nem warning (após o fix do `<br/>`); balanço de divs `:::` conferido
+  por script Python (LIFO, incluindo contagem de colchetes por linha);
+  ausência de `☐`/`☒`/`- [ ]` confirmada por grep; 3 discursivas + 12
+  blocos de 4 itens de V/F (48 total) confirmados por contagem
+  programática a partir do `index.qmd` e novamente no `notas.html`
+  renderizado (seção "Exercícios" sobrevive ao render, com
+  subseções 7.1–7.3 no sumário); termos-chave (Lei de Conway, COBOL,
+  Data Feminism, contra-dados, DGEI, Value Sensitive Design) presentes
+  em ambos `notas.html` e `slides.html`; nenhum trecho em inglês restou
+  sem tradução (todas as 7 fontes citadas aparecem só com "tradução
+  livre" no `index.qmd`) — corrigido no caminho um slide que usava só a
+  sigla "VSD" sem nunca expandir "Value Sensitive Design" por extenso
+  nos slides (adicionado).
+**Etapa 5 concluída (2026-08-30):** usuário aprovou ("pode seguir e
+fechar"). Entrada da Lesson 4 no `../index.qmd` convertida de texto
+simples para link: `* [**Lesson 4: Human, Social, and Ethical
+Dimensions of Software Engineering**](./aula04/index.qmd)`. Aula 4
+encerrada.
+
+**Verificação independente (2026-08-30, sessão supervisora):**
+reconferi os 7 itens de validação do agente — todos confirmados
+(balanço LIFO limpo, glifos limpos, 72 ocorrências de `□` = 48 dos
+Exercícios + 24 das 6 pausas ativas, `output-file` correto, aviso de
+não-literalidade do Sommerville presente e bem colocado no Bloco 2,
+nenhum trecho em inglês sobrou, 4 diagramas TikZ renderizados como SVG
+com proporções plausíveis). **Limpeza:** o agente deixou `notas.html`,
+`slides.html` e um `.gitignore` residuais direto em `aula04/` (deveriam
+existir só em `_site/`, como em toda outra aula do projeto) — removidos.
+**Achado importante, fora do escopo desta aula:** o `quarto render`
+do projeto inteiro está **quebrado agora** por um symlink circular real
+em `publications/mraimundo/best-practices-for-responsible-machine-learning-in-credit-sc.qmd`
+(aponta para `../mraimundo/` do próprio diretório, resolvendo pra si
+mesmo — confirmado com `readlink -f`, não é falso positivo). Os
+arquivos correspondentes em `publications/ahmoliveira/` aparecem como
+modificados no `git status`, sinal de que outra sessão está com
+trabalho em andamento ali — não toquei nesses arquivos. Isso bloqueia
+qualquer `quarto render` na raiz do projeto até ser corrigido (por
+quem estiver com esse trabalho em andamento), incluindo o preview
+automático do site. Vale avisar o usuário.
+
+## Aulas 5–16
 
 Não iniciadas.

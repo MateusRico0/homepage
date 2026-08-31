@@ -150,6 +150,26 @@ def find_lesson_files(discipline_filter=None):
     return lessons
 
 
+def find_discipline_index_files():
+    # teaching/<disciplina>/index.qmd (a página pública do curso, uma por
+    # disciplina) — não confundir com teaching/<disciplina>/aulaNN/index.qmd
+    # (find_lesson_files acima). Usado só quando toc-accordion.js muda: esse
+    # script também roda nessas páginas agora (relocaliza o link do ícone
+    # do PDD pra dentro de .quarto-title-meta, igual faz com Slides/Lista de
+    # aulas nas aulas), então uma mudança nele precisa re-renderizá-las.
+    files = []
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        dirnames[:] = [
+            d for d in dirnames if d not in EXCLUDE_DIRS and not d.startswith(".")
+        ]
+        if "index.qmd" not in filenames:
+            continue
+        rel_dir = os.path.relpath(dirpath, ROOT).replace(os.sep, "/")
+        if re.match(r"^teaching/[^/]+$", rel_dir):
+            files.append(os.path.join(dirpath, "index.qmd"))
+    return files
+
+
 def run_render(cmd):
     # Mesma falha intermitente de fim-de-render já observada com
     # `quarto render` neste projeto (ver deploy.sh) — tenta de novo antes
@@ -241,8 +261,14 @@ def plan_and_render(changed):
         p for p in remaining if os.path.basename(p) not in LESSON_ONLY_GLOBAL_FILES
     ]
 
+    # toc-accordion.js também roda nas páginas de disciplina (índice do
+    # curso), não só nas aulas — ver find_discipline_index_files(). Checa
+    # o basename ANTES do filtro de LESSON_ONLY_GLOBAL_FILES acima, que já
+    # tirou o arquivo de `remaining` nesse ponto.
+    needs_discipline_index = "toc-accordion.js" in basenames
+
     lesson_targets = set(find_lesson_files()) if needs_all_lessons else set()
-    other_targets = []
+    other_targets = find_discipline_index_files() if needs_discipline_index else []
 
     for p in remaining:
         rel = os.path.relpath(p, ROOT).replace(os.sep, "/")

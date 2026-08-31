@@ -706,3 +706,231 @@ aparecer um trecho que genuinamente destoe do Outside-In (não
 encontrado nesta revisão, que leu as aberturas mas não as ~2000+ linhas
 completas de cada aula), avaliar como um ajuste pontual separado, não
 como reescrita geral.
+
+## Fechamento de gaps pontuais da Aula 4 (2026-08-28)
+
+Auditoria detalhada já feita apontou 5 lacunas específicas na Aula 4,
+fechadas nesta sessão sem tocar no resto da aula já aprovada:
+
+- **Estratégia Pedagógica ausente em `_00-plano-aula.md`** — corrigido.
+  Diferente das Aulas 1–3 (modelos/algoritmos concretos), o objeto desta
+  aula é um *procedimento* (avaliar e escolher modelos), sem encaixe
+  óbvio nas duas categorias do `CLAUDE.md`. Decisão, lendo a abertura
+  real do `index.qmd`: **Estratégia A** — a aula abre mostrando primeiro
+  o resultado empírico (curva de acurácia treino/teste por profundidade)
+  e só depois formaliza $\hat R(\theta)$ vs. $R(\theta)$, a mesma lógica
+  prático-antes-do-formal do Outside-In, ainda que o objeto de estudo em
+  si não seja um modelo específico.
+- **Duas Pausas Ativas inteiras faltando, adicionadas** — os blocos
+  "Train/Validation/Test, e o Pecado de Espiar" e "Escolhendo k: Viés e
+  Variância do Próprio Estimador" não tinham nenhuma pausa. Criadas
+  seguindo exatamente o padrão já usado no resto do arquivo (pergunta
+  motivadora compartilhada + V/F de 4 itens no slide + slide de
+  Resposta), cada item nascendo de uma das quatro heurísticas
+  (contrafactual, limite, transferência de domínio, falsa dicotomia) —
+  nenhum item duplica, nem em conteúdo nem em heurística/domínio, os
+  itens já usados nos 12 blocos de V/F da seção de Exercícios da mesma
+  aula.
+- **`aula04/_03-respostas-pausas.md` criado** (não existia) — discussão
+  da pergunta motivadora + solução em `✔`/`✗` das 7 pausas ativas da
+  aula (as 5 já existentes mais as 2 novas), mesmo padrão de
+  `aula02/_03-respostas-pausas.md`.
+- **Fórmula da variância do Bootstrap, ausente do `index.qmd`,
+  adicionada** — a Fonte 6 de `_01-fontes.md` já citava
+  $\widehat{\mathrm{Var}}[S(Z)] = \frac{1}{B-1}\sum_b(S(Z^{*b})-\bar
+  S^*)^2$ como pedagogicamente relevante, mas a aula pulava direto para
+  o código do IC percentílico. Adicionada nas notas e no slide "Bootstrap:
+  a Ideia", com a premissa explícita ("para $B$ grande, os percentis
+  empíricos aproximam os percentis da verdadeira distribuição amostral de
+  $S$") logo antes do código que gera as réplicas, no estilo
+  premissa-depois-passo já usado no resto do arquivo.
+- **Duas lacunas de paridade notas/slides corrigidas**: (a) o achado de
+  que o 10-fold variou *mais* entre repetições do que o 5-fold (contra
+  a tendência teórica) estava só nas notas — adicionado como fragmento
+  no slide "k-fold Varia com a Partição — LOOCV Não"; (b) a narração dos
+  3 passos do "jeito errado" de fazer CV (selecionar 100 atributos com
+  toda a amostra → treinar 1-NN → validar por CV) estava só nas notas —
+  adicionada como fragmento no slide "O Experimento do ESL: Rótulo é
+  Ruído Puro", para que quem só tenha acesso ao slide reconstrua o
+  mecanismo do vazamento sem precisar das notas.
+- Revalidado com `quarto render --to html` e `--to revealjs`, sem erro
+  nem warning de div; balanço de divs (`:::`) conferido por script
+  próprio (LIFO real, não "casamento por tamanho em qualquer posição da
+  pilha"); `grep` no HTML/slides renderizados confirma zero `<input
+  type="checkbox">`, os 7 pares Pergunta/Resposta (incluindo os 2
+  novos), e a fórmula da variância do Bootstrap presente nos dois
+  formatos.
+
+## Rebuild de conformidade das 4 aulas, a pedido do usuário ("refaça todas as aulas de supervised") (2026-08-30)
+
+Pedido: reler toda a disciplina sob a estrutura atual do `../CLAUDE.md`
+(que evoluiu bastante ao longo desta sessão — Estratégia A/B, fase
+Intuição, glifos `□`/`✔`/`✗`, paridade notas/slides, `.fig-resize`,
+regra de slide vazio) e trazer todas as 4 aulas à conformidade. Rodada
+de auditoria (4 agentes em paralelo, um por aula, cada um lendo o
+`CLAUDE.md` inteiro e a aula inteira, e efetivamente renderizando para
+achar avisos de div escondidos) revelou não só desvios de formato como
+dois problemas de conteúdo genuinamente sérios — detalhados abaixo por
+aula.
+
+### Aula 1
+
+- **Bug crítico: texto de resposta de IA vazado no meio das notas.**
+  A frase "Aqui está o trecho com a formatação original em Markdown,
+  sem as tags do LaTeX, pronto para você substituir no seu documento
+  Quarto:" estava literalmente dentro do bloco HTML de "Densidade vs.
+  Probabilidade", renderizando ao vivo no `notas.html`. Removida.
+- **`.fig-resize`**: 0 das 16 figuras estava envolvida — todas
+  corrigidas.
+- **Exercícios**: formato antigo (`callout-tip` + `a. ( )`) trocado
+  para `callout-note icon=false` + `- □`, mantendo os 3 discursivas +
+  48 itens de V/F já corretos em conteúdo.
+- **4 pausas ativas em formato obsoleto** (`a./b./c./d.` +
+  `**Verdadeiro**` em texto) convertidas para `□`/`✔`/`✗`.
+- **5 pausas ativas inteiras faltando, adicionadas**: "Por que a
+  evidência some da comparação" (Bayes), "Das três saídas honestas
+  para o Tipo II indefinido" (o ponto central da aula — antes sem
+  nenhuma checagem), "Custo assimétrico", "A curva ROC não escolhe o
+  limiar por você", "Opção de rejeição" — 20 novos itens de V/F, cada
+  um nascendo de uma das 4 heurísticas, ancorados no conteúdo real de
+  cada bloco.
+- **Roteiro explícito ausente na Abertura** — a aula citava só uma
+  pergunta de abertura; adicionadas as 4 perguntas que de fato guiam a
+  aula (notas e slides).
+- **4 lacunas de paridade notas/slides**: exemplo numérico do
+  Jacobiano ($y=x^2$), robustez da $t$ de Student vs. Gaussiana, aviso
+  de leitura do PRML §2.1.1 (Beta como priori vs. como dado), e a
+  fórmula de Smithson–Verkuilen — todos estavam só nas notas, agora
+  também nos slides.
+- **`_03-respostas-pausas.md` criado** (não existia) — as 9 pausas
+  ativas da aula (4 já existentes + 5 novas), cada uma com discussão da
+  pergunta motivadora e resolução em `✔`/`✗`.
+- **`_02-solucoes.md` reestruturado**: formato antigo (`**a.** [ ]
+  texto` sem campo `Afirmação`) trocado pelo template exato do
+  `CLAUDE.md` (`### Tema — item (a)`, com `**Afirmação:** ✔/✗ texto`
+  explícito) — mesmo conteúdo de heurística/justificativa, só o
+  invólucro corrigido.
+
+### Aula 2
+
+- **Bloco 4 inteiro estava faltando** ("O preço da suposição de
+  independência" — o próprio plano da aula chamava esse bloco de "o
+  mais importante pedagogicamente"). As funções auxiliares para ele
+  (`ajustar_gaussiana_plena`, `ajustar_gaussiana_naive`,
+  `log_razao_posteriori`, `acuracia`) já existiam no chunk de setup,
+  nunca chamadas em lugar nenhum — sinal de que o bloco foi planejado e
+  nunca escrito. Reconstruído do zero, com **dado real** (Breast Cancer
+  Wisconsin, `smoothness_mean`/`concavity_mean` — a aula não usava
+  nenhum dataset real antes desta correção, contra a regra do
+  `CLAUDE.md`): ajuste de Gaussiana plena vs. Naive Bayes gaussiano
+  (covariância diagonal) nos mesmos dois atributos reais, elipses de
+  covariância lado a lado (mostrando a suposição de independência como
+  geometria, não só fórmula), comparação de acurácia (87,0% vs. 85,4%
+  — números verificados por script antes de escrever a aula), e a
+  citação do PRML §8.2.2 p. 381 (traduzida) que já estava resolvida em
+  `_01-fontes.md` desde uma rodada anterior desta sessão ("classifica
+  bem, estima mal" — dispensa citar Domingos & Pazzani formalmente).
+  Termina com pausa ativa própria.
+- **Promessa não cumprida, cumprida**: o Bloco 3 prometia "o Bloco de
+  teoria da decisão vai mostrar que [o log-razão] é linear em
+  $\mathbf{x}$, e por que isso não é coincidência" — essa derivação
+  nunca existia em lugar nenhum do arquivo. Adicionado um bloco novo,
+  "Quando o Log-Razão é Linear em $\mathbf{x}$", com Premissas (duas
+  Gaussianas com $\Sigma$ **compartilhada** entre classes) e
+  desenvolvimento passo a passo mostrando o cancelamento dos termos
+  quadráticos, concluindo no discriminante linear
+  $\mathbf{w}=\Sigma^{-1}(\boldsymbol\mu_A-\boldsymbol\mu_B)$ — e
+  conectando explicitamente com o Naive Bayes binário do Bloco 3 (chega
+  no mesmo tipo de fronteira por um caminho totalmente diferente, sem
+  nenhuma suposição sobre $\Sigma$) e com a ressalva de que
+  $\Sigma_A\ne\Sigma_B$ (o caso do próprio Bloco 4) quebra a
+  linearidade.
+- **`.fig-resize`, glifos de pausa/Exercícios, `_02-solucoes.md`**:
+  mesmas correções mecânicas da Aula 1 (7 figuras envolvidas; 3 pausas
+  antigas + Exercícios convertidos para `□`/`✔`/`✗`; `_02-solucoes.md`
+  reestruturado).
+
+### Aula 3
+
+Auditoria completa já rodou (achados: falta pausa ativa fechando a
+Abertura; **zero** ocorrências de `□`/`✔`/`✗` em toda a aula — todas as
+7 pausas e os 12 blocos de Exercícios em formato antigo; 5 das 7 pausas
+existem só nos slides, nunca nas notas, contra a regra "pausas ficam em
+ambos"; ~13 chunks de figura/TikZ sem `.fig-resize`, com pelo menos 6
+pares de código **duplicado** entre HTML e RevealJS gerando a mesma
+figura duas vezes; um passo de derivação faltando na conexão
+entropia/log-verossimilhança da classificação, inconsistente com o
+mesmo bloco já demonstrado passo a passo para regressão; `MedInc`/
+`HouseAge`/`MedHouseVal` explicados nas notas mas não no slide). Glifos
+de pausa/Exercícios e `_02-solucoes.md` já corrigidos mecanicamente;
+correção dos demais itens (dedup de código, passo de derivação faltante,
+mover pausas para as notas, paridade de variável) ainda em andamento.
+
+**Atualização (2026-08-30) — os demais achados da auditoria corrigidos:**
+
+- **Pausa ativa faltando na Abertura**: adicionada ao final do bloco
+  (pergunta motivadora + V/F de 4 itens, ancorados no argumento de
+  abertura — forma fixa vs. forma que emerge dos dados — pelas 4
+  heurísticas do `CLAUDE.md`; resposta só no slide, como o resto da
+  aula).
+- **5 pausas que existiam só nos slides movidas para as notas**
+  (paramétrico vs. não-paramétrico; variância da folha de regressão;
+  por que a folha `LR` vence o quinto corte; entropia própria vs.
+  informação mútua; critério de parada da poda): a pergunta motivadora
+  e o bloco de V/F de cada uma agora ficam **fora** do wrapper
+  `content-visible when-format="revealjs"` (compartilhados, aparecem
+  em notas e slides); só o slide de "— Resposta" continua exclusivo do
+  RevealJS, sem solução nas notas — mesmo padrão das 2 pausas que já
+  estavam corretas na aula (Diagnóstico dois splits; limites
+  estruturais).
+- **6 pares de código Python duplicado, unificados em um chunk
+  compartilhado cada** (busca exaustiva pelo limiar; ajuste da árvore
+  de regressão na senoide, 3 painéis; barras $I(G;\mathcal C)$ vs.
+  $I(W;\mathcal C)$; curva de entropia/Gini; caminho de poda por
+  custo-complexidade; fronteira diagonal com profundidade 1/3/8) —
+  cada figura agora é gerada uma única vez, num bloco `.fig-resize`
+  sem wrapper de formato, posicionado entre o texto/bullets de cada
+  formato (padrão A/B/C do `CLAUDE.md`), no lugar de recalcular a
+  mesma figura duas vezes (uma vez descartada no HTML, outra no
+  RevealJS).
+- **Todos os chunks de figura/TikZ envolvidos em `.fig-resize`**
+  (sweep final: `grep plt.show()`/`grep {.tikz}` contra `grep
+  fig-resize` — zero chunks de figura sem wrapper).
+- **Passo de derivação faltante na conexão entropia/log-verossimilhança
+  (classificação)**: a derivação saltava direto de "MLE categórico" para
+  $\ell_\tau(\hat p_\tau)=-N_\tau H(\hat p_\tau)$. Reescrita com os
+  mesmos passos explícitos numerados do bloco de regressão: Premissa
+  (categórica com restrição $\sum_k p_{\tau k}=1$) → Lagrangiano →
+  derivada igualada a zero → uso da restrição para achar $\hat
+  p_{\tau k}=n_{\tau k}/N_\tau$ → substituição de volta na
+  log-verossimilhança até $-N_\tau H(\hat p_\tau)$ — em notas (por
+  extenso) e slides (mesmos passos, comprimidos em fragments).
+- **Paridade notas/slides do California Housing**: o slide "Dados
+  Reais: California Housing" só listava `MedInc`/`HouseAge` pelo nome;
+  adicionadas as explicações que já estavam nas notas (`MedInc` = renda
+  mediana da região, em dezenas de milhares de dólares; `HouseAge` =
+  idade mediana dos imóveis, em anos) e o alvo `MedHouseVal` (preço
+  mediano, em \$100 mil), que o slide não mencionava.
+- **Validação**: checagem de balanceamento de divs por pilha (LIFO,
+  não por contagem de `:`) limpa antes e depois de cada lote de edição;
+  `quarto render --to html` e `--to revealjs` sem nenhum aviso de `Div
+  ... unclosed`; `notas.html` com zero `<input type="checkbox"`,
+  seção "Exercícios" presente, e as 6 perguntas de pausa ativa
+  (a nova da Abertura + as 5 movidas) confirmadas presentes no HTML das
+  notas via grep.
+
+### Aula 4
+
+Ver entradas imediatamente acima desta seção — Estratégia Pedagógica
+declarada, 2 pausas ativas faltando adicionadas, `_03-respostas-pausas.md`
+criado, fórmula da variância do Bootstrap adicionada, 2 lacunas de
+paridade corrigidas. `_02-solucoes.md` também reestruturado para o
+template atual (`### Tema — item (a)` com `**Afirmação:** ✔/✗`).
+
+## Aula 4 finalizada (2026-08-30)
+
+Após a rodada de conformidade acima, `../index.qmd` atualizado: entrada
+da Lesson 4 trocada de texto plano para link (`[**Lesson 4: Model
+Selection and Resampling Techniques**](./aula04/index.qmd)`), mesmo
+formato das Lessons 1–3. Aula 4 está, portanto, completa e publicada
+no planejamento do semestre.
