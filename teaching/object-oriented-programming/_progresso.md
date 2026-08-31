@@ -309,6 +309,75 @@ candidato: o `homepage-preview.service` persistente), não algo
 introduzido por esta sessão — não precisa de reversão nem investigação
 específica desta disciplina.
 
+## Auditoria de conformidade com o `CLAUDE.md` atual — Aulas 1–8 (2026-08-31)
+
+A pedido do usuário ("revise todas as aulas de orientação a objetos sob
+o novo claude.md"), auditei e corrigi as 8 aulas já construídas contra
+as regras atuais do `CLAUDE.md` (essa disciplina foi construída sob uma
+versão anterior das regras). Trabalho feito via 4 agentes em paralelo
+(2 aulas cada), com verificação independente minha depois de cada um.
+
+**Gaps encontrados, uniformes nas 8 aulas:**
+1. Pausas ativas: o V/F condutor (4 itens) estava isolado só nos slides
+   (deveria aparecer igual nas notas) e usava `a./b./c./d.` sem glifo;
+   a Resposta usava `**Verdadeiro**`/`**Falso**` em vez de `✔`/`✗`.
+2. Exercícios: os 12 blocos de V/F usavam `callout-tip` + `a. ( )` em
+   vez de `callout-note icon=false` + `- □`.
+3. Nenhuma aula tinha `_02-solucoes.md` nem `_03-respostas-pausas.md`.
+4. Aulas 1–2 (únicas com diagramas TikZ): dimensionamento via atributos
+   de fence (`{.tikz .nostretch .center width="N%"}`), que não têm
+   efeito nenhum — corrigido para o wrapper `.fig-resize` (mesmo
+   mecanismo real já usado nas outras disciplinas do site).
+
+**Correção:** todos os 4 pontos acima corrigidos nas 8 aulas,
+preservando o código Java e o conteúdo pedagógico original. Vários
+itens de V/F que eram paráfrase quase literal de uma definição da aula
+(proibido pelo `CLAUDE.md`) foram reescritos para nascer de uma das 4
+heurísticas exigidas (Contrafactual, Limite, Transferência, Falsa
+dicotomia) — ver os `_progresso.md` por aula (entradas anteriores desta
+sessão) para o antes/depois de cada rewrite.
+
+**Falhas de sessão durante o processo:** os 4 agentes atingiram o
+limite de sessão (reset 4:10am) antes de terminar completamente —
+retomei manualmente o que faltava: 2 itens de V/F faltantes em
+`aula02/_02-solucoes.md` (bloco "Estado, Comportamento e Identidade
+(revisitados)", itens c/d) e o arquivo `aula04/_03-respostas-pausas.md`
+inteiro (nunca chegou a ser criado). `aula03/_03-respostas-pausas.md`
+parecia truncado por ter poucas linhas (33, vs. ~100 nas outras) mas
+na verdade estava completo — só era mais denso (menos linhas em
+branco); falso alarme, não precisou de correção.
+
+**Bug no meu próprio checador de balanceamento de `:::`:** a versão
+usada nas sessões anteriores só reconhecia abertura de div com chaves
+(`::: {.classe}`), não a forma abreviada do Pandoc sem chaves (`:::
+columns`) — isso gerou um falso positivo de erro de balanceamento em
+`aula02/index.qmd` (linha 496). Corrigido o checador para tratar
+qualquer `:::` seguido de conteúdo não-vazio como abertura,
+independente de chaves; reconfirmado zero erros reais nas 8 aulas.
+
+**Achado de infraestrutura, não específico desta auditoria:** os
+arquivos `notas.html`/`slides.html` aparecem e desaparecem sozinhos
+direto nas pastas `aulaNN/` (fora de `_site/`) — confirmado que não são
+produzidos pelos meus comandos `quarto render` (que sempre escrevem em
+`_site/`); é algum processo de preview em segundo plano específico
+desta disciplina, pré-existente a esta sessão. Não removido — parece
+ser parte do fluxo de trabalho local do professor para esta disciplina
+especificamente (diferente das outras 4 disciplinas do site, que não
+têm esse comportamento).
+
+**Validação final (sessão supervisora, independente dos 4 agentes):**
+render completo (`--to html` e `--to revealjs`) das 8 aulas, checado
+imediatamente após cada render para evitar corrida com o processo de
+preview em segundo plano — zero erros/warnings relevantes. Balanço de
+`:::` limpo nas 8 aulas (checador corrigido). `grep`
+`☐|☒|- \[ \]|- \[x\]|( )` limpo em todos os `index.qmd`,
+`_02-solucoes.md` e `_03-respostas-pausas.md`. Contagem de `□`
+confirmada em `_site/`: 60 por aula nas notas (48 exercícios + 12
+pausas), 12 nos slides (só pausas — Exercícios é exclusivo de notas,
+como o `CLAUDE.md` exige); `✔`/`✗` confirmados só nos slides (12 por
+aula), zero nas notas, nas 8 aulas. 48/48 entradas em cada
+`_02-solucoes.md` confirmadas.
+
 ## Aulas 9–12+ (numeração provisória)
 
 Não iniciadas. Cada uma deve ser conferida contra o `Teoria/Aula N.tex`

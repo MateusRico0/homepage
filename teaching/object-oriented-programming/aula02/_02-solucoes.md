@@ -26,6 +26,26 @@
 
 **Justificativa:** A API de reflection permite obter um `Field`, chamar `setAccessible(true)` e escrever diretamente no atributo, ignorando qualquer método da classe. Isso comprova que o encapsulamento em Java é uma garantia de nível de linguagem/API (respeitada pelo compilador e pelo acesso "normal" ao código), não uma restrição absoluta e inquebrável imposta pela JVM em tempo de execução. Quem responde que reflection "não deveria funcionar porque o campo é private" confunde a barreira de compilação com uma barreira de execução.
 
+### Estado, Comportamento e Identidade (revisitados) — item (c)
+
+**Heurística:** Falsa dicotomia
+
+**Afirmação:** Dois objetos com Estado idêntico são sempre a mesma Identidade física na Heap.
+
+**Resposta:** Falso
+
+**Justificativa:** Estado (o conjunto de valores dos atributos) e Identidade (a referência/endereço na Heap que distingue um objeto de outro) são conceitos ortogonais. Dois objetos `Produto("TV", 50.0)` criados por dois `new` distintos têm Estado idêntico, mas são duas instâncias diferentes, em endereços diferentes — mudar o Estado de um não afeta o outro. Quem responde Verdadeiro está tratando "igualdade de estado" (o que `equals()` compara) como se fosse "igualdade de identidade" (o que `==` compara), a mesma confusão que motiva a distinção `equals()`/`==` em Java.
+
+### Estado, Comportamento e Identidade (revisitados) — item (d)
+
+**Heurística:** Limite
+
+**Afirmação:** A Identidade é garantida pela JVM no momento em que o objeto é instanciado via `new`.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** No instante em que `new` executa, a JVM aloca um espaço na Heap e atribui a esse espaço um endereço/referência único, que passa a ser a Identidade do objeto por toda a sua vida — mesmo que, depois, seu Estado mude completamente (todos os atributos sejam reescritos), a Identidade original persiste até o objeto se tornar inalcançável. É esse instante de alocação, não qualquer atributo ou valor, que fixa a Identidade.
+
 ### Struct Passivo vs. Agente Ativo — item (a)
 
 **Heurística:** Falsa dicotomia
