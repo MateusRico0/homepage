@@ -27,6 +27,12 @@ Modos de linha de comando (usados por site-manager.sh):
   python3 preview-watch.py --once     # um único render incremental (desde o último) e sai, sem servidor
   python3 preview-watch.py --render-all  # um render completo forçado e sai, sem servidor
 
+--once e --render-all cooperam com um serviço --watch já rodando em vez de
+falhar ou disputar um segundo `quarto render`: pedem o render (incremental
+ou completo, respectivamente) AO serviço já de pé, via sentinela
+(.render-once / .render-all — ver request_from_running_service()), e só
+retornam depois que ele termina.
+
 Ctrl+C encerra o servidor e a observação juntos (modo live).
 """
 import fcntl
@@ -46,6 +52,7 @@ PORT = int(os.environ.get("PREVIEW_PORT", "2222"))
 LOCK_PATH = os.path.join(ROOT, ".preview-watch.lock")
 LAST_RENDER_MARKER = os.path.join(ROOT, ".last-render")
 RENDER_ALL_TRIGGER = ".render-all"
+RENDER_ONCE_TRIGGER = ".render-once"
 
 # Diretórios nunca observados: saída do próprio build (_site), cache de
 # execução (_freeze), extensões pandoc (raramente mudam), e as pastas de
@@ -109,10 +116,10 @@ def snapshot():
             # própria convenção do Quarto — ver teaching/CLAUDE.md) — sem
             # excluir, o próprio render regenerava esses arquivos e o
             # watcher se via disparando outro render sozinho.
-            if fn.startswith("_") and fn != RENDER_ALL_TRIGGER:
+            if fn.startswith("_") and fn not in (RENDER_ALL_TRIGGER, RENDER_ONCE_TRIGGER):
                 continue
             ext = os.path.splitext(fn)[1]
-            if fn != RENDER_ALL_TRIGGER and ext not in WATCH_EXTS:
+            if fn not in (RENDER_ALL_TRIGGER, RENDER_ONCE_TRIGGER) and ext not in WATCH_EXTS:
                 continue
             if ext == ".html" and fn not in HTML_PARTIALS:
                 # .html solto na árvore-fonte nunca é editado à mão neste
@@ -235,6 +242,23 @@ def plan_and_render(changed):
     changed = list(changed)
     basenames = {os.path.basename(p) for p in changed}
 
+    if RENDER_ONCE_TRIGGER in basenames:
+        log(f"🔄 {RENDER_ONCE_TRIGGER} tocado — render incremental pedido explicitamente.")
+        sentinel_path = os.path.join(ROOT, RENDER_ONCE_TRIGGER)
+        # exclude=... evita que o snapshot() interno de
+        # run_incremental_since_marker() veja a própria sentinela (ainda
+        # no disco neste ponto) como "mudada" e reentre neste mesmo
+        # bloco — ver o docstring do parâmetro. A sentinela só é apagada
+        # DEPOIS que o render termina (não antes), pra
+        # request_render_once_from_running_service() continuar esperando
+        # até o render de verdade acabar, e não só até a sentinela sumir.
+        ok = run_incremental_since_marker(exclude={sentinel_path})
+        try:
+            os.remove(sentinel_path)
+        except OSError:
+            pass
+        return ok
+
     if RENDER_ALL_TRIGGER in basenames:
         log(f"🔄 {RENDER_ALL_TRIGGER} tocado — render completo pedido explicitamente.")
         ok = render_full()
@@ -311,18 +335,19 @@ def plan_and_render(changed):
 def watch_loop():
     log("👀 observando mudanças no projeto (Ctrl+C encerra tudo)...")
     prev = snapshot()
-    sentinel = os.path.join(ROOT, RENDER_ALL_TRIGGER)
-    if sentinel in prev:
-        # A sentinela já existia antes deste primeiro snapshot (ex.:
-        # alguém pediu --render-all bem durante o render de startup
-        # deste serviço, que roda ANTES do watch_loop existir — pode
-        # levar bem mais que POLL_INTERVAL num projeto deste tamanho).
-        # Sem este check, ela já nasce "de sempre" no baseline acima e
-        # o diff de mtime nunca a veria como mudança — quem pediu o
-        # render-all ficaria esperando pra sempre.
-        log(f"🔄 {RENDER_ALL_TRIGGER} já estava pendente antes deste serviço começar a observar — processando agora.")
-        plan_and_render([sentinel])
-        prev = snapshot()
+    for trigger in (RENDER_ALL_TRIGGER, RENDER_ONCE_TRIGGER):
+        sentinel = os.path.join(ROOT, trigger)
+        if sentinel in prev:
+            # A sentinela já existia antes deste primeiro snapshot (ex.:
+            # alguém pediu --render-all/--render bem durante o render de
+            # startup deste serviço, que roda ANTES do watch_loop existir
+            # — pode levar bem mais que POLL_INTERVAL num projeto deste
+            # tamanho). Sem este check, ela já nasce "de sempre" no
+            # baseline acima e o diff de mtime nunca a veria como
+            # mudança — quem pediu ficaria esperando pra sempre.
+            log(f"🔄 {trigger} já estava pendente antes deste serviço começar a observar — processando agora.")
+            plan_and_render([sentinel])
+            prev = snapshot()
     while True:
         time.sleep(POLL_INTERVAL)
         cur = snapshot()
@@ -388,17 +413,26 @@ def try_acquire_lock():
     return lock_file
 
 
-def run_incremental_since_marker():
+def run_incremental_since_marker(exclude=frozenset()):
     """Usado por --once e pelo arranque do modo live: renderiza só o que
     mudou desde o último render bem-sucedido (marcador .last-render). Sem
     marcador (primeira vez), não há como saber o que mudou — faz um
-    render completo e cria o marcador."""
+    render completo e cria o marcador.
+
+    `exclude` existe só pro caso do RENDER_ONCE_TRIGGER em
+    plan_and_render(): a sentinela .render-once ainda está no disco nesse
+    ponto (só é apagada depois que o render termina, pra manter o
+    contrato de request_render_once_from_running_service() de esperar o
+    render de verdade acabar) — sem excluí-la aqui, o snapshot() abaixo a
+    veria como "mudada" e reentraria em plan_and_render() com ela de
+    novo, infinitamente (RecursionError visto ao vivo antes deste
+    parâmetro existir)."""
     if not os.path.exists(LAST_RENDER_MARKER):
         log("🚀 sem .last-render (primeira vez) — render completo inicial...")
         return render_full()
     marker_time = os.path.getmtime(LAST_RENDER_MARKER)
     cur = snapshot()
-    changed = [p for p, mtime in cur.items() if mtime > marker_time]
+    changed = [p for p, mtime in cur.items() if mtime > marker_time and p not in exclude]
     if not changed:
         log("✅ nada mudou desde o último render — nada a fazer.")
         touch_marker()
@@ -407,18 +441,19 @@ def run_incremental_since_marker():
     return plan_and_render(changed)
 
 
-def request_render_all_from_running_service(timeout=1200):
-    """Usado por --render-all quando a trava já está com outro processo
-    (o serviço --watch, presumivelmente): em vez de competir por um
-    segundo `quarto render`, pede o render completo AO serviço já
-    rodando, tocando a sentinela .render-all — o watch_loop dele
-    detecta no próximo poll (até POLL_INTERVAL de atraso), interrompe a
-    escuta pra rodar o render completo, e volta a escutar sozinho
-    depois (ver o bloco RENDER_ALL_TRIGGER em plan_and_render()). Essa
-    função só espera esse ciclo terminar, pra manter o mesmo contrato
-    de antes pra quem chama (ex.: site-manager.sh): só retorna depois do
-    render terminar, com sucesso/falha refletido no código de saída."""
-    sentinel = os.path.join(ROOT, RENDER_ALL_TRIGGER)
+def request_from_running_service(trigger, description, timeout=1200):
+    """Usado por --once e --render-all quando a trava já está com outro
+    processo (o serviço --watch, presumivelmente): em vez de competir por
+    um segundo `quarto render`, pede o render (incremental ou completo,
+    conforme `trigger`) AO serviço já rodando, tocando a sentinela
+    correspondente — o watch_loop dele detecta no próximo poll (até
+    POLL_INTERVAL de atraso), interrompe a escuta pra atender o pedido, e
+    volta a escutar sozinho depois (ver os blocos RENDER_ONCE_TRIGGER/
+    RENDER_ALL_TRIGGER em plan_and_render()). Essa função só espera esse
+    ciclo terminar, pra manter o mesmo contrato de antes pra quem chama
+    (ex.: site-manager.sh): só retorna depois do render terminar, com
+    sucesso/falha refletido no código de saída."""
+    sentinel = os.path.join(ROOT, trigger)
     t0 = time.time()
     open(sentinel, "w").close()
     waited = 0.0
@@ -429,8 +464,16 @@ def request_render_all_from_running_service(timeout=1200):
         time.sleep(2)
         waited += 2
     ok = os.path.exists(LAST_RENDER_MARKER) and os.path.getmtime(LAST_RENDER_MARKER) >= t0
-    log("✅ render completo concluído pelo serviço." if ok else "❌ render completo falhou no serviço — confira o log dele.")
+    log(f"✅ {description} concluído pelo serviço." if ok else f"❌ {description} falhou no serviço — confira o log dele.")
     return ok
+
+
+def request_render_once_from_running_service(timeout=1200):
+    return request_from_running_service(RENDER_ONCE_TRIGGER, "render incremental", timeout)
+
+
+def request_render_all_from_running_service(timeout=1200):
+    return request_from_running_service(RENDER_ALL_TRIGGER, "render completo", timeout)
 
 
 def main_watch():
@@ -458,8 +501,8 @@ def main_watch():
 def main_once():
     lock = try_acquire_lock()
     if lock is None:
-        log("ℹ️  serviço --watch já rodando — ele mantém o site sempre atualizado sozinho; nada a fazer aqui.")
-        sys.exit(0)
+        log("ℹ️  serviço --watch já rodando — pedindo a ele um render incremental (sem subir um segundo processo) e aguardando terminar...")
+        sys.exit(0 if request_render_once_from_running_service() else 1)
     ok = run_incremental_since_marker()
     sys.exit(0 if ok else 1)
 
