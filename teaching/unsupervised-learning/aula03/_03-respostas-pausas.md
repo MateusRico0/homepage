@@ -9,25 +9,31 @@
 > discutidos aqui — ficam para o aluno resolver por conta, com
 > justificativa disponível só ao professor em `_02-solucoes.md`.)
 
-## Voronoi convexo e o que precisa mudar na definição de cluster
+## Densidade x grupo: a paisagem já resolve o problema sozinha?
 
-Aumentar $K$ não escapa da convexidade — cada fragmento de Voronoi
-continua convexo, então uma lua inteira nunca vira uma única célula,
-só um mosaico de pedaços convexos que a aproxima visualmente sem nunca
-ser "um cluster" no sentido de rótulo único. Trocar a métrica (por
-exemplo, para $L_1$) também não resolve: as bolas de Voronoi mudam de
-forma (losangos em vez de círculos), mas continuam convexas. O que
-precisa mudar é a própria definição: trocar "perto de um centro fixo"
-por "conectado por uma trilha de densidade alta" — que não impõe
-convexidade nenhuma, porque dois pontos podem estar geometricamente
-distantes e ainda pertencerem ao mesmo cluster, desde que exista um
-caminho de densidade alta ligando os dois. É exatamente a tese central
-formalizada no Bloco 3.
+Não: um limiar fixo $\lambda$ sobre $p(\mathbf{x})$ diz quais pontos
+estão "acima" da linha, mas não diz, por si só, quais desses pontos
+formam a mesma componente conectada — isso exige um passo algorítmico
+a mais (determinar conectividade), que é exatamente o que o resto da
+aula constrói (conjuntos de nível, grafo de alcançabilidade mútua,
+MST, árvore condensada). Ordenar os pacientes por densidade estimada e
+cortar a lista ao meio também não basta, pelo mesmo motivo: densidade
+alta não garante coerência espacial — nada impede que os pontos mais
+densos estejam espalhados em duas concentrações bem separadas, não uma
+massa única. Por outro lado, se a paisagem inteira fosse uma única
+crista sem nenhum vale separando regiões, não haveria estrutura de
+cluster genuína a recuperar — qualquer partição imposta seria
+arbitrária, já que não existe critério de densidade para justificá-la.
+A lógica de "componente conectada de densidade alta" transfere para
+qualquer domínio com concentrações bem separadas — por exemplo,
+detecção de fraude com dois golpes distintos, cada um formando sua
+própria concentração no espaço de atributos, mesmo sem nunca ter visto
+o rótulo do tipo de golpe.
 
-- ✗ Aumentar $K$ não escapa da convexidade — cada fragmento de Voronoi continua convexo.
-- ✔ Conectividade por densidade, não proximidade a um centro fixo, não impõe convexidade.
-- ✗ Trocar a métrica ($L_1$ em vez de $L_2$) não resolve — bolas de Voronoi em $L_1$ ainda são convexas.
-- ✔ Densidade-conectividade permite pontos geometricamente distantes no mesmo cluster, via caminho de alta densidade.
+- ✗ Um limiar sozinho diz quais pontos estão "acima" — não diz quais desses pontos formam a mesma componente conectada.
+- ✔ Sem vale nenhum separando regiões, não há estrutura de cluster genuína — qualquer corte imposto seria arbitrário.
+- ✗ Ordenar por densidade e cortar ao meio ignora conectividade espacial.
+- ✔ A lógica de componente conectada de alta densidade transfere para qualquer domínio com concentrações bem separadas.
 
 ## Vale raso entre duas montanhas
 
@@ -142,16 +148,17 @@ necessariamente tão confiável estatisticamente quanto o cluster puro de
 artefato do limiar, não estrutura real. A solução mais direta,
 sugerida já na Aula 2 e reaproveitável aqui, é reduzir a
 dimensionalidade antes de rodar o HDBSCAN, não só ajustar
-`min_cluster_size`. E o problema não é exclusivo do HDBSCAN: um K-means
-aplicado aos mesmos 30 atributos padronizados também sofre sua própria
-versão da maldição (distâncias ao centróide perdem significado
-geométrico em alta dimensão) — nenhum método baseado em distância
-escapa por completo.
+`min_cluster_size`. E o problema não é exclusivo de métodos baseados em
+densidade como o HDBSCAN: qualquer método de clustering baseado em
+distância entre pontos sofre sua própria versão da maldição —
+distâncias em geral (não só as baseadas em densidade) perdem
+significado geométrico relativo em alta dimensão — nenhum método
+baseado em distância escapa por completo.
 
 - ✔ Ataca o sintoma, não a causa — distâncias continuam sem poder discriminativo.
 - ✗ Um cluster que só aparece forçando `min_cluster_size` alto não é automaticamente tão confiável quanto o cluster puro do Bloco 6.
 - ✔ Reduzir dimensionalidade primeiro é a rota mais direta — a mesma lição da Aula 2.
-- ✗ K-means também sofre sua própria versão da maldição — nenhum método baseado em distância escapa por completo.
+- ✗ Nenhum método baseado em distância escapa por completo — o problema não é exclusivo de métodos baseados em densidade.
 
 ## Partição rígida ou probabilística?
 

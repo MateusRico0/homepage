@@ -40,26 +40,37 @@ dois anéis concêntricos) — uso explicitamente permitido pelo
 ## Plano de aula — Aula 3 (carga horária: ~120min)
 
 1. **Abertura — O que "cluster" deveria significar** (~15 min) —
-   Organizador prévio: a Aula 2 estimou densidade ponto a ponto; hoje
-   perguntamos o que fazer com essa densidade — como transformá-la em
-   grupos. Revisão rápida de $d_K(\mathbf{x})$. Roteiro explícito: (i)
-   por que "distância ao centróide" falha para formas arbitrárias; (ii)
-   o que é um cluster como conjunto de nível de densidade; (iii) como
-   construir isso com um grafo, sem escolher o número de clusters de
-   antemão; (iv) como decidir quais clusters são reais. Problema
-   motivador: mostrar (sem resolver ainda) um exemplo em que agrupar
-   pelos $k$ centróides mais próximos visivelmente corta um cluster
-   verdadeiro em pedaços errados. Pausa ativa fechando o bloco.
+   Organizador prévio: a Aula 1 assumiu forma paramétrica fixa para
+   $p(\mathbf{x})$; a Aula 2 abandonou essa forma fixa e estimou
+   densidade ponto a ponto ($d_K(\mathbf{x})$/KDE), respondendo "comum
+   ou raro?" — mas nunca "parecido com quem?". Hoje perguntamos o que
+   fazer com essa densidade — como transformá-la em grupos, sem impor
+   nenhuma forma às regiões (a mesma filosofia não-paramétrica, agora
+   aplicada a agrupamento em vez de estimação pontual). Roteiro
+   explícito: (i) o que exatamente deveria significar "cluster"; (ii)
+   como construir isso com um grafo, sem escolher o número de clusters
+   de antemão; (iii) que estrutura de grafo captura toda a hierarquia
+   de uma vez; (iv) como decidir quais clusters são reais. Problema
+   motivador: mostrar a paisagem de densidade (KDE, a mesma ferramenta
+   da Aula 2) sobre um exemplo sintético de duas luas entrelaçadas —
+   visivelmente duas cristas separadas por um vale — e apontar que essa
+   paisagem, sozinha, ainda não é uma partição em grupos. Pausa ativa
+   fechando o bloco, sobre a distância entre "ter uma paisagem de
+   densidade" e "ter uma partição em grupos".
 
 2. **Intuição — Vales e Montanhas, Não Bolas** (~12 min) — Preview
    gráfico e conceitual, antes de qualquer formalismo: densidade como
    uma "paisagem" (montanhas = regiões densas, vales = regiões raras);
    um cluster é uma montanha inteira, não importa a forma do seu
-   contorno. Mostrar lado a lado, no exemplo sintético de duas
-   lu­as/anéis: agrupamento por centróide (falha, corta ao meio) vs.
-   "andar sempre por terreno alto" (sucesso, cada lua/anel é um cluster
-   inteiro). Isso já entrega o resultado final; falta só nomear os
-   passos.
+   contorno. Argumento geométrico breve e autocontido (sem citar
+   nenhum algoritmo externo não coberto no curso): atribuir cada ponto
+   a um protótipo fixo mais próximo sempre gera regiões convexas
+   (interseção de semiespaços), então nenhuma quantidade de protótipos
+   recupera uma lua ou anel como cluster único. Mostrar, no exemplo
+   sintético de duas luas/anéis, o resultado de "andar sempre por
+   terreno alto" (HDBSCAN): cada lua/anel recuperado como um cluster
+   inteiro, $100\%$ de acurácia contra o rótulo verdadeiro. Isso já
+   entrega o resultado final; falta só nomear os passos.
 
 3. **Conjuntos de Nível de Densidade** (~10 min) — Formalizar
    $\{\mathbf{x} : p(\mathbf{x}) \ge \lambda\}$: para $\lambda$ alto,

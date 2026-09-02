@@ -9,19 +9,18 @@
 >   impressa 520 = página 539 do PDF (`pdftotext -f <pdf> -l <pdf>`
 >   confere o cabeçalho "520   14. Unsupervised Learning" na página
 >   impressa 520).
-> - `../_fontes/prml.pdf` (Bishop, PRML, 2006): offset **+20**
->   confirmado nesta sessão (mesmo valor já usado nas Aulas 1 e 2) —
->   página impressa 424 = página 444 do PDF.
 
 ---
 
 ### Fonte 1: ESL, §14.3.4 "Clustering Algorithms", p. 507
 **Uso pretendido:** a taxonomia de três paradigmas de clustering —
-combinatório (K-means/K-medoids), modelagem por mistura, e "mode
-seeking"/densidade — usada na Abertura (Bloco 1) para situar o
-contraste Outside-In (K-means, o "de fora") e no Bloco 3 (Conjuntos de
-Nível de Densidade) para justificar a definição de cluster como região
-de densidade alta ("mode seeking"), a tese central desta aula.
+combinatório (protótipos fixos, sem referência a densidade),
+modelagem por mistura, e "mode seeking"/densidade — usada no Bloco 3
+(Conjuntos de Nível de Densidade) para justificar a definição de
+cluster como região de densidade alta ("mode seeking"), a tese central
+desta aula, e situar essa definição frente às outras duas famílias
+(a modelagem por mistura fica para a Aula 4; o paradigma combinatório
+não é ensinado nesta disciplina, só mencionado en passant).
 
 **Trecho:**
 > "The goal of cluster analysis is to partition the observations into
@@ -40,57 +39,7 @@ de densidade alta ("mode seeking"), a tese central desta aula.
 
 ---
 
-### Fonte 2: ESL, §14.3.6 "K-means", pp. 509–510
-**Uso pretendido:** a definição formal de K-means como algoritmo
-combinatório baseado em distância euclidiana ao centróide, e a
-Voronoi tessellation resultante da partição — o fato matemático
-central que explica *por que* K-means corta uma lua/anel ao meio: toda
-célula de Voronoi é convexa, então qualquer cluster não-convexo é
-necessariamente fatiado por essas fronteiras retas. Usado na Abertura
-(Bloco 1) e na Intuição (Bloco 2).
-
-**Trecho:**
-> "The K-means algorithm is one of the most popular iterative descent
-> clustering methods. It is intended for situations in which all
-> variables are of the quantitative type, and squared Euclidean
-> distance $d(x_i,x_{i'}) = \sum_{j=1}^p (x_{ij}-x_{i'j})^2 =
-> ||x_i-x_{i'}||^2$ is chosen as the dissimilarity measure." (p. 509)
->
-> "Figure 14.6 shows some of the K-means iterations for the simulated
-> data of Figure 14.4. The centroids are depicted by 'O's. The straight
-> lines show the partitioning of points, each sector being the set of
-> points closest to each centroid. This partitioning is called the
-> *Voronoi tessellation*. After 20 iterations the procedure has
-> converged." (p. 510)
-
----
-
-### Fonte 3: PRML (Bishop, 2006), §9.1 "K-means Clustering", pp. 424–425
-**Uso pretendido:** duplo registro com a Fonte 2 — a mesma regra de
-atribuição (ponto vai para o centróide mais próximo), formalizada como
-minimização da distorção $J$, Eq. (9.1)–(9.2). Usado na Abertura
-(Bloco 1) para nomear com precisão o que "distância ao centróide"
-significa antes de mostrar onde isso falha.
-
-**Trecho:**
-> "Our goal is to find an assignment of data points to clusters, as
-> well as a set of vectors $\{\boldsymbol\mu_k\}$, such that the sum of
-> the squares of the distances of each data point to its closest
-> vector $\boldsymbol\mu_k$, is a minimum." (p. 424)
->
-> "$$J = \sum_{n=1}^N \sum_{k=1}^K r_{nk} ||\mathbf{x}_n -
-> \boldsymbol\mu_k||^2 \quad (9.1)$$ which represents the sum of the
-> squares of the distances of each data point to its assigned vector
-> $\boldsymbol\mu_k$." (p. 424)
->
-> "$$r_{nk} = \begin{cases} 1 & \text{if } k = \arg\min_j
-> ||\mathbf{x}_n - \boldsymbol\mu_j||^2 \\ 0 & \text{otherwise}
-> \end{cases} \quad (9.2)$$ In other words, we simply assign the $n$th
-> data point to the closest cluster centre." (p. 425)
-
----
-
-### Fonte 4: ESL, §14.3.12 "Hierarchical Clustering", pp. 520–525
+### Fonte 2: ESL, §14.3.12 "Hierarchical Clustering", pp. 520–525
 **Uso pretendido:** a definição de *single linkage* (Eq. 14.41), a
 estrutura de dendrograma com $N-1$ níveis, o defeito de *chaining*, e
 o argumento assintótico sobre single linkage não depender das

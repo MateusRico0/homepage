@@ -55,6 +55,7 @@ jupyter: homepage
 # SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
 # =====================================================================
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
@@ -78,23 +79,39 @@ _housing = load_dataset("gvlassis/california_housing")["train"].to_pandas()
 COLS = ["MedInc", "HouseAge", "AveRooms", "AveBedrms"]
 ```
 
-# O Problema Que a Aula 2 Deixou em Aberto
+# Revisão e Introdução
 
 ---
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 ## Revisão Rápida: Onde a Aula 2 Parou
 
-A Aula 2 generalizou "um vetor" para "um dataset inteiro" via a matriz de
-design $X\in\mathbb{R}^{N\times d}$, deu duas leituras ao produto
-$A\mathbf{x}$ (por linha: previsão; por coluna: combinação linear), e
-terminou classificando os sistemas lineares $A\mathbf{x}=\mathbf{b}$ em
-três casos — nenhuma, exatamente uma, ou infinitas soluções — via o
-critério do posto, $\text{rk}(A)=\text{rk}(A|\mathbf{b})$. A peça central
-que fica: em Regressão Linear Múltipla, o sistema $X\mathbf{w}=\mathbf{y}$
-tem $N$ equações e $d$ incógnitas, e como $N\gg d$ em praticamente todo
-problema real, o sistema é **sobredeterminado** — genericamente, **nenhuma
-solução exata**.
+A Aula 2 deu quatro passos, nesta ordem. **Primeiro**, generalizou "um
+vetor" para "um dataset inteiro" via a matriz de design
+$X\in\mathbb{R}^{N\times d}$ — cada linha uma observação, cada coluna um
+atributo. **Segundo**, deu duas leituras ao produto $A\mathbf{x}$: por
+linha, uma previsão (produto interno por observação); por coluna, uma
+combinação linear dos atributos — a mesma fórmula, dois significados,
+ambos usados o resto do curso. **Terceiro**, classificou os sistemas
+lineares $A\mathbf{x}=\mathbf{b}$ em três casos possíveis — nenhuma,
+exatamente uma, ou infinitas soluções — via o critério do posto da matriz
+aumentada, $\text{rk}(A)=\text{rk}(A|\mathbf{b})$, resolvendo um exemplo
+completo por Eliminação de Gauss. **Quarto**, tratou de independência
+linear: um atributo é redundante (multicolinear) quando é combinação
+linear dos demais, e o **posto** de uma matriz mede exatamente quantas
+colunas são, de fato, independentes — quando as $d$ colunas de $X$ são
+linearmente independentes, dizemos que $X$ **tem posto completo**,
+$\text{rk}(X)=d$.
+
+Esse último fato — posto completo de $X$, não o critério de solvabilidade
+do terceiro passo (outra aplicação do mesmo conceito de posto, mas sobre
+$A$ e a matriz aumentada, não sobre $X$) — é a peça que esta aula vai
+reusar diretamente no Bloco 4, como a condição exata que garante uma
+única melhor aproximação. A peça central que fica de tudo isso: em
+Regressão Linear Múltipla, o sistema $X\mathbf{w}=\mathbf{y}$ tem $N$
+equações e $d$ incógnitas, e como $N\gg d$ em praticamente todo problema
+real, o sistema é **sobredeterminado** — genericamente, **nenhuma solução
+exata**.
 
 ## Organizador Prévio: De "Sem Solução" Para "Melhor Aproximação"
 
@@ -113,7 +130,9 @@ esta aula segue.
 
 ## Roteiro da Aula
 
-Quatro perguntas guiam esta aula:
+A pergunta que fecha o Organizador Prévio — "mais próximo, mas dentro de
+onde?" — se desdobra em quatro perguntas mais específicas, cada uma
+resolvida em um bloco desta aula:
 
 1. O que significa, geometricamente, "a melhor aproximação possível" de
    $\mathbf{y}$ por um $X\mathbf{w}$ alcançável?
@@ -140,7 +159,13 @@ está mais perto? E "mais perto" — medido como, exatamente?
 ::: {.fragment}
 Aula 2: matriz de design $X\in\mathbb{R}^{N\times d}$, duas leituras de
 $A\mathbf{x}$ (linha = previsão, coluna = combinação linear), sistemas
-lineares com 0, 1 ou $\infty$ soluções via o posto.
+lineares com 0, 1 ou $\infty$ soluções via o posto da matriz aumentada.
+:::
+
+::: {.fragment}
+Também: colunas independentes (sem multicolinearidade) $\Rightarrow$
+**posto completo**, $\text{rk}(X)=d$. Vamos reusar isso no Bloco 4 — é a
+condição que garante solução única hoje.
 :::
 
 ::: {.fragment}
@@ -164,6 +189,11 @@ fio desta aula.
 :::
 
 ## Roteiro da Aula
+
+::: {.fragment}
+"Mais próximo, mas dentro de onde?" se desdobra em quatro perguntas, uma
+por bloco:
+:::
 
 ::: {.fragment}
 **1.** O que significa "a melhor aproximação possível" de $\mathbf{y}$?
@@ -214,7 +244,7 @@ $X\mathbf{w}$ alcançável está mais perto? "Mais perto" — medido como?
                 text width=2.9cm, minimum height=1.1cm},
   arrow/.style={-Stealth, thick, color=gray!70}
 ]
-  \node (A) [block] {$\mathbf{y}$ fora de $\text{col}(X)$};
+  \node (A) [block] {$\mathbf{y}$ fora de $\mathrm{col}(X)$};
   \node (B) [block, right=of A] {projeção ortogonal $\hat{\mathbf{y}}$};
   \node (C) [block, right=of B] {Equações Normais\\$X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$};
   \node (Q) [decision, right=of C] {$X^TX$ invertível?};
@@ -299,7 +329,7 @@ Bloco 4 vai provar, via projeção ortogonal.
 :::
 :::
 
-# Intuição: A Sombra no Chão, Não no Ar
+# Intuição: A Sombra no Chão
 
 ---
 
@@ -331,8 +361,7 @@ operação, só que o "chão" tem mais dimensões.
 ## A Ideia Antes da Álgebra
 
 ::: {.fragment}
-Um ponto $\mathbf{y}$ flutuando no espaço; um subespaço $U$ (reta ou
-plano pela origem) como "o chão". Luz perpendicular ao chão $\Rightarrow$
+Um ponto $\mathbf{y}$ flutuando no espaço; um subespaço $U$ como "o chão". Luz perpendicular ao chão $\Rightarrow$
 sombra $\hat{\mathbf{y}}$.
 :::
 
@@ -345,15 +374,9 @@ $\mathbf{y}$ — nenhum outro ponto do chão está mais perto.
 **Propriedade 2:** o segmento $\mathbf{y}\to\hat{\mathbf{y}}$ é
 perpendicular a **todo** $U$, não só à direção da luz.
 :::
-
-::: {.fragment}
-A Propriedade 2 é a *razão* pela qual a Propriedade 1 é verdade — Bloco 4
-prova isso formalmente. Por ora: reta ou plano, mesma operação, "chão"
-com mais dimensões.
-:::
 :::
 
-::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
 ```{python}
 #| echo: false
 #| fig-align: center
@@ -401,13 +424,13 @@ plt.show()
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 No painel esquerdo, $U$ é a reta gerada pela direção $(2,1)$, e
-$\mathbf{y}=(1{,}0,\,3{,}2)$ está fora dela. A sombra $\hat{\mathbf{y}}$
+$\mathbf{y}=(1{,}0;3{,}2)$ está fora dela. A sombra $\hat{\mathbf{y}}$
 (quadrado laranja) é o ponto da reta mais próximo de $\mathbf{y}$, e o
 segmento tracejado (o "resíduo") encontra a reta em ângulo reto — não em
 qualquer ângulo. No painel direito, o "chão" já é um plano
 bidimensional (o plano $x_3=0$) dentro de um espaço tridimensional:
-$\mathbf{y}=(1{,}5,\,1{,}8,\,2{,}3)$ tem sombra
-$\hat{\mathbf{y}}=(1{,}5,\,1{,}8,\,0)$ — a projeção simplesmente "zera" a
+$\mathbf{y}=(1{,}5;1{,}8;\,2{,}3)$ tem sombra
+$\hat{\mathbf{y}}=(1{,}5;1{,}8;\,0)$ — a projeção simplesmente "zera" a
 componente perpendicular ao chão, e o segmento tracejado (puramente na
 direção $x_3$) é, de novo, perpendicular a todo o plano, não só a uma
 direção dentro dele. É essa segunda observação — perpendicular a **todo**
@@ -419,14 +442,14 @@ $d=4$ dimensões, não $1$ ou $2$: a "álgebra" muda, a geometria não.
 ## O Que os Dois Painéis Mostram
 
 ::: {.fragment}
-Esquerda: $U$ = reta na direção $(2,1)$; $\mathbf{y}=(1{,}0,3{,}2)$ fora
+Esquerda: $U$ = reta na direção $(2,1)$; $\mathbf{y}=(1{,}0;3{,}2)$ fora
 dela. Sombra $\hat{\mathbf{y}}$ = ponto da reta mais próximo; o
 tracejado encontra a reta em ângulo reto.
 :::
 
 ::: {.fragment}
 Direita: "chão" = plano $x_3=0$ em $\mathbb{R}^3$. Projeção só "zera" a
-componente perpendicular: $(1{,}5,1{,}8,2{,}3)\to(1{,}5,1{,}8,0)$.
+componente perpendicular: $(1{,}5;1{,}8;2{,}3)\to(1{,}5;1{,}8;0)$.
 :::
 
 ::: {.fragment}
@@ -512,16 +535,27 @@ Propriedade 2 que o Bloco 4 vai provar ser *equivalente* à Propriedade 1
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 ## Recapitulando: Subespaço e Espaço-Coluna
 
-A Aula 1 definiu **subespaço** como um subconjunto fechado sob soma e
-multiplicação por escalar; a Aula 2 deu um exemplo concreto e central
-para este curso — o **espaço-coluna** $\text{col}(X)$, o conjunto de
-tudo que $X\mathbf{w}$ alcança quando $\mathbf{w}$ varia livremente por
-$\mathbb{R}^d$. Com $X\in\mathbb{R}^{16640\times 4}$ de posto completo
-(verificado na Aula 2), $\text{col}(X)$ é um subespaço de dimensão $4$
-dentro de um espaço ambiente de dimensão $16\,640$ — geometricamente,
-como um plano finíssimo boiando dentro de um espaço gigantesco, e
-$\mathbf{y}$ (o vetor com as $16\,640$ observações de `MedHouseVal`)
-quase certamente não está dentro dele.
+A Aula 1 definiu **subespaço** $U\subseteq V$ como um subconjunto
+fechado sob combinação linear: para quaisquer $\mathbf{u},\mathbf{v}\in
+U$ e escalares $a,b\in\mathbb{R}$, $a\mathbf{u}+b\mathbf{v}\in U$ (em
+particular, $\mathbf{0}\in U$ sempre — basta tomar $a=b=0$). A Aula 2
+deu um exemplo concreto e central para este curso — o **espaço-coluna**
+$$
+\text{col}(X) = \{X\mathbf{w} : \mathbf{w}\in\mathbb{R}^d\}\subseteq\mathbb{R}^N,
+$$
+o conjunto de todas as combinações lineares das colunas de $X$ (a
+Leitura 2 do produto matriz-vetor, Aula 2), ou seja, tudo que
+$X\mathbf{w}$ alcança quando $\mathbf{w}$ varia livremente por
+$\mathbb{R}^d$ — e essa definição já garante que $\text{col}(X)$ é, de
+fato, um subespaço (a distributividade do produto matriz-vetor,
+$X(a\mathbf{w}_1+b\mathbf{w}_2)=aX\mathbf{w}_1+bX\mathbf{w}_2$, é
+exatamente o fechamento sob combinação linear exigido pela definição).
+Com $X\in\mathbb{R}^{16640\times 4}$ de posto completo (verificado na
+Aula 2), $\text{col}(X)$ é um subespaço de dimensão $4$ dentro de um
+espaço ambiente de dimensão $16\,640$ — geometricamente, como um plano
+finíssimo boiando dentro de um espaço gigantesco, e $\mathbf{y}$ (o
+vetor com as $16\,640$ observações de `MedHouseVal`) quase certamente
+não está dentro dele.
 
 ## O Complemento Ortogonal
 
@@ -551,8 +585,16 @@ fazer essa soma, nunca nenhuma parte sobrando de fora.
 ## Recapitulando: Subespaço e Espaço-Coluna
 
 ::: {.fragment}
-Aula 1: subespaço = fechado sob soma/escalar. Aula 2: **espaço-coluna**
-$\text{col}(X)$ = tudo que $X\mathbf{w}$ alcança.
+**Subespaço** $U\subseteq V$ (Aula 1): fechado sob combinação linear —
+para quaisquer $\mathbf{u},\mathbf{v}\in U$ e escalares $a,b\in\mathbb{R}$,
+$a\mathbf{u}+b\mathbf{v}\in U$ (em particular, $\mathbf{0}\in U$).
+:::
+
+::: {.fragment}
+**Espaço-coluna** (Aula 2): $\text{col}(X) = \{X\mathbf{w} :
+\mathbf{w}\in\mathbb{R}^d\}\subseteq\mathbb{R}^N$ — todas as combinações
+lineares das colunas de $X$ (Leitura 2 do produto matriz-vetor).
+$\text{col}(X)$ já é, por construção, um subespaço.
 :::
 
 ::: {.fragment}
@@ -563,6 +605,7 @@ fora dele.
 :::
 
 ## O Complemento Ortogonal
+
 
 ::: {.fragment}
 **Definição (MathML, §3.6, tradução nossa):** dado $U\subseteq V$ com
@@ -581,9 +624,11 @@ $$\mathbf{x} = \underbrace{\sum_m \lambda_m\mathbf{b}_m}_{\in\, U} + \underbrace
 Notação compacta: $V = U\oplus U^\perp$ — uma única parte em $U$, uma
 única parte em $U^\perp$, nada sobra de fora.
 :::
+
+## O Complemento Ortogonal
 :::
 
-::: {.fig-resize style="width: 70%; margin: 0 auto;"}
+::: {.fig-resize style="width: 25%; margin: 0 auto;"}
 ```{python}
 #| echo: false
 #| fig-align: center
@@ -638,7 +683,6 @@ vai viver exatamente ali dentro.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## O Que o Desenho Mostra
 
 ::: {.fragment}
 $D=2$, $U$ = reta ($M=1$) $\Rightarrow$ $U^\perp$ = reta perpendicular
@@ -747,16 +791,17 @@ resultado final.
    (a formalização da "sombra" do Bloco 2).
 :::
 
-O objetivo dos quatro passos seguintes é ir de "$\hat{\mathbf{y}}$
-minimiza a distância" até uma fórmula fechada e calculável para
-$\hat{\mathbf{w}}$ tal que $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$.
+O objetivo dos dois passos seguintes é ir de "$\hat{\mathbf{y}}$ minimiza
+a distância" até uma fórmula fechada e calculável para $\hat{\mathbf{w}}$
+tal que $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ## Enunciando o Problema com Precisão
 
 ::: {.callout-note icon=false}
-**Premissas.**
+**Premissas**
+
 1. Subespaço $U=\text{col}(X)\subseteq\mathbb{R}^N$ (Aula 2).
 2. $\mathbf{y}\in\mathbb{R}^N$, em geral **fora** de $U$ (sobredeterminado).
 3. $\hat{\mathbf{y}}\in U$ = ponto de $U$ mais próximo de $\mathbf{y}$
@@ -770,136 +815,112 @@ $\hat{\mathbf{w}}$, com $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$.
 :::
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-## Passo (i): "Mais Próximo" Equivale a "Ortogonal"
+## Passo (i): Ortogonal a Cada Coluna de $X$ via Otimização
 
-O MathML caracteriza exatamente essa condição de mínimo, primeiro no
-caso de uma reta e depois generalizando (tradução nossa, §3.8.1, p. 82,
-adaptando a notação para $\hat{\mathbf{y}}$ em vez de $\pi_U(x)$):
-
-> "A projeção $\hat{\mathbf{y}}$ é a mais próxima de $\mathbf{y}$, onde
-> 'mais próxima' implica que a distância $\|\mathbf{y}-\hat{\mathbf{y}}\|$
-> é mínima. Disso segue que o segmento $\hat{\mathbf{y}}-\mathbf{y}$ [...]
-> é ortogonal a $U$."
-
-Ou seja: minimizar a distância **não é uma condição separada** de
-"ortogonal a $U$" — são a mesma condição, vista de dois ângulos. Por quê?
-Intuitivamente (o argumento completo usa cálculo, fora do escopo desta
-aula): se o resíduo $\mathbf{y}-\hat{\mathbf{y}}$ tivesse qualquer
-componente **não** ortogonal a $U$ — ou seja, alguma componente dentro de
-$U$ —, seria possível mover $\hat{\mathbf{y}}$ um pouco dentro de $U$,
-na direção dessa componente, e diminuir ainda mais a distância. Isso
-contradiz $\hat{\mathbf{y}}$ já ser o ponto mais próximo. Logo, no
-mínimo, não pode sobrar componente alguma do resíduo dentro de $U$ — o
-resíduo inteiro tem que estar em $U^\perp$ (Bloco 3):
+Formalizar "$\hat{\mathbf{y}}$ é o ponto de $U=\text{col}(X)$ mais
+próximo de $\mathbf{y}$" é resolver um problema de otimização. Minimizar
+a distância $\|\mathbf{y}-\mathbf{v}\|$ sobre $\mathbf{v}\in U$ é
+equivalente a minimizar o **quadrado** da distância — a raiz quadrada é
+crescente, então o mínimo cai no mesmo ponto, e o quadrado tem derivada
+mais simples. E como $U=\text{col}(X)$, já sabemos exatamente como
+$\mathbf{v}$ varia dentro de $U$: pela Leitura 2 do produto matriz-vetor
+(Aula 2), todo $\mathbf{v}\in U$ é $X\mathbf{w}$ para algum
+$\mathbf{w}\in\mathbb{R}^d$, e $\mathbf{w}$ não tem restrição nenhuma —
+não é preciso inventar uma base abstrata de $U$ só para ter variáveis
+livres para derivar; $\mathbf{w}$ já **é** essa variável livre, dada de
+graça pela própria definição de espaço-coluna. Minimizar sobre
+$\mathbf{v}\in U$ é, então, o mesmo que minimizar sobre
+$\mathbf{w}\in\mathbb{R}^d$ **sem restrições** — um problema de
+otimização irrestrita de verdade:
 $$
-\mathbf{y}-\hat{\mathbf{y}} \;\perp\; U \qquad\Longleftrightarrow\qquad
-\mathbf{y}-\hat{\mathbf{y}} \in U^\perp .
+\hat{\mathbf{w}} = \arg\min_{\mathbf{w}\in\mathbb{R}^d}\; g(\mathbf{w}),
+\qquad g(\mathbf{w}) = \|\mathbf{y}-X\mathbf{w}\|^2.
 $$
-:::
 
-::: {.content-visible when-format="revealjs"}
-## Passo (i): "Mais Próximo" Equivale a "Ortogonal"
-
-::: {.fragment}
-**MathML (tradução nossa, §3.8.1):** "a projeção é a mais próxima [...]
-disso segue que o segmento [...] é ortogonal a $U$." Minimizar distância
-e ser ortogonal a $U$ são a **mesma condição**.
-:::
-
-::: {.fragment}
-**Por quê:** se o resíduo tivesse componente **dentro** de $U$, dava
-para mover $\hat{\mathbf{y}}$ nessa direção e diminuir ainda mais a
-distância — contradiz mínimo. Logo, no mínimo, resíduo inteiro em
-$U^\perp$:
-$$\mathbf{y}-\hat{\mathbf{y}} \perp U \iff \mathbf{y}-\hat{\mathbf{y}}\in U^\perp$$
-:::
-:::
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-## Passo (ii): Escrevendo $\hat{\mathbf{y}}$ em Termos de $X$
-
-$\hat{\mathbf{y}}$ é um elemento de $U=\text{col}(X)$ — e a Leitura 2 do
-produto matriz-vetor (Aula 2, Bloco 2) já disse exatamente o que isso
-significa: todo elemento do espaço-coluna de $X$ é uma combinação linear
-das colunas de $X$, ou seja, é $X\mathbf{w}$ para algum vetor de pesos
-$\mathbf{w}\in\mathbb{R}^d$. Chame esse vetor $\hat{\mathbf{w}}$:
+Expandindo por manipulação de matrizes —
+$(\mathbf{y}-X\mathbf{w})^T(\mathbf{y}-X\mathbf{w})$, usando que
+$\mathbf{y}^TX\mathbf{w}$ é um escalar, logo igual à sua própria
+transposta $\mathbf{w}^TX^T\mathbf{y}$:
 $$
-\hat{\mathbf{y}} = X\hat{\mathbf{w}}, \qquad \hat{\mathbf{w}}\in\mathbb{R}^d.
+g(\mathbf{w}) = \mathbf{y}^T\mathbf{y} - 2\,\mathbf{y}^TX\mathbf{w} +
+\mathbf{w}^TX^TX\mathbf{w}.
 $$
-Substituindo no resultado do Passo (i):
+Usando as regras de cálculo vetorial $\nabla_{\mathbf{w}}(\mathbf{a}^T\mathbf{w})=\mathbf{a}$
+e $\nabla_{\mathbf{w}}(\mathbf{w}^TC\mathbf{w})=2C\mathbf{w}$ (para $C$
+simétrica — e $X^TX$ é simétrica), o gradiente de $g$ é
+$$
+\nabla_{\mathbf{w}}\, g(\mathbf{w}) = -2X^T\mathbf{y} + 2X^TX\mathbf{w} =
+-2\,X^T(\mathbf{y}-X\mathbf{w}).
+$$
+A Hessiana é $2X^TX$, e ela é **sempre semidefinida positiva** — para
+qualquer $X$, $\mathbf{w}^TX^TX\mathbf{w}=\|X\mathbf{w}\|^2\ge 0$ —, o
+suficiente para $g$ ser convexa, mesmo sem sabermos ainda se $X^TX$ é
+invertível (essa condição extra só vai entrar no Passo (ii), para
+*isolar* um único $\hat{\mathbf{w}}$ — não é necessária para caracterizar
+o mínimo). Como o problema é irrestrito e $g$ é convexa, o mínimo é
+caracterizado pela **condição de otimalidade de primeira ordem para
+problemas irrestritos** — necessária *e* suficiente para um mínimo
+global: o gradiente se anula no ponto ótimo,
+$$
+-2\,X^T(\mathbf{y}-X\hat{\mathbf{w}}) = \mathbf{0}
+\qquad\Longleftrightarrow\qquad
+X^T(\mathbf{y}-X\hat{\mathbf{w}}) = \mathbf{0}.
+$$
+
+Essa equação diz que o resíduo $\mathbf{y}-X\hat{\mathbf{w}}$ é ortogonal
+a cada coluna de $X$ individualmente. E como todo vetor de
+$\text{col}(X)$ é combinação linear das colunas (a mesma Leitura 2 de
+novo), o resíduo é ortogonal a **qualquer** vetor de $\text{col}(X)$ — a
+ortogonalidade "passa" pela combinação linear sem se perder:
 $$
 \mathbf{y}-X\hat{\mathbf{w}} \;\perp\; \text{col}(X).
 $$
+Minimizar a distância e ser ortogonal a $\text{col}(X)$, portanto, não
+são duas condições separadas — são a mesma condição, uma vista pela
+definição (mínimo) e a outra pela consequência algébrica de anular o
+gradiente. O MathML batiza essa condição da mesma forma (tradução nossa,
+§3.8.2, p. 85-86, adaptando $B\to X$): "obtemos $m$ condições
+simultâneas [...] o que [...] pode ser escrito como um sistema linear
+homogêneo [...] $B^T(\mathbf{x}-B\lambda)=\mathbf{0}$" — o MathML enuncia
+essa condição via uma base abstrata de $U$; aqui chegamos a ela
+diretamente, otimizando sobre a variável livre $\mathbf{w}$ que $X$ já
+oferece de graça.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Passo (ii): Escrevendo $\hat{\mathbf{y}}$ em Termos de $X$
+## Passo (i): "Mais Próximo" Equivale a "Ortogonal a Cada Coluna de $X$" — Via Otimização
 
 ::: {.fragment}
-$\hat{\mathbf{y}}\in\text{col}(X)$: pela Leitura 2 (Aula 2), é
-$X\mathbf{w}$ para algum $\mathbf{w}$. Chame esse vetor
-$\hat{\mathbf{w}}$:
-$$\hat{\mathbf{y}} = X\hat{\mathbf{w}}$$
+Minimizar $\|\mathbf{y}-\mathbf{v}\|$ sobre $\mathbf{v}\in U=\text{col}(X)$
+$\equiv$ minimizar $\|\mathbf{y}-\mathbf{v}\|^2$. Podemos definir $\mathbf{v}=X\mathbf{w}$ com $\mathbf{w}\in\mathbb{R}^d$ **livre**, onde $\mathbf{w}$ é a variável livre.
 :::
 
 ::: {.fragment}
-Substituindo no Passo (i):
-$$\mathbf{y}-X\hat{\mathbf{w}} \perp \text{col}(X)$$
-:::
-:::
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-## Passo (iii): Ortogonal a *Cada Coluna* de $X$
-
-"Ortogonal a $\text{col}(X)$ inteiro" parece, à primeira vista, uma
-condição gigantesca — $\text{col}(X)$ tem infinitos vetores. Mas o
-MathML mostra que basta checar a ortogonalidade **coluna a coluna**
-(tradução nossa, §3.8.2, p. 85-86, adaptando $B\to X$,
-$\mathbf{b}_i\to$ coluna $i$ de $X$):
-
-> "Como 'mais próxima' significa 'distância mínima', isso implica que o
-> vetor ligando $\hat{\mathbf{y}}\in U$ e $\mathbf{y}$ deve ser ortogonal
-> a todos os vetores de base de $U$. Portanto, obtemos $m$ condições
-> simultâneas [...] o que, [...] pode ser escrito como um sistema linear
-> homogêneo [...] $B^T(\mathbf{x}-B\lambda)=\mathbf{0}$"
-
-Por que basta checar as **colunas** de $X$ (uma base de $\text{col}(X)$),
-em vez de todo vetor de $\text{col}(X)$? Porque qualquer vetor de
-$\text{col}(X)$ é uma combinação linear das colunas (de novo, a Leitura
-2); se o resíduo é ortogonal a cada coluna individualmente, ele é
-ortogonal a **qualquer** combinação linear delas — a ortogonalidade
-"passa" pela combinação linear sem se perder. Aplicando isso ao nosso
-caso ($X$ no lugar de $B$, $\hat{\mathbf{w}}$ no lugar de $\lambda$):
-$$
-X^T\big(\mathbf{y}-X\hat{\mathbf{w}}\big) = \mathbf{0}.
-$$
-:::
-
-::: {.content-visible when-format="revealjs"}
-## Passo (iii): Ortogonal a *Cada Coluna* de $X$
-
-::: {.fragment}
-"Ortogonal a $\text{col}(X)$ inteiro" parece gigantesco, mas o MathML
-mostra que basta checar coluna a coluna (tradução nossa, §3.8.2):
-$m$ condições simultâneas $\Rightarrow$ sistema $B^T(\mathbf{x}-B\lambda)=\mathbf{0}$.
+$$g(\mathbf{w}) = \|\mathbf{y}-X\mathbf{w}\|^2 = \mathbf{y}^T\mathbf{y} - 2\mathbf{y}^TX\mathbf{w} + \mathbf{w}^TX^TX\mathbf{w}$$
+Cálculo vetorial: $\nabla_{\mathbf{w}} g = -2X^T\mathbf{y}+2X^TX\mathbf{w} = -2X^T(\mathbf{y}-X\mathbf{w})$.
 :::
 
 ::: {.fragment}
-**Por quê basta as colunas:** toda combinação linear delas herda a
-ortogonalidade — a ortogonalidade "passa" pela combinação sem se
-perder.
-:::
-
-::: {.fragment}
-Aplicando ao nosso caso:
+Hessiana $2X^TX$ é **sempre semidefinida positiva**
+($\mathbf{w}^TX^TX\mathbf{w}=\|X\mathbf{w}\|^2\ge0$) $\Rightarrow$ $g$
+convexa — nem precisa de $X^TX$ invertível ainda. **Condição de
+otimalidade de primeira ordem** (irrestrita, necessária e suficiente):
 $$X^T(\mathbf{y}-X\hat{\mathbf{w}}) = \mathbf{0}$$
 :::
+
+::: {.fragment}
+Resíduo ortogonal a cada coluna de $X$ $\Rightarrow$ (combinação linear)
+ortogonal a **todo** $\text{col}(X)$:
+$$\mathbf{y}-X\hat{\mathbf{w}} \perp \text{col}(X)$$
+Mesma equação do MathML ($B^T(\mathbf{x}-B\lambda)=\mathbf{0}$, tradução
+nossa, §3.8.2) — ali via base abstrata; aqui, direto com $X$.
+:::
 :::
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-## Passo (iv): Isolando $\hat{\mathbf{w}}$ — as Equações Normais
+## Passo (ii): Isolando $\hat{\mathbf{w}}$ — as Equações Normais
 
-Distribuindo o produto do Passo (iii):
+Distribuindo o produto do Passo (i):
 $$
 X^T\mathbf{y} - X^TX\hat{\mathbf{w}} = \mathbf{0}
 \qquad\Longleftrightarrow\qquad
@@ -934,10 +955,10 @@ uma única melhor aproximação — e ela tem fórmula fechada.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Passo (iv): Isolando $\hat{\mathbf{w}}$ — as Equações Normais
+## Passo (ii): Isolando $\hat{\mathbf{w}}$ — as Equações Normais
 
 ::: {.fragment}
-Distribuindo o Passo (iii):
+Distribuindo o Passo (i):
 $$X^T\mathbf{y} - X^TX\hat{\mathbf{w}} = \mathbf{0} \iff X^TX\hat{\mathbf{w}} = X^T\mathbf{y}$$
 :::
 
@@ -964,8 +985,7 @@ quando o curso tratar de SVD.
 :::
 
 ::: {.fragment}
-Fecha o ciclo da Aula 2: sobredeterminado sem solução exata, mas **com**
-uma única melhor aproximação sob posto completo — com fórmula fechada.
+Sobredeterminado sem solução exata, mas **com** aproximação sob posto completo — com fórmula fechada.
 :::
 :::
 
@@ -976,38 +996,30 @@ uma única melhor aproximação sob posto completo — com fórmula fechada.
 \definecolor{icorange}{HTML}{FF5E00}
 \definecolor{icred}{HTML}{E03C31}
 \begin{tikzpicture}[scale=1.0]
-  \draw[icblue, thick] (-2.6,0) -- (2.6,0.9) node[right] {\small $\text{col}(X)$};
-  \fill[icblue] (-2.6,0) circle (0pt);
-  \node (yhat) at (0.4,0.14) {};
-  \fill[icorange] (0.4,0.14) circle (2.4pt);
-  \node[icorange, below=2pt of yhat, font=\small] {$\hat{\mathbf{y}}=X\hat{\mathbf{w}}$};
+  % col(X): reta pela origem, direção (5,1) -- ŷ abaixo é a projeção
+  % ortogonal exata de y sobre essa reta (calculada, não estética).
+  \draw[icblue, thick] (-2.648,-0.530) -- (2.648,0.530) node[right] {\small $\mathrm{col}(X)$};
+  \node (yhat) at (1.462,0.292) {};
+  \fill[icorange] (1.462,0.292) circle (2.4pt);
+  \node[icorange, below right=1pt and 2pt of yhat, font=\small] {$\hat{\mathbf{y}}=X\hat{\mathbf{w}}$};
   \node (y) at (1.1,2.1) {};
   \fill[icred] (1.1,2.1) circle (2.4pt);
-  \node[icred, right=2pt of y, font=\small] {$\mathbf{y}$};
-  \draw[gray!70, dashed, thick, -{Stealth}] (1.1,2.1) -- (0.4,0.14) node[midway, right, font=\small, black] {resíduo $\perp\, \text{col}(X)$};
-  \draw[icblue, -{Stealth}, thick] (-0.3,-0.11) -- (0.4,0.14);
+  \node[icred, above=2pt of y, font=\small] {$\mathbf{y}$};
+  \draw[gray!70, dashed, thick, -{Stealth}] (1.1,2.1) -- (1.462,0.292) node[midway, right, font=\small, black] {resíduo $\perp\, \mathrm{col}(X)$};
+  % marcador de ângulo reto no ponto de encontro
+  \draw[gray!70, thick] (1.609,0.322) -- (1.579,0.469) -- (1.432,0.440);
+  \draw[icblue, -{Stealth}, thick] (1.119,0.224) -- (1.462,0.292);
 \end{tikzpicture}
 ```
 :::
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-O esquema resume os quatro passos: $\text{col}(X)$ é a "reta" azul (uma
+O esquema resume os dois passos: $\text{col}(X)$ é a "reta" azul (uma
 representação necessariamente simplificada de um subespaço de dimensão
 $4$), $\mathbf{y}$ está fora dele, $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$ é
 o ponto mais próximo dentro de $\text{col}(X)$, e o resíduo (tracejado)
 encontra o subespaço em ângulo reto — a mesma "sombra" do Bloco 2, agora
 com nome de variável de regressão.
-:::
-
-::: {.content-visible when-format="revealjs"}
-## O Esquema Fecha o Ciclo
-
-::: {.fragment}
-$\text{col}(X)$ (simplificado como reta — na verdade dimensão $4$),
-$\mathbf{y}$ fora dele, $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$ mais
-próximo, resíduo em ângulo reto — a mesma sombra do Bloco 2, agora com
-nomes de regressão.
-:::
 :::
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
@@ -1093,7 +1105,7 @@ que "igual a zero"; é só a direção do erro que fica fixada
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 ## Calculando $\hat{\mathbf{w}}$ de Verdade
 
-Chegou a hora de aplicar a fórmula fechada do Passo (iv) ao problema
+Chegou a hora de aplicar a fórmula fechada do Passo (ii) ao problema
 motivador do Bloco 1: os $N=16\,640$ bairros do California Housing, com
 $X\in\mathbb{R}^{16640\times 4}$ (as colunas `MedInc`, `HouseAge`,
 `AveRooms`, `AveBedrms`) e $\mathbf{y}\in\mathbb{R}^{16640}$
@@ -1123,21 +1135,31 @@ XtX = X_completo.T @ X_completo
 Xty = X_completo.T @ y_completo
 w_hat = np.linalg.inv(XtX) @ Xty
 
-print("w_hat (Equações Normais):", np.round(w_hat, 5))
+tabela_w = pd.DataFrame({"atributo": COLS, "ŵ": np.round(w_hat, 5)})
+tabela_w
 ```
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Para cada dólar (em dezenas de milhares) de renda mediana adicional
-(`MedInc`), o modelo associa um aumento de $\approx 0{,}488$ (centenas de
-milhares de dólares) no preço previsto — o maior peso em módulo entre os
-quatro, plausível: `MedInc` é o atributo com a relação mais direta com o
-valor do imóvel. Note que `AveRooms` recebe um peso **negativo**
-($\approx -0{,}188$), o que parece contraintuitivo, mas se explica pela
-Leitura 2 do produto matriz-vetor (Aula 2): o peso de `AveRooms` é
-estimado **na presença** de `AveBedrms`, um atributo fortemente
-correlacionado (Bloco 6 volta a isso) — o modelo pode estar
-"compensando" a superposição de informação entre os dois, não afirmando
-que mais cômodos por domicílio reduza o preço isoladamente.
+A tabela mostra que o peso de maior módulo não é o de `MedInc`
+($\approx 0{,}488$), como seria fácil supor à primeira vista, mas o de
+`AveBedrms` ($\approx 0{,}783$) — e isso é uma pista, não uma medida
+direta de importância. `AveRooms` e `AveBedrms` são atributos fortemente
+correlacionados (quantos cômodos, quantos são quartos — Bloco 6 volta a
+isso com números), e a Regressão Linear Múltipla estima cada peso **na
+presença** dos demais (Leitura 2 do produto matriz-vetor, Aula 2):
+quando duas colunas carregam quase a mesma informação, o modelo pode
+distribuir o efeito combinado entre elas de forma desequilibrada — um
+peso grande e positivo, o outro pequeno ou até **negativo** (`AveRooms`,
+$\approx -0{,}188$) — sem que isso signifique, isoladamente, que mais
+cômodos reduzam o preço. É um sintoma do problema de multicolinearidade
+que o Bloco 6 vai quantificar e explicar por que fragiliza numericamente
+$X^TX$. O peso de `MedInc` ($\approx 0{,}488$), por não competir por
+informação redundante com nenhum outro atributo do modelo, tem leitura
+direta: cada unidade adicional de renda mediana está associada a um
+aumento de $\approx 0{,}488$ (centenas de milhares de dólares) no preço
+previsto. Já `HouseAge` tem o menor peso em módulo ($\approx 0{,}012$) —
+a idade do imóvel, sozinha, quase não move a previsão depois de
+controlar pelos outros três atributos.
 
 ## Conferência Independente: `numpy.linalg.lstsq`
 
@@ -1152,15 +1174,21 @@ certa, as duas contas devem coincidir:
 ## O Que os Pesos Dizem
 
 ::: {.fragment}
-`MedInc`: peso $\approx 0{,}488$ — maior em módulo, plausível (renda tem
-relação direta com preço).
+`AveBedrms` ($\approx 0{,}783$) é o maior peso seguido de aior peso em módulo não`MedInc` ($\approx 0{,}488$). `AveRooms`, $\approx -0{,}188$ que deveria ter relação está negativo, pista de multicolinearidade, não de
+importância.
 :::
 
 ::: {.fragment}
-`AveRooms`: peso **negativo** ($\approx -0{,}188$), contraintuitivo à
-primeira vista — mas é estimado **na presença** de `AveBedrms`
-(correlacionados, Bloco 6); o modelo pode estar "compensando"
-superposição de informação, não afirmando causalidade isolada.
+`AveRooms`/`AveBedrms` são correlacionados (Bloco 6); pesos estimados
+**na presença** um do outro podem se desequilibrar — um grande, outro
+pequeno ou **negativo** (`AveRooms`, $\approx -0{,}188$) — sem
+significado causal isolado.
+:::
+
+::: {.fragment}
+`MedInc` ($\approx 0{,}488$): sem redundância com os demais, leitura
+direta. `HouseAge` ($\approx 0{,}012$): menor peso, quase sem efeito
+marginal.
 :::
 
 ## Conferência Independente
@@ -1191,14 +1219,14 @@ funciona com dados reais.
 
 ## Verificando a Ortogonalidade do Resíduo
 
-A promessa central do Passo (iii) foi que o resíduo
+A promessa central do Passo (i) foi que o resíduo
 $\mathbf{y}-X\hat{\mathbf{w}}$ é ortogonal a **cada coluna** de $X$ — não
 uma afirmação vaga, uma igualdade numérica exata (até erro de
 arredondamento) que podemos checar:
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## O Que a Comparação Confirma
+### O Que a Comparação Confirma
 
 ::: {.fragment}
 Diferença máxima entre os dois $\hat{\mathbf{w}}$: ordem de $10^{-14}$ —
@@ -1214,7 +1242,7 @@ Bloco 4 funciona com dados reais, não só no quadro.
 ## Verificando a Ortogonalidade do Resíduo
 
 ::: {.fragment}
-Promessa do Passo (iii): resíduo $\perp$ cada coluna de $X$ — não vago,
+Promessa do Passo (i): resíduo $\perp$ cada coluna de $X$ — não vago,
 uma igualdade numérica exata (a menos de arredondamento). Vamos checar:
 :::
 :::
@@ -1234,9 +1262,9 @@ for j, nome in enumerate(COLS):
 Cada produto interno é da ordem de $10^{-9}$ ou menor — e, colocado em
 perspectiva (dividindo pelas normas de cada vetor envolvido, para
 comparar "zero relativo" e não só "zero absoluto"), a proporção é da
-ordem de $10^{-14}$: numericamente zero, exatamente como o Passo (iii)
+ordem de $10^{-14}$: numericamente zero, exatamente como o Passo (i)
 exigia. Não é coincidência — é a própria equação
-$X^T(\mathbf{y}-X\hat{\mathbf{w}})=\mathbf{0}$ (Passo iii) verificada
+$X^T(\mathbf{y}-X\hat{\mathbf{w}})=\mathbf{0}$ (Passo i) verificada
 numericamente, coluna a coluna.
 
 ## O Tamanho do Resíduo — o Que a Ortogonalidade *Não* Diz
@@ -1247,17 +1275,17 @@ pena medir:
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Zero, em Perspectiva
+### Zero, em Perspectiva
 
 ::: {.fragment}
 Cada produto interno: ordem de $10^{-9}$ ou menor. Em proporção (dividido
 pelas normas): ordem de $10^{-14}$ — numericamente zero, exatamente como
-o Passo (iii) exigia.
+o Passo (i) exigia.
 :::
 
 ::: {.fragment}
 Não é coincidência: é $X^T(\mathbf{y}-X\hat{\mathbf{w}})=\mathbf{0}$
-(Passo iii) verificada numericamente, coluna a coluna.
+(Passo i) verificada numericamente, coluna a coluna.
 :::
 
 ## O Tamanho do Resíduo
@@ -1304,7 +1332,7 @@ inventado:
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## O Que os Números Dizem
+### O Que os Números Dizem
 
 ::: {.fragment}
 $\|\text{resíduo}\|\approx 101{,}5$ contra $\|\mathbf{y}\|\approx
@@ -1317,7 +1345,7 @@ da variação do preço com só 4 atributos.
 aproximação **dentro de $\text{col}(X)$**, não uma boa aproximação em
 termos absolutos. Faltam atributos (localização, qualidade, costa); o
 subespaço disponível é pequeno demais para chegar perto de
-$\mathbf{y}$.
+$\mathbf{y}$. 
 :::
 
 ## Vendo o Ajuste numa Amostra Concreta
@@ -1434,9 +1462,9 @@ a equação resolvida.
   decomposição) — todos resolvem o mesmo sistema linear, mesmo
   resultado a menos de arredondamento.
 - ✗ É consequência **necessária** de $X^T(\mathbf{y}-X\hat{\mathbf{w}})=\mathbf{0}$
-  (Passo iii), não coincidência — vale para qualquer amostra em que
+  (Passo i), não coincidência — vale para qualquer amostra em que
   $\hat{\mathbf{w}}$ resolva as Equações Normais.
-- ✔ A verificação é uma identidade algébrica geral (Passo iii),
+- ✔ A verificação é uma identidade algébrica geral (Passo i),
   independente de domínio ou escala dos atributos.
 - ✗ Vimos $R^2\approx 0{,}518$ com resíduo ortogonal — ortogonalidade
   fixa a *direção* do erro, não seu *tamanho*; um ajuste ruim pode ter
@@ -1458,7 +1486,7 @@ em si (tema que volta na Aula 4).
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 ## Reconectando com a Aula 2: Posto Completo
 
-O Passo (iv) do Bloco 4 usou uma hipótese específica: $X^TX$ é
+O Passo (ii) do Bloco 4 usou uma hipótese específica: $X^TX$ é
 invertível **se, e somente se**, as colunas de $X$ são linearmente
 independentes — ou seja, $X$ tem posto completo, $\text{rk}(X)=d$
 (critério provado na Aula 2, Bloco 5). Essa não é uma hipótese técnica
@@ -1472,7 +1500,7 @@ frágil — reaproveitando exatamente os exemplos da Aula 2.
 ## Reconectando com a Aula 2: Posto Completo
 
 ::: {.fragment}
-Passo (iv): $X^TX$ invertível $\iff$ colunas de $X$ linearmente
+Passo (ii): $X^TX$ invertível $\iff$ colunas de $X$ linearmente
 independentes $\iff$ $\text{rk}(X)=d$ (Aula 2, Bloco 5).
 :::
 
@@ -1689,8 +1717,6 @@ problema mora inteiramente em como $\hat{\mathbf{w}}$ tenta descrevê-la.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## O Diagrama Resume os Dois Caminhos
-
 ::: {.fragment}
 Mesma causa raiz (colunas redundantes), gravidade diferente. Em ambos:
 a projeção $\hat{\mathbf{y}}$ nunca é o problema — o problema mora em
@@ -1878,7 +1904,7 @@ diretamente: decomposição $QR$ e $SVD$.
 
 3. A Aula 2 provou que $X^TX$ é invertível se, e somente se, $X$ tem
    posto completo. Explique como essa condição de invertibilidade entra
-   exatamente no Passo (iv) da derivação das Equações Normais desta
+   exatamente no Passo (ii) da derivação das Equações Normais desta
    aula, e o que aconteceria à derivação (não só ao resultado final) se
    essa condição não fosse satisfeita.
 

@@ -69,11 +69,11 @@ Tendo em vista a natureza dos conteúdos do curso, a estrutura da aula deve segu
 
 Ambas as abordagens devem manter os **3 movimentos fundamentais** (Abertura com problema/roteiro, Desenvolvimento segmentado em blocos de 10–15 min com pausas ativas onde tem perguntas e testes de V/F, e Fechamento retomando os desafios iniciais da aula):
 
-**1. Abertura (5–10 min)** — o objetivo é criar o "gancho" cognitivo:
-- **Organizador prévio** (Ausubel): Uma ideia-ponte que conecta o novo conteúdo ao que já se sabe. 
-- **Revisão rápida**: Relembre parta da aula anterior para ajudar o aluno a lembrar.
-- **Roteiro explícito**: dizer as 3–4 perguntas que a aula vai responder. Isso reduz carga cognitiva extrínseca porque o aluno para de gastar memória de trabalho tentando adivinhar para onde vai.
-- **Problema motivador** discuta e provoque os alunos a pensar um pouco Isso vem antes do formalismo, não depois. 
+**1. Abertura (10 min)** — o objetivo é criar o "gancho" cognitivo (deve ser chamado de Revisão e Introdução):
+- **Revisão**: Faça uma revisão cuidadosa dos conceitos principais da aula anterior. Dando foco no que liga com a aula atual.
+- **Idéia Central** (Ausubel): Uma ideia-ponte que conecta o novo conteúdo ao que foi visto anteriormente.
+- **Roteiro explícito**: dizer as 3–4 perguntas que a aula vai responder (não dá para ser só uma pergunta, deve ter alguma introdução para não ficar uma lista que é lida de passagem). Isso reduz carga cognitiva extrínseca porque o aluno para de gastar memória de trabalho tentando adivinhar para onde vai.
+- **Problema motivador**: discuta e provoque os alunos a pensar um pouco. Isso vem antes do formalismo, não depois. 
 - **Pausa ativa** veja abaixo.
 
 **2. Intuição (10 min)** Quando possível, explique em linhas gerais o algoritmo/modelo, sem grandes complicações matemáticas (exemplo: em arvore de decisão dá para explicar que vamos quebrar o espaço recursivamente, e a cada quebra a informação resumida em cada bloco é mais explicativa do que antes), mostre gráficos, algoritmos, diagramas. O aluno deve praticamente entender o que vamos fazer, só vai faltar detalhes mais pesados. Isso deve ser aplicado quase sempre na **Estratégia A** e quando cabível, na **Estratégia B**.
@@ -171,6 +171,17 @@ Ambas as abordagens devem manter os **3 movimentos fundamentais** (Abertura com 
 | **Explicitar a estrutura argumentativa** | "Vou fazer três suposições; a terceira é frágil e vou atacá-la no fim" |
 
 ---
+
+## Registro e vocabulário
+
+Ser didático não significa usar linguagem ruim. Evite gírias/coloquialismos
+comerciais para descrever vantagens e limitações de um método — em especial
+**"o que X compra"** / **"o que X custa"** (ex.: "o que a MST compra", "o
+preço de não assumir forma nenhuma"), um vício de escrita que já apareceu
+repetido em várias aulas. Prefira nomear a coisa diretamente: **vantagens e
+limitações**, **custo computacional**, **o que se ganha e o que se perde**, ou
+reescrever a frase sem a metáfora comercial (ex.: "X permite fazer Y sem
+precisar de Z, mas exige W").
 
 ## Formato do arquivo de aula
 

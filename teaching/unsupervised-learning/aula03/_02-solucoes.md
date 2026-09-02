@@ -9,21 +9,21 @@
 
 **Heurística:** Falsa equivalência
 
-**Afirmação:** ✗ Se um cluster verdadeiro tem formato de "U" (uma curva fechada quase se tocando nas duas pontas), um K-means com $K$ grande o bastante eventualmente recupera esse formato exato como um único cluster, só fragmentando-o internamente em pequenas células convexas que, somadas, aproximam bem o "U".
+**Afirmação:** ✗ Se um cluster verdadeiro tem formato de "U" (uma curva fechada quase se tocando nas duas pontas), uma atribuição por protótipo mais próximo com um número suficientemente grande de protótipos eventualmente recupera esse formato exato como um único cluster, só fragmentando-o internamente em pequenas células convexas que, somadas, aproximam bem o "U".
 
 **Resposta:** Falso
 
-**Justificativa:** Mesmo que a soma de muitas células convexas pequenas aproxime visualmente a forma do "U", o K-means nunca produz "um único cluster" para essa forma — a saída são $K$ rótulos distintos, um por célula de Voronoi, cada um tratado como um cluster separado. "Aproximar a forma via muitos fragmentos" e "recuperar como um único cluster" são coisas diferentes: a definição de cluster do K-means é por rótulo de atribuição, não por proximidade entre fragmentos vizinhos. Juntar os fragmentos num único cluster exigiria um passo adicional que não faz parte do K-means.
+**Justificativa:** Mesmo que a soma de muitas células convexas pequenas aproxime visualmente a forma do "U", essa abordagem nunca produz "um único cluster" para essa forma — a saída são tantos rótulos distintos quantos protótipos, um por célula de Voronoi, cada um tratado como um cluster separado. "Aproximar a forma via muitos fragmentos" e "recuperar como um único cluster" são coisas diferentes: a definição de cluster por atribuição a protótipo é por rótulo, não por proximidade entre fragmentos vizinhos. Juntar os fragmentos num único cluster exigiria um passo adicional que não faz parte dessa regra de atribuição.
 
 ### Cluster como componente conexa vs. distância a centróide — item (b)
 
 **Heurística:** Falsa dicotomia
 
-**Afirmação:** ✔ A convexidade de cada célula de Voronoi é uma consequência necessária de usar distância euclidiana ao centro mais próximo como regra de atribuição — não uma escolha adicional independente do K-means.
+**Afirmação:** ✔ A convexidade de cada célula de Voronoi é uma consequência necessária de usar distância euclidiana ao protótipo mais próximo como regra de atribuição — não uma escolha adicional independente de qual algoritmo específico é usado para posicionar os protótipos.
 
 **Resposta:** Verdadeiro
 
-**Justificativa:** A célula de cada centro $k$ é a interseção dos semiespaços "mais perto de $k$ do que de qualquer $j$" — toda interseção de semiespaços é convexa, por definição, para qualquer métrica induzida por norma (a euclidiana inclusa). Não existe uma variante de "atribuição por centro mais próximo" que produza células não-convexas; a convexidade nasce da própria regra de atribuição, não é algo escolhido além dela.
+**Justificativa:** A célula de cada protótipo $k$ é a interseção dos semiespaços "mais perto de $k$ do que de qualquer $j$" — toda interseção de semiespaços é convexa, por definição, para qualquer métrica induzida por norma (a euclidiana inclusa). Não existe uma variante de "atribuição ao protótipo mais próximo" que produza células não-convexas; a convexidade nasce da própria regra de atribuição, não é algo escolhido além dela.
 
 ### Cluster como componente conexa vs. distância a centróide — item (c)
 
@@ -71,11 +71,11 @@
 
 **Heurística:** Falsa dicotomia
 
-**Afirmação:** ✗ A definição de cluster via $L_\lambda$ dispensa completamente a necessidade de qualquer parâmetro de escala, ao contrário do K-means (que exige $K$).
+**Afirmação:** ✗ A definição de cluster via $L_\lambda$ dispensa completamente a necessidade de qualquer parâmetro de escala, ao contrário de uma atribuição por protótipos fixos (que exige escolher quantos protótipos usar).
 
 **Resposta:** Falso
 
-**Justificativa:** $L_\lambda$ substitui a escolha de $K$ por uma escolha diferente — o próprio $\lambda$ (ou, no HDBSCAN, `min_cluster_size`/`min_samples`) — não elimina a necessidade de uma decisão de escala. A Síntese (Bloco 7) deixa isso explícito: `min_cluster_size` "ainda é uma escolha de escala". Trocar um parâmetro por outro não é o mesmo que eliminar o parâmetro.
+**Justificativa:** $L_\lambda$ substitui a escolha de "quantos protótipos" por uma escolha diferente — o próprio $\lambda$ (ou, no HDBSCAN, `min_cluster_size`/`min_samples`) — não elimina a necessidade de uma decisão de escala. A Síntese (Bloco 7) deixa isso explícito: `min_cluster_size` "ainda é uma escolha de escala". Trocar um parâmetro por outro não é o mesmo que eliminar o parâmetro.
 
 ### Conjuntos de nível e a hierarquia indexada por $\lambda$ — item (d)
 
@@ -449,11 +449,11 @@
 
 **Heurística:** Falsa dicotomia
 
-**Afirmação:** ✗ Um K-means aplicado aos mesmos 30 atributos padronizados está, em algum grau, imune à maldição da dimensionalidade, porque não usa nenhum estimador de densidade baseado em vizinhos como $\mathrm{core}_K$.
+**Afirmação:** ✗ Uma atribuição por protótipos fixos (distância euclidiana a centros) aplicada aos mesmos 30 atributos padronizados está, em algum grau, imune à maldição da dimensionalidade, porque não usa nenhum estimador de densidade baseado em vizinhos como $\mathrm{core}_K$.
 
 **Resposta:** Falso
 
-**Justificativa:** K-means usa distância euclidiana ao centróide, que sofre sua própria versão da maldição (distâncias entre pontos e centróides também perdem significado geométrico relativo em alta dimensão) — já apontado na resposta da pausa ativa do Bloco 7: "nenhum método baseado em distância escapa por completo". Não usar $\mathrm{core}_K$ especificamente não é o mesmo que estar imune à maldição em geral.
+**Justificativa:** Distância euclidiana a um protótipo fixo sofre sua própria versão da maldição (distâncias entre pontos e protótipos também perdem significado geométrico relativo em alta dimensão) — já apontado na resposta da pausa ativa do Bloco 7: "nenhum método baseado em distância escapa por completo". Não usar $\mathrm{core}_K$ especificamente não é o mesmo que estar imune à maldição em geral.
 
 ### Maldição da dimensionalidade herdada da Aula 2 — item (d)
 
@@ -491,7 +491,7 @@
 
 **Heurística:** Transferência de domínio
 
-**Afirmação:** ✔ O ESL (p. 507) cita "modelagem por mistura" como um paradigma de clustering distinto tanto do combinatório (K-means) quanto do "*mode seeking*" (HDBSCAN) — os três paradigmas citados ao longo desta aula.
+**Afirmação:** ✔ O ESL (p. 507) cita "modelagem por mistura" como um paradigma de clustering distinto tanto do combinatório (protótipos fixos) quanto do "*mode seeking*" (HDBSCAN) — os três paradigmas citados ao longo desta aula.
 
 **Resposta:** Verdadeiro
 

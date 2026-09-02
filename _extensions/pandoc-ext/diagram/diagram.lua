@@ -447,20 +447,32 @@ end
 -- Format conversion
 --
 
---- Converts a PDF to SVG.
+--- Converts a PDF to SVG. Tries `dvisvgm` first — it ships with any
+--- TeX Live/TinyTeX install (so it's already present wherever `pdflatex`
+--- is, including shared servers without root/admin to install a separate
+--- package like Inkscape) — falling back to `inkscape` if `dvisvgm` isn't
+--- on PATH. Without this fallback chain, a machine with only one of the
+--- two tools installed silently produced a 0-byte SVG for every diagram
+--- (pandoc.pipe's failure wasn't surfaced as a render error, and
+--- `diagram: cache: true` then kept re-serving that empty file forever —
+--- seen live on ssh.ic.unicamp.br, which has dvisvgm but not inkscape).
 local pdf2svg = function (imgdata)
   -- Using `os.tmpname()` instead of a hash would be slightly cleaner, but the
   -- function causes problems on Windows (and wasm). See, e.g.,
   -- https://github.com/pandoc-ext/diagram/issues/49
   local pdf_file = 'diagram-' .. pandoc.utils.sha1(imgdata) .. '.pdf'
   write_file(pdf_file, imgdata)
-  local args = {
-    '--export-type=svg',
-    '--export-plain-svg',
-    '--export-filename=-',
-    pdf_file
-  }
-  return pandoc.pipe('inkscape', args, ''), os.remove(pdf_file)
+  local ok, svg = pcall(pandoc.pipe, 'dvisvgm',
+    {'--pdf', '--stdout', '--no-fonts', pdf_file}, '')
+  if not ok then
+    ok, svg = pcall(pandoc.pipe, 'inkscape',
+      {'--export-type=svg', '--export-plain-svg', '--export-filename=-', pdf_file}, '')
+  end
+  os.remove(pdf_file)
+  if not ok then
+    error(svg)
+  end
+  return svg
 end
 
 local function properties_from_code (code, comment_start)
