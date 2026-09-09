@@ -270,10 +270,13 @@ Toda aula precisa de exercícios — em dois formatos distintos, um por saída, 
 3. **Transferência de domínio** — descreva um cenário prático ou analítico que **não** apareceu na aula, e afirme que o conceito se aplica (ou falha) ali de um jeito específico.
 4. **Falsa dicotomia/falsa equivalência** — construa uma afirmação que soe plausível por usar o jargão certo da aula, mas que erre a relação de causa e efeito de forma sutil e estrutural.
 
+**A heurística 3 (Transferência de domínio) deve migrar para outro cenário de Aprendizado de Máquina, nunca para um domínio estapafúrdio ou decorativo.** Feedback explícito do usuário, depois de revisar uma aula cujas Pausas Ativas usavam vigas de engenharia estrutural, modos de vibração de molas acopladas, crescimento populacional e sistemas de controle como "outro domínio" — nenhum desses é errado matematicamente, mas o curso é de Aprendizado de Máquina, e espalhar as transferências por física/engenharia/ecologia deixa os exercícios com cara de banco de questões genérico, desconectado do resto do material. Ao escolher o cenário da heurística 3, prefira: outro modelo ou arquitetura (ex.: uma camada linear de rede neural, a Hessiana da função de perda de uma regressão logística), outro dataset já catalogado nesta disciplina (ver "Dados: prefira exemplos reais a sintéticos" acima — Breast Cancer Wisconsin, German Credit, Adult Census etc.) ou outra técnica de ML que usa a mesma estrutura matemática (cadeias de Markov em aprendizado por reforço, matriz de covariância em PCA). Isso vale tanto para as Pausas Ativas quanto para a seção de Exercícios final, em qualquer disciplina de ML desta pasta — não só nesta aula.
+
 **Proibido:**
 - Perguntas do tipo "o que é X" ou "X é definido como Y".
 - Paráfrase literal de uma frase da aula.
 - Afirmações cuja falsidade dependa só de trocar uma palavra (ex: "sempre" por "nunca", "positivo" por "negativo") sem alterar a mecânica do conceito por trás.
+- Cenário de aplicação fora de Aprendizado de Máquina na heurística de Transferência de domínio (ver parágrafo acima).
 
 **Registro da justificativa — só para as notas, no arquivo consolidado de respostas.** As notas continuam saindo **sem solução no `index.qmd` publicado** (é trabalho do aluno resolver por conta — isso não muda). Mas a justificativa de cada item — por que é V ou F, apontando exatamente qual falha conceitual o aluno cometeria ao errar — deve ser escrita em `aulaNN/_01-respostas.md` (mesmo prefixo `_` dos demais arquivos de apoio, pelo mesmo motivo: nunca deve aparecer no site), junto com as soluções das pausas ativas. Formato, por item de V/F:
 
