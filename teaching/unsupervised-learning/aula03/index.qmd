@@ -395,6 +395,27 @@ central.
 
 :::
 
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+A paisagem mostra **duas cristas conectadas**, cada uma acompanhando
+uma lua, separadas por um vale visível — mesmo as duas luas se
+entrelaçando geometricamente. Pergunta nova, que a Aula 2 nunca fez:
+não "qual a densidade aqui", mas "onde termina uma crista e começa a
+outra" — uma pergunta sobre **conectividade**, não sobre o valor da
+densidade num ponto isolado.
+:::
+
+::: {.fragment}
+A resposta óbvia a olho nu (duas cristas) **não** tem nada a ver com
+"perto de um centro fixo": as duas pontas de cada lua estão, em linha
+reta, tão longe uma da outra quanto de pontos da lua vizinha — o que as
+une é a **crista de densidade alta** que as conecta, não a proximidade
+a um ponto central.
+:::
+
+:::
+
 ## Pergunta
 
 ::: {.callout-tip}
@@ -1071,20 +1092,213 @@ $\lambda$ é maior que a densidade máxima de qualquer região dos dados.
 
 ::: {.fragment}
 **Voltando à pergunta:** o vale raso do Bloco 2 agora tem nome —
-depende inteiramente de onde $\lambda$ corta. O Bloco 4 constrói a
-ferramenta computável para não depender de escolher $\lambda$ à mão.
+depende inteiramente de onde $\lambda$ corta. Os Blocos 4 a 6 constroem,
+em etapas, uma ferramenta computável que termina não dependendo de
+escolher $\lambda$ à mão.
 :::
 
 :::
 
-# Distância de Alcançabilidade Mútua
+# DBSCAN
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-O Bloco 3 definiu cluster em termos de $p(\mathbf{x})$ — mas $p$ nunca
-é conhecido de verdade, só estimado. A Aula 2 já resolveu exatamente
-esse problema com o estimador $k$-NN: fixar $K$ vizinhos e medir o raio
-$d_K(\mathbf{x})$ da bola que os captura dá
+**Do conjunto de nível a uma regra mais direta.** O Bloco 3 definiu
+cluster via conjuntos de nível de densidade $L_\lambda$ — mas isso
+exige estimar $p(\mathbf{x})$ (KDE) e escolher um $\lambda$. Existe uma
+via mais direta e clássica para a mesma ideia ("cluster = região densa
+conectada"), baseada só em **contar vizinhos dentro de um raio**, sem
+estimar densidade nenhuma: o **DBSCAN** (*Density-Based Spatial
+Clustering of Applications with Noise*, Ester, Kriegel, Sander & Xu,
+1996).
+
+**Os dois parâmetros.** DBSCAN precisa de um raio $\varepsilon$ e uma
+contagem mínima `minPts`. Defina a vizinhança
+$N_\varepsilon(p)=\{q : d(p,q)\le\varepsilon\}$ — que, por convenção
+(Ester et al., 1996; a mesma que o `scikit-learn` usa), **conta o
+próprio $p$** (afinal $d(p,p)=0\le\varepsilon$ sempre). Um ponto $p$ é
+**núcleo** (*core point*) se $|N_\varepsilon(p)|\ge\text{minPts}$ — se
+tem gente suficiente por perto, incluindo ele mesmo.
+
+**Conexão direta e cadeia.** Dois núcleos $p,q$ conectam
+**diretamente** se $d(p,q)\le\varepsilon$. Um cluster é formado
+seguindo **cadeias** dessas conexões diretas — o fecho transitivo de
+"conectar direto", uma definição **recursiva**, não um teste par a par:
+$p$ e um ponto distante $z$ podem acabar no mesmo cluster sem que
+$d(p,z)\le\varepsilon$, desde que exista uma cadeia de núcleos
+$p=x_0,x_1,\dots,x_m=z$ com $d(x_i,x_{i-1})\le\varepsilon$ em cada
+passo. Um ponto não-núcleo que cai a $\le\varepsilon$ de algum núcleo
+entra no cluster como **borda** (mas não propaga a cadeia adiante);
+quem sobra — nem núcleo, nem a $\le\varepsilon$ de nenhum núcleo —
+vira **ruído**.
+
+**O algoritmo, por extenso.** Nada aqui exige nenhuma peça sofisticada
+— dá para descrever o DBSCAN clássico direto da definição, em poucos
+passos, usando só a matriz de distâncias $D$:
+
+1. Para cada ponto $p$, conte quantos pontos (incluindo o próprio $p$)
+   estão a distância $\le\varepsilon$; se houver pelo menos `minPts`,
+   marque $p$ como **núcleo**.
+2. Escolha um núcleo $p$ ainda não visitado e abra um cluster novo;
+   marque $p$ como visitado e ponha $p$ numa fila de busca.
+3. Tire um ponto $q$ da fila e examine todo vizinho $r$ a distância
+   $\le\varepsilon$ de $q$: coloque $r$ no cluster atual (núcleo ou
+   borda); se $r$ **também for núcleo** e ainda não tiver sido
+   visitado, marque-o como visitado e **acrescente-o à fila** — é essa
+   propagação, só por núcleos, que forma a cadeia (fecho transitivo).
+4. Repita o passo 3 até a fila esvaziar; volte ao passo 2 para o
+   próximo núcleo ainda não visitado, até cobrir todos os núcleos.
+5. Todo ponto que nunca entrou em cluster nenhum (não é núcleo, e não
+   está a $\le\varepsilon$ de nenhum núcleo) fica como **ruído**.
+
+```{python}
+#| echo: false
+
+def nucleos_de(D, eps, minPts):
+    # |N_eps(p)|, contando o próprio p (convenção do DBSCAN original)
+    return set(i for i in range(len(D)) if (D[i] <= eps).sum() >= minPts)
+
+def dbscan_classico(D, eps, minPts):
+    nucleos = nucleos_de(D, eps, minPts)
+    rotulo = [-1] * len(D)
+    visitado = [False] * len(D)
+    cluster_atual = 0
+    for p in range(len(D)):
+        if visitado[p] or p not in nucleos:
+            continue
+        fila = [p]
+        visitado[p] = True
+        rotulo[p] = cluster_atual
+        while fila:
+            q = fila.pop()
+            for r in range(len(D)):
+                if D[q, r] > eps:
+                    continue
+                if rotulo[r] == -1:
+                    rotulo[r] = cluster_atual
+                if r in nucleos and not visitado[r]:
+                    visitado[r] = True
+                    fila.append(r)
+        cluster_atual += 1
+    return rotulo
+```
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Que é o DBSCAN
+
+::: {.fragment}
+Bloco 3: cluster via $L_\lambda$ — exige estimar $p(\mathbf{x})$ (KDE)
+e escolher $\lambda$. **DBSCAN** (Ester, Kriegel, Sander & Xu, 1996)
+ataca a mesma ideia de um jeito mais direto — só **contar vizinhos num
+raio**, sem estimar densidade nenhuma.
+:::
+
+::: {.fragment}
+Dois parâmetros: raio $\varepsilon$ e contagem mínima `minPts`.
+$N_\varepsilon(p)=\{q:d(p,q)\le\varepsilon\}$ conta o próprio $p$
+(convenção Ester et al. 1996 / `scikit-learn`).
+:::
+
+::: {.fragment .callout-important}
+## Ponto Núcleo
+
+$p$ é **núcleo** se $|N_\varepsilon(p)|\ge\text{minPts}$ — tem gente
+suficiente por perto, incluindo ele mesmo.
+:::
+
+## Conexão, Cadeia e Cluster
+
+::: {.fragment}
+Dois núcleos $p,q$ conectam **diretamente** se $d(p,q)\le\varepsilon$.
+Um cluster é uma **cadeia** dessas conexões — fecho transitivo,
+definição **recursiva**: $p$ e um $z$ distante podem cair no mesmo
+cluster sem $d(p,z)\le\varepsilon$, desde que exista uma cadeia de
+núcleos entre eles.
+:::
+
+::: {.fragment}
+Ponto não-núcleo a $\le\varepsilon$ de algum núcleo = **borda** (entra
+no cluster, mas não propaga a cadeia adiante). Quem sobra = **ruído**.
+:::
+
+## O Algoritmo, por Extenso
+
+::: {.fragment}
+**1.** $p$ é **núcleo** se $\ge$ `minPts` pontos (contando $p$) estão a
+$\le\varepsilon$ dele.
+:::
+
+::: {.fragment}
+**2.** Escolha um núcleo ainda não visitado, abra um cluster novo,
+ponha-o numa fila.
+:::
+
+::: {.fragment}
+**3.** Tire $q$ da fila; todo vizinho $r$ a $\le\varepsilon$ entra no
+cluster; se $r$ **também é núcleo** e não visitado, marque-o e
+**acrescente-o à fila** — só núcleos propagam a busca (a cadeia).
+:::
+
+::: {.fragment}
+**4.** Repita até a fila esvaziar; volte ao passo 2 para o próximo
+núcleo não visitado.
+:::
+
+::: {.fragment}
+**5.** Quem nunca entrou em nenhum cluster vira **ruído**.
+:::
+
+```{python}
+#| echo: false
+
+def nucleos_de(D, eps, minPts):
+    return set(i for i in range(len(D)) if (D[i] <= eps).sum() >= minPts)
+
+def dbscan_classico(D, eps, minPts):
+    nucleos = nucleos_de(D, eps, minPts)
+    rotulo = [-1] * len(D)
+    visitado = [False] * len(D)
+    cluster_atual = 0
+    for p in range(len(D)):
+        if visitado[p] or p not in nucleos:
+            continue
+        fila = [p]
+        visitado[p] = True
+        rotulo[p] = cluster_atual
+        while fila:                 # a "cadeia": só um núcleo reabre a busca
+            q = fila.pop()
+            for r in range(len(D)):
+                if D[q, r] > eps:
+                    continue
+                if rotulo[r] == -1:
+                    rotulo[r] = cluster_atual
+                if r in nucleos and not visitado[r]:
+                    visitado[r] = True
+                    fila.append(r)
+        cluster_atual += 1
+    return rotulo
+```
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Um jeito mais fácil de checar "esses dois estão juntos?".** Decidir
+se dois pontos $p,q$ conectam, do jeito que acabamos de ver, exige
+**duas** verificações separadas: "$p$ é núcleo?", "$q$ é núcleo?", e só
+então "$d(p,q)\le\varepsilon$?". Dá para colapsar tudo isso numa
+**única** comparação de distância — o que também é exatamente o que
+falta para montar um grafo pesado e usar tudo que já se sabe sobre
+grafos (Bloco 5). Para isso, é preciso primeiro medir "o quão núcleo"
+um ponto é, sem fixar $\varepsilon$ ainda.
+
+O Bloco 3 já definiu cluster em termos de $p(\mathbf{x})$ — mas $p$
+nunca é conhecido de verdade, só estimado. A Aula 2 já resolveu
+exatamente esse problema com o estimador $k$-NN: fixar $K$ vizinhos e
+medir o raio $d_K(\mathbf{x})$ da bola que os captura dá
 $p(\mathbf{x})\approx K/(NV)$, com $V$ o volume dessa bola — e $V$
 cresce junto com $d_K(\mathbf{x})$ (raio maior, volume maior). É por
 isso, e não por coincidência, que $d_K(\mathbf{x})$ é **inversamente
@@ -1143,6 +1357,12 @@ pontos dentro da mesma "montanha".
 ::: {.content-visible when-format="revealjs"}
 
 ## $d_K(\mathbf{x})$, Um Uso Novo
+
+::: {.fragment}
+Checar "$p,q$ conectam?" exige **duas** verificações (núcleo? núcleo?
+distância?). Dá pra colapsar numa **única** comparação — e é o que
+falta pra montar um grafo pesado (Bloco 5).
+:::
 
 ::: {.fragment}
 Aula 2: $p(\mathbf{x})\approx K/(NV)$, $V$ = volume da bola de raio
@@ -1336,91 +1556,26 @@ construir o grafo completo.
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-## Da Alcançabilidade Mútua a um DBSCAN Tradicional
+**A vantagem: uma distância só, em vez de duas verificações.** Com
+$d_{\mathrm{mreach}}$ definida para todo par, dá para checar se $p$ e
+$q$ conectam com uma **única** comparação de distância — sem verificar
+"núcleo?" separadamente para cada um. Escolha um limiar $\varepsilon$,
+construa o grafo cujos vértices são os $N$ pontos e cujas arestas ligam
+$u,v$ sempre que $d_{\mathrm{mreach}}(u,v)\le\varepsilon$, e tome as
+**componentes conexas** desse grafo — cada componente é um cluster;
+pontos sem nenhuma aresta (porque o $\mathrm{core}_K$ deles já é maior
+que $\varepsilon$) ficam isolados e viram ruído, sem nenhuma etapa
+extra.
 
-Com $d_{\mathrm{mreach}}$ definida para todo par, já é possível montar
-um DBSCAN de verdade, sem nenhuma peça nova: escolha um limiar
-$\varepsilon$, construa o grafo cujos vértices são os $N$ pontos e cujas
-arestas ligam $u,v$ sempre que $d_{\mathrm{mreach}}(u,v)\le\varepsilon$,
-e tome as **componentes conexas** desse grafo — cada componente é um
-cluster; pontos sem nenhuma aresta (porque o $\mathrm{core}_K$ deles já
-é maior que $\varepsilon$) ficam isolados e viram ruído, sem nenhuma
-etapa extra. Nada aqui é novo: é exatamente a mesma lógica de "conectar
-por limiar" do DBSCAN clássico, só que aplicada sobre
-$d_{\mathrm{mreach}}$ em vez da distância bruta $d$.
+**Por que isso é exatamente o DBSCAN da seção anterior.** Lembrando:
+DBSCAN define $p$ como núcleo se $|N_\varepsilon(p)|\ge\text{minPts}$ e
+conecta diretamente dois núcleos $p,q$ se $d(p,q)\le\varepsilon$.
 
-## Por Que Isso é Exatamente o DBSCAN Tradicional
-
-O DBSCAN tradicional, com parâmetros $\varepsilon$ e `minPts`, define um
-ponto $p$ como **núcleo** se tem pelo menos `minPts` vizinhos a
-distância $\le\varepsilon$ ($|N_\varepsilon(p)|\ge\text{minPts}$),
-conecta diretamente dois núcleos $p,q$ se $d(p,q)\le\varepsilon$, e
-forma clusters seguindo **cadeias** dessas conexões diretas — o fecho
-transitivo, uma definição recursiva, não um teste par a par.
-
-**O algoritmo, por extenso.** Nada aqui exige nenhuma peça sofisticada —
-dá para descrever o DBSCAN clássico direto da definição, em poucos
-passos, usando só a matriz de distâncias $D$:
-
-1. Para cada ponto $p$, conte quantos pontos (incluindo o próprio $p$)
-   estão a distância $\le\varepsilon$; se houver pelo menos `minPts`,
-   marque $p$ como **núcleo**.
-2. Escolha um núcleo $p$ ainda não visitado e abra um cluster novo;
-   marque $p$ como visitado e ponha $p$ numa fila de busca.
-3. Tire um ponto $q$ da fila e examine todo vizinho $r$ a distância
-   $\le\varepsilon$ de $q$: coloque $r$ no cluster atual (núcleo ou
-   borda); se $r$ **também for núcleo** e ainda não tiver sido
-   visitado, marque-o como visitado e **acrescente-o à fila** — é essa
-   propagação, só por núcleos, que forma a cadeia (fecho transitivo).
-4. Repita o passo 3 até a fila esvaziar; volte ao passo 2 para o
-   próximo núcleo ainda não visitado, até cobrir todos os núcleos.
-5. Todo ponto que nunca entrou em cluster nenhum (não é núcleo, e não
-   está a $\le\varepsilon$ de nenhum núcleo) fica como **ruído**.
-
-O passo 3 é a cadeia: a busca só **continua** a partir de um ponto se
-ele for núcleo — um ponto de borda entra no cluster, mas não propaga a
-busca adiante. É exatamente isso que torna a definição recursiva (fecho
-transitivo), não um teste par a par: $p$ e um ponto distante $z$ podem
-acabar no mesmo cluster sem que $d(p,z)\le\varepsilon$, desde que exista
-uma cadeia de núcleos entre eles.
-
-```{python}
-#| echo: false
-
-def nucleos_de(D, eps, minPts):
-    # |N_eps(p)|, contando o próprio p (convenção do DBSCAN original)
-    return set(i for i in range(len(D)) if (D[i] <= eps).sum() >= minPts)
-
-def dbscan_classico(D, eps, minPts):
-    nucleos = nucleos_de(D, eps, minPts)
-    rotulo = [-1] * len(D)
-    visitado = [False] * len(D)
-    cluster_atual = 0
-    for p in range(len(D)):
-        if visitado[p] or p not in nucleos:
-            continue
-        fila = [p]
-        visitado[p] = True
-        rotulo[p] = cluster_atual
-        while fila:
-            q = fila.pop()
-            for r in range(len(D)):
-                if D[q, r] > eps:
-                    continue
-                if rotulo[r] == -1:
-                    rotulo[r] = cluster_atual
-                if r in nucleos and not visitado[r]:
-                    visitado[r] = True
-                    fila.append(r)
-        cluster_atual += 1
-    return rotulo
-```
-
-**Atenção a um detalhe de contagem que muda o resultado.** $N_\varepsilon(p)$
-conta o próprio $p$ (a distância de $p$ a si mesmo é $0\le\varepsilon$,
-sempre) — é a convenção original do DBSCAN (Ester et al., 1996) e a que
-o `scikit-learn` usa. Então "pelo menos `minPts` pontos em
-$N_\varepsilon(p)$, contando $p$" significa "pelo menos
+**Atenção a um detalhe de contagem que muda o resultado.**
+$N_\varepsilon(p)$ conta o próprio $p$ (a distância de $p$ a si mesmo é
+$0\le\varepsilon$, sempre) — é a convenção original do DBSCAN (Ester et
+al., 1996) e a que o `scikit-learn` usa. Então "pelo menos `minPts`
+pontos em $N_\varepsilon(p)$, contando $p$" significa "pelo menos
 $\text{minPts}-1$ **outros** pontos a distância $\le\varepsilon$" — e
 $\mathrm{core}_K(p)$, por definição, é a distância ao $K$-ésimo vizinho
 **sem contar $p$**. O $K$ certo, portanto, é
@@ -1449,15 +1604,26 @@ que só liga núcleo a núcleo (sem a etapa extra de "anexar ponto de
 borda ao cluster mais próximo" do DBSCAN original), é chamada
 **DBSCAN\*** no artigo do HDBSCAN (Campello, Moulavi & Sander, 2013).
 
+**O desafio que sobra: como escolher os parâmetros?** DBSCAN (ou sua
+versão $d_{\mathrm{mreach}}$) funciona bem — mas exige fixar
+$\varepsilon$ e `minPts`/$K$ *a priori*, sem nenhum critério óbvio para
+escolhê-los, e o resultado pode mudar bastante conforme esses valores
+mudam. Em vez de tentar adivinhar o $\varepsilon$ "certo" de uma vez,
+existe uma saída mais palpável: construir a hierarquia inteira,
+variando $\varepsilon$ de $0$ a $\infty$, e decidir depois onde (e se)
+cortar. É essa ideia — clustering hierárquico — que resolve o problema
+de frente.
+
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## Como Isso Vira um DBSCAN Tradicional
+## Como Isso Vira o DBSCAN da Seção Anterior
 
 ::: {.fragment}
 Escolha um limiar $\varepsilon$. Monte o grafo: aresta $(u,v)$ sempre
-que $d_{\mathrm{mreach}}(u,v)\le\varepsilon$.
+que $d_{\mathrm{mreach}}(u,v)\le\varepsilon$ — **uma única** comparação,
+em vez de núcleo + núcleo + distância separadamente.
 :::
 
 ::: {.fragment}
@@ -1465,84 +1631,7 @@ que $d_{\mathrm{mreach}}(u,v)\le\varepsilon$.
 ($\mathrm{core}_K$ maior que $\varepsilon$) ficam isolados = ruído.
 :::
 
-::: {.fragment}
-Nada novo: é a mesma lógica de "conectar por limiar" do DBSCAN — só que
-sobre $d_{\mathrm{mreach}}$, não $d$ bruta.
-:::
-
-## DBSCAN Tradicional, Por Dentro — e a Equivalência
-
-::: {.fragment}
-DBSCAN clássico $(\varepsilon,\text{minPts})$: $p$ é **núcleo** se
-$|N_\varepsilon(p)|\ge\text{minPts}$; conecta núcleos $p,q$ direto se
-$d(p,q)\le\varepsilon$; cluster = **cadeia** dessas conexões (definição
-recursiva).
-:::
-
-## O Algoritmo, por Extenso
-
-::: {.fragment}
-**1.** $p$ é **núcleo** se $\ge$ `minPts` pontos (contando $p$) estão a
-$\le\varepsilon$ dele.
-:::
-
-::: {.fragment}
-**2.** Escolha um núcleo ainda não visitado, abra um cluster novo,
-ponha-o numa fila.
-:::
-
-::: {.fragment}
-**3.** Tire $q$ da fila; todo vizinho $r$ a $\le\varepsilon$ entra no
-cluster; se $r$ **também é núcleo** e não visitado, marque-o e
-**acrescente-o à fila** — só núcleos propagam a busca (a cadeia).
-:::
-
-::: {.fragment}
-**4.** Repita até a fila esvaziar; volte ao passo 2 para o próximo
-núcleo não visitado.
-:::
-
-::: {.fragment}
-**5.** Quem nunca entrou em nenhum cluster vira **ruído**.
-:::
-
-```{python}
-#| echo: false
-
-def nucleos_de(D, eps, minPts):
-    return set(i for i in range(len(D)) if (D[i] <= eps).sum() >= minPts)
-
-def dbscan_classico(D, eps, minPts):
-    nucleos = nucleos_de(D, eps, minPts)
-    rotulo = [-1] * len(D)
-    visitado = [False] * len(D)
-    cluster_atual = 0
-    for p in range(len(D)):
-        if visitado[p] or p not in nucleos:
-            continue
-        fila = [p]
-        visitado[p] = True
-        rotulo[p] = cluster_atual
-        while fila:                 # a "cadeia": só um núcleo reabre a busca
-            q = fila.pop()
-            for r in range(len(D)):
-                if D[q, r] > eps:
-                    continue
-                if rotulo[r] == -1:
-                    rotulo[r] = cluster_atual
-                if r in nucleos and not visitado[r]:
-                    visitado[r] = True
-                    fila.append(r)
-        cluster_atual += 1
-    return rotulo
-```
-
-::: {.fragment}
-O passo 3 é a cadeia: a busca só **continua** a partir de um núcleo —
-um ponto de borda entra no cluster, mas não propaga. Por isso $p$ e um
-$z$ distante podem cair no mesmo cluster sem $d(p,z)\le\varepsilon$,
-desde que exista uma cadeia de núcleos entre eles.
-:::
+## Por Dentro da Equivalência
 
 ::: {.fragment}
 **Detalhe que importa:** $N_\varepsilon(p)$ conta o próprio $p$
@@ -1564,43 +1653,50 @@ $\iff$ $d_{\mathrm{mreach}}(p,q)\le\varepsilon$ — mesma aresta, mesmo
 grafo, mesmos clusters (**DBSCAN\***, Campello, Moulavi & Sander 2013).
 :::
 
+## O Desafio que Sobra
+
+::: {.fragment}
+DBSCAN/$d_{\mathrm{mreach}}$ funcionam, mas exigem fixar $\varepsilon$
+e `minPts`/$K$ *a priori*, sem critério óbvio — o resultado muda
+bastante conforme esses valores mudam.
 :::
 
-# A Árvore Geradora Mínima e o Clustering Hierárquico Clássico
+::: {.fragment}
+Saída mais palpável: construir a hierarquia **inteira**, variando
+$\varepsilon$ de $0$ a $\infty$, e decidir depois onde cortar —
+**clustering hierárquico**.
+:::
+
+:::
+
+# Clustering Hierárquico
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-Com $d_{\mathrm{mreach}}$ definida para todo par de pontos, construa o
-**grafo completo** cujos vértices são os $N$ pontos e cujo peso de
-aresta $(i,j)$ é $d_{\mathrm{mreach}}(i,j)$. Esse grafo tem $N(N-1)/2$
-arestas — muitas delas redundantes, no sentido de que existem vários
-caminhos possíveis entre o mesmo par de vértices. Uma **árvore
-geradora** (*spanning tree*) é um subgrafo que conecta todos os $N$
-vértices usando exatamente $N-1$ arestas e nenhum ciclo — o mínimo de
-arestas que ainda mantém tudo ligado. Entre todas as árvores geradoras
-possíveis desse grafo (e existem muitas), a que minimiza a soma dos
-pesos das suas $N-1$ arestas é a **Árvore Geradora Mínima** (*Minimum
-Spanning Tree*, MST). Intuitivamente: a MST nunca inclui uma aresta
-cara quando existe uma rota mais barata entre os mesmos dois vértices
-passando por outro lugar da árvore — toda conexão redundante e cara é
-descartada.
+**Motivação: sentir o número de clusters sem fixar um único corte.** O
+Bloco 4 terminou num desafio: DBSCAN (com ou sem $d_{\mathrm{mreach}}$)
+exige fixar $\varepsilon$ e `minPts`/$K$ de antemão, sem critério óbvio
+para escolhê-los. Clustering hierárquico ataca o problema de outro
+jeito: em vez de escolher um corte e ver o que sai, constrói a
+**sequência inteira** de partições aninhadas, de $N$ clusters (um por
+ponto) até $1$ cluster (todo mundo junto), e só depois — ou nunca,
+deixando a árvore inteira como resposta — decide onde cortar. É
+exatamente essa ideia, aplicada à hierarquia de $d_{\mathrm{mreach}}$
+em vez da distância bruta, que o Bloco 6 (HDBSCAN) vai usar para
+extrair clusters sem escolher nenhum $\lambda$ à mão.
 
-**Clustering hierárquico aglomerativo, em geral.** Antes de entrar na
-regra específica desta aula, vale a ideia geral por trás dela: um
-algoritmo hierárquico aglomerativo começa com $N$ clusters — um por
-ponto — e, a cada passo, funde os **dois clusters mais próximos** num
-só, sempre num nível de dissimilaridade maior que o passo anterior, até
-sobrar um único cluster com todo mundo dentro. Essa sequência de $N-1$
-fusões é a **hierarquia** propriamente dita (o dendrograma). O que
-falta especificar é uma única coisa: o que significa "distância entre
-dois *clusters*" (não entre dois pontos) — existem várias regras
-possíveis para isso, e a Aula usa uma específica.
+**Como funciona: aglomerativo, de baixo para cima.** Um algoritmo
+hierárquico aglomerativo começa com $N$ clusters — um por ponto — e, a
+cada passo, funde os **dois clusters mais próximos** num só, sempre num
+nível de dissimilaridade maior que o passo anterior, até sobrar um
+único cluster com todo mundo dentro. Essa sequência de $N-1$ fusões é a
+**hierarquia** propriamente dita — o **dendrograma**. O que falta
+especificar é uma única coisa: o que significa "distância entre dois
+*clusters*" (não entre dois pontos) — existem várias regras possíveis
+para isso, e a Aula usa uma específica.
 
-**O resultado citado.** Um fato clássico de teoria de grafos e
-clustering conecta a MST a esse método de clustering hierárquico, que
-Hastie, Tibshirani & Friedman (ESL, 2009, §14.3.12) descrevem em
-detalhe sob o nome de **ligação simples** (*single linkage*), tradução
-livre —
+**Ligação simples (single linkage).** Hastie, Tibshirani & Friedman
+(ESL, 2009, §14.3.12) descrevem a regra desta aula, tradução livre —
 
 > "*Ligação simples* (SL) toma a dissimilaridade intergrupo como a do
 > par mais próximo (menos dissimilar): $d_{SL}(G,H) = \min_{i\in G,
@@ -1615,74 +1711,117 @@ maior que a anterior (ESL, p. 520-521, tradução livre): *"cada nível
 da hierarquia representa um agrupamento particular [...] a árvore
 binária [...] tem $N-1$ níveis"*.
 
-**O fato central.** Cortar as $k-1$ arestas mais pesadas da MST
-reproduz exatamente as $k$ componentes do clustering por ligação
-simples com $k$ clusters. Não é intuitivo à primeira vista — mas também
-não é coincidência: é uma propriedade de caminhos em grafos, não um
-acidente numérico.
+**O custo de fazer isso ingenuamente.** Construir essa hierarquia do
+zero — recalculando, a cada uma das $N-1$ fusões, qual par de clusters
+está mais próximo — parece exigir refazer o trabalho inteiro para cada
+$k$ diferente que se queira testar. Existe um atalho: uma única
+estrutura, com apenas $N-1$ arestas, que já contém a hierarquia inteira
+de ligação simples de uma vez — a **Árvore Geradora Mínima** (MST).
 
-**Por que é verdade.** Ligação simples junta $p$ e $q$ no mesmo cluster,
-num nível $\tau$, exatamente quando existe uma **cadeia** $p=x_0,
-x_1,\dots,x_m=q$ com $d(x_i,x_{i-1})\le\tau$ em cada passo — isto é, $p$
-e $q$ estão na mesma componente conexa do grafo completo restrito às
-arestas $\le\tau$ (a mesma lógica de fecho transitivo do Bloco 4, agora
-sobre distância bruta). Chame de **custo** de um caminho o **maior**
-peso de aresta ao longo dele — o "elo mais fraco da corrente" — e defina
-o custo mínimo entre $p$ e $q$ como o menor custo entre todos os
-caminhos possíveis do grafo completo. Então $p$ e $q$ ficam conectados a
-um nível $\tau$ assim que $\tau$ atinge esse custo mínimo, nem antes
-nem depois. A MST tem uma propriedade notável (caminho de **gargalo
-mínimo**, um resultado clássico de teoria de grafos): o caminho entre
-$p$ e $q$ *dentro da MST* — único, já que é uma árvore — é sempre um
-caminho de custo mínimo entre $p$ e $q$ no grafo completo. Nenhuma rota
-alternativa, por mais tortuosa, consegue um elo mais fraco mais barato;
-a MST, ao descartar só arestas redundantes e caras, preserva a melhor
-rota de gargalo entre qualquer par de vértices. Por isso cortar as
-arestas de peso $>\tau$ da MST produz exatamente as mesmas componentes
-que cortar as arestas de peso $>\tau$ do grafo completo — e essas
-componentes são, por definição, os clusters de ligação simples no nível
-$\tau$. "Cortar as $k-1$ arestas mais pesadas" é só escolher $\tau$ logo
-abaixo do peso da $(k-1)$-ésima aresta mais pesada, produzindo $k$
-componentes.
+Com uma matriz de distâncias definida para todo par de pontos (aqui,
+$d_{\mathrm{mreach}}$, mas o argumento a seguir vale para qualquer
+distância), construa o **grafo completo** cujos vértices são os $N$
+pontos e cujo peso de aresta $(i,j)$ é a distância entre eles. Esse
+grafo tem $N(N-1)/2$ arestas — muitas delas redundantes, no sentido de
+que existem vários caminhos possíveis entre o mesmo par de vértices.
+Uma **árvore geradora** (*spanning tree*) é um subgrafo que conecta
+todos os $N$ vértices usando exatamente $N-1$ arestas e nenhum ciclo —
+o mínimo de arestas que ainda mantém tudo ligado. Entre todas as
+árvores geradoras possíveis desse grafo (e existem muitas), a que
+minimiza a soma dos pesos das suas $N-1$ arestas é a **Árvore Geradora
+Mínima** (*Minimum Spanning Tree*, MST).
 
-**Verificando num exemplo pequeno.** A propriedade é geral, mas vale
-conferir com números antes de confiar de olho, um *worked example* no
-espírito da técnica de "exemplo resolvido antes do resultado geral".
+**Teorema (equivalência MST–ligação simples; Gower & Ross, 1969).** Seja
+$G$ o grafo completo de pesos $d(i,j)$ e, para um limiar $\tau\ge0$,
+seja $G_\tau$ o subgrafo de $G$ restrito às arestas de peso $\le\tau$.
+Seja $T$ a MST de $G$ e $T_\tau$ o subgrafo de $T$ restrito às arestas
+de peso $\le\tau$. Então, **para todo $\tau$, $G_\tau$ e $T_\tau$ têm
+exatamente as mesmas componentes conexas** — ou seja, os clusters de
+ligação simples no nível $\tau$ (componentes de $G_\tau$, por
+definição) são idênticos às componentes obtidas cortando de $T$ só as
+arestas de peso $>\tau$.
 
-**Como comparar duas partições, em números.** O exemplo vai produzir
-duas partições dos mesmos pontos — uma cortando a MST, outra pelo
-algoritmo de ligação simples — e a alegação é que elas são idênticas.
-"Olhar e comparar" funciona para 7 pontos, mas não escala; é preciso um
-número que meça o quanto duas partições concordam. O **índice de Rand**
-faz isso examinando todo **par** de pontos e perguntando se as duas
-partições concordam sobre esse par: ambas põem os dois pontos no mesmo
-cluster, ou ambas os separam em clusters diferentes — cada par que cai
-num desses dois casos conta como concordância; um par que uma partição
-junta e a outra separa conta como discordância. O índice de Rand é a
-fração de pares em concordância — mas mesmo dois agrupamentos
-**aleatórios e independentes** já concordam em boa parte dos pares só
-por acaso (dois pontos têm chance razoável de calhar no mesmo cluster
-sem nenhuma relação real entre as partições), o que infla o índice bruto
-e dificulta comparar casos com números diferentes de clusters. O
-**índice de Rand ajustado** (ARI, *Adjusted Rand Index*, Hubert & Arabie
-1985) corrige isso subtraindo o nível de concordância esperado só por
-acaso e normalizando: $\mathrm{ARI}=1$ significa partições idênticas (a
-menos de renomear os rótulos dos clusters), $\mathrm{ARI}\approx 0$
-significa concordância não melhor que o acaso, e valores negativos são
-possíveis (concordância pior que o acaso). É essa a métrica usada a
-seguir para confirmar, com um número, que MST-corte e ligação simples
-produzem a mesma partição.
+*Prova.* Como $T\subseteq G$ (toda aresta da MST é uma aresta de $G$),
+$T_\tau\subseteq G_\tau$: qualquer caminho dentro de $T_\tau$ também é
+um caminho dentro de $G_\tau$, logo toda componente de $T_\tau$ está
+contida numa componente de $G_\tau$. Falta a direção que não é óbvia:
+se $p$ e $q$ estão na mesma componente de $G_\tau$ (existe *algum*
+caminho entre eles em $G$ usando só arestas $\le\tau$), eles também
+precisam estar na mesma componente de $T_\tau$. Chame de **custo** de
+um caminho o **maior** peso de aresta ao longo dele — o "elo mais fraco
+da corrente". A MST tem a propriedade do **caminho de gargalo mínimo**
+(resultado clássico de teoria de grafos): o caminho entre $p$ e $q$
+*dentro da MST* — único, já que é uma árvore — tem sempre o menor custo
+possível entre **todos** os caminhos de $p$ a $q$ em $G$; nenhuma rota
+alternativa consegue um elo mais fraco mais barato. Por hipótese existe
+um caminho em $G$ de custo $\le\tau$ (o que exibe $p,q$ na mesma
+componente de $G_\tau$); logo o custo mínimo entre $p$ e $q$ é
+$\le\tau$; logo o caminho da MST entre eles também tem custo $\le\tau$
+— ou seja, esse caminho inteiro sobrevive em $T_\tau$, colocando $p$ e
+$q$ na mesma componente de $T_\tau$. $\blacksquare$
+
+**Consequência prática.** Cortar as $k-1$ arestas mais pesadas da MST é
+só escolher $\tau$ logo abaixo do peso da $(k-1)$-ésima aresta mais
+pesada — pelo teorema, isso produz exatamente as $k$ componentes do
+clustering por ligação simples com $k$ clusters, para qualquer $k$, sem
+recalcular nada.
+
+**Verificando num exemplo pequeno.** O teorema já garante a igualdade;
+mesmo assim vale conferir com números antes de seguir em frente, um
+*worked example* no espírito da técnica de "exemplo resolvido antes do
+resultado geral".
 
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
+## Sentir o Número de Clusters, sem Fixar um Corte
+
+::: {.fragment}
+Bloco 4 terminou num desafio: DBSCAN exige fixar $\varepsilon$ e
+`minPts`/$K$ sem critério óbvio. Clustering hierárquico ataca isso
+diferente: constrói a **sequência inteira** de partições, de $N$
+clusters a $1$, e só depois decide onde cortar.
+:::
+
+::: {.fragment}
+Essa ideia, sobre a hierarquia de $d_{\mathrm{mreach}}$, é o que o
+Bloco 6 (HDBSCAN) usa pra extrair clusters sem escolher $\lambda$ à
+mão.
+:::
+
+## O Algoritmo: Aglomerativo por Ligação Simples
+
+::: {.fragment}
+Começa com $N$ clusters, um por ponto; a cada passo funde os **dois
+clusters mais próximos** num só — $N-1$ fusões até sobrar um cluster
+com todo mundo, cada fusão num nível de dissimilaridade **maior** que a
+anterior. Essa sequência é a **hierarquia** (o dendrograma).
+:::
+
+::: {.fragment}
+Falta definir "distância entre dois *clusters*" (não entre dois
+pontos). A regra desta aula, **ligação simples**: distância entre
+clusters = distância do **par mais próximo**, um de cada lado. ESL
+(p. 523), tradução livre: *"a dissimilaridade intergrupo [é] a do par
+mais próximo: $d_{SL}(G,H)=\min_{i\in G,i'\in H} d_{ii'}$"* — o
+"vizinho mais próximo".
+:::
+
+::: {.fragment}
+**O custo de fazer isso ingenuamente:** recalcular, a cada uma das
+$N-1$ fusões, qual par de clusters está mais próximo parece exigir
+refazer tudo pra cada $k$ diferente. Atalho: uma única estrutura,
+$N-1$ arestas, contém a hierarquia inteira de uma vez — a **Árvore
+Geradora Mínima** (MST).
+:::
+
 ## O Que é uma Árvore Geradora
 
 ::: {.fragment}
-Grafo completo, pesos $d_{\mathrm{mreach}}(i,j)$: $N$ vértices,
-$N(N-1)/2$ arestas — conectado, mas redundante (vários caminhos
-possíveis entre o mesmo par).
+Grafo completo, pesos $d(i,j)$: $N$ vértices, $N(N-1)/2$ arestas —
+conectado, mas redundante (vários caminhos possíveis entre o mesmo
+par).
 :::
 
 ::: {.fragment}
@@ -1691,7 +1830,6 @@ $N$ vértices com só $N-1$ arestas, sem ciclo — o mínimo de arestas que
 ainda mantém tudo ligado.
 :::
 
-
 ::: {.fragment .callout-important}
 ## A Árvore Geradora *Mínima* (MST)
 
@@ -1699,107 +1837,45 @@ Entre todas as árvores geradoras possíveis, a **MST** é a que minimiza
 a soma dos pesos das suas $N-1$ arestas.
 :::
 
-::: {.fragment}
-Intuição: nunca inclui uma aresta cara quando existe uma rota mais
-barata entre os mesmos dois vértices por outro lugar da árvore — toda
-conexão redundante e cara é descartada.
-:::
+## Teorema (Gower & Ross, 1969)
 
-## Clustering Hierárquico Aglomerativo
+::: {.fragment .callout-important}
+## Equivalência MST–Ligação Simples
 
-::: {.fragment}
-Ideia geral (antes da regra específica de hoje): começa com $N$
-clusters, um por ponto; a cada passo funde os **dois clusters mais
-próximos** num só — $N-1$ fusões até sobrar um cluster com todo mundo.
+Para todo limiar $\tau$: as componentes conexas do grafo completo
+restrito a arestas $\le\tau$ **são idênticas** às componentes obtidas
+cortando da MST só as arestas $>\tau$.
 :::
 
 ::: {.fragment}
-Cada fusão num nível de dissimilaridade **maior** que a anterior — a
-sequência de fusões é a **hierarquia** (o dendrograma).
+($\subseteq$) MST $\subseteq$ grafo completo — todo caminho na MST
+cortada já é um caminho no grafo completo cortado. Direção fácil.
 :::
 
 ::: {.fragment}
-Falta definir uma coisa: "distância entre dois *clusters*" (não entre
-dois pontos) — várias regras possíveis; a aula usa uma específica, a
-seguir.
-:::
-
-## Ligação Simples (*Single Linkage*)
-
-::: {.fragment}
-A regra desta aula: distância entre clusters = distância do **par mais
-próximo**, um de cada lado. ESL (p. 523), tradução livre: *"a
-dissimilaridade intergrupo [é] a do par mais próximo:
-$d_{SL}(G,H)=\min_{i\in G,i'\in H} d_{ii'}$"* — o "vizinho mais
-próximo".
-:::
-
-## O Fato Central (Ainda Não Óbvio)
-
-::: {.fragment}
-**Cortar as $k-1$ arestas mais pesadas da MST = as $k$ componentes de
-ligação simples com $k$ clusters.**
-:::
-
-::: {.fragment}
-Não é intuitivo — mas também não é coincidência: é propriedade de
-caminhos em grafos.
-:::
-
-## Por Que É Verdade
-
-::: {.fragment}
-Ligação simples junta $p,q$ num nível $\tau$ $\iff$ existe cadeia
-$p\to\dots\to q$ com cada passo $\le\tau$ (componente conexa do grafo
-completo cortado em $\tau$ — mesmo fecho transitivo do Bloco 4).
-:::
-
-::: {.fragment}
-**Custo** de um caminho = maior aresta nele ("elo mais fraco"). $p,q$
-conectam em $\tau$ assim que $\tau$ atinge o **custo mínimo** entre
-todos os caminhos possíveis.
+($\supseteq$, a direção que importa) Se $p,q$ conectam no grafo
+completo em $\tau$, existe *algum* caminho de custo $\le\tau$ (custo =
+maior aresta do caminho, o "elo mais fraco").
 :::
 
 ::: {.fragment .callout-important}
-## Por Que a MST Basta (Caminho de Gargalo Mínimo)
+## Propriedade do Caminho de Gargalo Mínimo
 
-O caminho entre $p$ e $q$ **dentro da MST** (único) é sempre um caminho
-de custo mínimo no grafo completo — nenhuma outra rota tem elo mais
-fraco mais barato.
+O caminho entre $p$ e $q$ **dentro da MST** (único) sempre tem o
+**menor custo possível** entre todos os caminhos de $p$ a $q$ no grafo
+completo — resultado clássico de teoria de grafos.
 :::
 
 ::: {.fragment}
-Por isso: cortar arestas $>\tau$ da MST = cortar arestas $>\tau$ do
-grafo completo — mesmas componentes, os clusters de ligação simples em
-$\tau$.
-:::
-
-## Como Comparar Duas Partições?
-
-::: {.fragment}
-O exemplo vai gerar duas partições dos mesmos pontos (MST-corte vs.
-ligação simples) — a alegação é que são idênticas. Para 7 pontos dá
-para conferir olhando; em geral, precisa de um número.
+Logo o caminho da MST entre $p,q$ também tem custo $\le\tau$ — sobrevive
+inteiro em $T_\tau$. $\blacksquare$
 :::
 
 ::: {.fragment}
-**Índice de Rand:** olha todo **par** de pontos e pergunta se as duas
-partições concordam sobre ele (mesmo cluster nas duas, ou clusters
-diferentes nas duas). Fração de pares em concordância.
-:::
-
-::: {.fragment}
-Problema: até duas partições **aleatórias** concordam em vários pares só
-por acaso — isso infla o índice bruto.
-:::
-
-::: {.fragment .callout-important}
-## ARI (Índice de Rand Ajustado)
-
-Corrige o índice de Rand subtraindo a concordância esperada por acaso.
-$\mathrm{ARI}=1$: partições idênticas (a menos de renomear rótulos).
-$\mathrm{ARI}\approx 0$: concordância não melhor que o acaso.
-(Hubert & Arabie, 1985)
+**Consequência prática:** cortar as $k-1$ arestas mais pesadas da MST =
+escolher $\tau$ logo abaixo da $(k-1)$-ésima aresta mais pesada. Pelo
+teorema, isso dá exatamente os $k$ clusters de ligação simples, **para
+qualquer $k$**, sem recalcular nada.
 :::
 
 :::
@@ -1820,15 +1896,20 @@ D_pts = squareform(pdist(pts))
 edges_pts = mst_edges_sorted(D_pts)
 
 from scipy.cluster.hierarchy import linkage, fcluster
-from sklearn.metrics import adjusted_rand_score
 Z_pts = linkage(pts, method='single')
+
+def particoes_iguais(labels_a, labels_b):
+    """True sse os dois rotulamentos definem o mesmo agrupamento de
+    índices, ignorando o nome/número de cada rótulo."""
+    grupos_a = {frozenset(np.where(np.asarray(labels_a) == r)[0]) for r in set(labels_a)}
+    grupos_b = {frozenset(np.where(np.asarray(labels_b) == r)[0]) for r in set(labels_b)}
+    return grupos_a == grupos_b
 
 _resultado_k = {}
 for k in [2, 3]:
     labels_mst = clusters_from_mst_cut(edges_pts, n_pts, k)
     labels_sl = fcluster(Z_pts, k, criterion='maxclust')
-    ari = adjusted_rand_score(labels_mst, labels_sl)
-    _resultado_k[k] = (labels_mst, labels_sl, ari)
+    _resultado_k[k] = (labels_mst, labels_sl, particoes_iguais(labels_mst, labels_sl))
 ```
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
@@ -1840,8 +1921,8 @@ print("Arestas da MST (i, j, peso), ordem crescente:")
 for i, j, w in edges_pts:
     print(f"  ({i},{j}) peso={w:.3f}")
 
-for k, (labels_mst, labels_sl, ari) in _resultado_k.items():
-    print(f"k={k}:  MST-corte = {labels_mst}   ligação-simples = {labels_sl}   ARI = {ari:.2f}")
+for k, (labels_mst, labels_sl, iguais) in _resultado_k.items():
+    print(f"k={k}:  MST-corte = {labels_mst}   ligação-simples = {labels_sl}   partições idênticas? {iguais}")
 ```
 
 :::
@@ -1886,10 +1967,10 @@ $6{,}14$ e $6{,}22$) — exatamente as duas arestas mais pesadas.
 
 Cortando a aresta mais pesada ($k=2$): sobra $\{0,1,2,3,4,5\}$ de um
 lado e $\{6\}$ isolado do outro — e o clustering por ligação simples
-com $k=2$ produz **exatamente a mesma partição** (ARI $=1{,}00$,
-concordância perfeita). Cortando também a segunda mais pesada
+com $k=2$ produz **exatamente a mesma partição** (o código acima
+confirma: partições idênticas). Cortando também a segunda mais pesada
 ($k=3$): sobra $\{0,1,2\}$, $\{3,4,5\}$ e $\{6\}$ — os três grupos
-visuais, de novo idênticos à ligação simples (ARI $=1{,}00$). Note que
+visuais, de novo idênticos à ligação simples. Note que
 em $k=2$ os grupos A e B se fundem antes de $6$ se juntar a qualquer um
 deles — porque a menor distância entre A e B ($6{,}14$) é, por pouco,
 menor que a menor distância de $6$ a qualquer dos dois grupos
@@ -1920,22 +2001,20 @@ Bloco 6 ataca.
 
 ::: {.content-visible when-format="revealjs"}
 
-## O Exemplo Verificado
-
 ::: {.fragment}
-Na figura anterior: 7 pontos, 3 grupos visuais — A ($0,1,2$), B
+Na figura acima: 7 pontos, 3 grupos visuais — A ($0,1,2$), B
 ($3,4,5$), ponto isolado $6$. MST tem $N-1=6$ arestas; as duas
 tracejadas em vermelho são as **duas mais pesadas**.
 :::
 
 ::: {.fragment}
 $k=2$ (corta 1 aresta mais pesada): MST dá $\{0..5\},\{6\}$ — ligação
-simples dá **o mesmo** (ARI $=1{,}00$).
+simples dá **o mesmo** (partições idênticas, conferido no código).
 :::
 
 ::: {.fragment}
 $k=3$ (corta 2 mais pesadas): MST dá $\{0,1,2\},\{3,4,5\},\{6\}$ —
-ligação simples de novo **idêntico** (ARI $=1{,}00$).
+ligação simples de novo **idêntico**.
 :::
 
 ::: {.fragment}
@@ -2015,18 +2094,21 @@ cadeia fina de pontos.
 
 :::
 
-# Condensando a Árvore e Medindo Persistência
+# HDBSCAN
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-O Bloco 5 deixou dois problemas em aberto: (i) um único $k$ (ou
-$\lambda$) fixo não serve para um dataset com clusters de densidades
-muito diferentes entre si — um $\lambda$ que revela um cluster raro e
-denso pode já ter apagado outro, mais espalhado; (ii) encadeamento
-pode ligar, por um fio fino de pontos, dois grupos que "deveriam" ser
-distintos. O HDBSCAN ataca os dois de uma vez, com uma ideia que não
-está em nenhum dos livros-texto desta disciplina (Campello, Moulavi &
-Sander, 2013) — **persistência**.
+O nome já entrega a receita: **H**ierarchical **DBSCAN** — a ideia do
+Bloco 4 (núcleo, alcançabilidade mútua, grafo por limiar) rodando por
+**toda** a hierarquia do Bloco 5 de uma vez, em vez de um único
+$\varepsilon$. Mas o Bloco 5 deixou dois problemas em aberto: (i) um
+único $k$ (ou $\lambda$) fixo não serve para um dataset com clusters de
+densidades muito diferentes entre si — um $\lambda$ que revela um
+cluster raro e denso pode já ter apagado outro, mais espalhado; (ii)
+encadeamento pode ligar, por um fio fino de pontos, dois grupos que
+"deveriam" ser distintos. O HDBSCAN ataca os dois de uma vez, com uma
+ideia que não está em nenhum dos livros-texto desta disciplina
+(Campello, Moulavi & Sander, 2013) — **persistência**.
 
 ::: {.callout-tip}
 ## Ponte conceitual
@@ -2219,7 +2301,13 @@ $\lambda$.
 
 ::: {.content-visible when-format="revealjs"}
 
-## Dois Problemas Deixados em Aberto
+## HDBSCAN: Hierarchical DBSCAN
+
+::: {.fragment}
+O nome entrega a receita: ideia do Bloco 4 (núcleo, alcançabilidade
+mútua, grafo por limiar) rodando por **toda** a hierarquia do Bloco 5,
+não um só $\varepsilon$. Mas o Bloco 5 deixou dois problemas em aberto:
+:::
 
 ::: {.fragment}
 **(i)** Um $\lambda$ fixo não serve para clusters de densidades muito
@@ -2540,11 +2628,7 @@ correspondência:
 #| echo: true
 
 import pandas as pd
-from sklearn.metrics import adjusted_rand_score
 print(pd.crosstab(labels_bc, diagnosis, margins=True))
-mask = labels_bc != -1
-print(f"\nARI (excluindo ruído, n={mask.sum()}): {adjusted_rand_score(diagnosis[mask], labels_bc[mask]):.3f}")
-print(f"ARI (todos, ruído como rótulo próprio): {adjusted_rand_score(diagnosis, labels_bc):.3f}")
 ```
 
 O HDBSCAN encontrou dois clusters e marcou $168$ dos $569$ pacientes
@@ -2563,21 +2647,17 @@ uma "montanha" densa o bastante para sobreviver como cluster de alta
 persistência nesses dois atributos; boa parte fica dispersa no "vale"
 entre o núcleo maligno denso e a grande massa benigna.
 
-O ARI (índice de Rand ajustado, que mede concordância entre duas
-partições corrigindo por acaso) é $0{,}644$ olhando só os pacientes que
-o HDBSCAN classificou com confiança (excluindo ruído) — uma
-concordância forte — e $0{,}493$ olhando todos os pacientes, tratando o
-ruído como uma terceira categoria. Nenhum dos dois número é $1{,}0$: o
-HDBSCAN não é um classificador, e não teve acesso ao rótulo — o fato de
-encontrar *qualquer* estrutura que se alinha tão bem ao diagnóstico
-real, começando de dois atributos e nenhuma supervisão, é o resultado
-central deste bloco.
+Nenhum dos dois clusters é $100\%$ puro nos dois sentidos ao mesmo
+tempo, e boa parte dos malignos cai em ruído: o HDBSCAN não é um
+classificador, e não teve acesso ao rótulo. O fato de encontrar
+*qualquer* estrutura — um cluster inteiramente maligno, outro
+majoritariamente benigno — que se alinha tão bem ao diagnóstico real,
+começando de dois atributos e nenhuma supervisão, é o resultado central
+deste bloco.
 
 :::
 
 ::: {.content-visible when-format="revealjs"}
-
-## O Que o HDBSCAN Encontrou (Sem Ver o Rótulo)
 
 ::: {.fragment}
 $569$ pacientes, `radius_worst` + `concave points_worst`,
@@ -2609,13 +2689,9 @@ cluster de alta persistência nesses 2 atributos.
 :::
 
 ::: {.fragment}
-**ARI $=0{,}644$** (excluindo ruído) — concordância forte. **ARI
-$=0{,}493$** (todos, ruído como rótulo próprio).
-:::
-
-::: {.fragment}
-Não é $1{,}0$: HDBSCAN não é classificador, não viu o rótulo. Encontrar
-estrutura alinhada ao diagnóstico, sem supervisão, é o resultado.
+HDBSCAN não é classificador, não viu o rótulo. Encontrar um cluster
+inteiramente maligno e outro majoritariamente benigno, sem supervisão,
+é o resultado.
 :::
 
 :::
@@ -2687,8 +2763,11 @@ sem exigir um único corte global.
 **As vantagens**, em relação a uma partição por protótipos fixos
 (Bloco 2): nenhuma suposição de convexidade (as duas luas, os dois
 anéis, resolvidos de ponta a ponta); nenhuma escolha obrigatória do
-número de clusters $K$; pontos genuinamente atípicos podem ser
-marcados como ruído em vez de forçados a pertencer a algum cluster.
+**número de clusters** (não confundir com o $K$ do *core distance*,
+`min_samples` — esse continua sendo escolhido, controla escala de
+densidade, não quantidade de clusters); pontos genuinamente atípicos
+podem ser marcados como ruído em vez de forçados a pertencer a algum
+cluster.
 
 **As limitações.** Duas, nenhuma anunciada como
 "gratuita" antes: primeiro, `min_cluster_size` (e, em geral,
@@ -2735,7 +2814,8 @@ ponta.
 :::
 
 ::: {.fragment}
-Nenhuma escolha obrigatória de $K$.
+Nenhuma escolha obrigatória do **número de clusters** (diferente do
+$K$ do *core distance*, `min_samples` — esse continua sendo escolhido).
 :::
 
 ::: {.fragment}
@@ -2875,9 +2955,12 @@ Retomando as quatro perguntas da Abertura, uma frase cada:
 
 1. **O que deveria significar "cluster"?** Uma componente conexa de uma
    região de alta densidade — não uma bola em torno de um centróide.
-2. **Como construir isso sem escolher $K$ a priori?** Via
-   $d_{\mathrm{mreach}}$ e a MST, sem nenhum parâmetro de forma, só uma
-   escala local ($K$ do *core distance*).
+2. **Como construir isso sem escolher o número de clusters a priori?**
+   Via $d_{\mathrm{mreach}}$ e a MST, sem nenhum parâmetro de forma —
+   só uma escala local de densidade, o $K$ do *core distance*
+   (`min_samples`), que é uma coisa diferente de "número de clusters":
+   controla o quão local é a estimativa de densidade, não quantos
+   clusters existem.
 3. **Que estrutura de grafo captura toda a hierarquia de uma vez?** A
    MST — cortar suas $k-1$ arestas mais pesadas reproduz ligação
    simples para qualquer $k$, verificado no exemplo do Bloco 5.
@@ -2923,8 +3006,10 @@ densidade — não bola em torno de centróide.
 :::
 
 ::: {.fragment}
-**2.** Como construir sem escolher $K$? $d_{\mathrm{mreach}}$ + MST,
-sem parâmetro de forma, só uma escala local ($K$ do núcleo).
+**2.** Como construir sem escolher o **número de clusters**?
+$d_{\mathrm{mreach}}$ + MST, sem parâmetro de forma — só uma escala
+local de densidade, o $K$ do núcleo (`min_samples`; não é "número de
+clusters", é "o quão local").
 :::
 
 ::: {.fragment}
@@ -3232,14 +3317,15 @@ branco tem penalidade de 20% da nota da questão).
   que tumores malignos variam mais em apresentação clínica do que
   tumores benignos, formando uma "montanha" de densidade menos coesa
   nesses dois atributos.
-- □ O ARI de $0{,}644$ (excluindo ruído) sendo maior que o ARI de
-  $0{,}493$ (incluindo ruído como rótulo) é esperado, porque excluir os
-  pontos mais ambíguos (o ruído) da comparação tende a aumentar a
-  concordância medida nos pontos restantes.
-- □ Se o HDBSCAN tivesse encontrado só ruído (nenhum cluster) nesses
-  dois atributos, o ARI (incluindo ruído como rótulo) seria
-  necessariamente próximo de $1$, já que todos os pontos receberiam o
-  mesmo tratamento.
+- □ A pureza benigna do Cluster 1 ($315$ de $347$, $\approx90{,}8\%$),
+  medida só entre os pacientes que o HDBSCAN de fato agrupou (excluindo
+  ruído), tende a parecer mais favorável do que a concordância geral
+  com o diagnóstico, porque os casos mais ambíguos já foram descartados
+  como ruído antes da comparação.
+- □ Se o HDBSCAN não tivesse encontrado cluster nenhum nesses dois
+  atributos (todos os $569$ pacientes marcados como ruído), a tabela de
+  contingência não revelaria nenhum alinhamento com o diagnóstico,
+  porque não haveria partição nenhuma para comparar contra ele.
 :::
 
 ::: {.callout-note icon=false}

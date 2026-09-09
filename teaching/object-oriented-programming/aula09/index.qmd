@@ -1,0 +1,1000 @@
+---
+title: "Substituição e Falha: o Princípio de Liskov e a Taxonomia de Exceções"
+subtitle: "Aula 9 — Programação Orientada a Objetos"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    output-file: notas.html
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+# Proposta da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Na Aula 8, a Herança nos deu um jeito poderoso de compartilhar estrutura: um filho que `extends` um pai incorpora fisicamente seu DNA. Mas "compartilhar DNA" e "poder substituir com segurança" são perguntas diferentes — a primeira é sobre estrutura, a segunda é sobre **comportamento observável**. Esta aula fecha essa lacuna.
+
+**O roteiro, em quatro perguntas:**
+
+1. Quando a JVM decide, em tempo de execução, qual código realmente roda — e o que exatamente essa decisão promete manter estável?
+2. O que significa, com rigor (não só "parece a mesma coisa"), dizer que um filho pode substituir o pai em qualquer lugar do sistema?
+3. Por que um Quadrado "ser" um Retângulo no mundo real não garante, sozinho, que ele seja um substituto válido no código?
+4. Como transformar o erro de "acidente imprevisto" em parte estruturada e confiável do design de um objeto?
+
+Considere o sistema de pagamentos que atravessa a disciplina: `Pagavel p = new Pix();` compila porque `Pix` é um subtipo de `Pagavel`. Mas o compilador só verificou a sintaxe — nada nele garante que trocar um `Pix` por um `Boleto` em produção não vai quebrar alguma suposição que o resto do sistema fazia sobre o comportamento de `Pagavel`. É exatamente essa garantia que faltava, e que os próximos blocos formalizam.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Herança (Aula 8)** deu reuso de estrutura — o filho *incorpora* o DNA do pai.
+
+::: {.fragment}
+Mas DNA compartilhado não responde uma pergunta diferente: **posso substituir o pai pelo filho com segurança?**
+:::
+
+::: {.fragment}
+**Roteiro:** binding e VTable → definição formal do LSP → as três regras de contrato → o paradoxo Círculo-Elipse → contratos de exceção → taxonomia do erro → Checked vs. Unchecked.
+:::
+
+:::
+
+# Do Binding ao Contrato: Late Binding, VTable e `@Override`
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O **polimorfismo de inclusão** é o mecanismo que permite tratar diferentes subtipos de forma uniforme através de uma abstração comum: se $S$ é um subtipo de $T$, objetos do tipo $T$ podem ser substituídos por instâncias de $S$ sem que o sistema precise conhecer a identidade concreta da classe.
+
+```java
+// T e Pagavel, S e Pix
+Pagavel p = new Pix();
+
+// O sistema aceita 'p' em qualquer lugar que peça um Pagavel
+checkoutController.processar(p);
+```
+
+Duas visões coexistem sobre essa mesma linha: **a lente do compilador** enxerga só o tipo declarado (`Pagavel`) e garante que as mensagens enviadas são válidas para ele; **a realidade do Heap** é que o objeto é, de fato, um `Pix` completo, com todo o estado e comportamento da sua classe concreta. Um sistema bem desenhado nunca precisa de `instanceof` para operar — essa transparência é o próprio objetivo do polimorfismo de inclusão.
+
+**A mecânica do Late Binding.** Diferente de linguagens de *Early Binding*, em que o compilador decide estaticamente qual código executar olhando o tipo da variável, o Java resolve a chamada em tempo de execução, seguindo um protocolo fixo:
+
+1. O código chama o método sobre uma referência de tipo `Pagavel`.
+2. A JVM segue o ponteiro da referência até o objeto no Heap.
+3. Ela consulta a **VTable** (*Virtual Method Table*) da classe concreta daquele objeto (ex.: `Pix`).
+4. Ela executa o endereço de memória da implementação específica encontrada na tabela.
+
+```java
+public void verificar(Pagavel p, String id) {
+    if (p.pagamentoConfirmado(id)) { // a JVM faz o lookup na VTable aqui
+        notificarSucesso();
+    }
+}
+```
+
+Essa descentralização transforma o objeto num agente inteligente: não é quem chama o método que decide o comportamento, é o próprio objeto que "declara": *"Eu sou um Pix, logo sei como confirmar meu pagamento."*
+
+::: {.fig-resize style="width: 62%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=5.6cm, minimum height=1.2cm},
+  >=Stealth
+]
+  \node[bx, draw=icblue, fill=icblue!10] (ref) {Referência declarada: \texttt{Pagavel p}};
+  \node[bx, draw=icorange, fill=icorange!10, below=of ref] (heap) {Objeto no Heap — classe real: \texttt{Pix}};
+  \node[bx, draw=icred, fill=icred!10, below=of heap] (vtable) {VTable de \texttt{Pix}};
+  \node[bx, draw=icblue, fill=icblue!10, below=of vtable] (exec) {executa \texttt{Pix.pagamentoConfirmado()}};
+  \draw[->, thick] (ref) -- node[right, font=\scriptsize] {segue o ponteiro} (heap);
+  \draw[->, thick] (heap) -- node[right, font=\scriptsize] {consulta} (vtable);
+  \draw[->, thick] (vtable) -- node[right, font=\scriptsize] {despacha} (exec);
+\end{tikzpicture}
+```
+:::
+
+**A sobrescrita como preservação de contrato.** `@Override` permite que o especialista mude o *como*, preservando rigorosamente o *o quê*. Três exigências sustentam isso: a assinatura deve ser idêntica (ou covariante no retorno) para não quebrar o contrato; a semântica deve ser preservada — se o pai promete "validar", o filho não pode mudar a lógica para "deletar"; e a anotação `@Override` não é decoração, é um guarda de segurança que impede a criação acidental de um método novo por erro de digitação (assinatura levemente diferente que o compilador aceitaria como um método distinto).
+
+```java
+public class Boleto implements Pagavel {
+    @Override
+    public boolean pagamentoConfirmado(String id) {
+        // logica especifica: boleto demora ate 48h para compensar
+        System.out.println("Consultando compensacao bancaria: " + id);
+        return bancoAPI.verificarStatus(id);
+    }
+}
+```
+
+O cliente de `Pagavel` continua chamando o mesmo método, com a mesma assinatura — só que recebe uma resposta mais sofisticada e condizente com a realidade do `Boleto`. Essa é a peça que falta para a pergunta desta aula: **"mesma assinatura" não é o mesmo que "mesmo contrato"** — e é exatamente a distância entre as duas que o LSP formaliza a seguir.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Subtipagem e Substituibilidade
+
+```java
+// T e Pagavel, S e Pix
+Pagavel p = new Pix();
+checkoutController.processar(p); // aceita 'p' em qualquer lugar que peça Pagavel
+```
+
+::: {.fragment}
+**Lente do compilador:** só vê o tipo declarado (`Pagavel`) — valida as mensagens.
+:::
+::: {.fragment}
+**Realidade do Heap:** o objeto é de fato um `Pix` completo, com todo seu estado e comportamento.
+:::
+::: {.fragment}
+Um sistema bem desenhado nunca precisa de `instanceof` para operar — essa transparência é o objetivo.
+:::
+
+## Late Binding: Quem Decide o Código?
+
+::: {.fragment}
+**Early Binding** (C/C++ estático): decisão do compilador, olhando o tipo da variável.
+:::
+::: {.fragment}
+**Late Binding** (Java): a JVM olha a **identidade real** do objeto no Heap, no momento da chamada.
+:::
+::: {.fragment}
+O objeto "diz": *"Eu sou um Pix, logo sei como confirmar meu pagamento."*
+:::
+
+## A Mecânica da Decisão: a VTable
+
+```java
+public void verificar(Pagavel p, String id) {
+    if (p.pagamentoConfirmado(id)) { // a JVM faz o lookup na VTable aqui
+        notificarSucesso();
+    }
+}
+```
+
+::: {.fig-resize style="width: 62%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=5.6cm, minimum height=1.2cm},
+  >=Stealth
+]
+  \node[bx, draw=icblue, fill=icblue!10] (ref) {Referência declarada: \texttt{Pagavel p}};
+  \node[bx, draw=icorange, fill=icorange!10, below=of ref] (heap) {Objeto no Heap — classe real: \texttt{Pix}};
+  \node[bx, draw=icred, fill=icred!10, below=of heap] (vtable) {VTable de \texttt{Pix}};
+  \node[bx, draw=icblue, fill=icblue!10, below=of vtable] (exec) {executa \texttt{Pix.pagamentoConfirmado()}};
+  \draw[->, thick] (ref) -- node[right, font=\scriptsize] {segue o ponteiro} (heap);
+  \draw[->, thick] (heap) -- node[right, font=\scriptsize] {consulta} (vtable);
+  \draw[->, thick] (vtable) -- node[right, font=\scriptsize] {despacha} (exec);
+\end{tikzpicture}
+```
+:::
+
+## Sobrescrita como Preservação de Contrato
+
+```java
+public class Boleto implements Pagavel {
+    @Override
+    public boolean pagamentoConfirmado(String id) {
+        return bancoAPI.verificarStatus(id); // outra logica, mesma promessa
+    }
+}
+```
+
+::: {.fragment}
+**Mesma assinatura**, **semântica preservada** — se o pai promete "validar", o filho não vira "deletar".
+:::
+::: {.fragment}
+`@Override` não é decoração: é um guarda contra criar um método novo por erro de digitação.
+:::
+::: {.fragment}
+**Mas atenção:** "mesma assinatura" não é o mesmo que "mesmo contrato" — é essa distância que o LSP formaliza a seguir.
+:::
+
+:::
+
+## Late Binding, VTable e o Contrato de Sobrescrita
+
+::: {.callout-tip}
+## Se o compilador só enxerga o tipo declarado (`Pagavel`), por que a chamada ainda "sabe" executar o código certo de `Pix` ou `Boleto` em tempo de execução?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ A VTable consultada pela JVM pertence à classe concreta do objeto no Heap, não ao tipo declarado da referência.
+- □ Em Early Binding, a decisão de qual código executar é tomada pelo compilador; em Late Binding, pela JVM em tempo de execução.
+- □ A anotação `@Override` garante, por si só, que a semântica do método sobrescrito é preservada, independente do que o código do filho faça.
+- □ Se `Boleto` e `Pix` implementam `pagamentoConfirmado` com a mesma assinatura, o método efetivamente executado depende só da identidade real do objeto, nunca do tipo da variável usada para chamá-lo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Late Binding, VTable e o Contrato de Sobrescrita — Resposta
+
+::: {.callout-tip}
+## VTable e Late Binding — Resposta
+
+- ✔ A VTable consultada pela JVM pertence à classe concreta do objeto no Heap, não ao tipo declarado da referência — é exatamente o passo 3 do protocolo de despacho.
+- ✔ Em Early Binding, a decisão de qual código executar é tomada pelo compilador; em Late Binding, pela JVM em tempo de execução — a distinção central do bloco.
+- ✗ A anotação `@Override` garante, por si só, que a semântica do método sobrescrito é preservada, independente do que o código do filho faça — `@Override` só garante a correspondência de assinatura contra erro de digitação; a preservação de semântica é responsabilidade do programador, não do compilador.
+- ✔ Se `Boleto` e `Pix` implementam `pagamentoConfirmado` com a mesma assinatura, o método efetivamente executado depende só da identidade real do objeto, nunca do tipo da variável usada para chamá-lo — é a definição de Late Binding.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** a chamada "sabe" o código certo porque a decisão nunca foi do compilador — ele só valida a assinatura contra o tipo declarado. Quem decide, em cada chamada, é a JVM, consultando a VTable da classe real do objeto no Heap.
+:::
+
+:::
+
+# O Princípio da Substituição de Liskov
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O **Princípio de Substituição de Liskov (LSP)**, proposto por Barbara Liskov, é o critério que eleva a pergunta de sintaxe ("o código compila?") para semântica ("o programa continua correto sob substituição?"). Formalmente:
+
+> Se $S$ é um subtipo de $T$, então objetos do tipo $T$ podem ser substituídos por objetos do tipo $S$ sem que as propriedades desejáveis do programa sejam alteradas.
+
+Em notação lógica, sendo $\phi(x)$ o conjunto de todas as propriedades observáveis (comportamento, tempo de resposta, estado final) que o sistema espera de um objeto do tipo $T$:
+
+$$\forall x: T,\ \phi(x) \implies \forall y: S,\ \phi(y)$$
+
+A intuição é a de um **cliente cego para a implementação**: o código que consome `Pagavel` não deveria conseguir distinguir, pelo comportamento observado, se recebeu um `Pix` ou um `Boleto`.
+
+```java
+// O cliente espera um Pagavel. Ele assume que:
+// 1. O metodo criarCobranca retorna um ID valido.
+// 2. Nao havera travas inesperadas se o valor for positivo.
+void realizarCheckOut(Pagavel p, double valor) {
+    String id = p.criarCobranca(valor);
+    if (id == null) throw new Error("Violação de LSP!");
+}
+```
+
+Se passarmos um `Pix` e ele retornar `null`, o programa quebra — não porque `Pix` "não é" um `Pagavel" sintaticamente (ele implementa a interface, o código compila), mas porque seu comportamento observável surpreende quem depende do contrato de `Pagavel`. **A conclusão central:** se o comportamento de um subtipo muda a ponto de surpreender quem usa o tipo base, a hierarquia está errada — não importa quão bem ela reflita uma taxonomia do mundo real.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Rigor de Barbara Liskov
+
+::: {.fragment}
+De "o código compila" para "o programa continua correto sob substituição".
+:::
+
+::: {.fragment}
+**Definição:** se $S$ é subtipo de $T$, objetos de $T$ podem ser substituídos por objetos de $S$ sem alterar as propriedades desejáveis do programa.
+:::
+
+::: {.fragment}
+$$\forall x: T,\ \phi(x) \implies \forall y: S,\ \phi(y)$$
+$\phi(x)$ = todas as propriedades observáveis (comportamento, tempo de resposta, estado final) esperadas de um $T$.
+:::
+
+## O Cliente Cego para a Implementação
+
+```java
+void realizarCheckOut(Pagavel p, double valor) {
+    String id = p.criarCobranca(valor);
+    if (id == null) throw new Error("Violação de LSP!");
+}
+```
+
+::: {.fragment}
+Se um `Pix` retornar `null`, o programa quebra — não por erro de sintaxe, mas por **comportamento observável surpreendente**.
+:::
+::: {.fragment}
+**Conclusão central:** comportamento que surpreende quem usa a base = hierarquia errada, mesmo que o código compile.
+:::
+
+:::
+
+# As Três Regras de Contrato do LSP
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O LSP se operacionaliza em três regras verificáveis, todas sobre o comportamento de métodos sobrescritos.
+
+**Regra 1 — Pré-condições: não seja mais exigente.** A subclasse deve ser tão tolerante quanto o pai; pré-condições podem ser mantidas ou enfraquecidas, nunca fortalecidas.
+
+```java
+// Na interface/pai:
+// Pre-condicao: valor > 0
+String criarCobranca(double valor);
+
+// Na subclasse (VIOLACAO):
+public String criarCobranca(double valor) {
+    // Fortalecendo a pre-condicao (exigindo mais)
+    if (valor < 100.0) throw new IllegalArgumentException("Valor muito baixo");
+    return "ID-OK";
+}
+```
+
+Se a base aceita qualquer valor positivo, o filho não pode restringir esse domínio exigindo valores acima de 100 — isso quebraria qualquer código cliente que já passasse valores legítimos (como 50), disparando uma `IllegalArgumentException` inesperada. O código que usa `Pagavel` espera que R\$5,00 seja válido; se o objeto concreto falha ali, o tipo foi quebrado.
+
+**Regra 2 — Pós-condições: cumpra as promessas.** A subclasse deve ser tão generosa quanto o pai; pós-condições podem ser mantidas ou fortalecidas, nunca enfraquecidas.
+
+```java
+// No pai: promete retornar uma String de identificacao unica
+
+// Na subclasse (VIOLACAO):
+public String criarCobranca(double valor) {
+    // Enfraquecendo a garantia: retorna string vazia
+    return "";
+}
+```
+
+Se o pai prometia um resultado útil, o filho não pode retornar "nada" ou um estado inconsistente — ele pode até entregar algo *mais* refinado (um ID mais específico, por exemplo), mas nunca menos do que o prometido.
+
+**Regra 3 — Preservação de invariantes.** A subclasse deve manter íntegro o estado herdado; as "leis de física" da base continuam valendo no filho. Se a base garante que `saldo >= 0`, um `sacar()` sobrescrito no filho não pode deixar o saldo negativo — o filho tem acesso à "cozinha" (atributos `protected`), mas não pode deixar o gás ligado ao sair.
+
+Note que as três regras são, na prática, a mesma preocupação vista de três ângulos: **o comportamento do subtipo não pode surpreender ninguém que confiava no comportamento do tipo base** — seja recusando entradas que antes eram aceitas, entregando menos do que era prometido, ou corrompendo um estado que a base jurava proteger.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Regra 1 — Pré-condições: Não Seja Exigente
+
+```java
+// Pai: Pre-condicao: valor > 0
+// Filho (VIOLACAO):
+public String criarCobranca(double valor) {
+    if (valor < 100.0) throw new IllegalArgumentException("Valor muito baixo");
+    return "ID-OK";
+}
+```
+
+::: {.fragment}
+Pré-condições podem ser **mantidas ou enfraquecidas**, nunca fortalecidas — um cliente que já passava R\$50,00 agora quebra sem aviso.
+:::
+
+## Regra 2 — Pós-condições: Cumpra as Promessas
+
+```java
+// Pai: promete um ID unico e valido
+// Filho (VIOLACAO):
+public String criarCobranca(double valor) {
+    return ""; // enfraquecendo a garantia
+}
+```
+
+::: {.fragment}
+Pós-condições podem ser **mantidas ou fortalecidas**, nunca enfraquecidas — o filho pode entregar mais, nunca menos do que o prometido.
+:::
+
+## Regra 3 — Preservação de Invariantes
+
+::: {.fragment}
+Se a base garante `saldo >= 0`, nenhum `sacar()` sobrescrito no filho pode deixar o saldo negativo.
+:::
+::: {.fragment}
+O filho acessa a "cozinha" (`protected`) — mas não pode deixar o gás ligado ao sair.
+:::
+::: {.fragment}
+**As três regras são uma só ideia:** o subtipo não pode surpreender quem confiava no comportamento do tipo base.
+:::
+
+:::
+
+# O Paradoxo Círculo-Elipse
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O erro mais comum ao violar o LSP é confundir a taxonomia do **mundo real** com o comportamento de **software**. O exemplo clássico: geometricamente, todo Círculo é uma Elipse — mas no software mutável, essa relação pode se inverter.
+
+Uma `Elipse` tem o método `setAxes(a, b)`, que permite alterar os dois eixos de forma independente. Um `Circulo` exige, por natureza, que `a == b`. Se forçarmos a herança (`Circulo extends Elipse`), o que acontece quando o cliente chama `elipse.setAxes(10, 20)` num objeto que ele *acredita* ser uma `Elipse`, mas que na verdade é um `Circulo`?
+
+::: {.fig-resize style="width: 78%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.4cm and 2.2cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=4.6cm, minimum height=1.3cm},
+  >=Stealth
+]
+  \node[bx, draw=icblue, fill=icblue!10] (call) {Cliente chama\\\texttt{elipse.setAxes(10, 20)}};
+  \node[bx, draw=icorange, fill=icorange!10, below=of call] (real) {Objeto real no Heap: \texttt{Circulo}\\(exige $a = b$)};
+  \node[bx, draw=icred, fill=icred!10, below left=of real] (viola) {Aceita e força $a=b$:\\viola sua própria natureza matemática};
+  \node[bx, draw=icred, fill=icred!10, below right=of real] (surpresa) {Recusa ou lança exceção:\\quebra a expectativa do cliente};
+  \draw[->, thick] (call) -- (real);
+  \draw[->, thick] (real) -- (viola);
+  \draw[->, thick] (real) -- (surpresa);
+\end{tikzpicture}
+```
+:::
+
+Não há terceira opção honesta: ou o `Circulo` quebra sua própria natureza (aceitando $a \neq b$, e deixando de ser um círculo de verdade), ou ele quebra a expectativa do cliente de que os eixos ficariam exatamente $10$ e $20$ (lançando uma exceção que o código escrito para `Elipse` nunca previu). Qualquer uma das duas saídas viola o LSP.
+
+**A lição:** embora um quadrado *seja* um retângulo no mundo real (e um círculo *seja* uma elipse), essa relação de taxonomia não se transfere automaticamente para software mutável. Se o comportamento mutável de $S$ não condiz com o que $T$ promete, $S$ **não é um subtipo válido** de $T$ — não importa quão natural pareça a relação "É-UM" fora do código. A correção, nesses casos, costuma ser tornar os objetos imutáveis (sem `setAxes`, um novo objeto a cada mudança de forma) ou abandonar a herança em favor de uma interface comum mais genérica, como `FormaGeometrica`, sem o método problemático.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Falácia do "É-UM"
+
+::: {.fragment}
+**Mundo real:** todo Círculo é uma Elipse. Todo Quadrado é um Retângulo.
+:::
+::: {.fragment}
+**Software mutável:** `Elipse.setAxes(a, b)` altera os eixos independentemente; `Circulo` exige $a = b$.
+:::
+::: {.fragment}
+Forçar `Circulo extends Elipse` cria uma pergunta sem resposta honesta.
+:::
+
+## O Dilema de `setAxes(10, 20)`
+
+::: {.fig-resize style="width: 78%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.4cm and 2.2cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=4.6cm, minimum height=1.3cm},
+  >=Stealth
+]
+  \node[bx, draw=icblue, fill=icblue!10] (call) {Cliente chama\\\texttt{elipse.setAxes(10, 20)}};
+  \node[bx, draw=icorange, fill=icorange!10, below=of call] (real) {Objeto real no Heap: \texttt{Circulo}\\(exige $a = b$)};
+  \node[bx, draw=icred, fill=icred!10, below left=of real] (viola) {Aceita e força $a=b$:\\viola sua própria natureza matemática};
+  \node[bx, draw=icred, fill=icred!10, below right=of real] (surpresa) {Recusa ou lança exceção:\\quebra a expectativa do cliente};
+  \draw[->, thick] (call) -- (real);
+  \draw[->, thick] (real) -- (viola);
+  \draw[->, thick] (real) -- (surpresa);
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+Não há terceira opção honesta — qualquer saída viola o LSP.
+:::
+
+## A Lição do Paradoxo
+
+::: {.fragment}
+Quadrado *ser* Retângulo (mundo real) $\neq$ Quadrado *ser subtipo válido* de Retângulo (software).
+:::
+::: {.fragment}
+Se o comportamento mutável de $S$ não condiz com $T$, $S$ **não é um subtipo** de $T$ — mesmo que a taxonomia do mundo real diga que sim.
+:::
+::: {.fragment}
+**Saída honesta:** objetos imutáveis, ou abandonar a herança por uma interface comum mais genérica (`FormaGeometrica`).
+:::
+
+:::
+
+## O Paradoxo Círculo-Elipse e a Falácia do "É-UM"
+
+::: {.callout-tip}
+## Por que um Quadrado "ser" um Retângulo no mundo real não garante que ele seja um subtipo válido de Retângulo no código?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ Se `Retangulo` tiver um método `setAxes(a, b)` que altera largura e altura de forma independente, forçar `Quadrado extends Retangulo` cria uma chamada sem resposta honesta.
+- □ O paradoxo desaparece completamente se `Retangulo` e `Quadrado` forem tornados imutáveis, sem nenhum método que altere os eixos depois da criação.
+- □ Uma classe `FormaGeometrica` mais genérica, sem o método `setAxes`, resolveria o mesmo problema sem forçar uma relação de herança inválida.
+- □ Toda relação de taxonomia do mundo real ("todo X é um Y") pode ser traduzida diretamente para uma relação `extends` no código, sem risco de violar o LSP.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Paradoxo Círculo-Elipse — Resposta
+
+::: {.callout-tip}
+## Por que Quadrado "ser" Retângulo não garante subtipagem — Resposta
+
+- ✔ Se `Retangulo` tiver um método `setAxes(a, b)` que altera largura e altura de forma independente, forçar `Quadrado extends Retangulo` cria uma chamada sem resposta honesta — é exatamente o dilema do diagrama.
+- ✔ O paradoxo desaparece completamente se `Retangulo` e `Quadrado` forem tornados imutáveis, sem nenhum método que altere os eixos depois da criação — sem mutação, não há chamada que force a escolha entre violar a natureza do objeto ou a expectativa do cliente.
+- ✔ Uma classe `FormaGeometrica` mais genérica, sem o método `setAxes`, resolveria o mesmo problema sem forçar uma relação de herança inválida — é a segunda saída honesta mencionada na aula.
+- ✗ Toda relação de taxonomia do mundo real ("todo X é um Y") pode ser traduzida diretamente para uma relação `extends` no código, sem risco de violar o LSP — é exatamente a falácia que o paradoxo desmonta: taxonomia do mundo real não garante subtipagem de software.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** o critério de subtipagem em software não é "X é um tipo de Y no mundo real", é "o comportamento observável de X respeita todas as promessas de Y". O paradoxo Círculo-Elipse mostra que essas duas perguntas podem ter respostas diferentes.
+:::
+
+:::
+
+# Contratos de Exceção e a Instabilidade do LSP
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Há uma quarta forma de violar o LSP, além das três regras já vistas: as **exceções fazem parte da assinatura** de um método, tanto quanto seu tipo de retorno. Uma subclasse que lança uma exceção nova, mais ampla ou não declarada pelo pai "assusta" o cliente com um erro que ele nunca foi preparado para tratar.
+
+```java
+public class PagamentoCartaoBloqueado extends Cartao {
+    @Override
+    public String criarCobranca(double v) {
+        // VIOLACAO: o cliente do Pagavel espera um ID ou um erro previsto
+        throw new SecurityException("Usuario banido");
+    }
+}
+```
+
+Nenhum código escrito contra `Pagavel`/`Cartao` esperava uma `SecurityException` — ela não fazia parte do contrato original. Um padrão especialmente traiçoeiro: lançar `UnsupportedOperationException` (ou qualquer `RuntimeException` genérica) para "pular" um método do pai que o filho não quis implementar é, invariavelmente, uma violação do LSP e um sinal de que a hierarquia de herança está mal desenhada — se o filho não pode honrar o método, ele provavelmente não deveria ser um subtipo daquele pai.
+
+Essa instabilidade de contrato de exceção é a ponte natural para o próximo assunto: se as exceções são parte do contrato, elas merecem o mesmo cuidado de design que qualquer outro elemento da interface pública de um objeto — e é isso que uma **taxonomia de exceções** bem projetada entrega.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Exceções São Parte da Assinatura
+
+```java
+public class PagamentoCartaoBloqueado extends Cartao {
+    @Override
+    public String criarCobranca(double v) {
+        throw new SecurityException("Usuario banido"); // VIOLACAO
+    }
+}
+```
+
+::: {.fragment}
+Nenhum código escrito contra `Pagavel` esperava essa exceção — ela não fazia parte do contrato original.
+:::
+::: {.fragment}
+Lançar `UnsupportedOperationException` para "pular" um método do pai é quase sempre uma violação do LSP.
+:::
+::: {.fragment}
+**Ponte:** se exceção é contrato, ela merece o mesmo cuidado de design que qualquer outro elemento da interface pública.
+:::
+
+:::
+
+# Taxonomia do Erro: Hierarquia e Captura Polimórfica
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O erro não é um "acidente" ou algo que simplesmente "deu errado" — é uma **saída prevista** de uma função quando as pré-condições não permitem o sucesso. Pensando na máquina de estados da Aula 2: se um `Pedido` não pode transitar para "Pago", ele transita para "Falha de Pagamento" — ambos são estados válidos e antecipados, não uma quebra da máquina. Usar o fluxo de exceção para essa transição separa o "caminho feliz" do "caminho de recuperação", às custas de um custo real: lançar uma exceção é caro (a montagem do *stack trace* consome tempo), então reserve-a para situações realmente excepcionais, não para controle de fluxo comum.
+
+**A árvore de falhas.** Não trate exceções como simples mensagens de texto — trate-as como uma **Hierarquia de Tipos** que espelha o domínio de negócio, com uma raiz comum (por exemplo, `LojaException`), grandes categorias (falhas de **Infraestrutura** — rede, banco — separadas de falhas de **Negócio** — saldo, estoque) e especialistas que carregam dados específicos da falha.
+
+::: {.fig-resize style="width: 72%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.3cm and 1.6cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=4.4cm, minimum height=1.1cm},
+  >=Stealth
+]
+  \node[bx, draw=icblue, fill=icblue!10] (raiz) {\texttt{LojaException}};
+  \node[bx, draw=icorange, fill=icorange!10, below left=of raiz] (infra) {\texttt{InfraestruturaException}};
+  \node[bx, draw=icred, fill=icred!10, below right=of raiz] (negocio) {\texttt{PagamentoException}};
+  \node[bx, draw=icorange, fill=icorange!10, below=of infra] (timeout) {\texttt{TimeoutBancoException}};
+  \node[bx, draw=icred, fill=icred!10, below=of negocio] (cartao) {\texttt{CartaoExpiradoException}};
+  \draw[->, thick] (raiz) -- (infra);
+  \draw[->, thick] (raiz) -- (negocio);
+  \draw[->, thick] (infra) -- (timeout);
+  \draw[->, thick] (negocio) -- (cartao);
+\end{tikzpicture}
+```
+:::
+
+**Captura polimórfica.** A vantagem central de organizar exceções como hierarquia (em vez de uma lista plana) é que o `catch` pode escolher o nível de especificidade da reação — o mesmo polimorfismo do Bloco 2, agora aplicado ao tratamento de erro:
+
+```java
+try {
+    servicoPagamento.processar(pedido);
+} catch (CartaoExpiradoException e) {
+    // reacao ultra-especifica: sugerir atualizar os dados do cartao
+    view.pedirNovosDados(e.getDataExpiracao());
+} catch (PagamentoException e) {
+    // reacao por categoria: nao importa se foi saldo ou bloqueio,
+    // o tratamento e o mesmo: "pagamento nao autorizado"
+    view.notificarFalhaGenerica(e.getMensagemAmigavel());
+} catch (LojaException e) {
+    // reacao de ultima instancia: algo na loja falhou
+    log.registrarCritico(e);
+}
+```
+
+Essa estrutura evita que o código fique infestado de `if/else` de tratamento de erro, mantendo o "caminho feliz" limpo. O cuidado simétrico: **não capture `Exception` (ou pior, `Throwable`) indiscriminadamente** — isso esconderia erros de lógica (como um `NullPointerException` inesperado) que deveriam, na verdade, interromper a execução para correção, não ser silenciados.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Erro como Transição de Estado Prevista
+
+::: {.fragment}
+Erro não é "acidente": é a saída prevista de uma função quando a pré-condição falha.
+:::
+::: {.fragment}
+`Pedido` não pode ir a "Pago"? Ele transita para "Falha de Pagamento" — ambos estados válidos.
+:::
+::: {.fragment}
+**Custo real:** lançar exceção monta um *stack trace* — caro. Reserve para o excepcional, não para fluxo comum.
+:::
+
+## A Árvore de Falhas
+
+::: {.fig-resize style="width: 72%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.3cm and 1.6cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=4.4cm, minimum height=1.1cm},
+  >=Stealth
+]
+  \node[bx, draw=icblue, fill=icblue!10] (raiz) {\texttt{LojaException}};
+  \node[bx, draw=icorange, fill=icorange!10, below left=of raiz] (infra) {\texttt{InfraestruturaException}};
+  \node[bx, draw=icred, fill=icred!10, below right=of raiz] (negocio) {\texttt{PagamentoException}};
+  \node[bx, draw=icorange, fill=icorange!10, below=of infra] (timeout) {\texttt{TimeoutBancoException}};
+  \node[bx, draw=icred, fill=icred!10, below=of negocio] (cartao) {\texttt{CartaoExpiradoException}};
+  \draw[->, thick] (raiz) -- (infra);
+  \draw[->, thick] (raiz) -- (negocio);
+  \draw[->, thick] (infra) -- (timeout);
+  \draw[->, thick] (negocio) -- (cartao);
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+Raiz de domínio + categorias (Infraestrutura vs. Negócio) + especialistas — não mensagens de texto soltas.
+:::
+
+## Captura Polimórfica: Reação por Categoria
+
+```java
+try {
+    servicoPagamento.processar(pedido);
+} catch (CartaoExpiradoException e) {
+    view.pedirNovosDados(e.getDataExpiracao());   // ultra-especifica
+} catch (PagamentoException e) {
+    view.notificarFalhaGenerica(e.getMensagemAmigavel()); // por categoria
+} catch (LojaException e) {
+    log.registrarCritico(e);                       // ultima instancia
+}
+```
+
+::: {.fragment}
+O mesmo polimorfismo do Bloco 2, agora aplicado à reação a erro — o `catch` escolhe o nível de especificidade.
+:::
+::: {.fragment}
+**Cuidado simétrico:** capturar `Exception`/`Throwable` indiscriminadamente esconde bugs que deveriam interromper a execução.
+:::
+
+:::
+
+# Tradução de Exceções (Wrapping) e o Princípio da Menor Surpresa
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Camadas de alto nível — como um `CheckoutController` — não deveriam lidar com `SQLException` ou `TimeoutException`: isso é detalhe de implementação de uma camada inferior. A solução é capturar o erro técnico e **re-embalá-lo** (*wrapping*) numa exceção de domínio:
+
+```java
+// dentro do meio de pagamento (nivel baixo)
+try {
+    apiBanco.conectar();
+} catch (IOException e) {
+    // traduzindo "erro de rede" para "falha de comunicacao no pagamento"
+    throw new FalhaComunicacaoException("Banco indisponivel no momento", e);
+}
+```
+
+Note o segundo argumento do construtor: a exceção original (`e`) é preservada como **causa**, nunca descartada — isso mantém o *stack trace* completo disponível para depuração técnica, mesmo que a camada superior só veja `FalhaComunicacaoException`. O controlador agora lida só com o que ele entende (Pagamento), sem precisar saber se o erro veio de SQL, de uma API REST ou de um socket.
+
+Essa técnica adere ao **Princípio da Menor Surpresa**: o sistema de erro faz parte da interface pública de um objeto, e deve ser tão previsível quanto qualquer outro método. Se um método diz que lança `SaldoInsuficienteException`, ele não deve deixar escapar um `NullPointerException` interno — isso vazaria um detalhe de implementação (um bug de inicialização, por exemplo) através de uma interface que prometia apenas erros de negócio bem definidos.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Problema e a Solução: Wrapping
+
+::: {.fragment}
+`CheckoutController` não deveria lidar com `SQLException` ou `TimeoutException` — é detalhe de implementação de outra camada.
+:::
+
+::: {.fragment}
+```java
+try {
+    apiBanco.conectar();
+} catch (IOException e) {
+    throw new FalhaComunicacaoException("Banco indisponivel no momento", e);
+}
+```
+:::
+
+::: {.fragment}
+O segundo argumento (`e`) preserva a causa original — o *stack trace* técnico não se perde, só fica escondido do chamador.
+:::
+::: {.fragment}
+O controlador agora só entende **Pagamento** — não SQL, não REST, não socket.
+:::
+
+## O Princípio da Menor Surpresa
+
+::: {.fragment}
+O sistema de erro é parte da interface pública — deve ser tão previsível quanto qualquer método.
+:::
+::: {.fragment}
+Se um método promete `SaldoInsuficienteException`, ele não pode deixar vazar um `NullPointerException` interno.
+:::
+
+:::
+
+# Checked vs. Unchecked: o Critério de Responsabilidade
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A escolha entre uma exceção `Checked` ou `Unchecked` em Java não é uma questão técnica de sintaxe — é sobre **quem detém a responsabilidade** pelo erro.
+
+**Unchecked (violação do DNA).** Representa um erro de lógica: o contrato do método foi violado (um valor negativo passado onde só positivos são válidos, por exemplo). O sistema deve falhar rápido (**Fail-Fast**): validar no construtor ou no início do método, e lançar a exceção imediatamente se algo está errado. Não se recupera um bug com `try/catch` — o problema não está no fluxo de execução, está no código que chamou o método com argumentos inválidos, e é ali que a correção precisa acontecer. É muito mais fácil depurar um erro que aconteceu na entrada do método do que um erro que só se manifesta minutos depois, longe da causa real.
+
+**Checked (contingência do mundo).** Representa uma falha externa que o sistema *deve* prever — rede instável, timeout de API, arquivo ausente. O chamador é obrigado (pelo compilador) a ter um "Plano B": tratar (buscar uma rota alternativa) ou reembalar (traduzir para uma exceção de domínio, como visto no bloco anterior).
+
+O exemplo que amarra as três estratégias de erro num único método:
+
+```java
+public void realizarPagamento(double valor) {
+    // 1. UNCHECKED (DNA): falha rapida em caso de violacao de contrato
+    checkarValor(valor); // lanca IllegalArgumentException se valor < 0
+
+    try {
+        gatewayPrincipal.conectar();
+        gatewayPrincipal.pagar(valor);
+    } catch (ConexaoException e) {
+        // 2. TRATAR (recuperacao): contingencia transparente
+        gatewayBackup.pagar(valor);
+    } catch (IOException e) {
+        // 3. REEMBALAR (abstracao): traducao para linguagem de negocio
+        throw new ErroDeNegocioException("Falha na rede bancaria", e);
+    }
+}
+```
+
+As três decisões coexistem porque respondem perguntas diferentes: *"o chamador errou?"* (Unchecked, corrige-se acima, nunca no `catch`); *"o mundo falhou, mas há uma rota de escape?"* (Tratar, contingência transparente); *"o mundo falhou e não há solução local?"* (Reembalar, traduzindo para o vocabulário de quem chamou). Confundir as três — por exemplo, capturando uma `IllegalArgumentException` com um `try/catch` "para o sistema não cair" — só adia o problema, escondendo um bug real atrás de um comportamento silenciosamente incorreto.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Checked vs. Unchecked: Quem é Responsável?
+
+::: {.fragment}
+**Unchecked (DNA):** erro de lógica, contrato violado. Fail-Fast: valide cedo, lance na hora. Não se recupera bug com `try/catch`.
+:::
+::: {.fragment}
+**Checked (Mundo):** falha externa previsível (rede, API, arquivo). O compilador obriga um Plano B — tratar ou reembalar.
+:::
+
+## As Três Estratégias, num Método Só
+
+```java
+public void realizarPagamento(double valor) {
+    checkarValor(valor); // 1. UNCHECKED: falha rapida
+
+    try {
+        gatewayPrincipal.conectar();
+        gatewayPrincipal.pagar(valor);
+    } catch (ConexaoException e) {
+        gatewayBackup.pagar(valor); // 2. TRATAR: contingencia
+    } catch (IOException e) {
+        throw new ErroDeNegocioException("Falha na rede bancaria", e); // 3. REEMBALAR
+    }
+}
+```
+
+::: {.fragment}
+Três perguntas diferentes: *o chamador errou?* / *há rota de escape?* / *não há solução local?*
+:::
+::: {.fragment}
+Capturar um erro de DNA "para o sistema não cair" não resolve nada — só esconde o bug atrás de um comportamento incorreto.
+:::
+
+:::
+
+## Checked, Unchecked e as Três Estratégias de Erro
+
+::: {.callout-tip}
+## Um método precisa lidar com um valor inválido do chamador e, separadamente, com uma falha de rede do banco. Por que essas duas situações não deveriam usar a mesma estratégia de tratamento?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ Um valor inválido passado pelo chamador é uma violação de contrato — a resposta correta é Fail-Fast, não um `try/catch` que tenta "seguir em frente".
+- □ Uma falha de rede é uma contingência do mundo externo, que o método pode tentar contornar (rota alternativa) ou reembalar numa exceção de domínio.
+- □ Se um desenvolvedor captura `IllegalArgumentException` só para evitar que o sistema pare, ele elimina o bug de origem, não apenas adia sua manifestação.
+- □ Ao reembalar uma `IOException` numa exceção de domínio, é uma boa prática preservar a exceção original como causa, em vez de descartá-la.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Checked, Unchecked e as Três Estratégias — Resposta
+
+::: {.callout-tip}
+## Valor inválido vs. falha de rede — Resposta
+
+- ✔ Um valor inválido passado pelo chamador é uma violação de contrato — a resposta correta é Fail-Fast, não um `try/catch` que tenta "seguir em frente" — é a essência do design Unchecked.
+- ✔ Uma falha de rede é uma contingência do mundo externo, que o método pode tentar contornar (rota alternativa) ou reembalar numa exceção de domínio — as duas estratégias válidas para Checked.
+- ✗ Se um desenvolvedor captura `IllegalArgumentException` só para evitar que o sistema pare, ele elimina o bug de origem, não apenas adia sua manifestação — na verdade, ele só esconde o bug atrás de um comportamento silenciosamente incorreto; a causa raiz continua lá.
+- ✔ Ao reembalar uma `IOException` numa exceção de domínio, é uma boa prática preservar a exceção original como causa, em vez de descartá-la — é o segundo argumento do construtor de `FalhaComunicacaoException`, essencial para manter o *stack trace* técnico rastreável.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** as duas situações têm responsáveis diferentes — o valor inválido é um bug de quem chamou o método (corrige-se o código, não se recupera em tempo de execução), enquanto a falha de rede é uma característica do ambiente que o método pode genuinamente contornar ou traduzir.
+:::
+
+:::
+
+# Conclusão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando às quatro perguntas da abertura:
+
+1. **Quem decide, e o que essa decisão preserva:** a JVM decide em tempo de execução, consultando a VTable da classe real do objeto — e `@Override` promete preservar a assinatura e a semântica do método, não só a sintaxe.
+2. **Substituir com segurança, formalizado:** o LSP exige que o subtipo não fortaleça pré-condições, não enfraqueça pós-condições, e preserve todas as invariantes herdadas — e que suas exceções não surpreendam quem confiava no contrato do tipo base.
+3. **Taxonomia do mundo vs. subtipagem de software:** o paradoxo Círculo-Elipse mostra que "ser um X no mundo real" não garante "ser um subtipo válido de X no código" — o critério é sempre o comportamento observável, nunca a intuição geométrica ou biológica.
+4. **Erro estruturado, não acidente:** uma taxonomia de exceções bem desenhada, com captura polimórfica e tradução entre camadas, transforma a falha em parte confiável do design — e o critério Checked/Unchecked decide, caso a caso, se a responsabilidade é de quem chamou (Unchecked, Fail-Fast) ou do ambiente externo (Checked, com plano de contingência).
+
+### Ponte para a Aula 10 {.unnumbered}
+
+Até aqui, a disciplina garantiu que um objeto se comporta corretamente sozinho (Aulas 1–5), que ele promete comportamentos estáveis através de interfaces e herança (Aulas 6–8), e que essas promessas seguem válidas sob substituição, mesmo quando algo falha (Aula 9). A próxima pergunta ataca a própria ferramenta usada até aqui para modelar variação: herança resolve bem **um** eixo de especialização — mas o que acontece quando o negócio precisa variar em **dois ou mais eixos independentes ao mesmo tempo** (um produto físico ou digital, e, separadamente, nacional ou importado)? A Aula 10 mostra a herança colapsando sob essa explosão combinatória, e a composição — culminando no padrão Strategy — resolvendo exatamente o mesmo problema sem colisão.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos
+
+1. Late Binding: a JVM decide em tempo de execução, via VTable — `@Override` preserva assinatura *e* semântica
+2. LSP: pré-condições não fortalecidas, pós-condições não enfraquecidas, invariantes preservadas, exceções sem surpresa
+3. Círculo-Elipse: taxonomia do mundo real não garante subtipagem válida em software mutável
+4. Taxonomia de exceções: hierarquia de domínio, captura polimórfica, wrapping, e o critério Checked (Mundo) vs. Unchecked (DNA)
+
+::: {.fragment}
+**Próxima aula:** quando o negócio varia em dois ou mais eixos independentes ao mesmo tempo, a herança colapsa — a composição e o padrão Strategy resolvem.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. Um método `sacar(double valor)` em `ContaBancaria` não impõe restrição de horário. Uma subclasse `ContaInvestimento` sobrescreve esse método lançando uma `RuntimeException` caso o saque ocorra fora do horário comercial — uma regra que não existe na base. Explique, em termos das regras de contrato do LSP, exatamente qual regra é violada e por quê.
+
+2. Explique a diferença entre Early Binding e Late Binding usando o protocolo de despacho da VTable (os quatro passos vistos na aula). Em qual desses passos a JVM realmente decide qual código executar, e por que essa decisão não poderia ser tomada só com a informação disponível ao compilador?
+
+3. Um desenvolvedor precisa decidir se uma falha de comunicação com um gateway de pagamento externo deve ser modelada como uma exceção Checked ou Unchecked. Argumente a favor de uma das duas escolhas, e explique por que a escolha errada geraria um problema de design (não só um erro de sintaxe).
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-note icon=false}
+## Late Binding e VTable
+
+- □ Se um método for marcado como `static`, a JVM ainda assim consulta a VTable da classe real do objeto para decidir qual código executar.
+- □ Em um sistema que usasse Early Binding em vez de Late Binding, adicionar uma nova subclasse de `Pagavel` exigiria recompilar o código que já chamava métodos de `Pagavel`.
+- □ A VTable consultada numa chamada `p.pagamentoConfirmado(id)` é determinada pela classe declarada da variável `p`, não pela classe do objeto apontado por ela.
+- □ Se duas classes não relacionadas por herança ou interface comum implementarem um método com a mesma assinatura, a JVM ainda assim pode fazer Late Binding entre elas ao chamar esse método através de uma referência comum.
+:::
+
+::: {.callout-note icon=false}
+## Sobrescrita como Contrato (`@Override`)
+
+- □ Se um método sobrescrito muda a semântica do método original (por exemplo, de "validar" para "excluir o registro"), o compilador não impede essa mudança, mesmo com `@Override` presente.
+- □ Se a classe pai remover o método que uma subclasse originalmente sobrescrevia (renomeando-o), o compilador acusa erro na subclasse graças à anotação `@Override`.
+- □ Um método sobrescrito que devolve um subtipo mais específico do tipo de retorno original (covariância de retorno) ainda é uma sobrescrita válida.
+- □ `@Override` transforma automaticamente qualquer alteração de comportamento do método em uma violação de compilação, independente da assinatura.
+:::
+
+::: {.callout-note icon=false}
+## LSP: a Definição Formal
+
+- □ Se $\phi(x)$ representa que "o método nunca retorna null", e existe um subtipo $S$ de $T$ cujas instâncias podem retornar null nesse mesmo método, a fórmula $\forall x{:}T,\phi(x) \implies \forall y{:}S,\phi(y)$ é violada por esse subtipo.
+- □ O LSP é satisfeito sempre que o subtipo compila corretamente contra a interface do tipo base, independentemente do comportamento em tempo de execução.
+- □ Um sistema de testes automatizados que roda a mesma bateria de testes contra `Pagavel`, trocando só a implementação concreta injetada, está aplicando na prática a intuição do "cliente cego" usada para explicar o LSP.
+- □ Se um subtipo $S$ satisfaz o LSP em relação a $T$, isso implica necessariamente que $T$ também satisfaz o LSP em relação a $S$.
+:::
+
+::: {.callout-note icon=false}
+## Pré-condições no LSP
+
+- □ Se a base aceita valores de 0 a 1000, e uma subclasse aceita valores de -1000 a 2000 (um domínio maior), essa subclasse respeita a regra de pré-condições do LSP.
+- □ Uma subclasse pode enfraquecer uma pré-condição do pai (aceitar mais entradas do que ele aceitava) sem violar o LSP.
+- □ Se um método do pai não documenta explicitamente nenhuma pré-condição, uma subclasse está livre para adicionar qualquer restrição de entrada sem risco de violar o LSP.
+- □ Fortalecer uma pré-condição é equivalente, na prática, a remover funcionalidade que o cliente já esperava ter disponível através do tipo base.
+:::
+
+::: {.callout-note icon=false}
+## Pós-condições e Invariantes no LSP
+
+- □ Se o pai promete retornar um objeto nunca nulo, e o filho retorna um objeto "vazio" (um objeto real, mas sem dado útil) em vez de null, isso ainda pode violar a regra de pós-condições dependendo do que o cliente faz com o resultado.
+- □ Uma subclasse que sempre retorna um resultado mais específico e mais completo do que o pai prometia está fortalecendo a pós-condição, o que é permitido pelo LSP.
+- □ Uma subclasse que herda um atributo `protected` responsável por uma invariante crítica pode alterar esse atributo livremente, desde que não sobrescreva nenhum método do pai.
+- □ Preservar uma invariante herdada significa apenas que o valor do atributo nunca muda depois da construção do objeto.
+:::
+
+::: {.callout-note icon=false}
+## O Paradoxo Círculo-Elipse
+
+- □ O paradoxo Círculo-Elipse só aparece porque `Elipse` expõe um método mutável (`setAxes`) que permite alterar os eixos de forma independente depois da criação do objeto.
+- □ Se `Circulo` e `Elipse` fossem ambos imutáveis (sem nenhum `setAxes`, só construtores), a herança entre eles deixaria de gerar a mesma violação de LSP.
+- □ O paradoxo prova que herança geométrica sempre deve ser evitada em qualquer sistema orientado a objetos, mesmo quando os objetos são imutáveis.
+- □ Substituir a herança `Circulo extends Elipse` por uma interface comum `FormaGeometrica`, sem o método `setAxes`, é uma forma válida de evitar o paradoxo.
+:::
+
+::: {.callout-note icon=false}
+## Contratos de Exceção e o LSP
+
+- □ Uma subclasse que lança uma exceção verificada (`checked`) não declarada pelo método do pai obriga o código cliente já existente a ser recompilado ou reescrito para tratar essa nova exceção.
+- □ Lançar `UnsupportedOperationException` para "pular" um método herdado que a subclasse não quis implementar é uma prática recomendada quando a subclasse é uma especialização legítima.
+- □ Se `Pagavel.criarCobranca()` não declara nenhuma exceção, uma subclasse que lança uma `RuntimeException` inesperada em condições normais de uso ainda pode violar o espírito do LSP, mesmo sem quebrar a compilação.
+- □ Um subtipo que lança um subtipo mais específico de uma exceção já esperada pelo pai (por exemplo, `SaldoInsuficienteException extends PagamentoException`, quando o pai já declarava lançar `PagamentoException`) respeita o contrato de exceção do LSP.
+:::
+
+::: {.callout-note icon=false}
+## Taxonomia do Erro e Captura Polimórfica
+
+- □ Organizar exceções como uma hierarquia de tipos (em vez de uma lista de mensagens de texto) permite que o mesmo bloco `catch` trate corretamente subtipos de exceção criados depois que aquele código já foi escrito.
+- □ Se um bloco `catch (PagamentoException e)` vier antes de um bloco `catch (CartaoExpiradoException e)` no mesmo `try`, sendo `CartaoExpiradoException` subtipo de `PagamentoException`, o código não compila.
+- □ Capturar `Exception` de forma genérica no nível mais alto do sistema é sempre uma boa prática, pois garante que nenhum erro, de nenhum tipo, escape sem tratamento.
+- □ Tratar o erro como uma transição de estado prevista (por exemplo, de "Processando" para "Falha de Pagamento") é incompatível com o uso de uma hierarquia de exceções para organizar essas falhas.
+:::
+
+::: {.callout-note icon=false}
+## Checked vs. Unchecked e Wrapping
+
+- □ Se um método interno de baixo nível lança `SQLException` e essa exceção se propaga sem tradução até um controlador de alto nível, o `CheckoutController` passa a depender de um detalhe de implementação (o uso de SQL) que deveria estar oculto.
+- □ Reembalar uma exceção técnica numa exceção de domínio, descartando a exceção original em vez de passá-la como causa, preserva completamente a capacidade de depuração técnica do erro.
+- □ Um valor de entrada inválido detectado logo no início de um método é um exemplo típico de erro que deve ser tratado com uma exceção Unchecked, seguindo o princípio Fail-Fast.
+- □ Capturar uma `IllegalArgumentException` lançada por uma validação de contrato, só para permitir que a execução continue silenciosamente com um valor padrão, resolve o problema de origem que gerou a exceção.
+:::
+
+:::

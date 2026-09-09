@@ -378,13 +378,723 @@ como o `CLAUDE.md` exige); `✔`/`✗` confirmados só nos slides (12 por
 aula), zero nas notas, nas 8 aulas. 48/48 entradas em cada
 `_02-solucoes.md` confirmadas.
 
-## Aulas 9–12+ (numeração provisória)
+## Conformidade com o `CLAUDE.md` novo (consolidação de arquivos + anti-picotamento) — Aulas 1–8 (2026-09-03)
 
-Não iniciadas. Cada uma deve ser conferida contra o `Teoria/Aula N.tex`
-correspondente em `_fontes/material/` antes de escrever — não presumir que
-a Lesson N já esboçada no `index.qmd` da disciplina bate 1:1 com o
-conteúdo real da Aula N do material, nem que o resumo de `planejamento.tex`
-bate com o `.tex` real (já divergiu na Aula 3). Ao terminar cada aula,
-conferir também se ela precisa de pelo menos 3 pares de teste V/F
-intercalados nos slides antes de dar a aula por concluída (a Aula 3 quase
-saiu com só 2).
+A pedido do usuário ("refaça todas as aulas de orientação a objetos com
+essas novas diretivas", aprovação por etapa dispensada explicitamente),
+as 8 aulas já publicadas foram atualizadas para o `CLAUDE.md` reescrito
+nesta sessão. Trabalho feito via 4 agentes em paralelo (2 aulas cada),
+com verificação independente minha (leitura de disco + re-render de
+todas as 8 aulas nos dois formatos) depois.
+
+**1. Consolidação de arquivos de apoio (4→2 por aula).** `_00-plano-aula.md`
++ `_01-fontes.md` → `_00-planejamento.md` (Resumo / Plano de aula / Fontes
+usadas, template da Etapa 2 do `CLAUDE.md`); `_02-solucoes.md` +
+`_03-respostas-pausas.md` → `_01-respostas.md` (Gabarito V/F + Respostas
+das Pausas Ativas). Conteúdo preservado integralmente em todas as 8 —
+cada agente conferiu por diff/contagem antes de apagar os 4 arquivos
+antigos com `rm`. Nenhum conteúdo pedagógico do `index.qmd` foi alterado
+por este passo; a contagem de 12 blocos de V/F por aula (acima da nova
+faixa recomendada de 6–10 do `CLAUDE.md`) foi mantida como está — a
+faixa nova é orientação para aulas futuras, não uma obrigação de cortar
+conteúdo já aprovado.
+
+**2. Passada anti-picotamento nos slides.** Aplicada a todas as 8 aulas
+pela primeira vez (regra nova desta sessão). Slides genuinamente finos —
+quase sempre um bloco de código isolado sem nenhum comentário próprio,
+cujo comentário morava só no slide vizinho — foram fundidos, apagando
+o `## heading` intermediário (nunca os `:::` dos fragmentos). Total: 9
+merges em 6 das 8 aulas (aula01: 0 — já estava consistente; aula02: 2;
+aula03: 1; aula04: 2; aula05: 1; aula06: 1; aula07: 2; aula08:
+verificado pelo agente antes de uma interrupção, resultado íntegro
+conforme validação minha abaixo). Nenhum slide foi sobre-fundido; casos
+ambíguos (comparações antes/depois com código nos dois lados, pares
+pergunta/resposta de pausa ativa) foram deixados como estavam por já
+carregarem um ponto de aterrissagem substancial cada.
+
+**3. Validação final (minha, independente dos 4 agentes).** Um dos 4
+agentes (aula08) parou após consolidar os arquivos e editar o
+`index.qmd`, mas sem confirmar os renders finais (relatou que ficaria
+"esperando" um lock do `.quarto` liberar e encerrou sem retomar) —
+completei a verificação eu mesmo: checador de balanceamento de `:::`
+limpo, `quarto render --to html` e `--to revealjs` bem-sucedidos.
+Depois, re-renderizei as 8 aulas inteiras (`--to html` e `--to
+revealjs`, uma de cada vez) para descartar qualquer regressão cruzada —
+`aula03 --to html` falhou na primeira tentativa por uma corrida
+conhecida no cache `.quarto/project-cache` compartilhado entre renders
+concorrentes (mesmo sintoma relatado por vários agentes durante o
+trabalho paralelo), e teve sucesso limpo na segunda tentativa, sem
+nenhuma mudança de arquivo. Todas as 16 renderizações (8 aulas × 2
+formatos) confirmadas limpas ao final, sem erros nem avisos.
+
+## Aula 9 — Substituição e Falha: o Princípio de Liskov e a Taxonomia de Exceções
+
+Fonte: `Teoria/Aula 7.tex`, **segunda metade** (linhas 759–1411 de
+1582 — a Aula 8 já havia consumido 1–758). Cobre três blocos reais:
+(1) um recap compacto de Late Binding/VTable/`@Override` como
+preservação de contrato (subtipagem e substituibilidade, o protocolo
+de despacho de 4 passos, `@Override` como guarda sintático, não
+semântico); (2) o **Princípio da Substituição de Liskov** — definição
+formal ($\forall x{:}T,\phi(x)\implies\forall y{:}S,\phi(y)$), as três
+regras de contrato (pré-condições não fortalecidas, pós-condições não
+enfraquecidas, invariantes preservadas), o paradoxo Círculo-Elipse
+(com diagrama TikZ da bifurcação de violação), e contratos de exceção
+como quarta forma de violar o LSP; (3) **taxonomia de exceções** — erro
+como transição de estado prevista, árvore de falhas por domínio
+(diagrama TikZ de hierarquia), captura polimórfica, tradução/wrapping
+preservando a causa original, e o critério Checked (Mundo) vs.
+Unchecked (DNA/Fail-Fast).
+
+**Decisão de escopo (uma aula, não duas):** apesar do trecho-fonte
+cobrir três tópicos, o bloco de Late Binding/VTable é majoritariamente
+recapitulação/aprofundamento mecânico de conteúdo já lançado nas Aulas
+7 (Late Binding) e 8 (Classe Base Frágil, Composição sobre Herança já
+tratadas em profundidade) — não precisou do mesmo peso de um bloco
+inteiramente novo. Com esse bloco comprimido, o total estimado (~130
+min) ficou dentro da faixa 90–140 min já calibrada pelas 8 aulas
+publicadas, então não houve necessidade de dividir em aula09+aula10
+como aconteceu com `Aula 6.tex` e a primeira metade de `Aula 7.tex`.
+**Nada ficou pendente para uma futura aula10 a partir deste
+trecho-fonte** — o arco Herança→LSP→Exceções de `Aula 7.tex` está
+totalmente coberto entre a Aula 8 e esta Aula 9.
+
+`_00-planejamento.md`, `index.qmd` e `_01-respostas.md` escritos, já
+no formato consolidado de 2 arquivos de apoio adotado nesta sessão
+para as Aulas 1–8 (ver entrada acima). **Diagramas TikZ (3, novos
+nesta aula):** despacho de VTable (cadeia referência → objeto no Heap
+→ VTable → método executado), bifurcação do paradoxo Círculo-Elipse
+(`setAxes(10,20)` força violar a natureza do objeto ou a expectativa
+do cliente), e árvore de hierarquia de exceções de domínio
+(`LojaException` → Infraestrutura/Negócio → especialistas) — todos com
+a paleta IC (`icblue`/`icorange`/`icred`) e wrapper `.fig-resize`,
+seguindo o padrão já usado nas Aulas 1–2.
+
+**Exercícios:** 3 discursivas + **9 blocos** de V/F de 4 itens (36
+itens) — dentro da nova faixa flexível do `CLAUDE.md` (6–10 blocos),
+calibrado pela densidade real desta aula (três subtemas, mas o
+primeiro comprimido), não esticado até o teto da faixa só para bater
+uma cota. Todos os itens são originais (nenhum reaproveitado verbatim
+do `\section*{Exercícios de Fixação}` do próprio `.tex`, cujos ~25
+blocos de V/F são majoritariamente definicionais — formato que o
+`CLAUDE.md` desta disciplina proíbe explicitamente); os temas desses
+blocos-fonte serviram só de inspiração temática, registrado em
+`_00-planejamento.md`.
+
+**Achado de processo (correção durante a sessão):** o item (b) do
+bloco "Taxonomia do Erro e Captura Polimórfica" foi escrito
+inicialmente com uma afirmação mal formada (descrevia a ordem
+*correta* de captura — específica antes de genérica — mas alegava que
+essa ordem "perdia" a reação específica, o oposto do que essa ordem
+garante). Corrigido para testar o comportamento real e verificável do
+compilador Java (código inalcançável/erro de compilação quando o
+`catch` genérico vem antes do específico), mantendo a heurística de
+Caso Limite. Identificado por um script de verificação cruzada entre
+os itens `- □` do `index.qmd` e o campo **Afirmação** de
+`_01-respostas.md` (comparação de texto exato), que também confirmou
+as demais 35 correspondências.
+
+**Validação:** checador de balanceamento de `:::` (pilha LIFO): zero
+erros, pilha vazia. `quarto render --to html` e `--to revealjs`: ambos
+"Output created", sem erros/avisos relevantes (só os avisos padrão do
+Inkscape na conversão TikZ→SVG, já vistos nas Aulas 1–2). Contagem
+programática: 48 `□` em `notas.html` (36 exercícios + 12 pausas), 12
+`□` em `slides.html` (só pausas, antes da resolução); `✔`/`✗`: 0 em
+`notas.html`, 12 em `slides.html` (9 verdadeiros + 3 falsos,
+distribuídos 3+1 em cada uma das 3 pausas). Revisão de picotamento nos
+headings `##` do bloco RevealJS: 1 ajuste feito durante a construção
+(fundido "O Problema: Vazamento de Detalhe Técnico" — um único
+fragmento — com o slide seguinte "A Solução: Wrapping", que continuava
+a mesma ideia). `index.qmd` da disciplina atualizado: a Lesson 9 antiga
+("Breaking Contracts (Exceptions)", esboço genérico desatualizado) foi
+substituída pelo título e descrição reais desta aula.
+
+## Aulas 10–12+ (numeração provisória)
+
+Depois de `aula09`, restam ainda inteiros: `Aula 8.tex`, `Aula 9.tex`,
+`Aula 10.tex` e `Revisão.tex`, cada um a conferir integralmente antes
+de escrever (não presumir que a Lesson N já esboçada no `index.qmd` da
+disciplina bate 1:1 com o conteúdo real, nem que o resumo de
+`planejamento.tex` bate com o `.tex` real — já divergiu antes). Ao
+terminar cada aula, conferir também se ela precisa de pelo menos 3
+pares de teste V/F intercalados nos slides antes de dar a aula por
+concluída.
+
+## Aula 10 — O Colapso da Herança e a Era da Composição: o Padrão Strategy
+
+Fonte: `Teoria/Aula 8.tex` (1115 linhas — arquivo completo, ao contrário
+das Aulas 8–9, que dividiram `Aula 7.tex` ao meio). Cobre as quatro
+primeiras seções reais do `.tex`: (1) **A Ilusão e o Custo da Herança**
+— a fusão estrutural do `extends`, a "ilusão da produtividade"
+(`PedidoInternacional extends Pedido` só para ganhar métodos de graça),
+o acoplamento estrutural como o vínculo mais rígido da OO, Herança de
+Estado vs. Comportamento, e o peso físico da herança de estado na Heap
+(a "Subclasse Gorda", via `Ebook extends ProdutoBase`); (2) **O Colapso
+da Hierarquia** — um cenário de e-commerce (`Produto` → `ProdutoFisico`/
+`ProdutoDigital` × Nacional/Importado) forçando uma explosão
+combinatória de subclasses, e a proibição de herança múltipla de
+classes em Java (Problema do Diamante) fechando qualquer saída por
+herança; (3) **A Era da Composição e Modularidade** — o princípio do
+GoF ("favoreça composição sobre herança"), a virada de *is-a* para
+*has-a*, a teoria da quase-decomponibilidade de Herbert Simon, a
+analogia eletrodoméstico integrado vs. modular, e os tipos de
+composição (Agregação vs. Associação) com o Especialista da
+Informação; (4) **O que fazer então?** — o labirinto de `if/else` para
+meios de pagamento, a tentativa fracassada por herança
+(`PedidoPix`/`PedidoCartao`, confundindo identidade com papel), e a
+resolução via padrão **Strategy** (interface `Pagavel`, injeção de
+dependência, delegação, topologia Context/Strategy/ConcreteStrategy,
+Late Binding/VTable revisitado, e o OCP em ação).
+
+**Decisão de escopo (divide em aula10 + aula11 futura):** `Aula 8.tex`
+tem 1115 linhas, comparável em tamanho a `Aula 6.tex` e `Aula 7.tex`,
+ambos já divididos em duas aulas do site cada. As quatro seções usadas
+nesta aula formam um arco fechado (problema → princípio → solução
+nomeada) que já soma ~125–135 min estimados (dentro da faixa 90–140 já
+calibrada) — as duas seções finais do `.tex` (`Padrões de Projeto`,
+linhas 806–917: origem histórica/Christopher Alexander, o marco GoF de
+1994, o que padrões NÃO são, o vocabulário arquitetural, e a visão
+geral das três famílias; e `Conclusão`, linhas 917–943) ficaram de fora
+e são o ponto de partida exato de uma **Aula 11** futura. Nada do arco
+Herança→Composição→Strategy ficou pendente: só o vocabulário geral de
+padrões (que não depende de nada não visto ainda) migrou para a Aula
+11.
+
+**Reaproveitamento deliberado de nomenclatura.** A interface `Pagavel`
+e as classes `Pix`/`Cartao`/`Boleto`, já usadas nas Aulas 8–9 como
+**subclasses** de `MeioPagamentoBase`, foram reaproveitadas nesta aula
+como implementações independentes de `Pagavel` injetadas por
+composição/Strategy — não é coincidência de nomes, é o contraste
+pedagógico central da aula: o mesmo domínio, resolvido de duas formas
+estruturalmente diferentes. Por causa disso, o bloco de Fragile Base
+Class (já coberto em profundidade na Aula 8 via `GerenciadorDeCobrancas`
+e o bug de contagem dupla) foi tratado apenas como referência breve
+nesta aula — o ângulo novo é o custo físico de memória da herança de
+estado (Subclasse Gorda) e a explosão combinatória, nenhum dos dois já
+visto antes.
+
+`_00-planejamento.md`, `index.qmd` e `_01-respostas.md` escritos, no
+formato consolidado de 2 arquivos de apoio já em uso desde a Aula 9.
+**Diagramas TikZ (3, novos nesta aula):** a matriz de explosão
+combinatória (grid Físico/Digital × Nacional/Importado, com nota do
+terceiro eixo levando a 8 classes), a bifurcação do Problema do
+Diamante (`Produto` → `ProdutoFisico`/`ProdutoImportado` →
+`FisicoImportado` tentando herdar dos dois, marcado como erro de
+compilação), e a topologia do padrão Strategy (Context `Pedido` → has-a
+→ Strategy `Pagavel` ← implementam ← `Pix`/`Cartao`/`Boleto`) — todos
+com a paleta IC (`icblue`/`icorange`/`icred`) e wrapper `.fig-resize`,
+seguindo o padrão já usado nas Aulas 1–2 e 9.
+
+**Exercícios:** 3 discursivas + **8 blocos** de V/F de 4 itens (32
+itens), dentro da faixa flexível do `CLAUDE.md` (6–10 blocos),
+calibrado pelos quatro subtemas reais da aula (fusão/peso da herança,
+colapso combinatório, composição/modularidade, Strategy). Todos os
+itens são originais (nenhum reaproveitado verbatim do
+`\section*{Exercícios de Fixação}` do próprio `.tex`, cujos 25 blocos
+de V/F de formato `( )` são majoritariamente definicionais — proibido
+pelo `CLAUDE.md` desta disciplina); os temas desses blocos-fonte
+serviram só de inspiração temática, registrado em
+`_00-planejamento.md`.
+
+**Achado de processo (correção durante a sessão):** um script de
+verificação cruzada entre os itens `- □` do `index.qmd` e o campo
+**Afirmação** de `_01-respostas.md` (comparação de texto exato)
+encontrou 1 divergência: o item (b) do bloco "Composição, Agregação e
+Associação" tinha, em `_01-respostas.md`, o texto e o veredito da Pausa
+Ativa 2 colados por engano no lugar do item de exercício real (que tem
+texto e veredito diferentes — o exercício pergunta se uma dependência
+de ciclo de vida faz a relação "deixar de se encaixar" em Associação,
+resposta Verdadeiro; a pausa pergunta se a relação "ainda seria
+corretamente descrita" como Associação, resposta Falso). Corrigido
+substituindo pelo texto e pela justificativa corretos, batendo com o
+`index.qmd`; as demais 43 correspondências (32 exercícios + 12 itens de
+pausa) foram confirmadas idênticas na primeira passada.
+
+**Revisão de picotamento nos headings `##` do bloco RevealJS:** feita
+durante a construção, antes de considerar os slides prontos (não como
+retrabalho posterior). 3 ajustes: (1) fundido o slide "A Regra de Ouro
+do GoF" (só a citação + 1 frase) com o slide seguinte "Três Razões
+Estruturais", que elaborava a mesma ideia; (2) fundido o slide
+"Desmembrando a Lógica: `Pedido` Delega" (2 fragmentos curtos, sem
+código) com o slide seguinte "Definindo a Fronteira: o Contrato
+Abstrato", que continha o código correspondente; (3) fundido o slide de
+uma linha só "A Pergunta Certa" como fragmento final do slide anterior
+"A Tentativa por Herança: o Colapso da Identidade", por ser o desfecho
+direto da mesma ideia, não um ponto de aterrissagem próprio.
+
+**Correção de uma inconsistência entre aulas, fora do escopo original
+mas necessária:** o fechamento da Aula 9 (`aula09/index.qmd`, seção
+"Ponte para a Aula 10" e o slide "O que Aprendemos") prometia
+explicitamente que a Aula 10 traria "Factory Method, Builder e Adapter"
+— texto escrito antes de `Aula 8.tex` ter sido lido, presumindo que o
+esboço genérico antigo da Lesson 10 (`Creational and Structural
+Patterns`) bateria com o conteúdo real. Como o conteúdo real de
+`Aula 8.tex` é sobre o colapso da herança e o padrão Strategy (não
+sobre padrões de criação), a ponte da Aula 9 foi corrigida para
+apontar corretamente para este conteúdo, para não deixar uma promessa
+factualmente errada numa aula já publicada. `aula09` re-renderizado nos
+dois formatos após a correção — sem erros.
+
+**Validação.** Checador de balanceamento de `:::` (pilha LIFO): zero
+erros, pilha vazia, em `index.qmd` (antes e depois dos 3 ajustes de
+picotamento). `quarto render --to html` e `--to revealjs`: ambos
+"Output created", sem erros (a primeira rodada teve os avisos padrão do
+Inkscape na conversão TikZ→SVG, já vistos nas Aulas 1–2 e 9; a segunda
+rodada, com os SVGs em cache, não teve nem esses). Contagem programática
+no `_site/`: 44 `□` em `notas.html` (32 exercícios + 12 pausas), 12 `□`
+em `slides.html` (só pausas, antes da resolução); `✔`/`✗`: 0 em
+`notas.html`, 12 em `slides.html` (3 pausas × 4 itens). `grep`
+`☐|☒|- \[ \]|- \[x\]` limpo em `index.qmd` e `_01-respostas.md`.
+`index.qmd` da disciplina atualizado: Lesson 10 agora aponta para
+`./aula10/index.qmd` com título/conteúdo reais (Colapso da Herança e
+Composição/Strategy); a Lesson 11 antiga ("Behavioral Patterns:
+Strategy and Observer") teve sua descrição ajustada para não mais
+prometer Strategy — que já foi ensinado aqui — passando a descrever o
+vocabulário geral de Padrões de Projeto (origem, GoF, o que padrões NÃO
+são, as três famílias), que é o conteúdo real ainda não escrito das
+duas seções finais de `Aula 8.tex`. A Lesson 11 continua sem link (a
+aula ainda não foi construída).
+
+## Aula 11 — Padrões de Projeto: Vocabulário, Imutabilidade e a Gênese Segura do Objeto
+
+Fontes: (a) `Teoria/Aula 8.tex`, linhas 806–944 — as duas seções finais
+do arquivo, deliberadamente deferidas pela Aula 10: vocabulário geral
+de Padrões de Projeto (origem em Christopher Alexander, marco GoF de
+1994, o que um padrão explicitamente NÃO é, o vocabulário arquitetural
+como linguagem ubíqua, e as três famílias — Comportamento/Estrutural/
+Criação); (b) `Teoria/Aula 9.tex` (1180 linhas, lida por completo) —
+usado até a linha 590 (Imutabilidade/Value Object) e 591–990 (Criação
+Segura: Builder e Factory Method + DIP na criação); a seção
+`State Pattern` (linhas 353–590 — nota: o State Pattern efetivamente
+começa em 353 e a seção de Criação Segura em 591, ambas lidas na
+íntegra para decidir o corte) e a `Conclusão` final (992–1005) ficaram
+para a Aula 12.
+
+**Decisão de escopo (aula11 recebe vocabulário + Value Object + Builder
++ Factory Method; State Pattern vai para a Aula 12):** o material
+combinado de `Aula 9.tex` (Value Object + State + Builder + Factory
+Method) mais o vocabulário de `Aula 8.tex` era claramente denso demais
+para uma aula de 90–140 min sem comprimir as derivações principiadas
+que o `CLAUDE.md` exige. A divisão seguiu a fronteira que o próprio
+esboço da disciplina já sinalizava (Parte 4: "Padrões de Criação e
+Estruturais" vs. "Padrões de Comportamento"): esta aula ficou com o
+vocabulário geral (que não depende de nada ainda não visto) mais três
+padrões de proteção de dado/gênese (Value Object, Builder, Factory
+Method), todos de espírito Criacional/Estrutural; o State Pattern,
+genuinamente Comportamental e pensado pelo próprio `.tex` de origem
+para contrastar diretamente com o Strategy já visto na Aula 10, fica
+para a Aula 12. O corte exato na linha 353 de `Aula 9.tex` preserva um
+arco fechado nesta aula (vocabulário → dado imutável → objeto que nasce
+validado) sem nenhuma dependência pendente — Builder e Factory Method
+não citam nem pressupõem State. Carga horária estimada: ~127 min
+(dentro da faixa 90–140 já calibrada). **Nada do trecho usado nesta
+aula ficou pendente**; o que resta para a Aula 12: o State Pattern
+completo e a `Conclusão` de `Aula 9.tex` (que resume os "três pilares"
+incluindo State — cabe melhor no fechamento da Aula 12).
+
+**Reaproveitamento/adaptação de nomes.** O Value Object usa `Dinheiro`
+diretamente do `.tex` (encaixa naturalmente no domínio: o total de um
+`Pedido`). O Builder usa `PedidoBuilder`/`Pedido` diretamente do `.tex`,
+sem adaptação — o próprio material de origem já usa o domínio do curso
+aqui. O Factory Method e a DIP do `.tex` usam exemplos genéricos
+(`NotificacaoFactory`/`Notificacao`, `Servico`/`Database`/`DBFactory`)
+sem ligação ao fio condutor de e-commerce; esta aula adapta os nomes
+para `NotificacaoPedidoFactory`/`NotificacaoPedido` (notificações de
+status de pedido) e `ServicoDePedidos`/`RepositorioPedidos`/
+`RepositorioPedidosFactory`, mantendo a mecânica do `.tex` inalterada —
+mesma decisão já tomada na Aula 10 ao reaproveitar `Pagavel`/`Pix`/
+`Cartao`/`Boleto`.
+
+`_00-planejamento.md`, `index.qmd` e `_01-respostas.md` escritos, no
+formato consolidado de 2 arquivos de apoio já em uso desde a Aula 9.
+**Diagramas TikZ (3, novos nesta aula):** a árvore de taxonomia das
+três famílias de padrões (GoF → Comportamento/Estrutural/Criação →
+exemplos, com Strategy já destacado como representante Comportamental
+visto na Aula 10); o diagrama de memória comparando *aliasing* (duas
+referências Stack apontando para o mesmo `Retangulo` mutável na Heap,
+uma mutação corrompendo a outra) com o Value Object (`d1`/`d2`
+apontando para instâncias `Dinheiro` distintas, a original intacta); e
+o fluxo passo a passo do Builder (`PedidoBuilder` acumulando campos →
+`build()` como portão de validação → `Pedido` imutável nascendo ou a
+exceção sendo lançada) — todos com a paleta IC (`icblue`/`icorange`/
+`icred`) e wrapper `.fig-resize`, seguindo o padrão já usado nas Aulas
+1–2, 9 e 10.
+
+**Exercícios:** 3 discursivas + **8 blocos** de V/F de 4 itens (32
+itens), dentro da faixa flexível do `CLAUDE.md` (6–10 blocos),
+calibrado pelos subtemas reais da aula (vocabulário/famílias,
+aliasing, Entidade vs. VO, Obsessão por Primitivos, Builder, Factory
+Method, DIP). Todos os itens são originais (nenhum reaproveitado
+verbatim do `\section*{Exercícios de Fixação}` de `Aula 9.tex`, cujos
+25 blocos de V/F em formato `( )` são majoritariamente definicionais —
+proibido pelo `CLAUDE.md` desta disciplina); os temas desses blocos-
+fonte serviram só de inspiração temática, registrado em
+`_00-planejamento.md`.
+
+**Achado de processo (correção durante a sessão, mesmo padrão já visto
+nas Aulas 9–10):** um script de verificação cruzada entre os itens
+`- □` do `index.qmd` e o campo **Afirmação** de `_01-respostas.md`
+(comparação de texto exato) encontrou, na primeira passada, que os 12
+itens `✔`/`✗` de resolução das 3 pausas ativas nos slides haviam sido
+**parafraseados** em vez de reaproveitar o texto literal da pergunta
+`□` com uma justificativa apenas anexada ao final (o padrão exigido
+pelo `CLAUDE.md`: "reescreva cada item trocando `□` pelo glifo
+resolvido", mantendo o texto igual). Corrigido nas 3 pausas (12 itens):
+cada resolução agora reproduz o texto exato do item `□` correspondente,
+com `— justificativa curta` anexado após um travessão, igual ao padrão
+já usado nas Aulas 9–10. As 32 correspondências dos blocos de
+Exercícios (índice `□` vs. `_01-respostas.md`) estavam corretas desde a
+primeira passada.
+
+**Validação.** Checador de balanceamento de `:::` (pilha LIFO): zero
+erros, pilha vazia, antes e depois da correção das pausas. `quarto
+render --to html` e `--to revealjs`: ambos "Output created", sem erros
+nem avisos (avisos padrão do Inkscape na primeira rodada, ausentes na
+segunda com os SVGs em cache). Contagem programática no `_site/`: 44
+`□` em `notas.html` (32 exercícios + 12 pausas), 12 `□` em
+`slides.html` (só pausas, antes da resolução); `✔`/`✗`: 0 em
+`notas.html`, 12 em `slides.html` (6 verdadeiros + 6 falsos,
+distribuídos entre as 3 pausas). `grep` `☐|☒|- \[ \]|- \[x\]|( )` limpo
+em `index.qmd` e `_01-respostas.md`. Revisão de picotamento nos
+headings `##` do bloco RevealJS (34 slides extraídos e revisados em
+sequência): nenhum merge necessário — o diagrama das três famílias e o
+diagrama de *aliasing* já foram construídos com o comentário na mesma
+slide da figura (evitando de origem o antipadrão descrito no
+`CLAUDE.md`), e os slides mais curtos (ex.: "Revisão: Fail-Fast na
+Instanciação", "A Fábrica na Prática", "O `new` como a Cola Mais Forte
+do Código") seguem o mesmo padrão já aceito em aulas anteriores de
+"código substancial + um fragmento de comentário" como ponto de
+aterrissagem válido. `index.qmd` da disciplina atualizado: Lesson 11
+agora aponta para `./aula11/index.qmd` com título e conteúdo reais
+(vocabulário de padrões, Value Object, Builder, Factory Method/DIP); a
+Lesson 12 antiga ("Architectural Pattern — MVC", placeholder genérico)
+teve sua descrição ajustada para descrever o State Pattern (conteúdo
+real já lido em `Aula 9.tex`, linhas 353–590, mas ainda não escrito),
+sem fabricar conteúdo de MVC — que segue sem fonte confirmada até que
+`Aula 10.tex` seja lido por uma sessão futura.
+
+## Aula 12 — O Antipadrão do Status, o Padrão State e o Padrão Adapter
+
+Fonte: `Teoria/Aula 9.tex`, seção `State Pattern` (linhas 353–590,
+adiada pela Aula 11 por ser Comportamental, não Criacional/Estrutural)
++ `Teoria/Aula 10.tex` (830 linhas antes dos exercícios), lido
+integralmente. Cobre: o antipadrão de status-como-primitivo (`String`
+verificada no início de cada método do `Pedido`) e sua fragilidade de
+evolução; o padrão State (Context/State/ConcreteState) como cura,
+delegando `pagar()`/`cancelar()`/`enviar()` para classes de estado
+polimórficas; o contraste explícito Strategy vs. State (mesma
+topologia, decisão externa vs. auto-mutação interna); onde colocar a
+lógica de transição (estados conhecerem o próximo estado vs. tabela
+centralizada no Contexto); um ciclo de vida robusto (`EstadoPago`,
+`EstadoEnviado`) com regras de negócio via exceção; a motivação e
+estrutura do padrão Adapter (tradução de protocolo numa fronteira
+externa incompatível, caso de uso de unificação de log com um sistema
+legado); Object Adapter vs. Class Adapter (composição vence por
+testabilidade e compatibilidade futura); e uma ligação final,
+explícita, entre State (fluxo interno) e Adapter (fronteira externa)
+coexistindo na mesma classe `EstadoPago`.
+
+**Decisão de escopo (uma aula, não mais):** de `Aula 10.tex`, só as
+seções `Introdução e Revisão` (framing, sem conteúdo novo), `Strategy`
+(recapitulação breve, já coberta em profundidade na Aula 10 do site) e
+`Padrão Adapter` foram usadas. Ficam explicitamente pendentes para
+aulas futuras: `O Padrão Decorator e a Composição Dinâmica` (linhas
+399–553), `O Padrão Observer e o Desacoplamento de Eventos` (555–743),
+e `Síntese Arquitetural e o Estabelecimento de Fronteiras` (745–827) —
+esta última lê como o fechamento real do curso (fronteiras
+arquiteturais, matriz de decisão, "próximos passos"), não uma aula de
+MVC separada; não existe nenhuma seção de MVC em nenhum dos 10
+arquivos `Teoria/Aula N.tex` lidos até agora. `index.qmd` da disciplina
+atualizado: Lesson 12 agora aponta para `./aula12/index.qmd` com título
+e conteúdo reais (State + Adapter); adicionada uma nova Lesson 13
+placeholder (`*(not yet written)*`) cobrindo Decorator + Observer, para
+não perder esse conteúdo do esboço público — a Síntese Arquitetural
+ainda não tem lesson designada, será decidido quando construída.
+
+**Conteúdo construído:** 2 diagramas TikZ (transição de estados do
+`Pedido`, camada de tradução do Adapter), 3 pausas ativas, 3
+discursivas + 8 blocos de V/F de 4 itens (32 itens), todos originais
+pelas 4 heurísticas exigidas.
+
+**Achado de processo — retomada após limite de sessão.** O agente que
+construiu esta aula (`_00-planejamento.md` e `index.qmd`) atingiu o
+limite de sessão da conta (reset 3h America/Sao_Paulo) antes de
+escrever `_01-respostas.md`, rodar a verificação final e atualizar
+`index.qmd`/`_progresso.md` da disciplina — retomado manualmente por
+mim: escrevi `_01-respostas.md` (32 justificativas de V/F + discussão
+das 3 pausas, lendo a resolução já embutida no RevealJS de `index.qmd`
+para garantir consistência), e completei os dois updates de arquivo.
+
+**Validação (minha).** Checador de balanceamento de `:::`: zero
+erros, pilha vazia (`index.qmd` já estava correto, herdado do agente).
+`quarto render --to html` e `--to revealjs`: ambos "Output created",
+sem erros (só os avisos padrão do Inkscape na conversão TikZ→SVG).
+Contagem programática: 44 `□` em `notas.html` (32 exercícios + 12
+pausas), 0 `✔`/`✗`; 12 `□` em `slides.html` (só pausas,
+pré-resolução), 12 `✔`/`✗` (resoluções). Único `type="checkbox"`
+encontrado em ambos os HTMLs é a regra CSS genérica `ul.task-list li
+input[type="checkbox"]` do tema (não um checkbox real renderizado) —
+confirmado inofensivo.
+
+## Aula 13 — O Padrão Decorator e o Padrão Observer: Composição Dinâmica e Desacoplamento de Eventos
+
+Fonte: `Teoria/Aula 10.tex`, linhas 399–743 — `\section{O Padrão Decorator
+e a Composição Dinâmica}` (399–553) + `\section{O Padrão Observer e o
+Desacoplamento de Eventos}` (555–743), lidas na íntegra. Cobre: a
+explosão combinatória da herança estática diante de responsabilidades
+opcionais e cumulativas (cenário da cafeteria, $2^N$ subclasses); a
+estrutura do Decorator (dualidade É-UM/TEM-UM, `Bebida`/`BebidaDecorator`/
+`Leite`/`Chocolate`, repasse puro + acréscimo via `super`); o exemplo real
+do `java.io` (`BufferedInputStream`/`FileInputStream`) e uma réplica
+original no domínio do curso — uma cadeia de notificadores do `Pedido`
+(`Notificador`/`NotificadorEmail`/`NotificadorComLog`/`NotificadorComRetry`)
+que também evidencia que, ao contrário do custo aditivo da bebida, a
+*ordem* das camadas pode mudar o comportamento observável; o perigo do
+acoplamento de notificação em cascata (`Pedido` com `EmailService`/
+`LogService`/`InventarioService` como dependências diretas, violação do
+OCP); a estrutura do Observer (Subject/Observer, `PedidoObserver`/
+`PedidoSubject`, registro e broadcast, inversão de controle); as
+estratégias de tráfego de dados Push vs. Pull; e a generalização do
+Observer local para uma Arquitetura Orientada a Eventos distribuída
+(Sujeito→Produtor, callback→Tópicos/Filas, Observador→Consumidor/
+microsserviço, Kafka/RabbitMQ).
+
+**Decisão de escopo (aula13 = Decorator + Observer; aula14 = só a
+Síntese):** a `\section{Síntese Arquitetural e o Estabelecimento de
+Fronteiras}` (linhas 745–827 de `Aula 10.tex`) ficou de fora desta aula
+e é o ponto de partida exato de uma **Aula 14** futura — ela lê como o
+fechamento/capítulo de síntese do curso (fronteiras núcleo estável vs.
+periferia volátil, matriz de decisão comparando os quatro padrões
+Strategy/Adapter/Decorator/Observer, e a conclusão "próximos passos"),
+não um quinto padrão a ensinar, e pode legitimamente sair mais curta
+que as demais aulas sem precisar de conteúdo inventado para
+compensar — inclusive porque o próprio `.tex` fecha essa seção
+anunciando (incorretamente, à luz do que o site já construiu) "SOLID"
+como próximo tema; a Aula 14 deve tratar essa frase de fechamento do
+`.tex` como não vinculante, já que este curso já cobriu OCP em
+profundidade (Aula 10) e não há necessidade de reabrir SOLID do zero.
+Decorator (399–553) e Observer (555–743) formam um par natural — ambos
+resolvem "trocar uma decisão de compilação por uma decisão de
+execução", um para um único objeto (Decorator) e outro para a
+comunicação entre vários objetos (Observer) — e o exemplo de fechamento
+do Decorator (a cadeia de notificadores do `Pedido`) foi desenhado
+deliberadamente para ser reaproveitado como o próprio cenário de
+abertura do Observer (o mesmo domínio de notificação, dois problemas
+estruturais diferentes), evitando uma seção de ponte artificialmente
+fina entre as duas metades da aula. Carga horária estimada: ~115 min
+(dentro da faixa 90–140 já calibrada). Segue ainda não lido desta
+disciplina: `Teoria/Aula 8.tex` e `Aula 9.tex` já foram integralmente
+usados (Aulas 10–12); `Revisão.tex` é o único arquivo de fonte que
+ainda não foi aberto por nenhuma sessão — mencionado no `_progresso.md`
+como o lugar onde MVC poderia (ou não) aparecer, ainda sem confirmação.
+
+**Conteúdo original desta sessão (não literal do `.tex`):** a classe
+`Chocolate` (segundo decorador concreto, mesma estrutura de `Leite`,
+mencionada só em prosa no `.tex` original) foi escrita para dar
+suporte de código ao diagrama de recursão de três camadas; a cadeia de
+notificadores `Notificador`/`NotificadorEmail`/`NotificadorComLog`/
+`NotificadorComRetry` é inteiramente nova (não está no `.tex`), desenhada
+especificamente para (a) ecoar o ângulo do Java I/O do próprio material
+e (b) servir de ponte de domínio para o Observer, que já usa
+`Pedido`/notificação como cenário-fonte.
+
+`_00-planejamento.md`, `index.qmd` e `_01-respostas.md` escritos, no
+formato consolidado de 2 arquivos de apoio já em uso desde a Aula 9.
+**Diagramas TikZ (3, novos nesta aula):** a cadeia de wrapping recursivo
+do Decorator (`Cafe` → `Leite` → `Chocolate`, setas tracejadas descendo
+via `super.getCusto()` e setas coloridas subindo com o valor acumulado
+5,00 → 6,50 → 8,50); a topologia publicador-assinante do Observer
+(`PedidoSubject` → interface `PedidoObserver` ← `EmailService`/
+`LogService`/`InventarioService`); e o mapeamento lado a lado Observer
+local vs. Arquitetura Orientada a Eventos (Sujeito local/Produtor de
+Eventos, interface de callback/Tópicos e Filas, Observadores locais/
+Consumidores de Eventos) — todos com a paleta IC (`icblue`/`icorange`/
+`icred`) e wrapper `.fig-resize`, seguindo o padrão já usado nas Aulas
+1–2 e 9–12.
+
+**Exercícios:** 3 discursivas + **8 blocos** de V/F de 4 itens (32
+itens), dentro da faixa flexível do `CLAUDE.md` (6–10 blocos),
+calibrado pelos oito subtemas reais da aula (explosão combinatória,
+estrutura do Decorator, recursão, java.io/cadeia de notificadores,
+acoplamento em cascata, estrutura do Observer, Push/Pull, EDA
+distribuída). Todos os itens são originais (nenhum reaproveitado
+verbatim do `\section*{Exercícios de Fixação: Aula 10}` do próprio
+`.tex`, cujos itens são majoritariamente definicionais — formato que o
+`CLAUDE.md` desta disciplina proíbe explicitamente); os temas desses
+blocos-fonte serviram só de inspiração temática, registrado em
+`_00-planejamento.md`.
+
+**Achado de processo (correção durante a sessão, mesmo padrão já visto
+nas Aulas 9–12):** ao escrever `_01-respostas.md`, a primeira versão da
+resolução da Pausa Ativa 1 continha um item de rascunho duplicado (um
+`✗` de um item que na verdade era `✔`, seguido por uma nota
+inconsistente sobre o próprio erro) — não chegou a ser publicado no
+`index.qmd`, mas foi detectado e removido de `_01-respostas.md` antes
+da checagem cruzada final, via edição direta. Um script de verificação
+cruzada entre os 44 itens `- □` do `index.qmd` (12 de pausas + 32 de
+exercícios) e o texto de cada item resolvido em `_01-respostas.md`
+(comparando prefixo exato, já que a convenção desta disciplina descarta
+o ponto final da afirmação original antes de anexar `— justificativa`)
+confirmou as 44 correspondências sem nenhuma divergência de conteúdo
+depois da correção.
+
+**Achado de processo (TikZ):** o primeiro render falhou com `! Package
+tikz Error: You need to say \usetikzlibrary{calc}` no diagrama de
+recursão do Decorator, que usa aritmética de coordenadas
+(`($(leite.south)+(-0.2,0)$)`) para deslocar o ponto de chegada das
+setas de retorno — corrigido adicionando `calc` à lista de bibliotecas
+TikZ desse diagrama (nas duas cópias, notas e slides); os demais 2
+diagramas da aula não usam aritmética de coordenadas e não precisaram
+do ajuste.
+
+**Validação.** Checador de balanceamento de `:::` (pilha LIFO): zero
+erros, pilha vazia, antes e depois da correção do TikZ. `quarto render
+--to html` e `--to revealjs`: ambos "Output created", sem erros (só os
+avisos padrão do Inkscape na conversão TikZ→SVG, já vistos nas Aulas
+1–2 e 9–12). Contagem programática no `_site/`: 44 `□` em `notas.html`
+(32 exercícios + 12 pausas), 0 `✔`/`✗`; 12 `□` em `slides.html` (só
+pausas, pré-resolução), 12 `✔`/`✗` (8 verdadeiros + 4 falsos,
+distribuídos 3+2+3 verdadeiros e 1+2+1 falsos nas 3 pausas). Único
+`type="checkbox"` encontrado em ambos os HTMLs é a regra CSS genérica
+`ul.task-list li input[type="checkbox"]` do tema (não um checkbox real
+renderizado) — confirmado inofensivo, mesmo padrão das Aulas 7–12.
+`index.qmd` da disciplina atualizado: Lesson 13 agora aponta para
+`./aula13/index.qmd` com título e conteúdo reais (Decorator + Observer);
+Lesson 14 adicionada como novo placeholder não linkado, cobrindo a
+Síntese Arquitetural (fronteiras núcleo/periferia, matriz de decisão
+dos quatro padrões) ainda não escrita.
+
+## Aula 14 — Síntese Arquitetural: Núcleo Estável, Periferia Volátil e o Encerramento do Curso
+
+Fonte: `Teoria/Aula 10.tex`, `\section{Síntese Arquitetural e o Estabelecimento de
+Fronteiras}`, linhas 745–827 — a última seção de `Aula 10.tex`, lida na íntegra,
+exatamente o trecho que a Aula 13 já havia deliberadamente deferido para esta
+aula. Esta é a **última aula nova da disciplina**: não introduz um quinto
+padrão, e sim consolida os quatro já ensinados (Strategy, Adapter, Decorator,
+Observer) sob uma única moldura arquitetural — a fronteira entre um núcleo
+estável (contratos, interfaces, regras de negócio que mudam raramente) e uma
+periferia volátil (implementações concretas, SDKs de terceiros, infraestrutura
+sujeita a pressão de mercado); a "Regra de Ouro" da dependência (o código
+estável nunca depende do código volátil; a dependência aponta sempre para as
+abstrações), generalizando o DIP (Aula 5) e o OCP (Aula 10) já vistos
+separadamente; a matriz de decisão comparando intenção e critério de uso dos
+quatro padrões; e a análise de que cada padrão ataca um tipo específico de
+acoplamento nocivo (Strategy: condicional; Adapter: sintático; Decorator:
+taxonômico; Observer: temporal/identidade).
+
+**Decisão de escopo (aula deliberadamente mais curta, ~80 min em vez de
+90–140 min):** o trecho-fonte é, por natureza, um capítulo de síntese/
+fechamento — não há antipadrão novo a diagnosticar nem mecânica de código
+nova a formalizar, só uma reorganização do que já foi construído nas Aulas
+10–13. Seguindo a nota deixada pela própria Aula 13 (que já sinalizava que
+esta aula "pode legitimamente sair mais curta que as demais... sem precisar
+de conteúdo inventado para compensar"), a carga horária real (~80 min) não
+foi esticada até a faixa das aulas anteriores — reflete a densidade genuína
+da fonte, não um corte de conteúdo pedagógico.
+
+**Decisão sobre o fechamento do `.tex` ("Próxima Aula: Expandindo o
+SOLID"):** o parágrafo final do material de origem anuncia SOLID completo
+como tema da aula seguinte do curso original do professor. Essa promessa
+**não foi reaproveitada** nesta aula — o OCP já foi coberto em profundidade
+(Aula 10), e esta é a última aula planejada da disciplina no site (não há
+Aula 15). A Conclusão foi reescrita como um fechamento genuíno de curso,
+retomando explicitamente o problema de abertura da Aula 1 (o custo de
+mudança e o acrônimo TRUE de Sandi Metz — Transparent, Reasonable, Usable,
+Exemplary) em vez de abrir um gancho para conteúdo que não será escrito —
+mesma decisão de princípio já tomada no fechamento da Aula 13 em relação a
+essa mesma alusão do `.tex` a SOLID.
+
+`_00-planejamento.md`, `index.qmd` e `_01-respostas.md` escritos, no formato
+consolidado de 2 arquivos de apoio já em uso desde a Aula 9. **Diagramas
+TikZ (2, novos nesta aula, ambos sem aritmética de coordenadas — não houve
+necessidade de `usetikzlibrary{calc}` e nenhum erro de compilação ocorreu):**
+a fronteira genérica núcleo/periferia (um núcleo estável envolto por uma
+parede de abstração, com quatro exemplos de periferia — SDK de pagamento,
+banco de dados, serviço de e-mail, algoritmo sazonal de frete — apontando
+para dentro da parede); e a síntese visual dos quatro padrões como quatro
+"paredes" diferentes ao redor do mesmo núcleo `Pedido`, cada uma rotulada
+com o tipo específico de acoplamento que resolve (Strategy/condicional,
+Adapter/sintático, Decorator/taxonômico, Observer/temporal-identidade) —
+ambos com a paleta IC (`icblue`/`icorange`/`icred`) e wrapper `.fig-resize`,
+seguindo o padrão já usado nas Aulas 1–2 e 9–13.
+
+**Pausas ativas: 2 (não 3), calibradas ao tamanho real da aula** — uma ao
+final do bloco de Fronteiras Arquiteturais, outra ao final da Matriz de
+Decisão; dentro da faixa flexível que o `CLAUDE.md` já previa para uma aula
+genuinamente mais curta. **Exercícios:** 3 discursivas + **6 blocos** de V/F
+de 4 itens (24 itens) — no piso da faixa flexível do `CLAUDE.md` (6–10
+blocos), calibrado pela densidade real da aula (dois blocos de conteúdo
+novo, não quatro ou cinco como nas Aulas 10–13). Todos os itens são
+originais (nenhum reaproveitado verbatim do `\section*{Exercícios de
+Fixação: Aula 10}` do próprio `.tex`, já consultado só como inspiração
+temática nas Aulas 12–13 e não usado literalmente aqui tampouco).
+
+**Achado de processo (verificação cruzada):** um script comparando os 24
+itens `- □` de Exercícios do `index.qmd` (excluídos os 8 itens `- □` das 2
+pausas ativas, que ficam num `callout-tip` compartilhado à parte) contra o
+campo **Afirmação** de `_01-respostas.md` confirmou as 24 correspondências
+exatas na primeira passada — nenhuma correção necessária desta vez. Os 8
+itens de pausa ativa também foram conferidos manualmente contra a resolução
+em `_01-respostas.md`: idênticos, exceto pela convenção já documentada nas
+Aulas 9–13 de descartar o ponto final da afirmação original antes de anexar
+`— justificativa`.
+
+**Validação.** Checador de balanceamento de `:::` (pilha LIFO): zero erros,
+pilha vazia. `quarto render --to html` e `--to revealjs`: ambos "Output
+created", sem erros (só os avisos padrão do Inkscape na conversão TikZ→SVG,
+já vistos nas Aulas 1–2 e 9–13). Contagem programática no `_site/`: 32 `□`
+em `notas.html` (24 exercícios + 8 pausas), 0 `✔`/`✗`; 8 `□` em
+`slides.html` (só pausas, pré-resolução), 8 `✔`/`✗` (resoluções). Único
+`type="checkbox"` encontrado em ambos os HTMLs é a regra CSS genérica
+`ul.task-list li input[type="checkbox"]` do tema (não um checkbox real
+renderizado) — confirmado inofensivo, mesmo padrão das Aulas 7–13. Revisão
+de picotamento nos headings `##`/`#` do bloco RevealJS (14 slides
+extraídos e revisados em sequência, com contagem de caracteres por seção
+como checagem adicional): nenhum merge necessário — os 3 slides mais curtos
+(60, 48 e 9 caracteres) são os divisores de seção `#` (title-slides sem
+conteúdo próprio, mesmo padrão estrutural já usado em todas as aulas
+anteriores desta disciplina, não um caso de picotamento real), e as duas
+figuras TikZ já foram construídas com o comentário na mesma slide da
+figura, evitando de origem o antipadrão descrito no `CLAUDE.md`. `index.qmd`
+da disciplina atualizado: Lesson 14 agora aponta para `./aula14/index.qmd`
+com título e conteúdo reais (matriz de decisão dos quatro padrões,
+fronteira núcleo/periferia, fechamento do curso), substituindo o
+placeholder `*(not yet written)*`; nenhuma Lesson 15 foi adicionada.
+
+**Sobre `Revisão.tex` (lido integralmente nesta sessão — o último arquivo
+de `Teoria/` ainda não aberto por nenhuma sessão).** É um documento de
+**revisão/recapitulação pura** para estudo/prova: slides organizados em 3
+blocos temáticos (Execução Virtualizada e Ciclo de Vida de Memória;
+Encapsulamento, Invariantes e Coesão Estrutural; Subtipagem, Contratos e
+Extensibilidade), cada um já com V/F resolvidos e questões discursivas já
+com gabarito embutido no próprio arquivo. Cobre exclusivamente conteúdo já
+lecionado nas Aulas 1, 2, 4, 5, 8, 9 e 12 (JVM/bytecode/JIT, Stack/Heap/GC,
+cópia defensiva vs. imutabilidade, invariantes de classe e `private`,
+Modelo Anêmico, Tell-Don't-Ask, coesão/acoplamento, interfaces, herança
+caixa-branca vs. composição caixa-preta, fragilidade da superclasse, LSP,
+DIP) — inclusive um exercício de Observer/OCP (`SensorAmbiente`/
+`Interessado`) estruturalmente idêntico ao `Pedido`/`PedidoObserver` já
+ensinado na Aula 13. **Nenhum conceito novo, não coberto em nenhuma das 14
+aulas do site, foi encontrado** — não há MVC, não há SOLID formal, não há
+nenhum padrão de projeto além do Observer já ensinado. Por ser puramente
+material de recapitulação para prova, com gabaritos já embutidos e sem
+nenhuma seção deliberadamente deferida (ao contrário dos `Aula N.tex`, que
+sempre tiveram algum corte consciente registrado), **`Revisão.tex` não
+gerou uma Aula 15** — está fora do escopo do pipeline `index.qmd`/`aulaNN`
+desta disciplina, que é sobre construir aulas de conteúdo novo, não sobre
+compilar material de revisão. Nenhuma ação adicional é necessária sobre
+este arquivo.
+
+## Encerramento da leitura de `Teoria/` — todos os arquivos consumidos
+
+Com esta sessão, **todos os arquivos de `_fontes/material/Teoria/` foram
+lidos e, quando continham conteúdo pedagógico novo, transformados em aula**:
+`Aula 1.1.tex`/`Aula 1.2.tex` (Aula 1), `Aula 2.tex` (Aula 2), `Aula 3.tex`
+(Aula 3), `Aula 4.tex` (Aula 4), `Aula 5.tex` (Aula 5), `Aula 6.tex` (Aulas
+6–7), `Aula 7.tex` (Aulas 8–9), `Aula 8.tex` (Aulas 10–11), `Aula 9.tex`
+(Aulas 11–12), `Aula 10.tex` (Aulas 12–14), e `Revisão.tex` (lido e
+consumido nesta sessão como material de recapitulação pura, sem gerar aula
+nova, conforme justificado acima). Não resta nenhum arquivo de `Teoria/`
+não lido, e não resta nenhuma seção deliberadamente deferida de um `Aula
+N.tex` ainda pendente de uma aula futura — a disciplina `object-oriented-
+programming`, aula01 a aula14, está **completa em relação ao material de
+teoria real** (`_fontes/material/Teoria/`) disponível para este curso.

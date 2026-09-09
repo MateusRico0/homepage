@@ -583,6 +583,177 @@ figuras/diagramas. Reconferido balanceamento LIFO (limpo) e re-renderizado
 relatório do agente (números reais computados, contagem de exercícios,
 glifos, YAML) confere.
 
-## Aulas 4–15
+## Aula 4 — Autovalores, Autovetores e Matrizes Simétricas (2026-09-07)
+
+Construída em uma única sessão a partir de um `_00-planejamento.md` já
+completo, escrito por uma sessão anterior que atingiu o limite de taxa
+da conta antes de gerar qualquer outro arquivo — esta sessão executou o
+plano já pronto (7 blocos, ~100min, Estratégia B/Inside-Out com
+Problema-Fio), sem redesenhá-lo. Gancho de abertura: a promessa
+explícita deixada pelo Fechamento da Aula 3 ("o número de condição foi
+usado aqui de forma empírica [...] a Aula 4 dá a ferramenta exata para
+medi-lo diretamente a partir da estrutura de $X^TX$ [...] sem precisar
+perturbar nada").
+
+- [x] `_00-planejamento.md` — já existente ao início da sessão; 12
+      fontes citadas (10 do `mathml.pdf`, 2 do `copt.pdf`), todas com
+      página impressa e trecho literal em inglês já extraídos.
+- [x] **Verificação de citações contra os PDFs originais (offset de
+      página):** confirmado offset **+6** para `mathml.pdf` (consistente
+      com Aulas 1–3) reconferindo 9 trechos distintos (Def. 3.4 p.74→80,
+      Def. 4.5 p.104→110, Def./obs. 4.6 p.105→111, Teorema 4.8 p.106→112,
+      Exemplo 4.5 p.107→113, Fig. 4.4 p.108→114, Teoremas 4.14/4.15
+      p.111→117, Teorema 4.20 p.116→122, Teorema 4.21/Exemplo 4.11
+      p.117-118→123-124) — todos batendo exatamente, texto e página.
+      Para `copt.pdf` (**primeira vez usado nesta disciplina**),
+      descoberto e confirmado offset **+14** (não +6): "lengths of the
+      semi-axes" (p.30→44), "Suppose A ∈ Sⁿ" (p.646→660), "largest and
+      smallest eigenvalues" (p.647→661), "condition number" (p.649→663)
+      — os quatro batendo com o mesmo offset, texto conferido
+      literalmente contra o PDF via `pdftotext`. **Novo item no
+      dicionário de offsets da disciplina: `copt.pdf` usa +14, diferente
+      do +6 do `mathml.pdf`.**
+- [x] `index.qmd` — dual HTML/RevealJS, 7 blocos: (1) Revisão/Introdução
+      retomando a Aula 3 + Pausa Ativa 1; (2) Intuição visual
+      (autovetores como direções que não giram, matriz
+      $A=\begin{bmatrix}4&2\\1&3\end{bmatrix}$ do MathML Exemplo 4.5,
+      figura de grade de vetores + círculo→elipse) + Pausa Ativa 2; (3)
+      polinômio característico, exemplo resolvido à mão (raízes
+      $\lambda=2,5$, autovetores $(2,1)$/$(1,-1)$), verificação via
+      `numpy.linalg.eig` + Pausa Ativa 3; (4) Teorema Espectral Real —
+      prova própria de ortogonalidade entre autovetores de autovalores
+      distintos (sinalizada explicitamente como "prova nossa, não da
+      fonte"), contraste com $A_{\text{sim}}=\frac12\begin{bmatrix}5&-2\\
+      -2&5\end{bmatrix}$ (MathML Exemplo 4.11, autovalores $7/2,3/2$,
+      autovetores ortonormais), decomposição espectral geral
+      $A=PDP^{-1}$ especializada ao caso simétrico + Pausa Ativa 4; (5)
+      definitude positiva via $x^TAx$ (MathML Def./Exemplo 3.4, $A_1$
+      PD/$A_2$ indefinida, com figura de contorno tigela-vs-sela),
+      caracterização por autovalores (Boyd A.5.2), quociente de Rayleigh,
+      número de condição exato fechando o ciclo da Aula 3, ponte breve
+      para Hessiana/convexidade (Aula 7) + Pausa Ativa 5; (6) aplicação
+      no dado real (ver números abaixo), sem pausa ativa própria (fiel
+      ao plano); (7) Fechamento retomando as 4 perguntas + ponte para SVD
+      (Aula 5). 5 Pausas Ativas (uma por bloco, Blocos 1–5; Blocos 6–7
+      sem pausa, conforme o plano original). 6 elementos visuais, todos
+      em `.fig-resize` (2 TikZ: roteiro de abertura, ponte final
+      simétrica-vs-retangular para SVD; 4 figuras matplotlib: grade de
+      vetores/círculo→elipse do Bloco 2, contraste de ângulo entre
+      autovetores simétrica-vs-não-simétrica do Bloco 4, contorno
+      tigela-vs-sela do Bloco 5, scatter real `AveRooms`/`AveBedrms` com
+      autovetores da covariância do Bloco 6).
+- **Números do Bloco 6 — computados via script Python antes de
+  escrever, reproduzindo exatamente os valores que o plano já
+  antecipava** (mesmo kernel `homepage`, `uv run python`,
+  `gvlassis/california_housing`):
+  - Autovalores de $X^TX$ (4 atributos completos):
+    $[747{,}25;\ 52\,666{,}03;\ 273\,990{,}28;\ 1{,}753\times10^{7}]$;
+    $\text{cond}(X^TX)=23\,460{,}5$ — bate com a Aula 3 até a primeira
+    casa decimal (era $\approx 23\,460$ via `np.linalg.cond`).
+  - Par quase-colinear (`AveRooms`/`AveBedrms`, amostra de 20,
+    `random_state=7`): autovalores $[1{,}767;\ 741{,}961]$,
+    $\text{cond}=419{,}8$ — idêntico ao $\approx 420$ da Aula 3.
+  - Par bem-condicionado (`MedInc`/`HouseAge`, mesma amostra):
+    autovalores $[139{,}617;\ 23\,613{,}014]$, $\text{cond}=169{,}1$ —
+    idêntico ao $\approx 169$ da Aula 3. **Nenhuma discrepância a
+    registrar** — os três números batem, número por número, com o que o
+    `_00-planejamento.md` já antecipava (a Aula 3 os havia calculado por
+    perturbação/`np.linalg.cond`; ambos os métodos convergem porque, para
+    matriz simétrica PSD, `np.linalg.cond` já usa os mesmos autovalores
+    por baixo dos panos).
+  - Ortogonalidade dos autovetores confirmada (produto interno $=0$,
+    até erro de arredondamento) nos três casos e também na covariância.
+  - Covariância empírica `AveRooms`/`AveBedrms` (dados completos):
+    autovalores $[0{,}0640;\ 7{,}2132]$, autovetor principal
+    $\approx(0{,}986;\,0{,}166)$ — quase alinhado ao eixo `AveRooms`
+    (variância $\approx7{,}02$ vs. $\approx0{,}26$ de `AveBedrms`,
+    quase $27\times$ maior), levemente inclinado pela covariância
+    cruzada positiva ($\approx1{,}17$).
+  - Covariância dos 4 atributos brutos: variância de `HouseAge`
+    ($\approx163{,}8$) mais de $20\times$ maior que qualquer outro
+    atributo — maior autovalor da covariância completa
+    ($\approx164{,}0$) dominado por essa escala bruta, não pela
+    estrutura de correlação — usado como o aviso honesto de
+    sensibilidade a escala antes de semear PCA (Aprendizado Não
+    Supervisionado), sem desenvolver.
+- [x] `_01-respostas.md` — criado do zero, já no formato consolidado
+      atual do `CLAUDE.md` (um único arquivo, não mais os três arquivos
+      separados `_02-solucoes.md`/`_03-respostas-pausas.md` usados nas
+      Aulas 2–3): discussão em prosa + V/F resolvido das 5 Pausas
+      Ativas, e heurística nomeada + afirmação + resposta + justificativa
+      para os 32 itens de V/F dos Exercícios (8 blocos × 4 itens: "regra
+      básica de autovalor/autovetor", "polinômio característico",
+      "não-unicidade e autoespaços", "Teorema Espectral Real",
+      "definitude positiva", "quociente de Rayleigh/número de condição",
+      "$X^TX$: simetria", "covariância empírica/semente de PCA"); mais 3
+      questões discursivas, sem solução (trabalho do aluno). **Checagem
+      de texto exato entre `index.qmd` e `_01-respostas.md` confirmada
+      programaticamente** (32/32 itens idênticos após a correção de dois
+      artefatos triviais de quebra de linha) — mesma checagem que já
+      pegou bugs reais em aulas anteriores desta disciplina.
+- **Um bug de execução encontrado e corrigido durante o render:**
+  `numpy.linalg.eig` devolve autovalores/autovetores em `dtype=complex128`
+  por padrão para matrizes não-simétricas (mesmo quando os autovalores
+  são todos reais, como no exemplo $A=\begin{bmatrix}4&2\\1&3
+  \end{bmatrix}$) — isso quebrava tanto uma comparação de ângulo
+  (`np.degrees` não aceita complexo) quanto a formatação `:.1f` num
+  f-string mais adiante. Corrigido tomando `.real` explicitamente nos
+  dois chunks que chamam `np.linalg.eig(A_exemplo)`, com comentário no
+  código explicando o motivo — **novo item de atenção para futuras aulas
+  desta disciplina**, ao lado dos já registrados (`\le`/`\mathbb`
+  proibidos em mathtext do matplotlib; `{,}` literal quebra f-string).
+
+**Validação (itens obrigatórios, todos passados):**
+
+1. Balanceamento de `:::` verificado por script (pilha LIFO): 0 abas
+   abertas remanescentes ao final do arquivo, checado antes e depois da
+   correção do bug de `dtype`.
+2. `quarto render --to html` e `--to revealjs`: ambos sem erro após a
+   correção do bug de `dtype` complexo.
+3. Glifos: `notas.html` tem 52 `□` (20 das 5 Pausas Ativas + 32 dos 8
+   blocos de Exercícios) e zero `✔`/`✗`; `slides.html` tem 20 `□`
+   (Pergunta) + 12 `✔` + 8 `✗` (Resposta) das mesmas 5 Pausas Ativas —
+   nenhum glifo cruzado entre as duas saídas. Único hit de
+   `type="checkbox"` em ambos os arquivos é a regra genérica de CSS do
+   tema (`ul.task-list li input[type="checkbox"]`), nunca um checkbox
+   real renderizado.
+4. Exercícios confirmados por contagem programática: 3 discursivas + 8
+   blocos de V/F (32 itens) — densidade calibrada abaixo do teto de 10
+   blocos porque a aula tem 5 blocos de conteúdo novo (vs. os 6 da Aula
+   3), consistente com a diretriz de não esticar por cota.
+5. YAML confirmado: `output-file: notas.html` (html) e
+   `output-file: slides.html` (revealjs), mesmo bloco `format:`
+   compartilhado das Aulas 1–3.
+6. Números reais (`23,460`, `419.8`, `169.1`, autovalores completos)
+   confirmados presentes no `notas.html` renderizado, não só no
+   código-fonte.
+
+**Etapa 5 concluída nesta sessão:** link da Aula 4 adicionado ao
+`../index.qmd` (bullet convertido para link, mesmo formato das Lições
+1–3); dicionário de notações abaixo atualizado.
+
+### Dicionário de notações — símbolos novos desta aula
+
+| Símbolo/termo | Significado | Introduzido em |
+|---|---|---|
+| $\lambda$ | autovalor | Aula 4, Bloco 2 |
+| autovetor $\mathbf{x}$ (na equação $A\mathbf{x}=\lambda\mathbf{x}$) | direção que $A$ só estica/encolhe, nunca gira | Aula 4, Bloco 2 |
+| $p_A(\lambda)=\det(A-\lambda I)$ | polinômio característico de $A$ | Aula 4, Bloco 3 |
+| $E_\lambda$ | autoespaço associado ao autovalor $\lambda$ | Aula 4, Bloco 3 |
+| multiplicidade algébrica/geométrica | grau da raiz no polinômio característico / dimensão do autoespaço | Aula 4, Bloco 4 (menção breve) |
+| $A=PDP^{-1}$ | decomposição em autovalores (matriz diagonalizável geral) | Aula 4, Bloco 4 |
+| $A=Q\Lambda Q^T$ | decomposição espectral (matriz simétrica, $Q$ ortogonal) | Aula 4, Bloco 4 |
+| $A\succ 0$ / $A\succeq 0$ | matriz (simétrica) positiva definida / semidefinida | Aula 4, Bloco 5 |
+| quociente de Rayleigh $\mathbf{x}^TA\mathbf{x}/\mathbf{x}^T\mathbf{x}$ | média ponderada dos autovalores, limitada por $\lambda_{\min}$/$\lambda_{\max}$ | Aula 4, Bloco 5 |
+| $\text{cond}(A)=\lambda_{\max}(A)/\lambda_{\min}(A)$ | número de condição exato (matrizes simétricas PSD) | Aula 4, Bloco 5 |
+
+**Pendência explícita para a Aula 5:** autovalores/autovetores só
+existem garantidamente (na forma real do Teorema Espectral) para
+matrizes quadradas simétricas — $X$ retangular precisa da Decomposição
+em Valores Singulares (SVD), já anunciada no Fechamento desta aula via
+a própria definição de número de condição do Boyd (escrita em termos de
+valores singulares $\sigma$, não autovalores).
+
+## Aulas 5–15
 
 Não iniciadas.

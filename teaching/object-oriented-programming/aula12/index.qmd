@@ -1,0 +1,1088 @@
+---
+title: "O Padrão State e o Padrão Adapter: o Fluxo Seguro do Objeto e a Fronteira Externa"
+subtitle: "Aula 12 — Programação Orientada a Objetos"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    output-file: notas.html
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+# Proposta da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Na Aula 11, o `Pedido` ganhou dois terços do "tríptico da estabilidade": o **dado** deixou de correr risco de *aliasing* (Value Object) e a **gênese** deixou de ser um construtor sujo de parâmetros arriscados (Builder, Factory Method). Falta o terceiro pilar: o **fluxo** — como um objeto muda de comportamento ao longo do seu próprio ciclo de vida sem recair no labirinto de `if/else` que o Strategy já baniu do cálculo de pagamento. É exatamente aí que o `Pedido` ainda esconde um problema: ele controla se pode ser pago, cancelado ou enviado através de uma variável `status` (uma `String` ou um `int`) verificada no topo de cada método — a mesma Obsessão por Primitivos da Aula 11, agora infiltrada no comportamento, não no dado.
+
+O padrão que resolve isso — o **State** — tem uma peculiaridade notável: sua topologia de classes (um Contexto, uma interface, implementações concretas) é quase indistinguível da topologia do Strategy que já dominamos. E é exatamente por isso que o contraste entre os dois vai ser o fio condutor da primeira metade desta aula: mesma estrutura, intenção arquitetural completamente diferente.
+
+Na segunda metade, a aula muda de direção. Depois de o objeto estar protegido por dentro — dado, gênese e agora fluxo —, resta uma fronteira que nenhum dos padrões anteriores tocou: o ponto onde o sistema conversa com o mundo *externo* — um SDK de pagamento, uma biblioteca de auditoria de terceiros, um sistema legado que a empresa não pode reescrever. Quando a interface desse mundo externo não bate com a que o domínio espera, surge o padrão **Adapter**.
+
+**O roteiro, em quatro perguntas:**
+
+1. Por que reduzir o ciclo de vida de um objeto a uma `String status` verificada em cada método é uma bomba-relógio de manutenção, e não apenas um estilo de código menos elegante?
+2. Como o State converte esse controle de fluxo em objetos polimórficos — e, já que sua estrutura de classes parece a do Strategy, por que os dois resolvem problemas arquiteturais diferentes?
+3. Quando um estado decide para onde o objeto vai a seguir, quem deveria guardar essa decisão — o próprio estado, ou o objeto hospedeiro?
+4. Se o sistema precisa conversar com uma biblioteca cuja interface não foi desenhada para o seu domínio, e você não pode alterar nem a biblioteca nem o jeito como o resto do sistema já fala, quem deveria absorver essa tradução?
+
+Considere o nosso `Pedido`, já purificado pelo Strategy (Aula 10) e nascido em segurança pelo Builder (Aula 11). Ele ainda tem um método `pagar()` que começa perguntando "em que status eu estou?", um `cancelar()` que repete a mesma pergunta, e um `enviar()` que a repete outra vez. Adicionar um único estado novo — digamos, "EM\_ANALISE\_DE\_FRAUDE" — significa abrir os três métodos e inserir um novo `if` em cada um. É esse `Pedido`, comportamentalmente ainda no modelo antigo, que os próximos blocos corrigem — e, feito isso, a aula vira a atenção para a fronteira que liga esse `Pedido` já robusto ao resto do mundo.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Aula 11** fechou dois pilares: o **dado** (Value Object) e a **gênese** (Builder, Factory Method) do objeto.
+
+::: {.fragment}
+Falta o terceiro: o **fluxo** — como o objeto muda de comportamento ao longo do seu ciclo de vida.
+:::
+
+::: {.fragment}
+O `Pedido` ainda decide o que fazer verificando uma `String status` no topo de cada método — Obsessão por Primitivos aplicada ao comportamento.
+:::
+
+::: {.fragment}
+A solução, o **State**, tem uma topologia de classes quase idêntica à do **Strategy** — o contraste entre os dois é o fio condutor da primeira metade da aula.
+:::
+
+::: {.fragment}
+Na segunda metade, viramos a câmera para fora: como o sistema conversa com uma biblioteca externa cuja interface não fala a língua do nosso domínio? Entra o **Adapter**.
+:::
+
+::: {.fragment}
+**Roteiro:** o antipadrão do status → a estrutura do State → onde mora a transição → a fronteira externa e o Adapter.
+:::
+
+:::
+
+# O Antipadrão do Status como Primitivo
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**O método que sempre começa com uma pergunta.** Considere o `Pedido` tal como ele ainda está, depois do Strategy e do Builder — funcional, mas com o ciclo de vida codificado em condicionais:
+
+```java
+public class Pedido {
+    private String status = "NOVO"; // Obsessao por Primitivos, de volta
+
+    public void pagar() {
+        if (status.equals("NOVO")) {
+            processarPagamento();
+            status = "PAGO";
+        } else if (status.equals("PAGO")) {
+            throw new IllegalStateException("Pedido ja esta pago!");
+        } else if (status.equals("ENVIADO")) {
+            throw new IllegalStateException("Pedido ja foi enviado!");
+        }
+        // E se adicionarmos o estado "CANCELADO" ou "EM_ANALISE_DE_FRAUDE"?
+    }
+
+    public void cancelar() {
+        if (status.equals("NOVO")) {
+            status = "CANCELADO";
+        } else if (status.equals("PAGO")) {
+            estornar();
+            status = "CANCELADO";
+        } else if (status.equals("ENVIADO")) {
+            throw new IllegalStateException("Impossivel cancelar: pedido em transito!");
+        }
+    }
+
+    // enviar() repete a mesma bateria de "if (status.equals(...))"
+}
+```
+
+Repare no padrão: a primeira linha de cada método é sempre uma verificação de status, e a lógica de negócio real vem depois, aninhada dentro do `if` correto. Isso cria um **acoplamento temporal** — a ordem das chamadas importa (não dá para cancelar antes de existir, nem pagar duas vezes), mas a regra que garante essa ordem está espalhada e escondida atrás de condicionais repetidas em cada método.
+
+**Três sintomas concretos.** Primeiro, a **fragilidade de evolução**: adicionar um único estado novo (por exemplo, "EM\_ANALISE\_DE\_FRAUDE" entre "NOVO" e "PAGO") exige abrir `pagar()`, `cancelar()` e `enviar()` e inserir um `else if` em cada um — o novo estado age como uma "bomba" que obriga a mexer em todos os métodos que dependem de `status`, violando diretamente o OCP já visto na Aula 10. Segundo, a **complexidade ciclomática**: a lógica de transição de estado fica misturada com a lógica de negócio (processar pagamento, estornar), tornando o teste unitário exaustivo — para testar "cancelar um pedido pago" é preciso primeiro montar um pedido no estado certo, exatamente o problema de testabilidade que o Strategy já havia resolvido para os algoritmos de pagamento. Terceiro, e talvez o mais familiar: `status` — normalmente uma `String` ou um `int` — é um caso claro de **Obsessão por Primitivos** (Aula 11): nada no tipo `String` impede que alguém escreva `status = "PGO"` por engano, ou compare com um valor que nunca existiu. O compilador não ajuda em nada.
+
+O padrão **State** surge exatamente para converter esse controle de fluxo, hoje expresso em condicionais sobre um primitivo, em estrutura de objetos — a mesma virada conceitual que a Aula 11 já fez para o *dado* (`double` → `Dinheiro`), agora aplicada ao *comportamento ao longo do tempo*.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O `Pedido` Ainda Preso ao Status
+
+```java
+public class Pedido {
+    private String status = "NOVO"; // Obsessao por Primitivos, de volta
+
+    public void pagar() {
+        if (status.equals("NOVO")) {
+            processarPagamento();
+            status = "PAGO";
+        } else if (status.equals("PAGO")) {
+            throw new IllegalStateException("Pedido ja esta pago!");
+        } else if (status.equals("ENVIADO")) {
+            throw new IllegalStateException("Pedido ja foi enviado!");
+        }
+    }
+}
+```
+
+::: {.fragment}
+Cada método começa perguntando "em que status eu estou?" — a lógica de negócio real só aparece depois, aninhada no `if` certo.
+:::
+
+## O Acoplamento Temporal Escondido
+
+::: {.fragment}
+A ordem das chamadas importa (não cancela antes de existir, não paga duas vezes) — mas a regra que garante essa ordem está espalhada em condicionais repetidas.
+:::
+::: {.fragment}
+**Fragilidade de evolução:** um estado novo ("EM\_ANALISE\_DE\_FRAUDE") exige abrir `pagar()`, `cancelar()` **e** `enviar()` — viola o OCP da Aula 10.
+:::
+
+## Complexidade Ciclomática e Obsessão por Primitivos
+
+::: {.fragment}
+**Testabilidade:** testar "cancelar um pedido pago" exige primeiro montar o pedido no estado certo — o mesmo problema que o Strategy já resolveu para os algoritmos.
+:::
+::: {.fragment}
+**Obsessão por Primitivos (Aula 11), de volta:** `status` como `String`/`int` não impede `"PGO"` por engano — nada no tipo garante um valor válido.
+:::
+::: {.fragment}
+O State converte esse controle de fluxo em estrutura de objetos — a mesma virada que a Aula 11 fez para o dado (`double` → `Dinheiro`), agora aplicada ao comportamento ao longo do tempo.
+:::
+
+:::
+
+## O Antipadrão do Status e a Fragilidade de Evolução
+
+::: {.callout-tip}
+## Se um novo requisito pedir um estado "EM\_ANALISE\_DE\_FRAUDE" entre "NOVO" e "PAGO" no `Pedido` do antipadrão acima, quantos métodos já existentes precisam ser abertos e editados — e o que esse número revela sobre a real causa da fragilidade do design?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ No `Pedido` do antipadrão, inserir um novo estado exige editar apenas o método `pagar()`, já que é o único que decide a transição de "NOVO" para "PAGO".
+- □ Um teste unitário que verifica "cancelar um pedido já pago dispara estorno" precisa, antes de chamar `cancelar()`, montar um `Pedido` cujo campo `status` já esteja manualmente ajustado para `"PAGO"`.
+- □ Se o tipo do campo `status` fosse trocado de `String` para um `enum` Java, isso sozinho eliminaria a necessidade de abrir `pagar()`, `cancelar()` e `enviar()` ao adicionar um estado novo.
+- □ A fragilidade de evolução do `Pedido` do antipadrão nasce do fato de a lógica de transição de estado estar fisicamente distribuída dentro de vários métodos que também contêm lógica de negócio não relacionada ao fluxo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Antipadrão do Status — Resposta
+
+::: {.callout-tip}
+## Quantos métodos precisam mudar — Resposta
+
+- ✗ No `Pedido` do antipadrão, inserir um novo estado exige editar apenas o método `pagar()`, já que é o único que decide a transição de "NOVO" para "PAGO" — falso: `cancelar()` e `enviar()` também verificam `status` e também precisariam de um novo `else if` para tratar (ou rejeitar) o novo estado.
+- ✔ Um teste unitário que verifica "cancelar um pedido já pago dispara estorno" precisa, antes de chamar `cancelar()`, montar um `Pedido` cujo campo `status` já esteja manualmente ajustado para `"PAGO"` — exatamente o custo de testabilidade do antipadrão: o teste depende de reconstruir manualmente um estado interno antes de exercitar o comportamento.
+- ✗ Se o tipo do campo `status` fosse trocado de `String` para um `enum` Java, isso sozinho eliminaria a necessidade de abrir `pagar()`, `cancelar()` e `enviar()` ao adicionar um estado novo — falso: um `enum` elimina o risco de um valor inválido (`"PGO"`), mas os três métodos continuariam precisando de um novo `case`/`if` para cada estado novo; o problema estrutural (lógica de transição espalhada) não desaparece.
+- ✔ A fragilidade de evolução do `Pedido` do antipadrão nasce do fato de a lógica de transição de estado estar fisicamente distribuída dentro de vários métodos que também contêm lógica de negócio não relacionada ao fluxo — é precisamente essa mistura (transição + regra de negócio no mesmo método) que torna cada edição arriscada.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** três métodos (`pagar()`, `cancelar()`, `enviar()`) precisariam de edição — e esse número revela que a causa real não é "faltam mais `if`s", é que a responsabilidade de decidir o fluxo está fisicamente espalhada por toda a classe em vez de concentrada num único lugar. O bloco seguinte mostra onde esse lugar deveria ser.
+:::
+
+:::
+
+# O Padrão State: Estrutura e Delegação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**A motivação central: tratar estados como estratégias de comportamento.** A limpeza arquitetural do State vem de uma virada conceitual simples: em vez de tratar cada fase do ciclo de vida como um *valor* guardado numa variável, tratamos cada fase como uma *classe polimórfica*. O `Pedido` (o **Contexto**) deixa de saber "como" reagir a `pagar()` ou `cancelar()` e passa a perguntar apenas ao "quem" ele é no momento — delegando toda a decisão para um objeto de estado. Quando o estado muda, o Contexto simplesmente aponta para uma instância nova de uma classe diferente. O sistema passa a crescer horizontalmente: um novo estado significa uma nova classe, não um novo `if` espalhado por três métodos.
+
+**A estrutura em três papéis.** O padrão define:
+
+- **Context (Contexto):** a classe que os clientes efetivamente usam — no nosso caso, `Pedido`. Mantém uma referência para o `EstadoAtual` e delega todas as operações sensíveis ao estado.
+- **State (interface):** o contrato dos métodos que dependem do estado.
+- **Concrete States (Estados Concretos):** uma classe por fase do ciclo de vida, cada uma implementando o comportamento correspondente.
+
+```java
+public interface EstadoPedido {
+    void pagar(Pedido pedido);
+    void cancelar(Pedido pedido);
+    void enviar(Pedido pedido);
+}
+
+public class EstadoNovo implements EstadoPedido {
+    @Override
+    public void pagar(Pedido pedido) {
+        System.out.println("Pagamento processado!");
+        pedido.setEstado(new EstadoPago());
+    }
+
+    @Override
+    public void cancelar(Pedido pedido) {
+        pedido.setEstado(new EstadoCancelado());
+    }
+
+    @Override
+    public void enviar(Pedido pedido) {
+        throw new IllegalStateException("Pedido ainda nao foi pago!");
+    }
+}
+```
+
+O `EstadoNovo` sabe que, após um pagamento bem-sucedido, o próximo passo lógico é o `EstadoPago` — toda essa inteligência de fluxo está encapsulada fora da classe `Pedido`, que fica livre para representar apenas a entidade de negócio.
+
+**A "cegueira" deliberada do Contexto.** O `Pedido`, agora um hospedeiro, limita-se a repassar cada chamada para o objeto de estado atual:
+
+```java
+public class Pedido {
+    private EstadoPedido estadoAtual;
+    private double valor;
+
+    public Pedido(double valor) {
+        this.valor = valor;
+        this.estadoAtual = new EstadoNovo(); // todo pedido nasce em EstadoNovo
+    }
+
+    // Invocado apenas pelos objetos de estado concreto
+    protected void setEstado(EstadoPedido novoEstado) {
+        this.estadoAtual = novoEstado;
+    }
+
+    public void pagar()    { estadoAtual.pagar(this); }
+    public void cancelar() { estadoAtual.cancelar(this); }
+    public void enviar()   { estadoAtual.enviar(this); }
+
+    public double getValor() { return valor; }
+}
+```
+
+O ponto-chave é `setEstado`: marcado como `protected`, só as classes de estado (que residem no mesmo pacote) podem disparar transições. Isso impede que um cliente externo mude o estado do pedido de forma arbitrária — por exemplo, saltando de "Novo" direto para "Entregue" — preservando a integridade da máquina de estados. Comparando com o `Pedido` do bloco anterior: a complexidade ciclomática da classe caiu a quase zero, porque a "inteligência" de fluxo foi inteiramente terceirizada. Se você quer saber o que acontece quando um `EstadoNovo` é cancelado, a resposta mora inteira dentro de `EstadoNovo.cancelar()` — não espalhada por um método de 100 linhas com 10 `if`s.
+
+::: {.fig-resize style="width: 78%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.5cm and 2.0cm,
+  st/.style={draw, rectangle, rounded corners, align=center, font=\small\bfseries, minimum width=2.6cm, minimum height=1.0cm},
+  lbl/.style={font=\scriptsize},
+  >=Stealth
+]
+  \node[st, draw=icblue, fill=icblue!10] (novo) {EstadoNovo};
+  \node[st, draw=icblue, fill=icblue!10, right=of novo] (pago) {EstadoPago};
+  \node[st, draw=icblue, fill=icblue!10, right=of pago] (enviado) {EstadoEnviado};
+  \node[st, draw=icred, fill=icred!10, below=1.7cm of pago] (cancelado) {EstadoCancelado};
+
+  \draw[->, thick] (novo) -- node[lbl, above] {pagar()} (pago);
+  \draw[->, thick] (pago) -- node[lbl, above] {enviar()} (enviado);
+  \draw[->, thick, icred] (novo) -- node[lbl, left] {cancelar()} (cancelado);
+  \draw[->, thick, icred] (pago) -- node[lbl, right, align=left] {cancelar()\\(com estorno)} (cancelado);
+  \draw[->, thick, dashed, icred] (enviado) to[out=200, in=340, looseness=1.2] node[lbl, below, pos=0.5] {cancelar() -- bloqueado (excecao)} (cancelado);
+\end{tikzpicture}
+```
+:::
+
+O diagrama resume o ciclo de vida completo que os próximos parágrafos implementam: de `EstadoNovo`, o pedido pode ser pago (indo para `EstadoPago`) ou cancelado diretamente; de `EstadoPago`, pode ser enviado ou cancelado (com estorno); de `EstadoEnviado`, o cancelamento deixa de ser permitido — a transição em vermelho tracejado marca uma operação que a classe correspondente rejeita com exceção, não uma transição real.
+
+**O contraste que importa: Strategy vs. State.** Peguem o diagrama do Strategy da Aula 10 e comparem com o `Pedido`/`EstadoPedido` acima — a semelhança estrutural é real, não coincidência: ambos têm um Contexto, uma interface e implementações concretas intercambiáveis via polimorfismo. Mas a intenção arquitetural é oposta em um ponto preciso: **quem decide qual implementação está ativa, e quando**.
+
+- No **Strategy**, um agente *externo* ao Contexto — o código cliente — decide qual `ConcretaEstrategia` injetar, normalmente uma única vez (ou trocando por decisão explícita do usuário, como o frete escolhido no carrinho). O Contexto nunca troca de estratégia sozinho.
+- No **State**, o próprio objeto de estado *ativo* decide, como consequência de uma operação de negócio, qual será o próximo estado — e dispara a transição chamando `setEstado` no Contexto. Ninguém de fora precisa (nem deveria) injetar um `EstadoPago` manualmente; ele nasce como resultado de `pagar()` ser chamado sobre um `EstadoNovo`.
+
+Em outras palavras: o Strategy injeta um algoritmo de fora para dentro; o State faz o objeto mudar de "personalidade" de dentro para fora, como consequência do seu próprio ciclo de vida. Dizer que "State é só Strategy com outro nome" ignora exatamente esse ponto — a topologia de classes é parecida porque ambos resolvem "substituir condicionais por polimorfismo", mas o *gatilho* da substituição de implementação mora em lugares opostos.
+
+::: {.fig-resize style="width: 92%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=0.5cm and 0.6cm,
+  cl/.style={draw, rectangle, rounded corners, align=center, font=\scriptsize, minimum width=3.0cm, minimum height=0.8cm},
+  hdr/.style={font=\small\bfseries},
+  >=Stealth
+]
+  \node[hdr, icorange] (hS) {Strategy -- injecao externa};
+  \node[cl, draw=black!50, fill=black!5, below=0.5cm of hS] (clienteS) {Cliente};
+  \node[cl, draw=icblue, fill=icblue!10, below=0.5cm of clienteS] (contextoS) {Contexto (Pedido)};
+  \node[cl, draw=icorange, fill=icorange!10, below=0.5cm of contextoS] (ifaceS) {Strategy (interface)};
+  \node[cl, draw=icorange, fill=icorange!10, below=0.5cm of ifaceS] (concS) {ConcretaEstrategia};
+  \draw[->, thick] (clienteS) -- node[right, font=\scriptsize] {cria e injeta} (contextoS);
+  \draw[->, thick] (contextoS) -- (ifaceS);
+  \draw[->, thick, dashed] (concS) -- (ifaceS);
+
+  \node[hdr, icblue, right=3.6cm of hS] (hE) {State -- auto-mutacao};
+  \node[cl, draw=icblue, fill=icblue!10, below=0.5cm of hE] (contextoE) {Contexto (Pedido)};
+  \node[cl, draw=icred, fill=icred!10, below=0.5cm of contextoE] (ifaceE) {State (interface)};
+  \node[cl, draw=icred, fill=icred!10, below=0.5cm of ifaceE] (concE) {EstadoAtual};
+  \draw[->, thick] (contextoE) -- node[right, font=\scriptsize] {cria o estado inicial} (ifaceE);
+  \draw[->, thick, dashed] (concE) -- (ifaceE);
+  \draw[->, thick, icred] (concE) to[out=0, in=0, looseness=1.6] node[right, font=\scriptsize] {setEstado(proximo)} (contextoE);
+\end{tikzpicture}
+```
+:::
+
+O painel da esquerda mostra a seta de controle vindo de fora (o Cliente injeta a estratégia); o painel da direita mostra a seta de controle saindo do próprio estado ativo em direção ao Contexto (`setEstado`) — o Cliente sequer aparece no diagrama do State, porque ele nunca decide diretamente qual estado vem a seguir.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Motivação: Estados como Estratégias de Comportamento
+
+::: {.fragment}
+Em vez de um *valor* guardado numa variável, cada fase do ciclo de vida vira uma **classe polimórfica**.
+:::
+::: {.fragment}
+O `Pedido` (Contexto) deixa de saber "como" reagir — passa a perguntar só ao "quem" ele é agora, delegando ao objeto de estado.
+:::
+::: {.fragment}
+Quando o estado muda, o Contexto aponta para uma instância nova de uma classe diferente — o sistema cresce horizontalmente (novas classes), não verticalmente (novos `if`s).
+:::
+
+## A Estrutura em Três Papéis
+
+::: {.fragment}
+**Context:** a classe que os clientes usam (`Pedido`) — mantém a referência ao `EstadoAtual`.
+:::
+::: {.fragment}
+**State (interface):** o contrato dos métodos que dependem do estado.
+:::
+::: {.fragment}
+**Concrete States:** uma classe por fase do ciclo de vida.
+:::
+
+```java
+public interface EstadoPedido {
+    void pagar(Pedido pedido);
+    void cancelar(Pedido pedido);
+    void enviar(Pedido pedido);
+}
+
+public class EstadoNovo implements EstadoPedido {
+    @Override
+    public void pagar(Pedido pedido) {
+        System.out.println("Pagamento processado!");
+        pedido.setEstado(new EstadoPago());
+    }
+
+    @Override
+    public void cancelar(Pedido pedido) {
+        pedido.setEstado(new EstadoCancelado());
+    }
+
+    @Override
+    public void enviar(Pedido pedido) {
+        throw new IllegalStateException("Pedido ainda nao foi pago!");
+    }
+}
+```
+
+::: {.fragment}
+`EstadoNovo` sabe que, após um pagamento bem-sucedido, o próximo passo é `EstadoPago` — essa inteligência mora fora do `Pedido`.
+:::
+
+## O Contexto: um Objeto que "Esquece" o Status
+
+```java
+public class Pedido {
+    private EstadoPedido estadoAtual;
+    private double valor;
+
+    public Pedido(double valor) {
+        this.valor = valor;
+        this.estadoAtual = new EstadoNovo();
+    }
+
+    protected void setEstado(EstadoPedido novoEstado) {
+        this.estadoAtual = novoEstado;
+    }
+
+    public void pagar()    { estadoAtual.pagar(this); }
+    public void cancelar() { estadoAtual.cancelar(this); }
+    public void enviar()   { estadoAtual.enviar(this); }
+}
+```
+
+::: {.fragment}
+`setEstado` é `protected`: só as classes de estado (mesmo pacote) disparam transições — o cliente externo não pode saltar de "Novo" direto para "Entregue".
+:::
+::: {.fragment}
+A complexidade ciclomática do `Pedido` cai a quase zero — a "inteligência" de fluxo foi inteiramente terceirizada para os estados.
+:::
+
+## O Ciclo de Vida Completo do `Pedido`
+
+::: {.fig-resize style="width: 78%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.5cm and 2.0cm,
+  st/.style={draw, rectangle, rounded corners, align=center, font=\small\bfseries, minimum width=2.6cm, minimum height=1.0cm},
+  lbl/.style={font=\scriptsize},
+  >=Stealth
+]
+  \node[st, draw=icblue, fill=icblue!10] (novo) {EstadoNovo};
+  \node[st, draw=icblue, fill=icblue!10, right=of novo] (pago) {EstadoPago};
+  \node[st, draw=icblue, fill=icblue!10, right=of pago] (enviado) {EstadoEnviado};
+  \node[st, draw=icred, fill=icred!10, below=1.7cm of pago] (cancelado) {EstadoCancelado};
+
+  \draw[->, thick] (novo) -- node[lbl, above] {pagar()} (pago);
+  \draw[->, thick] (pago) -- node[lbl, above] {enviar()} (enviado);
+  \draw[->, thick, icred] (novo) -- node[lbl, left] {cancelar()} (cancelado);
+  \draw[->, thick, icred] (pago) -- node[lbl, right, align=left] {cancelar()\\(com estorno)} (cancelado);
+  \draw[->, thick, dashed, icred] (enviado) to[out=200, in=340, looseness=1.2] node[lbl, below, pos=0.5] {cancelar() -- bloqueado (excecao)} (cancelado);
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+A transição tracejada em vermelho não é um caminho real — é uma operação que `EstadoEnviado` rejeita com exceção.
+:::
+
+## O Contraste que Importa: Strategy vs. State
+
+::: {.fragment}
+Mesma topologia — Contexto, interface, implementações concretas via polimorfismo. **Não é coincidência.**
+:::
+::: {.fragment}
+**Strategy:** um agente *externo* ao Contexto (o Cliente) decide qual `ConcretaEstrategia` injetar — o Contexto nunca troca sozinho.
+:::
+::: {.fragment}
+**State:** o próprio estado *ativo* decide qual é o próximo, como consequência de uma operação de negócio, e dispara `setEstado` — ninguém de fora injeta manualmente.
+:::
+
+## Strategy Injeta de Fora; State Muda de Dentro
+
+::: {.fig-resize style="width: 92%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=0.5cm and 0.6cm,
+  cl/.style={draw, rectangle, rounded corners, align=center, font=\scriptsize, minimum width=3.0cm, minimum height=0.8cm},
+  hdr/.style={font=\small\bfseries},
+  >=Stealth
+]
+  \node[hdr, icorange] (hS) {Strategy -- injecao externa};
+  \node[cl, draw=black!50, fill=black!5, below=0.5cm of hS] (clienteS) {Cliente};
+  \node[cl, draw=icblue, fill=icblue!10, below=0.5cm of clienteS] (contextoS) {Contexto (Pedido)};
+  \node[cl, draw=icorange, fill=icorange!10, below=0.5cm of contextoS] (ifaceS) {Strategy (interface)};
+  \node[cl, draw=icorange, fill=icorange!10, below=0.5cm of ifaceS] (concS) {ConcretaEstrategia};
+  \draw[->, thick] (clienteS) -- node[right, font=\scriptsize] {cria e injeta} (contextoS);
+  \draw[->, thick] (contextoS) -- (ifaceS);
+  \draw[->, thick, dashed] (concS) -- (ifaceS);
+
+  \node[hdr, icblue, right=3.6cm of hS] (hE) {State -- auto-mutacao};
+  \node[cl, draw=icblue, fill=icblue!10, below=0.5cm of hE] (contextoE) {Contexto (Pedido)};
+  \node[cl, draw=icred, fill=icred!10, below=0.5cm of contextoE] (ifaceE) {State (interface)};
+  \node[cl, draw=icred, fill=icred!10, below=0.5cm of ifaceE] (concE) {EstadoAtual};
+  \draw[->, thick] (contextoE) -- node[right, font=\scriptsize] {cria o estado inicial} (ifaceE);
+  \draw[->, thick, dashed] (concE) -- (ifaceE);
+  \draw[->, thick, icred] (concE) to[out=0, in=0, looseness=1.6] node[right, font=\scriptsize] {setEstado(proximo)} (contextoE);
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+O Cliente nem aparece no diagrama do State — ele nunca decide diretamente qual estado vem a seguir.
+:::
+
+:::
+
+## Strategy vs. State: Mesma Topologia, Intenções Diferentes
+
+::: {.callout-tip}
+## Se alguém disser que o State Pattern é apenas "um Strategy com nomes diferentes", por que essa afirmação, apesar de a topologia de classes ser quase idêntica, erra o ponto central da intenção arquitetural de cada padrão?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ Em um `CalculadoraDeFrete` que usa Strategy, é o próprio objeto `FreteExpresso` injetado que decide, sozinho e sem intervenção externa, substituir-se por `FreteGratis` durante a execução do sistema.
+- □ Num `Pedido` usando State, é fisicamente o objeto `EstadoNovo` — e não um código cliente externo chamando `pedido.setEstrategia(new EstadoPago())` — quem invoca a transição para `EstadoPago` como consequência de `pagar()` ter sido chamado.
+- □ Se um `ConcreteState` do padrão State fosse instanciado e injetado manualmente por código cliente externo antes de qualquer operação de negócio ocorrer no Contexto, essa prática ainda preservaria integralmente a intenção arquitetural original do State Pattern.
+- □ O fato de tanto Strategy quanto State definirem uma interface implementada por múltiplas classes concretas é suficiente, por si só, para classificá-los como o mesmo padrão de projeto sob nomes diferentes.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Strategy vs. State — Resposta
+
+::: {.callout-tip}
+## Por que "mesma topologia" não é "mesmo padrão" — Resposta
+
+- ✗ Em um `CalculadoraDeFrete` que usa Strategy, é o próprio objeto `FreteExpresso` injetado que decide, sozinho e sem intervenção externa, substituir-se por `FreteGratis` durante a execução do sistema — falso: no Strategy, a troca de implementação é decidida por um agente externo ao Contexto (o cliente que chama `setEstrategia`); a estratégia concreta nunca se autossubstitui.
+- ✔ Num `Pedido` usando State, é fisicamente o objeto `EstadoNovo` — e não um código cliente externo chamando `pedido.setEstrategia(new EstadoPago())` — quem invoca a transição para `EstadoPago` como consequência de `pagar()` ter sido chamado — exatamente a auto-mutação que define o State: a transição nasce de dentro do próprio fluxo de negócio, não de uma injeção externa.
+- ✗ Se um `ConcreteState` do padrão State fosse instanciado e injetado manualmente por código cliente externo antes de qualquer operação de negócio ocorrer no Contexto, essa prática ainda preservaria integralmente a intenção arquitetural original do State Pattern — falso: isso reintroduziria o mesmo mecanismo de injeção externa do Strategy, esvaziando o ponto central do State, que é o objeto decidir e mudar sua própria "personalidade" como efeito colateral de sua lógica de negócio.
+- ✗ O fato de tanto Strategy quanto State definirem uma interface implementada por múltiplas classes concretas é suficiente, por si só, para classificá-los como o mesmo padrão de projeto sob nomes diferentes — falso: a estrutura de classes (interface + implementações) é necessária mas não suficiente para definir o padrão; o que diferencia os dois é *quem* decide qual implementação está ativa e *quando* essa decisão acontece.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** a afirmação erra porque confunde "mesma forma de classes" com "mesma intenção arquitetural". O Strategy resolve "como variar um algoritmo escolhido de fora"; o State resolve "como um objeto muda de comportamento como consequência do seu próprio ciclo de vida". A topologia é parecida porque ambos usam polimorfismo para eliminar condicionais — mas o gatilho da troca mora em lugares opostos.
+:::
+
+:::
+
+# Onde Colocar a Transição, e o Ciclo de Vida Robusto
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**O dilema mais difícil do State Pattern.** Nos exemplos acima, `EstadoNovo.pagar()` instancia diretamente `new EstadoPago()`. Isso funciona, mas cria uma decisão de design que precisa ser feita conscientemente: **onde deve morar o conhecimento de "qual é o próximo estado"?**
+
+- **Opção A — Transição nos Estados** (a que usamos até aqui): cada estado conhece o seu sucessor. *Prós:* transições dinâmicas e fluidas, sem nenhuma lógica condicional no Contexto. *Contras:* os estados ficam acoplados entre si — `EstadoNovo` precisa conhecer a classe `EstadoPago`.
+- **Opção B — Transição no Contexto:** o Contexto centraliza a "tabela" de transições.
+
+```java
+// Opcao B: o Contexto decide, reintroduzindo condicional
+protected void avancarFluxo() {
+    if (estadoAtual instanceof EstadoNovo) {
+        this.estadoAtual = new EstadoPago();
+    } else if (estadoAtual instanceof EstadoPago) {
+        this.estadoAtual = new EstadoEnviado();
+    }
+    // o Contexto volta a ter logica condicional - o que queriamos evitar
+}
+```
+
+*Prós:* os estados ficam totalmente isolados uns dos outros. *Contras:* o Contexto volta a ter lógica condicional — exatamente o problema que o State foi criado para eliminar.
+
+**O veredito prático:** use transições nos estados (Opção A) para fluxos de negócio naturais e bem definidos, como o ciclo de vida de um `Pedido` — o acoplamento entre `EstadoNovo` e `EstadoPago` é aceitável porque essa sequência já é uma regra de negócio estável, não uma variação livre. Uma técnica avançada para reduzir esse acoplamento sem voltar à Opção B é fazer o método de estado *retornar* o próximo estado, deixando para o Contexto apenas a tarefa de atualizar a referência (`this.estado = estado.proximo();`), ou usar uma fábrica de estados dedicada — sem, ainda assim, reintroduzir condicionais no Contexto.
+
+**O ciclo de vida robusto: o polimorfismo cobrindo os casos de borda.** A força real do State aparece quando o mesmo método se comporta de forma distinta em cada classe, sem um único `if (status == ...)`:
+
+```java
+public class EstadoPago implements EstadoPedido {
+    @Override
+    public void pagar(Pedido pedido) {
+        throw new IllegalStateException("Pedido ja esta pago!");
+    }
+
+    @Override
+    public void cancelar(Pedido pedido) {
+        realizarEstornoFinanceiro(pedido);
+        pedido.setEstado(new EstadoCancelado());
+        System.out.println("Pedido estornado e cancelado.");
+    }
+
+    @Override
+    public void enviar(Pedido pedido) {
+        pedido.setEstado(new EstadoEnviado());
+    }
+}
+
+public class EstadoEnviado implements EstadoPedido {
+    @Override
+    public void pagar(Pedido pedido) {
+        throw new IllegalStateException("Pedido ja foi enviado!");
+    }
+
+    @Override
+    public void cancelar(Pedido pedido) {
+        throw new DomainException("Impossivel cancelar: produto em transito!");
+    }
+
+    @Override
+    public void enviar(Pedido pedido) {
+        throw new IllegalStateException("Pedido ja foi enviado!");
+    }
+}
+```
+
+O método `cancelar()` se comporta de forma distinta em cada estado: em `EstadoNovo`, apenas muda o status; em `EstadoPago`, desencadeia um estorno financeiro antes de mudar; em `EstadoEnviado`, proíbe a ação, protegendo a regra de negócio de que um produto em trânsito não pode ser simplesmente cancelado. Tudo isso sem um único `if (status == ...)` — o código torna-se auto-documentado: para saber o que acontece quando um pedido pago é cancelado, basta abrir a classe `EstadoPago`, isolada de ruídos de outros estados.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Dilema: Onde Mora a Transição?
+
+::: {.fragment}
+**Opção A — nos Estados:** cada estado conhece seu sucessor. Fluido, mas acopla os estados entre si.
+:::
+::: {.fragment}
+**Opção B — no Contexto:** uma tabela central de transições.
+:::
+
+```java
+protected void avancarFluxo() {
+    if (estadoAtual instanceof EstadoNovo) {
+        this.estadoAtual = new EstadoPago();
+    } else if (estadoAtual instanceof EstadoPago) {
+        this.estadoAtual = new EstadoEnviado();
+    }
+}
+```
+
+::: {.fragment}
+A Opção B isola os estados entre si, mas reintroduz condicional no Contexto — exatamente o que o State existe para eliminar.
+:::
+
+## O Veredito Prático
+
+::: {.fragment}
+**Use transições nos estados** para fluxos de negócio naturais e estáveis — o acoplamento `EstadoNovo → EstadoPago` é aceitável porque essa sequência já é regra de negócio, não variação livre.
+:::
+::: {.fragment}
+**Técnica avançada:** o método de estado *retorna* o próximo estado (`this.estado = estado.proximo();`) — reduz o acoplamento sem reintroduzir condicional no Contexto.
+:::
+
+## O Ciclo de Vida Robusto: `EstadoPago`
+
+```java
+public class EstadoPago implements EstadoPedido {
+    @Override
+    public void pagar(Pedido pedido) {
+        throw new IllegalStateException("Pedido ja esta pago!");
+    }
+
+    @Override
+    public void cancelar(Pedido pedido) {
+        realizarEstornoFinanceiro(pedido);
+        pedido.setEstado(new EstadoCancelado());
+    }
+
+    @Override
+    public void enviar(Pedido pedido) {
+        pedido.setEstado(new EstadoEnviado());
+    }
+}
+```
+
+::: {.fragment}
+Em `EstadoPago`, `cancelar()` desencadeia um estorno financeiro **antes** de mudar de estado — regra de negócio embutida na própria classe.
+:::
+
+## O Ciclo de Vida Robusto: `EstadoEnviado`
+
+```java
+public class EstadoEnviado implements EstadoPedido {
+    @Override
+    public void cancelar(Pedido pedido) {
+        throw new DomainException("Impossivel cancelar: produto em transito!");
+    }
+}
+```
+
+::: {.fragment}
+Em `EstadoEnviado`, `cancelar()` é **proibido** — protege a regra de que um produto em trânsito não pode ser simplesmente cancelado.
+:::
+::: {.fragment}
+Sem um único `if (status == ...)`: o código é auto-documentado — para saber o que acontece com um pedido pago cancelado, basta abrir `EstadoPago`.
+:::
+
+:::
+
+# Da Fronteira Interna à Fronteira Externa: Motivação do Adapter
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Com Strategy, Builder e agora State, o `Pedido` está protegido por dentro em três frentes: comportamento variável (Strategy), gênese (Builder) e fluxo de vida (State). Mas nenhum desses padrões toca um problema diferente: como o sistema conversa com o que está *fora* dele. Considere um cenário concreto e comum: a equipe de compliance da empresa exige que toda transição de estado do `Pedido` seja registrada num sistema de auditoria — mas esse sistema é uma biblioteca legada, mantida por outra equipe, que ninguém tem permissão (nem motivo técnico) para reescrever. A interface que essa biblioteca oferece não é a que o resto do sistema já usa para logar eventos.
+
+O dilema é o mesmo, em espírito, do dilema do legado descrito na Aula 10: alterar o código de terceiros é impossível (biblioteca fechada); alterar o código central do domínio para se moldar ao formato do fornecedor destrói a arquitetura que as últimas três aulas construíram com tanto cuidado. É esse conflito — uma interface externa incompatível com o contrato que o domínio já espera — que o padrão **Adapter** resolve.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Depois de State:** o `Pedido` está protegido por dentro (comportamento, gênese, fluxo). Falta a fronteira que aponta para fora.
+
+::: {.fragment}
+**Cenário:** toda transição de estado precisa ser registrada num sistema de auditoria — mas é uma biblioteca legada, de outra equipe, com uma interface incompatível.
+:::
+
+::: {.fragment}
+**O dilema:** não posso mudar a biblioteca (fechada); não devo mudar meu domínio para se moldar a ela (destrói a arquitetura já construída).
+:::
+
+::: {.fragment}
+Entra o **Adapter** — a fronteira arquitetural aponta agora para fora, não mais para dentro do objeto.
+:::
+
+:::
+
+# O Padrão Adapter: Tradução de Protocolos
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**O papel do Adapter: um tradutor posicionado na fronteira.** O Adapter atua como um intermediário que converte a interface de uma classe incompatível na interface que o cliente já espera. O cliente faz uma chamada baseando-se numa interface abstrata que ele conhece e confia; o Adapter implementa essa interface esperada — o que o torna aceitável aos olhos do cliente — mas, por dentro, guarda uma referência para o objeto do fornecedor externo (o *Adaptee*). Ele recebe os parâmetros do cliente, faz as conversões necessárias e invoca os métodos nativos do sistema legado. Como o filósofo do design diria: "Adapter permite que classes trabalhem juntas mesmo que não pudessem de outra forma, por causa de interfaces incompatíveis."
+
+```java
+// A fronteira que o resto do sistema ja usa
+public interface LoggerModerno {
+    void info(String mensagem);
+}
+
+// A biblioteca legada de auditoria, incompativel, mantida por outra equipe
+public class LogServicoLegado {
+    public void registrarLogNoArquivo(String msg, int severidade) {
+        System.out.println("[" + severidade + "] " + msg);
+    }
+}
+
+// O ADAPTER: harmoniza os dois mundos via composicao
+public class LogAdapter implements LoggerModerno {
+    private LogServicoLegado legado; // Object Adapter: TEM-UM legado
+
+    public LogAdapter(LogServicoLegado legado) {
+        this.legado = legado;
+    }
+
+    @Override
+    public void info(String mensagem) {
+        // Traducao: absorve o parametro de severidade que o legado exige
+        legado.registrarLogNoArquivo(mensagem, 1);
+    }
+}
+```
+
+Sem o `LogAdapter`, cada classe de negócio que precisasse registrar um evento de auditoria teria que conhecer o número mágico `1` (severidade "info") e o nome exótico `registrarLogNoArquivo`. Centralizando essa tradução, todo o resto do sistema — incluindo o nosso `Pedido` — só precisa conhecer `LoggerModerno.info(mensagem)`.
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.3cm and 1.4cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\scriptsize, minimum width=3.1cm, minimum height=1.1cm},
+  >=Stealth
+]
+  \node[bx, draw=black!50, fill=black!5] (cliente) {Cliente\\(Pedido / EstadoPago)};
+  \node[bx, draw=icorange, fill=icorange!10, right=of cliente] (iface) {LoggerModerno\\(interface alvo)\\info(mensagem)};
+  \node[bx, draw=icblue, fill=icblue!10, right=of iface] (adapter) {LogAdapter\\implementa LoggerModerno};
+  \node[bx, draw=icred, fill=icred!10, right=of adapter] (legado) {LogServicoLegado\\(Adaptee)\\registrarLogNoArquivo(msg, sev)};
+
+  \draw[->, thick] (cliente) -- node[above, font=\scriptsize] {chama} (iface);
+  \draw[->, thick, dashed] (adapter) -- node[above, font=\scriptsize] {implementa} (iface);
+  \draw[->, thick] (adapter) -- node[above, font=\scriptsize] {traduz e delega} (legado);
+\end{tikzpicture}
+```
+:::
+
+**Ligando de volta ao State desta aula:** o `Pedido` pode receber um `LoggerModerno` por injeção (o mesmo raciocínio de Dependência Injetada já usado com `Pagavel` na Aula 10), e cada classe de estado concreta passa a registrar sua própria transição sem conhecer a existência do `LogServicoLegado`:
+
+```java
+public class EstadoPago implements EstadoPedido {
+    @Override
+    public void cancelar(Pedido pedido) {
+        realizarEstornoFinanceiro(pedido);
+        pedido.setEstado(new EstadoCancelado());
+        pedido.getLogger().info("Pedido estornado e cancelado."); // via LogAdapter
+    }
+}
+```
+
+Se amanhã a equipe de compliance trocar a biblioteca legada por outra (com uma assinatura de método totalmente diferente), o único arquivo tocado é `LogAdapter` — nem `Pedido`, nem `EstadoPago`, nem nenhuma outra classe de estado precisa mudar uma linha.
+
+**Object Adapter vs. Class Adapter: por que a composição vence.** O GoF descreve duas topologias técnicas para o Adapter. O **Class Adapter** usa herança: a classe Adapter estende diretamente o *Adaptee* ao mesmo tempo em que implementa a interface esperada pelo cliente.
+
+```java
+// Class Adapter (via heranca) - desencorajado
+public class LogAdapterPorHeranca extends LogServicoLegado implements LoggerModerno {
+    @Override
+    public void info(String mensagem) {
+        registrarLogNoArquivo(mensagem, 1); // metodo herdado, nao delegado
+    }
+}
+```
+
+O problema é o acoplamento estático em tempo de compilação: o Adapter passa a conhecer os detalhes íntimos e o estado interno da classe herdada, violando o encapsulamento. Pior — se o fornecedor lançar uma nova subclasse de `LogServicoLegado` (por exemplo, uma versão com *rate limiting* embutido), o `LogAdapterPorHeranca` não consegue reaproveitá-la: ele está rigidamente preso à classe-mãe original via `extends`.
+
+Por isso, a indústria adota quase exclusivamente o **Object Adapter** (o `LogAdapter` que já vimos), apoiado no princípio "Tem-Um". Como o `LogAdapter` trata o legado como uma caixa preta opaca, recebida por injeção, o mesmo Adapter funciona com qualquer subclasse presente ou futura de `LogServicoLegado`, sem nenhuma alteração — a regra de ouro é "prefira sempre Object Adapter para manter as caixas pretas fechadas".
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Adapter: um Tradutor na Fronteira
+
+::: {.fragment}
+O cliente chama uma interface que já conhece e confia; o Adapter implementa essa interface, mas guarda por dentro uma referência ao objeto incompatível (o *Adaptee*).
+:::
+::: {.fragment}
+*"Adapter permite que classes trabalhem juntas mesmo que não pudessem de outra forma, por causa de interfaces incompatíveis."*
+:::
+
+```java
+public interface LoggerModerno {
+    void info(String mensagem);
+}
+
+public class LogServicoLegado {
+    public void registrarLogNoArquivo(String msg, int severidade) {
+        System.out.println("[" + severidade + "] " + msg);
+    }
+}
+
+public class LogAdapter implements LoggerModerno {
+    private LogServicoLegado legado;
+
+    public LogAdapter(LogServicoLegado legado) { this.legado = legado; }
+
+    @Override
+    public void info(String mensagem) {
+        legado.registrarLogNoArquivo(mensagem, 1);
+    }
+}
+```
+
+::: {.fragment}
+Sem o Adapter, cada classe de negócio precisaria conhecer o número mágico `1` e o nome `registrarLogNoArquivo` — o `LogAdapter` centraliza essa tradução.
+:::
+
+## A Camada de Tradução, Visualmente
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.3cm and 1.4cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\scriptsize, minimum width=3.1cm, minimum height=1.1cm},
+  >=Stealth
+]
+  \node[bx, draw=black!50, fill=black!5] (cliente) {Cliente\\(Pedido / EstadoPago)};
+  \node[bx, draw=icorange, fill=icorange!10, right=of cliente] (iface) {LoggerModerno\\(interface alvo)\\info(mensagem)};
+  \node[bx, draw=icblue, fill=icblue!10, right=of iface] (adapter) {LogAdapter\\implementa LoggerModerno};
+  \node[bx, draw=icred, fill=icred!10, right=of adapter] (legado) {LogServicoLegado\\(Adaptee)\\registrarLogNoArquivo(msg, sev)};
+
+  \draw[->, thick] (cliente) -- node[above, font=\scriptsize] {chama} (iface);
+  \draw[->, thick, dashed] (adapter) -- node[above, font=\scriptsize] {implementa} (iface);
+  \draw[->, thick] (adapter) -- node[above, font=\scriptsize] {traduz e delega} (legado);
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+Se a equipe de compliance trocar a biblioteca legada amanhã, só `LogAdapter` muda — nenhuma classe de estado do `Pedido` sofre impacto.
+:::
+
+## Ligando ao State: Log de Transição via Adapter
+
+```java
+public class EstadoPago implements EstadoPedido {
+    @Override
+    public void cancelar(Pedido pedido) {
+        realizarEstornoFinanceiro(pedido);
+        pedido.setEstado(new EstadoCancelado());
+        pedido.getLogger().info("Pedido estornado e cancelado."); // via LogAdapter
+    }
+}
+```
+
+::: {.fragment}
+`EstadoPago` registra o evento sem jamais conhecer `LogServicoLegado` — duas fronteiras (State para dentro, Adapter para fora) cooperando na mesma classe.
+:::
+
+## Object Adapter vs. Class Adapter
+
+```java
+// Class Adapter (via heranca) - desencorajado
+public class LogAdapterPorHeranca extends LogServicoLegado implements LoggerModerno {
+    @Override
+    public void info(String mensagem) {
+        registrarLogNoArquivo(mensagem, 1); // metodo herdado, nao delegado
+    }
+}
+```
+
+::: {.fragment}
+**Class Adapter:** acoplamento estático — conhece as entranhas do legado; se o fornecedor lançar uma nova subclasse, não consegue reaproveitá-la.
+:::
+::: {.fragment}
+**Object Adapter (o `LogAdapter` de antes):** trata o legado como caixa preta injetada — funciona com qualquer subclasse presente ou futura, sem alteração.
+:::
+::: {.fragment}
+**Regra de ouro:** prefira sempre Object Adapter para manter as caixas pretas fechadas.
+:::
+
+:::
+
+## O Dilema da Herança no Adapter
+
+::: {.callout-tip}
+## Se o `LogAdapter` decidisse estender (`extends`) `LogServicoLegado` em vez de compô-lo por injeção, que capacidade futura o sistema perderia especificamente quando o fornecedor lançasse uma nova subclasse de `LogServicoLegado`?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ Um `LogAdapter` construído por composição (Object Adapter) continua funcionando corretamente mesmo que o objeto injetado no construtor seja, na verdade, uma subclasse de `LogServicoLegado` lançada pelo fornecedor depois que o `LogAdapter` já havia sido escrito.
+- □ Um `LogAdapter` que estendesse `LogServicoLegado` (Class Adapter) precisaria ser reescrito ou duplicado para conseguir adaptar especificamente uma nova subclasse do legado, mesmo que essa subclasse só adicionasse um método novo sem alterar `registrarLogNoArquivo`.
+- □ Trocar `LogServicoLegado legado` por uma injeção via construtor no `LogAdapter` (em vez de herança) é o que permite substituir, em um teste automatizado, o legado real por uma versão simulada (*mock*) sem alterar o código do `LogAdapter`.
+- □ Se `LogServicoLegado` expusesse um método `protected` usado internamente por suas próprias subclasses, um `LogAdapter` implementado como Object Adapter teria acesso direto a esse método da mesma forma que um Class Adapter teria.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Dilema da Herança no Adapter — Resposta
+
+::: {.callout-tip}
+## O que se perde ao herdar em vez de compor — Resposta
+
+- ✔ Um `LogAdapter` construído por composição (Object Adapter) continua funcionando corretamente mesmo que o objeto injetado no construtor seja, na verdade, uma subclasse de `LogServicoLegado` lançada pelo fornecedor depois que o `LogAdapter` já havia sido escrito — exatamente a flexibilidade da composição: o Adapter trata o legado (e qualquer subclasse dele) como uma caixa preta, via polimorfismo.
+- ✔ Um `LogAdapter` que estendesse `LogServicoLegado` (Class Adapter) precisaria ser reescrito ou duplicado para conseguir adaptar especificamente uma nova subclasse do legado, mesmo que essa subclasse só adicionasse um método novo sem alterar `registrarLogNoArquivo` — o `extends` prende o Adapter a uma única classe-mãe fixa em tempo de compilação; uma nova subclasse do fornecedor exigiria um novo Class Adapter dedicado.
+- ✔ Trocar `LogServicoLegado legado` por uma injeção via construtor no `LogAdapter` (em vez de herança) é o que permite substituir, em um teste automatizado, o legado real por uma versão simulada (*mock*) sem alterar o código do `LogAdapter` — a mesma vantagem de testabilidade já vista com Strategy e Factory Method: composição habilita substituição em tempo de execução.
+- ✗ Se `LogServicoLegado` expusesse um método `protected` usado internamente por suas próprias subclasses, um `LogAdapter` implementado como Object Adapter teria acesso direto a esse método da mesma forma que um Class Adapter teria — falso: só quem herda (`extends`) enxerga membros `protected` da classe-mãe; um Object Adapter só acessa a API pública do objeto que compõe, o que é exatamente o ponto — ele nunca vê as entranhas do legado.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** o sistema perderia a capacidade de reaproveitar automaticamente a nova subclasse — o Object Adapter continua funcionando sem alteração (a subclasse ainda é um `LogServicoLegado` válido); o Class Adapter, preso via `extends` à classe original, exigiria escrever um segundo Adapter dedicado só para a subclasse nova.
+:::
+
+:::
+
+# Conclusão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando às quatro perguntas da abertura:
+
+1. **Por que a `String status` é uma bomba-relógio:** porque a lógica de transição fica espalhada e misturada com regra de negócio em vários métodos, tornando cada estado novo uma edição obrigatória em toda a classe — a mesma Obsessão por Primitivos da Aula 11, agora aplicada ao comportamento em vez do dado.
+2. **Como o State resolve isso, e por que não é "Strategy disfarçado":** convertendo cada fase do ciclo de vida numa classe polimórfica que se autodetermina — a topologia de classes é semelhante à do Strategy, mas o gatilho da troca de implementação mora dentro do próprio fluxo de negócio, não numa injeção externa.
+3. **Onde mora a transição:** de preferência, dentro dos próprios estados — o acoplamento entre `EstadoNovo` e `EstadoPago` é aceitável porque a sequência já é uma regra de negócio estável; centralizar no Contexto reintroduziria a condicional que o padrão existe para eliminar.
+4. **Quem traduz uma interface externa incompatível:** um Adapter posicionado exatamente na fronteira, tratando o legado como caixa preta via composição (Object Adapter) — nunca via herança, que prenderia o sistema à classe concreta do fornecedor.
+
+O `Pedido` que começou esta aula perguntando "em que status eu estou?" no topo de cada método termina com o fluxo inteiramente delegado a classes de estado auto-documentadas, e com um canal de comunicação para o mundo externo (auditoria, SDKs, sistemas legados) inteiramente isolado atrás de um Adapter. Strategy, Builder/Factory Method e State fecham o "tríptico da estabilidade" do objeto por dentro; o Adapter abre a primeira fronteira estrutural para fora.
+
+### Ponte para a Aula 13 {.unnumbered}
+
+A fronteira externa aberta pelo Adapter não é a única forma de composição estrutural e comportamental que falta explorar. Duas perguntas ficam em aberto: como adicionar responsabilidades a um objeto individual de forma dinâmica e cumulativa, sem recair na explosão combinatória de subclasses que a herança geraria (o padrão **Decorator** — pensem no sistema de I/O do próprio Java, que empilha buffers e streams exatamente assim); e como um evento no núcleo do sistema pode disparar reações em múltiplos subsistemas periféricos sem que o núcleo sequer saiba quem está ouvindo (o padrão **Observer**, a base conceitual de arquiteturas orientadas a eventos). A Aula 13 ataca essas duas questões; a síntese final que compara todos os padrões de isolamento vistos ao longo do curso — e estabelece a fronteira definitiva entre o núcleo estável e a periferia volátil de um sistema — fica para o fechamento da disciplina.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos
+
+1. A `String status` verificada em cada método é Obsessão por Primitivos aplicada ao comportamento — fragiliza a evolução e explode a complexidade de teste
+2. O State converte o ciclo de vida em classes polimórficas auto-mutáveis — mesma topologia do Strategy, mas o gatilho da troca mora dentro do próprio fluxo de negócio, não numa injeção externa
+3. A transição deve morar, de preferência, dentro dos próprios estados — centralizar no Contexto reintroduz a condicional que o padrão elimina
+4. O Adapter traduz uma interface externa incompatível na fronteira, tratando o legado como caixa preta via composição (Object Adapter), nunca via herança
+
+::: {.fragment}
+**Próxima aula:** Decorator (composição dinâmica de responsabilidades) e Observer (desacoplamento de eventos um-para-muitos) — as duas peças que faltam antes da síntese final do curso.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. **(Do Antipadrão ao State)** Explique, com precisão técnica, por que representar o ciclo de vida de um objeto através de uma variável `status` (`String` ou `int`) verificada no início de cada método viola tanto o Open/Closed Principle quanto o princípio de Fail-Fast já estudado nesta disciplina. Em seguida, demonstre como a estrutura Context/State/ConcreteState do padrão State resolve os dois problemas simultaneamente, usando o `Pedido` discutido em aula.
+
+2. **(Strategy vs. State: a Distinção que Importa)** Strategy e State compartilham uma topologia de classes quase idêntica (Contexto, interface, implementações concretas), mas resolvem intenções arquiteturais diferentes. Compare os dois padrões precisamente no ponto de "quem decide qual implementação está ativa, e quando", usando como exemplo a injeção de `Pagavel` no `Pedido` (Aula 10) contra a transição de `EstadoNovo` para `EstadoPago`. Por que essa distinção é mais importante do que a semelhança estrutural entre os dois padrões?
+
+3. **(Object Adapter e a Fronteira com o Legado)** Considerando o cenário do `LogAdapter` discutido em aula (um sistema de auditoria legado, incompatível, que a equipe não pode alterar), explique por que a indústria prefere o Object Adapter (composição) ao Class Adapter (herança) nesse tipo de integração. Descreva um cenário concreto em que o fornecedor da biblioteca legada lança uma nova versão com uma classe-filha, e mostre exatamente por que o Object Adapter absorve essa mudança sem exigir uma nova classe, enquanto o Class Adapter exigiria.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-note icon=false}
+## O Antipadrão do Status como Primitivo
+
+- □ Um método que verifica `if (status.equals("PAGO"))` como primeira instrução antes de executar qualquer lógica de negócio caracteriza o mesmo tipo de acoplamento temporal descrito para o antipadrão do `Pedido`, independentemente de o valor de `status` ser uma `String` ou um `enum`.
+- □ Um sistema de emissão de boletos que usa um campo `int codigoSituacao` (0 = emitido, 1 = pago, 2 = vencido) verificado em cinco métodos diferentes da mesma classe está estruturalmente exposto ao mesmo padrão de fragilidade de evolução descrito para o `Pedido`.
+- □ Se um novo estado for adicionado a um sistema que usa o antipadrão de status-como-primitivo, o compilador Java emitirá um erro de compilação em todo método que não trate explicitamente esse novo estado.
+- □ Testar isoladamente a transição "de PAGO para CANCELADO dispara estorno" num sistema que usa o antipadrão de status exige reconstruir manualmente o estado interno do objeto antes de invocar o método sob teste, ao contrário do que ocorreria com uma implementação via State Pattern.
+:::
+
+::: {.callout-note icon=false}
+## Estrutura do Padrão State (Context/State/ConcreteState)
+
+- □ No padrão State, o método responsável por trocar a referência de estado no Contexto (`setEstado`) deveria ser público, para que qualquer código cliente externo pudesse forçar uma transição arbitrária sempre que necessário.
+- □ Se `EstadoNovo.enviar()` lançasse uma exceção informando que o pedido ainda não foi pago, essa exceção estaria expressando uma regra de negócio genuína do domínio, e não um defeito de implementação do padrão State.
+- □ Depois de aplicado o State Pattern, a complexidade ciclomática da classe `Pedido` aumenta em relação à versão com `if/else`, porque agora ela precisa gerenciar referências para múltiplas classes de estado diferentes.
+- □ Um `Pedido` que armazena `EstadoPedido estadoAtual` e delega `pagar()` para `estadoAtual.pagar(this)` permite que o comportamento de `pagar()` mude completamente ao longo da vida do objeto sem que o código-fonte do método `pagar()` no `Pedido` seja alterado uma única vez.
+:::
+
+::: {.callout-note icon=false}
+## Strategy vs. State: Mesma Topologia, Intenções Diferentes
+
+- □ Um sistema de checkout onde o cliente escolhe explicitamente, no carrinho, qual `EstrategiaFrete` usar, e onde o `Pedido` decide sozinho, como consequência de um pagamento bem-sucedido, transitar de `EstadoNovo` para `EstadoPago`, está aplicando Strategy e State no mesmo sistema para dois problemas arquiteturais distintos.
+- □ Se um engenheiro implementasse o State de forma que um código cliente externo chamasse `pedido.forcarEstado(new EstadoPago())` livremente a qualquer momento, essa implementação preservaria a intenção arquitetural original do padrão da mesma forma que a implementação vista em aula.
+- □ A razão pela qual Strategy e State não são o mesmo padrão sob nomes diferentes está exclusivamente no número de métodos que a interface de cada um declara, e não em quem decide a troca de implementação.
+- □ Um `ConcreteState` que, ao processar uma operação de negócio, decide autonomamente instanciar e ativar o próximo estado da máquina está exercendo o mesmo papel decisório que, no Strategy, pertence ao código cliente que injeta a estratégia no Contexto.
+:::
+
+::: {.callout-note icon=false}
+## Onde Colocar a Lógica de Transição
+
+- □ Centralizar a decisão de qual é o próximo estado dentro de um método do Contexto (Opção B) elimina completamente a necessidade de estruturas condicionais em qualquer parte do sistema.
+- □ Fazer com que `EstadoNovo` conheça diretamente a classe `EstadoPago` (Opção A) introduz um acoplamento entre classes de estado que é aceitável quando a sequência de transições já reflete uma regra de negócio estável e conhecida.
+- □ Uma técnica em que o método de transição retorna o próximo estado (`this.estado = estado.proximo();`) permite ao Contexto atualizar sua referência sem conter uma cadeia de `if/else` comparando o tipo do estado atual.
+- □ Se a ordem de transições de um sistema mudasse com muita frequência por decisão de negócio (por exemplo, um fluxo de aprovação configurável por cliente), a Opção A (transição fixa nos estados) seria estruturalmente mais adequada do que uma tabela de transições configurável mantida fora das classes de estado.
+:::
+
+::: {.callout-note icon=false}
+## O Ciclo de Vida Robusto e o Polimorfismo em Ação
+
+- □ O fato de `EstadoPago.cancelar()` chamar `realizarEstornoFinanceiro()` antes de mudar o estado, enquanto `EstadoNovo.cancelar()` apenas muda o estado sem estornar nada, é uma expressão direta do polimorfismo substituindo uma cadeia de `if (status == ...)`.
+- □ Se `EstadoEnviado.cancelar()` lança uma exceção proibindo o cancelamento, isso significa que o padrão State, ao contrário do antipadrão original, não é capaz de expressar a regra de negócio "produtos em trânsito não podem ser cancelados".
+- □ Um desenvolvedor que precisa entender o que acontece quando um pedido pago é cancelado, ao usar o State Pattern, encontra essa resposta isolada dentro da classe `EstadoPago`, sem precisar ler os outros estados.
+- □ Adicionar um novo estado "EM\_ANALISE\_DE\_FRAUDE" ao sistema baseado em State Pattern exige alterar o código-fonte de `EstadoNovo`, `EstadoPago` e `EstadoEnviado` da mesma forma que exigiria no antipadrão original baseado em `String status`.
+:::
+
+::: {.callout-note icon=false}
+## O Dilema da Incompatibilidade e o Papel do Adapter
+
+- □ O padrão Adapter resolve especificamente o problema de uma interface externa incompatível com o contrato que o domínio já usa, sem exigir alteração nem do código do fornecedor externo, nem do código cliente que já confia na interface esperada.
+- □ Se a equipe decidisse modificar diretamente as classes de negócio centrais para chamar os métodos nativos do sistema legado de auditoria, essa prática produziria o mesmo nível de isolamento arquitetural que o uso de um Adapter produziria.
+- □ No `LogAdapter`, o parâmetro de severidade fixo (`1`) passado para `registrarLogNoArquivo` é um detalhe de tradução que o Adapter absorve, evitando que ele precise ser conhecido por todas as classes de negócio que disparam eventos de log.
+- □ Um Adapter, por definição do padrão, deve alterar o comportamento interno de pelo menos uma das duas interfaces que ele está harmonizando para que a tradução funcione corretamente.
+:::
+
+::: {.callout-note icon=false}
+## Object Adapter vs. Class Adapter
+
+- □ Um `LogAdapter` implementado como Object Adapter continua funcionando sem nenhuma alteração de código se o objeto `LogServicoLegado` injetado no construtor for substituído por uma subclasse dele lançada pelo fornecedor após o Adapter já estar em produção.
+- □ Um `LogAdapter` implementado como Class Adapter (via `extends LogServicoLegado`) consegue adaptar automaticamente qualquer subclasse futura do legado, porque a herança propaga essa capacidade para toda a árvore de classes.
+- □ A principal razão pela qual a indústria prefere o Object Adapter é estética — o código fica mais curto — e não uma diferença estrutural de acoplamento entre as duas abordagens.
+- □ Substituir a composição (`private LogServicoLegado legado`) por herança (`extends LogServicoLegado`) no `LogAdapter` tornaria mais fácil, e não mais difícil, substituir o legado real por um objeto simulado (*mock*) em um teste automatizado.
+:::
+
+::: {.callout-note icon=false}
+## Estudo de Caso: Unificação de Log e a Fronteira com o State
+
+- □ Se `EstadoPago` chamar `pedido.getLogger().info(...)` para registrar uma transição, essa classe de estado permanece livre de qualquer conhecimento sobre a existência de `LogServicoLegado`.
+- □ Se o fornecedor do sistema de auditoria legado mudar a assinatura de `registrarLogNoArquivo` de `(String, int)` para `(String, String)`, um sistema que usa `LogAdapter` corretamente precisaria alterar apenas a classe `LogAdapter`, sem tocar em nenhuma classe de estado do `Pedido`.
+- □ A combinação de State (para o fluxo interno) e Adapter (para a fronteira externa) na mesma classe `EstadoPago` representa uma violação do princípio de que cada classe deve aplicar exatamente um único padrão de projeto.
+- □ Um sistema onde `Pedido` recebe um `LoggerModerno` por injeção de dependência, em vez de instanciar diretamente `new LogServicoLegado()` dentro de suas classes de estado, permite substituir o logger por um *mock* em testes automatizados sem alterar as classes de estado.
+:::
+
+:::

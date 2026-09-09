@@ -1,0 +1,480 @@
+---
+title: "Síntese Arquitetural: Núcleo Estável, Periferia Volátil e o Encerramento do Curso"
+subtitle: "Aula 14 — Programação Orientada a Objetos (Aula de Encerramento)"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    output-file: notas.html
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+# Proposta da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Nas últimas quatro aulas, o `Pedido` que atravessa esta disciplina ganhou um repertório de quatro padrões de projeto — Strategy (Aula 10), Adapter (Aula 12), Decorator e Observer (Aula 13) —, cada um resolvendo um problema concreto de acoplamento. Esta é a última aula nova do curso, e ela não introduz um quinto padrão. Em vez disso, dá um passo para trás e pergunta: **o que esses quatro padrões têm, estruturalmente, em comum?**
+
+A resposta é uma única ideia arquitetural, repetida quatro vezes com sotaques diferentes: todo sistema de software saudável separa um **núcleo estável** — os contratos, as interfaces, as regras de negócio que raramente mudam — de uma **periferia volátil** — as implementações concretas, os SDKs de terceiros, os detalhes de infraestrutura que mudam por pressão do mercado. Strategy, Adapter, Decorator e Observer são quatro formas diferentes de erguer essa mesma fronteira, cada uma respondendo a um tipo específico de instabilidade.
+
+**O roteiro desta aula, em três perguntas:**
+
+1. O que exatamente separa o "lado estável" do "lado volátil" de um sistema, e por que a direção da dependência entre eles importa mais do que a quantidade de código em cada lado?
+2. Colocando Strategy, Adapter, Decorator e Observer lado a lado numa mesma matriz, que tipo específico de acoplamento nocivo cada um deles ataca — e por que nenhum dos quatro resolve o problema dos outros três?
+3. Voltando à primeira aula deste curso: os quatro padrões, tomados em conjunto, são de fato uma resposta madura ao problema original do custo de mudança e ao acrônimo TRUE — mas de que forma exatamente?
+
+**Problema motivador:** pense nas quatro aulas anteriores como quatro histórias independentes — uma explosão de `if/else` (Strategy), um SDK de terceiros com assinatura incompatível (Adapter), uma explosão combinatória de subclasses (Decorator), uma cascata de chamadas diretas a serviços (Observer). Elas parecem problemas diferentes. O que este fechamento revela é que, arquiteturalmente, são o mesmo problema visto de quatro ângulos.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+Nas últimas 4 aulas, o `Pedido` ganhou **Strategy** (Aula 10), **Adapter** (Aula 12), **Decorator** e **Observer** (Aula 13).
+
+::: {.fragment}
+Esta é a **última aula nova do curso**. Não há um quinto padrão — há um passo atrás: o que esses quatro padrões têm, estruturalmente, em comum?
+:::
+
+::: {.fragment}
+**A resposta:** uma única ideia arquitetural repetida 4 vezes — separar um **núcleo estável** (contratos, regras raramente mudam) de uma **periferia volátil** (implementações concretas, mudam por pressão de mercado).
+:::
+
+::: {.fragment}
+**Roteiro:** a fronteira estável/volátil e a Regra de Ouro → a matriz de decisão dos 4 padrões → de volta à Aula 1 (TRUE) e ao encerramento do curso.
+:::
+
+::: {.fragment}
+**Problema motivador:** 4 histórias aparentemente diferentes (if/else, SDK incompatível, explosão de subclasses, cascata de notificações) são, arquiteturalmente, o mesmo problema visto de 4 ângulos.
+:::
+
+:::
+
+# Fronteiras Arquiteturais: Núcleo Estável e Periferia Volátil
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**O conceito de parede de proteção.** Padrões de projeto não servem apenas para organizar código; eles estabelecem linhas de demarcação estritas dentro do sistema. Uma arquitetura de software saudável divide qualquer sistema, sem ambiguidade, em duas regiões: o **lado estável** e o **lado volátil**.
+
+O lado estável é o **Núcleo** (*Core*): contratos, interfaces, as regras de negócio mais abstratas do sistema. Essa camada muda muito raramente, porque ela define o que a aplicação faz em termos lógicos — não como ela faz. O lado volátil é a **Periferia**: os detalhes técnicos de implementação — *queries* de banco de dados, protocolos de rede, algoritmos sujeitos a alterações sazonais, bibliotecas de terceiros. Ela muda com frequência, porque responde a pressões externas ao domínio do negócio (um banco troca de fornecedor de gateway de pagamento; a lei muda uma alíquota de imposto; um serviço de e-mail é substituído por outro).
+
+A introdução sistemática de interfaces — exatamente o que Strategy, Adapter, Decorator e Observer fazem, cada um a seu modo — funciona como uma **junta de dilatação**: quando erguemos uma fronteira usando qualquer um desses padrões, garantimos que os tremores causados por mudanças na periferia volátil (a troca de um SDK de pagamento, a alteração de uma alíquota) morram na barreira do contrato, sem se propagar para dentro do núcleo. Isso é uma generalização direta de dois princípios que este curso já formalizou separadamente: o DIP (Aula 5) e o OCP (Aula 10). A **Regra de Ouro** que resume essa fronteira é simples de enunciar e difícil de romper na prática:
+
+> "O código estável nunca deve depender do código volátil. A dependência deve apontar sempre para as abstrações."
+
+Note que a regra fala de **direção**, não de proporção. Não importa se a periferia tem mais linhas de código que o núcleo — o que importa é para onde apontam as setas de dependência no grafo do sistema. Um módulo de alto nível (estável) nunca conhece diretamente um módulo de baixo nível (volátil); ambos dependem de uma abstração intermediária, e é essa abstração — não o núcleo, não a periferia — que absorve o impacto da mudança.
+
+O diagrama a seguir mostra essa topologia de forma genérica: um núcleo estável envolto por uma camada de abstração (a "parede"), com quatro exemplos de periferia volátil (um SDK de pagamento, um banco de dados, um serviço de e-mail, um algoritmo sazonal de frete) apontando **para dentro** da parede — nunca o núcleo apontando para fora dela.
+
+::: {.fig-resize style="width: 78%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.6cm and 1.8cm,
+  core/.style={draw, rectangle, rounded corners, thick, fill=icblue!15, draw=icblue, align=center, font=\bfseries\small, minimum width=3.6cm, minimum height=1.4cm},
+  wall/.style={draw, rectangle, rounded corners, dashed, fill=icorange!8, draw=icorange, minimum width=5.6cm, minimum height=3.4cm},
+  peri/.style={draw, rectangle, rounded corners, fill=icred!10, draw=icred, align=center, font=\scriptsize, minimum width=2.8cm, minimum height=0.9cm},
+  >=Stealth
+]
+  \node[wall] (wall) {};
+  \node[core] at (wall.center) {Nucleo Estavel\\(Contratos / Interfaces)};
+  \node[peri, above=1.2cm of wall, xshift=-3.0cm] (p1) {SDK de Pagamento};
+  \node[peri, above=1.2cm of wall, xshift=3.0cm] (p2) {Banco de Dados};
+  \node[peri, below=1.2cm of wall, xshift=-3.0cm] (p3) {Servico de E-mail};
+  \node[peri, below=1.2cm of wall, xshift=3.0cm] (p4) {Algoritmo Sazonal de Frete};
+
+  \draw[->, thick, icred] (p1) -- (wall.north west);
+  \draw[->, thick, icred] (p2) -- (wall.north east);
+  \draw[->, thick, icred] (p3) -- (wall.south west);
+  \draw[->, thick, icred] (p4) -- (wall.south east);
+\end{tikzpicture}
+```
+:::
+
+A borda tracejada representa a camada de abstração (a "parede"): cada elemento da periferia (vermelho) aponta para dentro dela — implementa o contrato que ela define —, mas o núcleo (azul, no centro) nunca precisa apontar para fora. Se o banco de dados for trocado, ou o SDK de pagamento for substituído por outro fornecedor, a seta que muda é a da periferia; o núcleo permanece intocado.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Conceito de Parede de Proteção
+
+::: {.fragment}
+Padrões de projeto estabelecem **linhas de demarcação estritas**, não só organizam código. Toda arquitetura saudável separa um lado **estável** de um lado **volátil**.
+:::
+::: {.fragment}
+**Núcleo (estável):** contratos, interfaces, regras de negócio abstratas — muda raramente, define **o quê**, não **como**.
+:::
+::: {.fragment}
+**Periferia (volátil):** *queries*, protocolos de rede, SDKs de terceiros, algoritmos sazonais — muda por pressão externa ao domínio.
+:::
+
+## A Regra de Ouro da Dependência
+
+::: {.fragment}
+*"O código estável nunca deve depender do código volátil. A dependência deve apontar sempre para as abstrações."*
+:::
+::: {.fragment}
+Generaliza dois princípios já vistos separadamente: **DIP** (Aula 5) e **OCP** (Aula 10) — a regra fala de **direção** da dependência, não de proporção de código em cada lado.
+:::
+::: {.fragment}
+Strategy, Adapter, Decorator e Observer introduzem interfaces sistematicamente — cada um funciona como uma **junta de dilatação**: os tremores da periferia morrem na barreira do contrato.
+:::
+
+## A Fronteira Genérica: Núcleo, Parede e Periferia
+
+::: {.fig-resize style="width: 78%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.6cm and 1.8cm,
+  core/.style={draw, rectangle, rounded corners, thick, fill=icblue!15, draw=icblue, align=center, font=\bfseries\small, minimum width=3.6cm, minimum height=1.4cm},
+  wall/.style={draw, rectangle, rounded corners, dashed, fill=icorange!8, draw=icorange, minimum width=5.6cm, minimum height=3.4cm},
+  peri/.style={draw, rectangle, rounded corners, fill=icred!10, draw=icred, align=center, font=\scriptsize, minimum width=2.8cm, minimum height=0.9cm},
+  >=Stealth
+]
+  \node[wall] (wall) {};
+  \node[core] at (wall.center) {Nucleo Estavel\\(Contratos / Interfaces)};
+  \node[peri, above=1.2cm of wall, xshift=-3.0cm] (p1) {SDK de Pagamento};
+  \node[peri, above=1.2cm of wall, xshift=3.0cm] (p2) {Banco de Dados};
+  \node[peri, below=1.2cm of wall, xshift=-3.0cm] (p3) {Servico de E-mail};
+  \node[peri, below=1.2cm of wall, xshift=3.0cm] (p4) {Algoritmo Sazonal de Frete};
+
+  \draw[->, thick, icred] (p1) -- (wall.north west);
+  \draw[->, thick, icred] (p2) -- (wall.north east);
+  \draw[->, thick, icred] (p3) -- (wall.south west);
+  \draw[->, thick, icred] (p4) -- (wall.south east);
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+Cada elemento da periferia (vermelho) aponta **para dentro** da parede de abstração — nunca o núcleo (azul) aponta para fora dela.
+:::
+
+:::
+
+::: {.callout-tip}
+## Se a troca do banco de dados relacional de um sistema por um banco NoSQL não exigir nenhuma alteração de código na camada de regras de negócio, o que isso revela sobre como a fronteira entre núcleo e periferia foi desenhada — e onde exatamente mora essa fronteira?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ Se um sistema trocar seu banco de dados relacional por um banco NoSQL sem que nenhuma classe da camada de regras de negócio precise ser recompilada, isso é evidência de que a fronteira entre o núcleo estável e a periferia volátil foi desenhada corretamente nesse ponto do sistema.
+- □ Se a interface usada para acessar um gateway de pagamento externo for definida dentro do próprio pacote do gateway (e não dentro do núcleo do sistema que o consome), a Regra de Ouro da dependência ainda estaria sendo respeitada, desde que o núcleo apenas implemente essa interface.
+- □ Mesmo em um sistema hipotético sem nenhuma dependência de infraestrutura externa (sem banco de dados, sem SDKs, sem rede), ainda pode haver periferia volátil dentro do próprio código — por exemplo, um algoritmo de cálculo de frete sujeito a mudanças sazonais frequentes.
+- □ Como o núcleo estável é definido por conter as regras de negócio do sistema, qualquer classe que implemente uma fórmula de cálculo (como uma fórmula de imposto) deve necessariamente pertencer ao núcleo estável, nunca à periferia volátil.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Fronteira e a Regra de Ouro — Resposta
+
+::: {.callout-tip}
+## Onde mora a fronteira, de fato — Resposta
+
+- ✔ Se um sistema trocar seu banco de dados relacional por um banco NoSQL sem que nenhuma classe da camada de regras de negócio precise ser recompilada, isso é evidência de que a fronteira entre o núcleo estável e a periferia volátil foi desenhada corretamente nesse ponto do sistema — exatamente o teste prático da Regra de Ouro: a mudança na periferia não se propagou para o núcleo.
+- ✗ Se a interface usada para acessar um gateway de pagamento externo for definida dentro do próprio pacote do gateway (e não dentro do núcleo do sistema que o consome), a Regra de Ouro da dependência ainda estaria sendo respeitada, desde que o núcleo apenas implemente essa interface — falso: se o contrato pertence ao pacote volátil, é o núcleo que passa a depender (mesmo que indiretamente, via a definição da interface) de uma decisão tomada pela periferia; o DIP exige que o lado estável seja o dono da abstração, não apenas seu implementador.
+- ✔ Mesmo em um sistema hipotético sem nenhuma dependência de infraestrutura externa (sem banco de dados, sem SDKs, sem rede), ainda pode haver periferia volátil dentro do próprio código — por exemplo, um algoritmo de cálculo de frete sujeito a mudanças sazonais frequentes — a distinção estável/volátil não depende de a periferia ser "externa" ao sistema, depende só da frequência e da origem da mudança.
+- ✗ Como o núcleo estável é definido por conter as regras de negócio do sistema, qualquer classe que implemente uma fórmula de cálculo (como uma fórmula de imposto) deve necessariamente pertencer ao núcleo estável, nunca à periferia volátil — falso: uma fórmula de imposto muda por força de lei, com frequência e origem externas ao negócio — é exatamente o tipo de "regra de negócio" que pertence à periferia volátil, não ao núcleo, mesmo parecendo lógica de domínio à primeira vista.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** a fronteira não mora "em algum lugar do código-fonte" de forma fixa — ela mora em qualquer ponto onde uma abstração intercepta uma decisão que muda por razões diferentes das razões que fazem o núcleo mudar. Estabilidade é sobre **frequência e origem da mudança**, não sobre "parecer lógica de negócio".
+:::
+
+:::
+
+# Matriz Comparativa de Decisão: os Quatro Padrões
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Uma matriz para escolher a ferramenta certa.** O domínio da sintaxe de cada padrão precisa ser acompanhado pelo discernimento arquitetural de saber exatamente quando aplicar cada estrutura. A tabela a seguir consolida, lado a lado, a intenção principal e o critério de aplicação de Strategy, Adapter, Decorator e Observer — os quatro padrões estudados nesta disciplina.
+
+| Padrão | Intenção principal | Quando utilizar |
+|---|---|---|
+| **Strategy** (Aula 10) | Isolar famílias de algoritmos intercambiáveis a partir de uma mesma interface. | Quando o comportamento lógico de um método varia com base no contexto ou em regras de mercado voláteis (ex.: cálculo de impostos ou fretes). |
+| **Adapter** (Aula 12) | Converter a interface de uma classe existente em outra interface esperada pelo cliente. | Ao integrar o sistema a componentes externos cujo contrato de código não pode ser modificado (ex.: SDK de bancos ou frameworks legados). |
+| **Decorator** (Aula 13) | Anexar responsabilidades adicionais a um objeto de maneira dinâmica e cumulativa. | Quando a expansão de funcionalidades por herança estática geraria uma explosão combinatória de subclasses (ex.: opcionais de produtos). |
+| **Observer** (Aula 13) | Criar um vínculo um-para-muitos em que a mudança de estado de um objeto aciona dependentes anonimamente. | Quando a execução de um fluxo principal de negócio precisa disparar reações em múltiplos subsistemas independentes. |
+
+: Matriz de decisão arquitetural para padrões de isolamento. {.striped}
+
+A análise detalhada da tabela revela que **cada padrão ataca um tipo específico de acoplamento nocivo** — e é exatamente por isso que nenhum dos quatro substitui os outros três:
+
+- O **Strategy** elimina o acoplamento **condicional** — a cadeia de `if/else` que testava explicitamente qual algoritmo aplicar.
+- O **Adapter** sana o acoplamento **sintático** — a incompatibilidade de assinatura entre o contrato que o sistema espera e o contrato que uma biblioteca externa oferece.
+- O **Decorator** soluciona o acoplamento **taxonômico** — a rigidez de uma árvore de herança fixada em tempo de compilação, incapaz de representar combinações decididas em tempo de execução.
+- O **Observer** erradica o acoplamento **temporal e de identidade** — a necessidade de um objeto conhecer, por nome e no momento exato do evento, cada um dos subsistemas que precisam reagir a ele.
+
+Compreender essa matriz — não apenas a mecânica de cada padrão isoladamente — é o que transforma um desenvolvedor que escreve código correto num modelador de sistemas resilientes: a pergunta deixa de ser "eu sei implementar Strategy?" e passa a ser "este sintoma de acoplamento que estou vendo agora é condicional, sintático, taxonômico ou temporal — e, portanto, qual padrão o resolve?".
+
+Vale reforçar, com um cenário concreto: se um `Pedido` precisa (a) escolher entre três meios de pagamento com a mesma assinatura de método (Strategy), (b) integrar um desses meios de pagamento a um SDK legado com assinatura incompatível (Adapter), (c) acumular selos de fidelidade opcionais sobre o pedido fechado (Decorator), e (d) notificar um número variável de sistemas de log e estoque quando o pedido é faturado (Observer) — os quatro padrões coexistem tranquilamente na mesma classe `Pedido`, porque cada um resolve um problema estrutural diferente dos outros três, não uma versão redundante do mesmo problema.
+
+O diagrama a seguir sintetiza essa ideia: os quatro padrões como quatro "paredes" diferentes ao redor do mesmo núcleo (`Pedido`), cada uma endereçando um tipo de volatilidade que nenhuma das outras três resolve.
+
+::: {.fig-resize style="width: 82%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.8cm and 2.6cm,
+  core/.style={draw, rectangle, rounded corners, thick, fill=icblue!15, draw=icblue, align=center, font=\bfseries\small, minimum width=2.6cm, minimum height=1.1cm},
+  patt/.style={draw, rectangle, rounded corners, fill=icorange!10, draw=icorange, align=center, font=\scriptsize, minimum width=3.6cm, minimum height=1.3cm},
+  >=Stealth
+]
+  \node[core] (core) {Pedido\\(Nucleo)};
+  \node[patt, above=of core] (strategy) {\textbf{Strategy}\\acoplamento condicional (if/else)};
+  \node[patt, below=of core] (observer) {\textbf{Observer}\\acoplamento temporal / identidade};
+  \node[patt, left=of core] (adapter) {\textbf{Adapter}\\acoplamento sintatico};
+  \node[patt, right=of core] (decorator) {\textbf{Decorator}\\acoplamento taxonomico};
+
+  \draw[<->, thick, icred] (core) -- (strategy);
+  \draw[<->, thick, icred] (core) -- (observer);
+  \draw[<->, thick, icred] (core) -- (adapter);
+  \draw[<->, thick, icred] (core) -- (decorator);
+\end{tikzpicture}
+```
+:::
+
+As quatro setas partem do mesmo núcleo, mas cada uma atravessa uma "parede" de natureza diferente — não há sobreposição de responsabilidade entre elas, e é justamente essa ausência de sobreposição que permite aos quatro padrões coexistirem na mesma classe sem conflito.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Matriz de Decisão dos Quatro Padrões
+
+| Padrão | Intenção | Quando usar |
+|---|---|---|
+| **Strategy** | Isolar algoritmos intercambiáveis. | Comportamento varia por contexto/regra volátil. |
+| **Adapter** | Converter interface incompatível. | Integração com componente externo imutável. |
+| **Decorator** | Anexar responsabilidades dinamicamente. | Herança geraria explosão combinatória. |
+| **Observer** | Vínculo um-para-muitos, mudança de estado aciona dependentes. | Um fluxo precisa disparar reações em vários subsistemas. |
+
+## Cada Padrão Ataca um Tipo Específico de Acoplamento
+
+::: {.fragment}
+**Strategy** → acoplamento **condicional** (a cadeia de `if/else`).
+:::
+::: {.fragment}
+**Adapter** → acoplamento **sintático** (assinatura incompatível com uma biblioteca externa).
+:::
+::: {.fragment}
+**Decorator** → acoplamento **taxonômico** (herança rígida, decidida em compilação).
+:::
+::: {.fragment}
+**Observer** → acoplamento **temporal e de identidade** (conhecer, por nome, cada subsistema que reage a um evento).
+:::
+::: {.fragment}
+Nenhum dos quatro resolve o problema dos outros três — por isso podem coexistir na mesma classe `Pedido`, sem redundância.
+:::
+
+## A Síntese Visual: Quatro Paredes, um Núcleo
+
+::: {.fig-resize style="width: 82%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.8cm and 2.6cm,
+  core/.style={draw, rectangle, rounded corners, thick, fill=icblue!15, draw=icblue, align=center, font=\bfseries\small, minimum width=2.6cm, minimum height=1.1cm},
+  patt/.style={draw, rectangle, rounded corners, fill=icorange!10, draw=icorange, align=center, font=\scriptsize, minimum width=3.6cm, minimum height=1.3cm},
+  >=Stealth
+]
+  \node[core] (core) {Pedido\\(Nucleo)};
+  \node[patt, above=of core] (strategy) {\textbf{Strategy}\\acoplamento condicional (if/else)};
+  \node[patt, below=of core] (observer) {\textbf{Observer}\\acoplamento temporal / identidade};
+  \node[patt, left=of core] (adapter) {\textbf{Adapter}\\acoplamento sintatico};
+  \node[patt, right=of core] (decorator) {\textbf{Decorator}\\acoplamento taxonomico};
+
+  \draw[<->, thick, icred] (core) -- (strategy);
+  \draw[<->, thick, icred] (core) -- (observer);
+  \draw[<->, thick, icred] (core) -- (adapter);
+  \draw[<->, thick, icred] (core) -- (decorator);
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+As quatro setas partem do mesmo núcleo, mas cada uma atravessa uma parede de natureza diferente — sem sobreposição de responsabilidade.
+:::
+
+:::
+
+::: {.callout-tip}
+## Se um engenheiro precisa, ao mesmo tempo, trocar o algoritmo de cálculo de frete conforme a transportadora e notificar um número variável de sistemas externos sempre que um pedido é despachado, quantos padrões diferentes desta matriz ele provavelmente precisa combinar — e por que isso não contradiz a ideia de que cada padrão ataca um tipo específico de acoplamento?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ Como Strategy e Adapter compartilham a mesma topologia estrutural básica (uma interface e implementações concretas injetadas por composição), eles resolvem exatamente o mesmo tipo de problema de acoplamento, apenas com nomes históricos diferentes.
+- □ Um sistema que precisa oferecer suporte simultâneo a três gateways de pagamento com assinaturas de método incompatíveis entre si, mantendo uma única interface interna de cobrança, está diante de um cenário mais bem resolvido por Adapter do que por Strategy.
+- □ Se um `PedidoSubject` tivesse apenas um único observador registrado, e esse número nunca mudasse ao longo de toda a vida do sistema, aplicar o padrão Observer ainda traria o benefício estrutural de o núcleo não conhecer o tipo concreto desse observador, mesmo sem nenhum ganho vindo da quantidade de assinantes.
+- □ Já que Decorator e Observer resolvem problemas relacionados a decisões tomadas em tempo de execução, um sistema que já usa Decorator para acumular responsabilidades sobre um `Pedido` nunca precisaria também aplicar Observer para notificar múltiplos subsistemas sobre esse mesmo `Pedido`.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Matriz em Cenários Combinados — Resposta
+
+::: {.callout-tip}
+## Quantos padrões, e por que não é contraditório — Resposta
+
+- ✗ Como Strategy e Adapter compartilham a mesma topologia estrutural básica (uma interface e implementações concretas injetadas por composição), eles resolvem exatamente o mesmo tipo de problema de acoplamento, apenas com nomes históricos diferentes — falso: topologia semelhante não implica mesma intenção; Strategy isola variação de algoritmo já compatível com uma interface própria do sistema, Adapter traduz uma interface que **não nasceu** compatível — a matriz distingue pela intenção e pelo tipo de acoplamento, não pela forma das classes.
+- ✔ Um sistema que precisa oferecer suporte simultâneo a três gateways de pagamento com assinaturas de método incompatíveis entre si, mantendo uma única interface interna de cobrança, está diante de um cenário mais bem resolvido por Adapter do que por Strategy — o problema central aqui é sintático (assinaturas incompatíveis), a assinatura exata da coluna "Quando utilizar" do Adapter.
+- ✔ Se um `PedidoSubject` tivesse apenas um único observador registrado, e esse número nunca mudasse ao longo de toda a vida do sistema, aplicar o padrão Observer ainda traria o benefício estrutural de o núcleo não conhecer o tipo concreto desse observador, mesmo sem nenhum ganho vindo da quantidade de assinantes — o valor do Observer vem da cegueira de identidade entre Sujeito e Observador, não da cardinalidade da lista; um único assinante já se beneficia dessa cegueira.
+- ✗ Já que Decorator e Observer resolvem problemas relacionados a decisões tomadas em tempo de execução, um sistema que já usa Decorator para acumular responsabilidades sobre um `Pedido` nunca precisaria também aplicar Observer para notificar múltiplos subsistemas sobre esse mesmo `Pedido` — falso: os dois padrões são ortogonais (acoplamento taxonômico vs. temporal/identidade) e coexistem sem conflito, exatamente como a cadeia de notificadores (Decorator) e a notificação de serviços independentes (Observer) da Aula 13 coexistiram sobre o mesmo `Pedido`.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** o engenheiro precisaria de pelo menos dois padrões — Strategy para a variação do algoritmo de frete (acoplamento condicional) e Observer para a notificação de sistemas externos variáveis (acoplamento temporal/identidade). Não há contradição porque cada padrão da matriz ataca um sintoma estrutural diferente; problemas compostos exigem combinações compostas, não a escolha de um único padrão "vencedor".
+:::
+
+:::
+
+# Conclusão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando às três perguntas da abertura:
+
+1. **O que separa o lado estável do lado volátil, e por que a direção da dependência importa mais que a proporção:** o núcleo (contratos, regras de negócio abstratas) muda raramente; a periferia (implementações concretas, infraestrutura, SDKs) muda por pressão externa. A Regra de Ouro exige que a dependência aponte sempre para a abstração — nunca do estável para o volátil —, generalizando o DIP e o OCP já vistos separadamente nas Aulas 5 e 10.
+2. **O que a matriz revela sobre os quatro padrões:** cada um ataca um tipo específico de acoplamento — Strategy (condicional), Adapter (sintático), Decorator (taxonômico), Observer (temporal/identidade) — e por isso nenhum substitui os outros três; problemas reais frequentemente exigem combiná-los na mesma classe.
+3. **Como os quatro padrões respondem ao problema original da Aula 1:** cada um deles é uma forma concreta de tornar o código mais **T**ransparente (as consequências de trocar uma implementação ficam contidas na periferia), mais **R**azoável (o custo de adicionar uma nova variação — um novo meio de pagamento, um novo observador — é proporcional ao benefício, não uma reescrita), mais **U**sável (o núcleo pode ser reaproveitado com periferias diferentes, como o `Pedido` sendo usado com qualquer `Pagavel`) e mais **E**xemplar (a fronteira estável/volátil, uma vez estabelecida, convida quem mantém o código a preservá-la, não a corroê-la).
+
+**Encerramento da disciplina.** Este curso começou com uma pergunta simples — como escrever software que sobrevive à mudança? — e com um diagnóstico de que sistemas mal projetados têm um custo de manutenção que cresce exponencialmente, não linearmente. Catorze aulas depois, a resposta não é uma técnica única, é um hábito de pensamento: perguntar, diante de qualquer decisão de design, "o que aqui é estável, e o que aqui é volátil — e minha dependência está apontando na direção certa?". A máquina de estados da Aula 2, os contratos e a Lei de Demeter da Aula 3, a decomposição por responsabilidade da Aula 4, as métricas de acoplamento e o DIP da Aula 5, as interfaces como contrato puro da Aula 6, o polimorfismo e o LSP das Aulas 7–9, e os quatro padrões das Aulas 10–13 são, todos, instâncias diferentes da mesma disciplina de pensamento: isolar o que muda pouco daquilo que muda muito, e deixar que só a abstração atravesse essa fronteira.
+
+O software profissional, nesse sentido, funciona como um organismo vivo ou como um computador de mesa bem projetado: os órgãos não espiam o estado celular uns dos outros, e uma placa-mãe estável aceita qualquer placa de vídeo ou memória do mercado, desde que o componente periférico respeite o formato do encaixe. Projetar bem não é escrever código que nunca muda — é escrever código cujas mudanças ficam contidas exatamente onde deveriam ficar. Essa é a nota final deste curso: TRUE não é um acrônimo para ser lembrado em uma prova, é o critério prático por trás de cada padrão, cada princípio e cada linha de código que esta disciplina construiu ao longo do semestre.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos — e o Fechamento do Curso
+
+1. Núcleo estável (contratos, regras raramente mudam) vs. periferia volátil (implementações, infraestrutura) — a Regra de Ouro: a dependência sempre aponta para a abstração
+2. A matriz: Strategy (condicional), Adapter (sintático), Decorator (taxonômico), Observer (temporal/identidade) — quatro sintomas diferentes, nenhuma sobreposição
+3. Os quatro padrões, em conjunto, operacionalizam o TRUE da Aula 1: Transparente, Razoável, Usável, Exemplar
+
+::: {.fragment}
+**O fio condutor do curso inteiro:** máquina de estados (Aula 2) → contratos e Lei de Demeter (Aula 3) → decomposição e métricas (Aulas 4–5) → interfaces puras (Aula 6) → polimorfismo e LSP (Aulas 7–9) → os quatro padrões de isolamento (Aulas 10–13) — todos a mesma disciplina de pensamento: isolar o que muda pouco do que muda muito.
+:::
+
+::: {.fragment}
+**Mensagem de encerramento:** projetar bem não é escrever código que nunca muda — é escrever código cujas mudanças ficam contidas exatamente onde deveriam ficar. Foi um prazer construir esse repertório com vocês ao longo do semestre.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. **(Da Fronteira Genérica à Regra de Ouro)** Escolha um sistema que você conhece bem (um aplicativo, um jogo, um sistema acadêmico) e identifique, com exemplos concretos, o que nele seria núcleo estável e o que seria periferia volátil. Em seguida, explique — usando a Regra de Ouro — o que aconteceria de errado, na prática, se a dependência entre esses dois lados estivesse invertida.
+
+2. **(A Matriz como Ferramenta de Diagnóstico)** Considere um sistema de streaming de vídeo que precisa: (a) escolher entre diferentes algoritmos de compressão conforme a banda disponível do usuário; (b) integrar-se a três provedores de CDN externos com APIs incompatíveis entre si; e (c) notificar um número variável de painéis de monitoramento sempre que a qualidade do stream cai abaixo de um limiar. Para cada um dos três problemas, identifique qual padrão da matriz se aplica e justifique com base no tipo específico de acoplamento que cada padrão ataca.
+
+3. **(Do TRUE ao Isolamento Arquitetural)** Retome o acrônimo TRUE (Transparent, Reasonable, Usable, Exemplary) apresentado na Aula 1 e os três sintomas de design deficiente (rigidez, fragilidade, imobilidade). Escolha dois dos quatro padrões estudados nas Aulas 10–13 e explique, para cada um, exatamente qual sintoma ele elimina e por qual propriedade do TRUE essa eliminação se manifesta.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-note icon=false}
+## Núcleo Estável vs. Periferia Volátil
+
+- □ Um módulo que implementa uma regra de cálculo de comissão de vendas, alterada a cada campanha promocional trimestral pelo departamento de marketing, deveria ser tratado como periferia volátil, mesmo estando fisicamente dentro do mesmo pacote de código que as regras centrais de faturamento.
+- □ Se um sistema não tiver nenhuma interface explícita entre suas camadas, isso automaticamente implica que ele não possui nenhum núcleo estável, mesmo que parte de seu código de fato mude com muito menos frequência que o restante.
+- □ Um framework de testes automatizados que nunca precisa ser trocado ao longo de toda a vida de um projeto, mas que não expressa nenhuma regra de negócio do domínio, não deveria ser classificado como núcleo estável apenas por sua baixa frequência de mudança — a definição de núcleo usada nesta aula exige também conter contratos ou regras de negócio do domínio.
+- □ Um sistema acadêmico de matrícula em que a lógica de "o que conta como pré-requisito satisfeito" muda a cada reforma curricular, enquanto o mecanismo de armazenamento em banco de dados permanece intacto desde o lançamento do sistema, deveria tratar essa lógica de pré-requisitos como periferia volátil apesar de ela expressar uma regra do domínio acadêmico — porque o que determina a classificação é a frequência real de mudança, não a categoria intuitiva "regra de negócio = núcleo".
+:::
+
+::: {.callout-note icon=false}
+## A Regra de Ouro da Dependência
+
+- □ Se uma classe do núcleo estável instanciar diretamente (via `new`) uma classe concreta pertencente à periferia volátil, isso por si só já viola a Regra de Ouro, independentemente de existir ou não uma interface abstrata entre as duas.
+- □ Em um sistema onde tanto o núcleo quanto a periferia dependem exclusivamente de interfaces definidas dentro do próprio núcleo, a Regra de Ouro estaria sendo respeitada mesmo que a periferia contenha a maior parte das linhas de código do sistema.
+- □ Se duas classes voláteis da periferia dependerem diretamente uma da outra (sem passar por nenhuma abstração do núcleo), isso por si só já é uma violação da Regra de Ouro, do mesmo jeito que seria se o núcleo dependesse diretamente da periferia.
+- □ Um sistema em que o núcleo depende de uma interface, e essa interface é implementada por uma única classe concreta que nunca muda ao longo de toda a vida do projeto, ainda se beneficia estruturalmente da Regra de Ouro, mesmo sem nunca ter havido uma segunda implementação até hoje.
+:::
+
+::: {.callout-note icon=false}
+## Strategy vs. Adapter na Matriz de Decisão
+
+- □ Um sistema que já usa Strategy para escolher entre três algoritmos de cálculo de frete, todos implementando a mesma interface `CalculadoraDeFrete` definida internamente, não precisaria do Adapter mesmo que decidisse futuramente integrar um serviço de frete de terceiros cuja API pública tenha uma assinatura de método completamente diferente da interface `CalculadoraDeFrete`.
+- □ Se um SDK de terceiros já for compatível, desde o primeiro dia, com a interface que o núcleo do sistema espera, ainda seria estruturalmente válido envolvê-lo num Adapter, embora esse Adapter faria apenas repasse puro, sem nenhuma tradução real de assinatura.
+- □ Um sistema de recomendação que troca, em tempo de execução, entre diferentes algoritmos de ranqueamento de produtos — todos já implementando a mesma interface `RankeadorDeProdutos` do próprio sistema — está resolvendo um problema de acoplamento condicional, não sintático, e por isso a ferramenta correta da matriz é o Strategy, não o Adapter.
+- □ Como tanto Strategy quanto Adapter usam injeção de dependência via construtor, qualquer classe que receba uma dependência dessa forma está necessariamente aplicando um dos dois padrões, mesmo que a dependência recebida não varie nem precise de tradução de interface.
+:::
+
+::: {.callout-note icon=false}
+## Decorator vs. Observer na Matriz de Decisão
+
+- □ Um sistema de assinatura de streaming que permite empilhar, de forma independente e cumulativa, complementos como "sem anúncios", "qualidade 4K" e "download offline" sobre um plano-base, está diante de um cenário mais bem resolvido pela intenção principal do Decorator do que pela do Observer.
+- □ Se um sistema de pedidos precisar apenas notificar exatamente um sistema de log fixo, que nunca mudará ao longo de toda a vida da aplicação, aplicar o Observer nesse caso não traria nenhuma vantagem estrutural sobre uma chamada direta e permanente a esse único sistema de log.
+- □ Um cenário em que um pedido precisa acumular selos de fidelidade opcionais (Decorator) e, ao mesmo tempo, notificar um número variável de sistemas de estoque (Observer) exige escolher apenas um dos dois padrões, já que ambos operam sobre decisões tomadas em tempo de execução.
+- □ Um sistema de edição de texto colaborativo em que múltiplos cursores de usuários diferentes precisam ser avisados sempre que o documento compartilhado é alterado, sem que o documento conheça quantos cursores existem, está aplicando a mesma estrutura de acoplamento temporal/identidade que o Observer resolve para o `Pedido`.
+:::
+
+::: {.callout-note icon=false}
+## Aplicando a Matriz a um Cenário Novo
+
+- □ Um sistema de emissão de notas fiscais que precisa se adaptar a três formatos de arquivo XML distintos exigidos por diferentes prefeituras, cada formato com uma estrutura de tags incompatível entre si, mas mantendo uma única interface interna `GeradorDeNotaFiscal`, está diante de um cenário cuja intenção principal bate com a do Adapter, não com a do Strategy.
+- □ Um sistema de jogos que precisa trocar dinamicamente o comportamento de movimento de um personagem (andar, voar, nadar) conforme o terreno em que ele se encontra, todos os comportamentos já implementando a mesma interface `ComportamentoDeMovimento` definida pelo próprio jogo, está diante de um cenário resolvido pela intenção do Adapter, já que o comportamento muda em tempo de execução.
+- □ Um sistema de pagamento que precisa acumular, de forma opcional e cumulativa, taxas de conveniência, seguro de compra e parcelamento sobre o valor de uma transação, sem que o número de combinações possíveis gere uma nova subclasse para cada combinação, está diante de um cenário cuja intenção principal bate com a do Decorator.
+- □ Um sistema de alerta de estoque que precisa avisar automaticamente um número variável de compradores cadastrados sempre que um produto esgotado volta a ficar disponível, sem que o estoque conheça a identidade concreta de cada comprador cadastrado, está diante de um cenário cuja intenção principal bate com a do Observer.
+:::
+
+::: {.callout-note icon=false}
+## Síntese do Curso: TRUE e o Custo de Mudança
+
+- □ Um sistema em que trocar o algoritmo de cálculo de frete exige apenas registrar uma nova implementação de `CalculadoraDeFrete`, sem alterar nenhuma classe já existente, satisfaz a propriedade **Reasonable** do TRUE de forma mais direta do que a propriedade **Transparent**, já que o custo da mudança (uma classe nova) é proporcional ao benefício (uma nova opção de frete).
+- □ Um sistema que aplica o Adapter para integrar um SDK de pagamento legado, mas cujo Adapter concreto não pode ser reaproveitado em nenhum outro contexto do sistema além daquele SDK específico, ainda estaria satisfazendo plenamente a propriedade **Usable** do TRUE, já que o Adapter isola a incompatibilidade sintática do núcleo.
+- □ Se um sistema apresentar o sintoma de **fragilidade** descrito na Aula 1 (quebrar em pontos sem conexão lógica com o que foi alterado) mesmo depois de aplicar Strategy, Adapter, Decorator e Observer em todos os pontos de variação conhecidos, isso indica necessariamente que os quatro padrões foram implementados incorretamente, e não que pode haver uma quinta fonte de acoplamento ainda não identificada.
+- □ A conclusão de que "os quatro padrões estudados neste curso são, em conjunto, uma resposta madura ao problema do custo de mudança" depende logicamente de cada um deles, isoladamente, já resolver sozinho todos os três sintomas (rigidez, fragilidade, imobilidade) apresentados na Aula 1.
+:::
+
+:::

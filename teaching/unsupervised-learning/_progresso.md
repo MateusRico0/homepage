@@ -838,3 +838,64 @@ encerrada.
 ## Aulas 4–12
 
 Não iniciadas.
+
+## Aula 4 — Modelos de Mistura Gaussiana e o Algoritmo EM
+
+Construída sem aprovação por etapa (autorização explícita do usuário
+para esta rodada). Fontes: PRML §9.1-9.3 (Bishop, 2006, pp. 424-444 —
+mistura de gaussianas, variável latente, log-verossimilhança e a
+necessidade do EM, o Passo E de responsabilidades posteriores, o Passo
+M de atualizações ponderadas, KMeans como caso limite do GMM) e ESL
+§8.5-8.5.1 (Hastie/Tibshirani/Friedman, 2009, pp. 272-274). Todos os
+trechos citados literalmente em inglês no `_00-planejamento.md`, com
+página (offset registrado explicitamente), e traduzidos no `index.qmd`.
+
+**Dataset:** Breast Cancer Wisconsin (`scikit-learn/breast-cancer-wisconsin`),
+mesmo par de atributos `radius_worst`/`concave points_worst` já usado
+na Aula 3 — GMM ajustado nos mesmos dois atributos, sem usar o
+diagnóstico, permitindo comparar diretamente a partição rígida do
+HDBSCAN (Aula 3) contra a atribuição probabilística do GMM (esta
+aula) na mesma figura/eixos.
+
+**Conteúdo:** Revisão/Introdução → Intuição ("duas nuvens que se
+tocam", motivando soft clustering como resposta ao limite do
+HDBSCAN) → O Modelo de Mistura Gaussiana com variável latente →
+Por Que Não Maximizar a Verossimilhança Direto (o argumento que motiva
+o EM) → O Passo E (responsabilidades posteriores via Bayes) → O Passo
+M (atualizações ponderadas por máxima verossimilhança) → O Algoritmo
+EM Completo em Ação (worked example) → KMeans Como Caso Limite do GMM
+(covariâncias esféricas idênticas, variância → 0) → Fechamento e Ponte
+para a Aula 5.
+
+**Pausas ativas:** 5 (Ruído do HDBSCAN vs. ambiguidade do GMM;
+o que significa responsabilidade 50/50; responsabilidade muda com os
+parâmetros; GMM completo é sempre melhor que o KMeans?; mais
+componentes, mais verossimilhança? — esta última no fechamento).
+
+**Exercícios:** 7 blocos de V/F de 4 itens (28 itens), todos originais
+pelas 4 heurísticas exigidas, cobrindo partição rígida vs.
+probabilística, a variável latente e a história geradora do GMM, a
+log-verossimilhança e a necessidade do EM, o Passo E, e os demais
+tópicos da aula.
+
+**Achado de processo (retomada após limite de sessão):** o agente
+atingiu o limite de sessão da conta (reset 16h America/Sao_Paulo) logo
+antes/durante a escrita de `_01-respostas.md` — mas o arquivo já
+estava completo (5 pausas + gabarito das 28 questões) quando retomei;
+faltavam apenas a verificação final e os updates de `index.qmd`/
+`_progresso.md` da disciplina, feitos por mim. Encontrei e corrigi um
+bug real durante a verificação: um `label=f"...{,}5|<0{,}05$)"` — um
+f-string do Python contendo chaves literais de notação decimal
+brasileira (`{,}`) usadas para o LaTeX do matplotlib — o Python tentava
+interpretar `{,}` como uma expressão de interpolação f-string
+inválida, gerando `SyntaxError: f-string: expecting a valid expression
+after '{'`. Corrigido separando a parte interpolada (`f"{ambig_mask.sum()}"`)
+da parte literal com chaves LaTeX (`r"..."`), concatenadas com `+`.
+
+**Validação (minha).** Checador de balanceamento de `:::`: zero
+unclosed. `quarto render --to html` e `--to revealjs`: ambos "Output
+created", sem erros. Contagem de glifos no `_site/`: `notas.html` — 48
+`□` (28 exercícios + 20 pausas), 0 `✔`/`✗`; `slides.html` — 20 `□`
+(pausas pré-resolução), 20 `✔`/`✗` (14 verdadeiros + 6 falsos). Único
+`type="checkbox"` em cada HTML é a regra CSS genérica do tema, não um
+checkbox real.

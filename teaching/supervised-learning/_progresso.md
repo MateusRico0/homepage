@@ -1022,3 +1022,67 @@ com nova seção "Part 1 wrap-up" antes da Parte 2. Lessons 5–12
 referência cruzada interna da Lesson 10 (Ensemble Theory) à "Lesson 8"
 (decomposição bias-variância), corrigida para "Lesson 9". Verificado
 `quarto render index.qmd --to html` sem erro.
+
+## Aula 6 — Regressão Linear e Máxima Verossimilhança
+
+Construída sem aprovação por etapa (autorização explícita do usuário
+para esta rodada). Fontes: PRML §3 e §3.1 (Bishop, pp. 137-143 —
+introdução do capítulo, o modelo de ruído gaussiano homocedástico
+$Y\mid X\sim\mathcal N(\beta^TX,\sigma^2)$, a construção da
+verossimilhança e a prova de que MLE = OLS sob normalidade) e ESL §3.2
+(Hastie/Tibshirani/Friedman, pp. 44-46 — a visão geométrica de
+projeção ortogonal, equações normais, hat matrix). Todos os trechos
+citados literalmente em inglês no `_00-planejamento.md`, com página, e
+traduzidos no `index.qmd`.
+
+**Dataset:** California Housing (`gvlassis/california_housing`), já
+usado na Aula 3 como atributos de árvore de regressão — hoje reaparece
+com o alvo contínuo genuíno `MedHouseVal`, servindo pela primeira vez
+como problema de regressão de verdade. Continuidade explícita com a
+Aula 3, registrada em `_00-planejamento.md`.
+
+**Conteúdo:** Abertura (pergunta "qual é a melhor reta?") → Intuição
+geométrica de mínimos quadrados → Bloco 1 (RSS, equações normais,
+projeção ortogonal, com diagrama TikZ do subespaço $\mathcal
+S=\text{span}(\varphi_1,\varphi_2)$) → Bloco 2 (modelo de ruído
+gaussiano homocedástico, construção da verossimilhança conjunta,
+anunciando premissas antes de derivar) → Bloco 3 (o teorema central:
+prova algébrica de que maximizar a log-verossimilhança gaussiana
+equivale a minimizar RSS, com verificação numérica via grid search e
+`scipy.optimize.minimize` confirmando $\hat\beta_{\text{MLE}}=\hat\beta_{\text{OLS}}$
+a $10^{-8}$) → Síntese e Limitações (viés de $\hat\sigma^2_{\text{MLE}}$,
+heterocedasticidade real nos dados, censura de `MedHouseVal` no teto
+$5{,}00001$, não-linearidade) → Fechamento.
+
+**Pausas ativas:** 4 (uma por bloco principal + intuição), pergunta
+motivadora + V/F compartilhados entre notas/slides, resolução
+✔/✗ exclusiva do RevealJS.
+
+**Exercícios:** 3 discursivas + 8 blocos de V/F de 4 itens (32 itens),
+todos originais pelas 4 heurísticas exigidas, cobrindo geometria da
+projeção, equações normais, premissas do modelo gaussiano, construção
+da verossimilhança, o teorema central OLS=MLE, o viés do MLE de
+$\sigma^2$, verificação numérica, e as limitações reais dos dados.
+
+**Achado de processo (retomada após limite de sessão):** o agente que
+construiu esta aula atingiu o limite de sessão da conta (reset 16h
+America/Sao_Paulo) antes de escrever `_01-respostas.md` e antes de
+atualizar `index.qmd`/`_progresso.md` da disciplina — retomado
+manualmente por mim. Também encontrei e corrigi, na verificação: (1)
+um `label=r"$\mathbb E[...]$"` num chunk matplotlib — `\mathbb` não é
+reconhecido pelo parser mathtext do matplotlib (mesma classe de
+problema já documentada para `\le`) — trocado por `\mathrm{E}`; (2) um
+chunk Python vazio (`#| echo: false` sem código, sobrando de alguma
+edição) logo antes do chunk da figura de bump/densidades condicionais
+— removido.
+
+**Validação (minha).** Checador de balanceamento de `:::`: zero
+unclosed. `quarto render --to html` e `--to revealjs`: ambos "Output
+created", sem erros (um diagrama TikZ presente, convertido via
+Inkscape sem problema). Contagem de glifos no `_site/`: `notas.html`
+— 48 `□` (32 exercícios + 16 pausas), 0 `✔`/`✗`; `slides.html` — 16
+`□` (pausas pré-resolução), 16 `✔`/`✗` (8 verdadeiros + 8 falsos).
+Único `type="checkbox"` em cada HTML é a regra CSS genérica do tema
+(`ul.task-list li input[type="checkbox"]`), não um checkbox real.
+Gabarito (`_01-respostas.md`) escrito com 32 entradas, cross-checado
+contra o texto exato dos 32 itens `- □` do `index.qmd`.

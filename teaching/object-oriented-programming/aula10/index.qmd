@@ -1,0 +1,1083 @@
+---
+title: "O Colapso da Herança e a Era da Composição: o Padrão Strategy"
+subtitle: "Aula 10 — Programação Orientada a Objetos"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    output-file: notas.html
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+# Proposta da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Na Aula 8, a Herança nos deu uma ferramenta poderosa para modelar taxonomias rígidas: `Pix`, `Cartao` e `Boleto` herdando de `MeioPagamentoBase` porque compartilham DNA (autenticação, log de auditoria) **e** precisam ser tratados polimorficamente. Na Aula 9, formalizamos quando essa substituição é segura (o LSP) e como o erro se encaixa nesse contrato. As duas aulas, sem dizer isso explicitamente, assumiram um mundo com **um único eixo de variação por vez**: um meio de pagamento é Pix, ou Cartão, ou Boleto — nunca as três coisas simultaneamente, então a árvore de herança nunca precisou lidar com combinações.
+
+Esta aula ataca exatamente o momento em que essa suposição para de valer: quando o mesmo objeto de negócio precisa variar em **dois ou mais eixos independentes ao mesmo tempo** — um produto que é físico ou digital, e, separadamente, nacional ou importado.
+
+**O roteiro, em quatro perguntas:**
+
+1. Se a herança define o que um objeto *é*, o que acontece quando um produto precisa *ser* duas coisas ortogonais ao mesmo tempo?
+2. Por que o Java proíbe herdar de duas classes simultaneamente — e por que essa proibição não é um capricho de sintaxe, mas o sintoma de um problema mais profundo?
+3. Se a herança fracassa para eixos independentes, o que a substitui — e por que "usar um" é estruturalmente diferente de "ser um"?
+4. Como transformar um método `processarPagamento()` cheio de `if/else` num design que aceita um novo meio de pagamento sem tocar em uma única linha do código já existente?
+
+Considere o e-commerce que atravessa a disciplina. Ele nasceu simples: uma classe `Produto` com um preço e um identificador. Conforme o negócio cresce, cada novo requisito parece pedir "mais uma subclasse" — até o dia em que dois requisitos de negócio, verdadeiramente independentes um do outro, chegam ao mesmo tempo. É esse dia que os próximos blocos dissecam.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Herança (Aulas 8–9)** modelou muito bem hierarquias com **um** eixo de variação — Pix, Cartão, Boleto como especializações de um único tipo base.
+
+::: {.fragment}
+Mas o que acontece quando o negócio varia em **dois eixos independentes ao mesmo tempo** — físico/digital **e**, separadamente, nacional/importado?
+:::
+
+::: {.fragment}
+**Roteiro:** a fusão estrutural e seu custo → o colapso da hierarquia (explosão combinatória) → a era da composição → o padrão Strategy.
+:::
+
+:::
+
+# A Fusão Estrutural e o Peso da Herança de Estado
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Na fase inicial do aprendizado, `extends` parece a solução mágica para não repetir código. Essa visão é míope: quando declaramos `class B extends A`, não estamos só permitindo que `B` chame métodos de `A` — estamos fundindo as estruturas das duas classes numa única entidade lógica, compartilhando o mesmo "DNA". A promessa subjacente é a substituibilidade total: onde o sistema espera um `A`, ele deve aceitar um `B` sem perceber diferença.
+
+**A ilusão da produtividade.** É tentador herdar apenas para "ganhar" métodos prontos:
+
+```java
+public class PedidoInternacional extends Pedido {
+    // "Ganhei" os metodos calcularTotal() e getItens() de graca!
+    public double calcularTaxaAlfandega() { /* ... */ }
+}
+```
+
+Essa ilusão esconde um erro semântico grave. Se a relação não for estritamente identitária, o acoplamento estrutural cobra seu preço rapidamente: se, numa refatoração futura, `Pedido` passar a exigir um endereço de faturamento nacional obrigatório no construtor, `PedidoInternacional` quebra imediatamente — não porque alguém escreveu código errado, mas porque a herança forçou uma identidade que, na realidade, não existe. Trocamos duplicação de código (um problema de manutenção menor, fácil de refatorar depois) por um acoplamento estrutural tóxico (caro de desfazer, porque agora as duas classes são "a mesma coisa" aos olhos do compilador).
+
+**O vínculo de sangue.** A herança de classes é o acoplamento mais rígido e inflexível disponível na Orientação a Objetos: a subclasse frequentemente interage com a implementação interna do pai (via `protected`), violando o encapsulamento de caixa preta; e o comportamento herdado é fixado em tempo de compilação — não é possível trocar de "pai" em tempo de execução. Essa rigidez se manifesta de duas formas bem diferentes, que vale a pena distinguir com precisão:
+
+- **Herança de Comportamento (interfaces):** fluida e adaptável. O filho promete apenas responder a um contrato (como `pagar()`), mantendo soberania total sobre *como* resolve o problema. O acoplamento é puramente semântico.
+- **Herança de Estado (classes):** rígida e invasiva. O filho herda campos físicos de memória (`double saldo`, `String id`). O layout de dados do pai é imposto ao filho, que perde autonomia sobre sua própria composição interna.
+
+**O peso na memória: a "Subclasse Gorda".** O custo da herança de estado não é só conceitual — é tangível na infraestrutura. Toda vez que declaramos um campo numa classe base, instruímos a JVM a alocar espaço na Heap para **cada instância de cada subclasse**, sem exceção:
+
+```java
+public abstract class ProdutoBase {
+    protected double pesoFisico;      // essencial para logistica e frete
+    protected String dimensoesPacote; // essencial para envio fisico
+}
+
+public class Ebook extends ProdutoBase {
+    // Ebook herda pesoFisico e dimensoesPacote na Heap, mesmo sem usar!
+}
+```
+
+Se instanciarmos milhares de `Ebook`, teremos milhares de bytes desperdiçados em atributos semanticamente irrelevantes para um produto puramente digital — um cenário clássico de "objeto gordo". Arquitetura de alto nível também é sobre eficiência de infraestrutura: ao permitir que `Ebook` herde atributos físicos, violamos coesão **e** degradamos a eficiência do servidor.
+
+**Uma nota de continuidade.** A Aula 8 já tratou em profundidade o Problema da Classe Base Frágil (o exemplo do bug de contagem dupla em `GerenciadorDeCobrancas`) — não vamos reabrir aquela discussão aqui. O ponto novo desta aula é diferente: mesmo quando a base *não* muda, o simples fato de herdar estado já tem um custo físico mensurável, que cresce silenciosamente com cada subclasse mal ajustada à hierarquia.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## `extends`: a Fusão que Você Não Pediu
+
+::: {.fragment}
+`class B extends A` não é só "B usa métodos de A" — é fundir as estruturas de ambas numa única entidade lógica, o mesmo "DNA".
+:::
+::: {.fragment}
+**A promessa:** onde o sistema espera um `A`, deve aceitar um `B` sem perceber diferença.
+:::
+
+## A Ilusão da Produtividade
+
+```java
+public class PedidoInternacional extends Pedido {
+    // "Ganhei" os metodos calcularTotal() e getItens() de graca!
+    public double calcularTaxaAlfandega() { /* ... */ }
+}
+```
+
+::: {.fragment}
+Se `Pedido` passar a exigir um endereço de faturamento nacional no construtor, `PedidoInternacional` quebra — ninguém errou o código, a herança forçou uma identidade que não existia.
+:::
+::: {.fragment}
+Trocamos duplicação (barata de corrigir depois) por acoplamento estrutural (caro de desfazer).
+:::
+
+## O Vínculo de Sangue: Acoplamento Estrutural
+
+::: {.fragment}
+O mais rígido dos vínculos em OO: acesso às "entranhas" via `protected`, comportamento fixado em tempo de compilação.
+:::
+::: {.fragment}
+Não é possível trocar de "pai" em tempo de execução.
+:::
+
+## Herança de Estado vs. Comportamento
+
+::: {.fragment}
+**Comportamento (interfaces):** fluida — o filho promete responder a um contrato, soberano sobre o *como*.
+:::
+::: {.fragment}
+**Estado (classes):** rígida — o filho herda campos físicos de memória; o layout do pai é imposto.
+:::
+
+## O Peso na Memória: a "Subclasse Gorda"
+
+```java
+public abstract class ProdutoBase {
+    protected double pesoFisico;      // essencial para logistica e frete
+    protected String dimensoesPacote; // essencial para envio fisico
+}
+
+public class Ebook extends ProdutoBase {
+    // Ebook herda pesoFisico e dimensoesPacote na Heap, mesmo sem usar!
+}
+```
+
+::: {.fragment}
+Milhares de `Ebook` = milhares de bytes desperdiçados em atributos irrelevantes para um produto digital.
+:::
+::: {.fragment}
+**Diferente da Aula 8** (Classe Base Frágil, base que muda): aqui a base nem precisa mudar — o custo já existe, silencioso, desde a primeira instância.
+:::
+
+:::
+
+# O Colapso da Hierarquia: Explosão Combinatória
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Todo sistema nasce simples. A classe abstrata `Produto` estabelece um contrato básico e aloca o estado comum:
+
+```java
+public abstract class Produto {
+    protected String id;
+    protected double precoBase;
+
+    public abstract double calcularPrecoFinal();
+}
+```
+
+Neste momento, a herança parece perfeitamente adequada. Conforme o e-commerce escala, a primeira especialização separa a árvore por meio de entrega:
+
+```java
+public class ProdutoFisico extends Produto {
+    protected double pesoGrama;
+    @Override
+    public double calcularPrecoFinal() { return precoBase + calcularFrete(); }
+}
+
+public class ProdutoDigital extends Produto {
+    protected String linkDownload;
+    @Override
+    public double calcularPrecoFinal() { return precoBase; }
+}
+```
+
+Sem perceber, atrelamos irreversivelmente o conceito de "Produto" à sua regra de "Logística" na mesma hierarquia estática. O sistema passa a tratar "ser físico" como uma propriedade primária da identidade do objeto, quando é apenas uma faceta de seu ciclo de vida.
+
+**O choque de dimensões.** O departamento financeiro exige uma nova tributação: produtos Nacionais têm isenção, Importados recebem taxa alfandegária. Onde encaixamos essa lógica?
+
+- Inserir a regra em `Produto` força produtos nacionais a herdarem verificações inúteis.
+- Criar `ProdutoImportado` entra em choque direto com a separação `Fisico`/`Digital` já estabelecida.
+
+A única saída por herança pura é a **permutação forçada**: uma classe para cada combinação.
+
+::: {.fig-resize style="width: 82%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=0.5cm and 2.4cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=4cm, minimum height=1.1cm},
+  hdr/.style={font=\small\bfseries, text=icblue},
+  rlbl/.style={font=\scriptsize, align=right, text width=1.5cm},
+  >=Stealth
+]
+  \node[hdr] (hFisico) {Físico};
+  \node[hdr, right=2.4cm of hFisico] (hDigital) {Digital};
+  \node[bx, draw=icblue, fill=icblue!10, below=of hFisico] (FN) {FisicoNacional};
+  \node[bx, draw=icblue, fill=icblue!10, below=of hDigital] (DN) {DigitalNacional};
+  \node[bx, draw=icorange, fill=icorange!10, below=of FN] (FI) {FisicoImportado\\\scriptsize(regra fiscal)};
+  \node[bx, draw=icorange, fill=icorange!10, below=of DN] (DI) {DigitalImportado\\\scriptsize(regra fiscal duplicada)};
+  \node[rlbl, left=0.2cm of FN] {Nacional};
+  \node[rlbl, left=0.2cm of FI] {Importado};
+  \node[bx, draw=icred, fill=icred!10, below=1.0cm of FI, xshift=2.4cm, minimum width=8.6cm] (nota) {+ 1 eixo independente (ex.\ Perecível/Não-Perecível) $\Rightarrow$ 8 classes};
+\end{tikzpicture}
+```
+:::
+
+Se adicionarmos um terceiro eixo — Perecível vs. Não-Perecível —, o número de classes salta de 4 para 8, e a tendência é exponencial. Uma simples alteração na política fiscal exigirá modificações em múltiplas classes espalhadas pela árvore, violando o princípio de que cada regra deveria ter uma única fonte de verdade.
+
+**O limite da linguagem.** O desenvolvedor pode tentar contornar a explosão recorrendo à herança múltipla:
+
+```java
+// Esta abordagem e sintaticamente invalida em Java
+public class FisicoImportado extends ProdutoFisico, ProdutoImportado {
+    // Erro de Compilacao: Classes nao podem estender multiplas classes
+}
+```
+
+::: {.fig-resize style="width: 65%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.0cm and 0.6cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=4.0cm, minimum height=1.0cm},
+  >=Stealth
+]
+  \node[bx, draw=icblue, fill=icblue!10] (produto) {Produto (abstrata)};
+  \node[bx, draw=icblue, fill=icblue!10, below left=1.1cm and 0.2cm of produto] (fisico) {ProdutoFisico};
+  \node[bx, draw=icblue, fill=icblue!10, below right=1.1cm and 0.2cm of produto] (importado) {ProdutoImportado};
+  \node[bx, draw=icred, fill=icred!10, below=1.6cm of produto] (alvo) {FisicoImportado\\\scriptsize extends ProdutoFisico, ProdutoImportado};
+  \draw[->, thick] (fisico) -- (produto);
+  \draw[->, thick] (importado) -- (produto);
+  \draw[->, thick, dashed, icred] (alvo) -- (fisico);
+  \draw[->, thick, dashed, icred] (alvo) -- (importado);
+  \node[font=\small, text=icred, below=0.25cm of alvo] {Erro de compilação — Java não aceita duas superclasses};
+\end{tikzpicture}
+```
+:::
+
+O Java proíbe a herança múltipla de classes para evitar o **Problema do Diamante** — ambiguidades severas na resolução de métodos e conflitos de estado na memória (se `ProdutoFisico` e `ProdutoImportado` declarassem, cada um à sua maneira, um campo `desconto`, qual dos dois prevaleceria em `FisicoImportado`?). Sem poder herdar as regras de "Físico" e "Importado" de fontes limpas, somos forçados a copiar e colar o comportamento tributário em diversas folhas da árvore.
+
+**O diagnóstico.** A herança de classes foi projetada para mapear taxonomias biológicas e estritas (todo Cachorro é, essencial e imutavelmente, um Mamífero). Meios de distribuição logística ou enquadramentos fiscais não definem a identidade estrutural imutável do produto — são regras ou *features* modulares, que variam de forma independente. A herança fracassa catastroficamente quando tentamos usá-la para agrupar comportamentos que variam de forma ortogonal entre si.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Cenário: a Classe Base Limpa
+
+```java
+public abstract class Produto {
+    protected String id;
+    protected double precoBase;
+    public abstract double calcularPrecoFinal();
+}
+```
+
+::: {.fragment}
+Início perfeitamente razoável — um contrato único de precificação para todo o catálogo.
+:::
+
+## A Primeira Especialização: Logística
+
+```java
+public class ProdutoFisico extends Produto {
+    protected double pesoGrama;
+    @Override
+    public double calcularPrecoFinal() { return precoBase + calcularFrete(); }
+}
+
+public class ProdutoDigital extends Produto {
+    protected String linkDownload;
+    @Override
+    public double calcularPrecoFinal() { return precoBase; }
+}
+```
+
+::: {.fragment}
+Armadilha invisível: "ser físico" vira propriedade primária da identidade, quando é só uma faceta do ciclo de vida.
+:::
+
+## O Choque de Dimensões: Fiscalidade
+
+::: {.fragment}
+**Novo requisito:** Nacional (isenção) vs. Importado (taxa alfandegária).
+:::
+::: {.fragment}
+Inserir em `Produto`: polui a base para quem não precisa. Criar `ProdutoImportado`: choca com `Fisico`/`Digital` já estabelecido.
+:::
+
+## O Colapso: a Matriz de Explosão
+
+::: {.fig-resize style="width: 82%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=0.5cm and 2.4cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=4cm, minimum height=1.1cm},
+  hdr/.style={font=\small\bfseries, text=icblue},
+  rlbl/.style={font=\scriptsize, align=right, text width=1.5cm},
+  >=Stealth
+]
+  \node[hdr] (hFisico) {Físico};
+  \node[hdr, right=2.4cm of hFisico] (hDigital) {Digital};
+  \node[bx, draw=icblue, fill=icblue!10, below=of hFisico] (FN) {FisicoNacional};
+  \node[bx, draw=icblue, fill=icblue!10, below=of hDigital] (DN) {DigitalNacional};
+  \node[bx, draw=icorange, fill=icorange!10, below=of FN] (FI) {FisicoImportado\\\scriptsize(regra fiscal)};
+  \node[bx, draw=icorange, fill=icorange!10, below=of DN] (DI) {DigitalImportado\\\scriptsize(regra fiscal duplicada)};
+  \node[rlbl, left=0.2cm of FN] {Nacional};
+  \node[rlbl, left=0.2cm of FI] {Importado};
+  \node[bx, draw=icred, fill=icred!10, below=1.0cm of FI, xshift=2.4cm, minimum width=8.6cm] (nota) {+ 1 eixo independente (ex.\ Perecível/Não-Perecível) $\Rightarrow$ 8 classes};
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+4 classes hoje, 8 se adicionarmos um terceiro eixo binário — e a regra fiscal duplicada entre `FisicoImportado`/`DigitalImportado` não tem fonte única de verdade.
+:::
+
+## O Limite da Linguagem: o Diamante
+
+```java
+// Esta abordagem e sintaticamente invalida em Java
+public class FisicoImportado extends ProdutoFisico, ProdutoImportado {
+    // Erro de Compilacao
+}
+```
+
+::: {.fig-resize style="width: 65%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.0cm and 0.6cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=4.0cm, minimum height=1.0cm},
+  >=Stealth
+]
+  \node[bx, draw=icblue, fill=icblue!10] (produto) {Produto (abstrata)};
+  \node[bx, draw=icblue, fill=icblue!10, below left=1.1cm and 0.2cm of produto] (fisico) {ProdutoFisico};
+  \node[bx, draw=icblue, fill=icblue!10, below right=1.1cm and 0.2cm of produto] (importado) {ProdutoImportado};
+  \node[bx, draw=icred, fill=icred!10, below=1.6cm of produto] (alvo) {FisicoImportado\\\scriptsize extends ProdutoFisico, ProdutoImportado};
+  \draw[->, thick] (fisico) -- (produto);
+  \draw[->, thick] (importado) -- (produto);
+  \draw[->, thick, dashed, icred] (alvo) -- (fisico);
+  \draw[->, thick, dashed, icred] (alvo) -- (importado);
+  \node[font=\small, text=icred, below=0.25cm of alvo] {Erro de compilação — Java não aceita duas superclasses};
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+Java proíbe para evitar o **Problema do Diamante**: se ambas as superclasses declarassem um campo com o mesmo nome, qual prevaleceria?
+:::
+
+## O Diagnóstico
+
+::: {.fragment}
+Herança de classes: feita para taxonomias biológicas e **imutáveis** (todo Cachorro é um Mamífero).
+:::
+::: {.fragment}
+Logística e fiscalidade **não são identidade** — são *features* modulares que variam de forma independente.
+:::
+::: {.fragment}
+Herança fracassa catastroficamente ao tentar agrupar comportamentos ortogonais entre si.
+:::
+
+:::
+
+## O Colapso da Hierarquia e a Explosão Combinatória
+
+::: {.callout-tip}
+## Se hoje o e-commerce adicionasse um terceiro eixo de variação (Perecível vs. Não-Perecível) ainda usando herança pura, quantas classes-folha existiriam — e por que dobrar de 4 para 8 não é o pior problema dessa abordagem?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ Em uma hierarquia de herança pura que já modela dois eixos binários independentes com 4 subclasses-folha, a adição de um terceiro eixo binário eleva esse número para 8, mantendo a mesma lógica de crescimento.
+- □ Se Java permitisse herança múltipla de classes sem nenhuma outra mudança de linguagem, o problema de duplicação de lógica fiscal entre `FisicoImportado` e `DigitalImportado` desapareceria completamente, sem risco de ambiguidade.
+- □ Um sistema de biblioteca que precisa classificar itens simultaneamente por Formato (Físico/Digital) e por Categoria de Empréstimo (Curto Prazo/Longo Prazo) enfrentaria o mesmo padrão de explosão combinatória se modelado por herança de classes pura.
+- □ Herança de classes é uma ferramenta inadequada para qualquer sistema que apresente mais de uma característica variável, mesmo quando essas características não são independentes entre si (por exemplo, quando uma determina totalmente a outra).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Colapso da Hierarquia — Resposta
+
+::: {.callout-tip}
+## Explosão combinatória — Resposta
+
+- ✔ Em uma hierarquia de herança pura que já modela dois eixos binários independentes com 4 subclasses-folha, a adição de um terceiro eixo binário eleva esse número para 8, mantendo a mesma lógica de crescimento — o crescimento é multiplicativo (2×2×2), não aditivo.
+- ✗ Se Java permitisse herança múltipla de classes sem nenhuma outra mudança de linguagem, o problema de duplicação de lógica fiscal entre `FisicoImportado` e `DigitalImportado` desapareceria completamente, sem risco de ambiguidade — herança múltipla resolveria a duplicação de código, mas introduziria exatamente o Problema do Diamante (ambiguidade de estado/método) que o diagrama ilustra.
+- ✔ Um sistema de biblioteca que precisa classificar itens simultaneamente por Formato e por Categoria de Empréstimo enfrentaria o mesmo padrão de explosão combinatória se modelado por herança de classes pura — dois eixos independentes, mesmo problema estrutural, domínio diferente.
+- ✗ Herança de classes é uma ferramenta inadequada para qualquer sistema que apresente mais de uma característica variável, mesmo quando essas características não são independentes entre si — a explosão só ocorre quando os eixos são **ortogonais**; se uma característica determina totalmente a outra, não há combinações genuinamente novas a cobrir.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** o terceiro eixo levaria a 8 classes, mas o pior problema não é o número — é que a regra fiscal ficaria duplicada em `FisicoImportado` e `DigitalImportado` (e depois em mais 2 folhas), sem uma única fonte de verdade. Uma mudança na lei fiscal exigiria editar múltiplos arquivos, com alto risco de esquecer um deles.
+:::
+
+:::
+
+# A Era da Composição: Princípio, *Is-a* para *Has-a* e Quase-Decomponibilidade
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Quando os autores de *Design Patterns: Elements of Reusable Object-Oriented Software* (o *Gang of Four*, GoF) formalizaram os princípios da arquitetura moderna, identificaram que o uso indiscriminado de `extends` era o principal vetor de degradação em sistemas de grande porte. A regra máxima do design orientado a objetos, segundo eles, é: **"favoreça a composição de objetos sobre a herança de classes"**.
+
+Essa preferência não é estilística — é uma estratégia para mitigar riscos estruturais:
+
+- **Encapsulamento preservado:** a herança frequentemente exige que a base exponha detalhes internos (`protected`) para os descendentes funcionarem. A composição interage através de interfaces públicas, mantendo cada classe como caixa preta.
+- **Flexibilidade dinâmica:** a herança fixa relações antes mesmo do programa iniciar. A composição permite montar e alterar comportamentos complexos conectando objetos menores em tempo de execução — podemos trocar a estratégia de tributação ou o mecanismo de logística de um produto sem instanciar uma nova subclasse.
+- **Desacoplamento de eixos de mudança:** compondo um objeto com instâncias de interfaces como `Tributacao` e `Logistica`, os eixos de mudança se tornam independentes. Uma alteração na regra fiscal de importados não afeta a lógica de frete.
+
+**De *is-a* para *has-a*.** A herança define uma relação estrita de identidade, onde o subtipo assume toda a carga física e histórica do pai. A composição vê o objeto como um **orquestrador** que delega trabalho pesado a especialistas menores. A escolha arquitetural correta: use herança apenas quando o objeto é uma especialização essencial do pai; use composição quando ele apenas *precisa consumir* os serviços de outro.
+
+**A arquitetura da complexidade.** Herbert Simon observou que sistemas complexos e estáveis quase sempre assumem a forma de hierarquias construídas a partir de subsistemas simples — a **quase-decomponibilidade**: os elos internos de uma peça são muito mais fortes do que as dependências entre peças distintas. Sistemas que funcionam evoluíram a partir de sistemas simples que já funcionavam, combinando poucas peças padronizadas.
+
+A diferença entre design integrado (herança) e modular (composição) é ilustrada pela analogia dos eletrodomésticos: se um televisor tem um VCR embutido na mesma carcaça, a quebra de uma engrenagem do vídeo cassete obriga levar a TV inteira para o conserto. Num aparelho de som modular, se o CD Player queima, você o desconecta e troca, enquanto as caixas de som e o amplificador seguem operacionais. No e-commerce: se a API dos Correios mudar, trocamos apenas a classe que encapsula a logística, sem tocar em `Pedido`.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Regra de Ouro do GoF e Três Razões Estruturais
+
+::: {.fragment}
+**"Favoreça a composição de objetos sobre a herança de classes."**
+:::
+::: {.fragment}
+Não é estilo — é mitigação de risco estrutural, por três razões:
+:::
+::: {.fragment}
+**Encapsulamento preservado:** composição fala com interfaces públicas; herança expõe `protected`.
+:::
+::: {.fragment}
+**Flexibilidade dinâmica:** composição monta/altera comportamentos em tempo de execução; herança fixa antes do programa iniciar.
+:::
+::: {.fragment}
+**Desacoplamento de eixos:** `Tributacao` e `Logistica` como colaboradores independentes — mudar um não afeta o outro.
+:::
+
+## Mudança de Perspectiva: de *Is-a* para *Has-a*
+
+::: {.fragment}
+**Is-a:** identidade estrita, o subtipo carrega toda a história física do pai.
+:::
+::: {.fragment}
+**Has-a:** o objeto é um orquestrador, delega trabalho pesado a especialistas.
+:::
+::: {.fragment}
+**Escolha:** herança para especialização essencial; composição para consumo de serviço.
+:::
+
+## A Arquitetura da Complexidade (Herbert Simon)
+
+::: {.fragment}
+Sistemas estáveis são hierarquias de subsistemas simples — **quase-decomponibilidade**: elos internos fortes, dependências externas fracas.
+:::
+::: {.fragment}
+Sistemas que funcionam evoluíram de sistemas simples que já funcionavam, combinando peças padronizadas.
+:::
+
+## Sistemas Modulares vs. Integrados
+
+::: {.fragment}
+**Integração (herança):** TV com VCR embutido — a engrenagem do vídeo quebra, a TV inteira vai para o conserto.
+:::
+::: {.fragment}
+**Modularidade (composição):** som modular — o CD Player queima, você troca só ele; caixas e amplificador seguem operacionais.
+:::
+::: {.fragment}
+**No e-commerce:** API dos Correios muda? Trocamos só a classe de logística, `Pedido` intocado.
+:::
+
+:::
+
+# Tipos de Composição e Fronteiras de Domínio
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Composição não é um conceito monolítico — se manifesta em diferentes graus de proximidade e tempo de vida entre objetos.
+
+**Agregação (*has-a* / Todo-Parte).** O "Todo" agrupa elementos, mas não é dono absoluto de suas vidas. Exemplo: um `CarrinhoDeCompras` que contém `Produto`s — se o carrinho for deletado, os produtos continuam ativos no estoque. Compartilham um contexto temporário, mas têm ciclos de vida independentes.
+
+**Associação (*uses-a* / colaboração livre).** As entidades são completamente autônomas. Um `Cliente` associado a um `CartaoDeCredito`: o cliente usa o cartão para transacionar, mas o cartão pode existir sem aquele cliente específico (ou pertencer a outra conta), e o cliente não depende daquele cartão.
+
+Diferente da Composição estrita (onde a "parte" é criada e destruída exclusivamente pelo "todo"), Agregação e Associação oferecem a flexibilidade necessária para montar e desmontar subsistemas em tempo de execução.
+
+**Independência e testabilidade.** A composição permite desmembrar uma lógica de mil linhas em dezenas de classes isoladas e coesas. Podemos testar a regra tributária de importação exaustivamente, sem instanciar o grafo complexo de um `ProdutoFisico`. Equipes diferentes podem trabalhar no cálculo de frete e no cálculo de impostos simultaneamente, sem conflitos de controle de versão.
+
+**Evitando a mistura de domínios.** É tentador colocar lógicas de comunicação, infraestrutura e negócio na mesma entidade — mas isso cria dependências artificiais severas. O princípio do **Especialista da Informação** (já visto na Aula 5, sob a ótica do GRASP) resolve isso de novo aqui: a responsabilidade de uma tarefa deve recair exclusivamente sobre a classe que possui os dados necessários para resolvê-la. `Produto` é o especialista em nome e preço base; ele **não** deve se conectar a um servidor SMTP para despachar e-mails, nem formatar relatórios em PDF. Isolar essas preocupações mantém `Produto` testável e imune a mudanças em requisitos de rede ou interface — se o sistema mudar o formato de exportação de relatórios, a alteração fica contida num serviço especializado, sem tocar o núcleo do domínio.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Agregação: Todo-Parte
+
+::: {.fragment}
+O "Todo" agrupa, mas não é dono absoluto das vidas das partes.
+:::
+::: {.fragment}
+`CarrinhoDeCompras` contém `Produto`s — deletar o carrinho não deleta os produtos do estoque.
+:::
+
+## Associação: Colaboração Livre
+
+::: {.fragment}
+Entidades completamente autônomas: `Cliente` associado a `CartaoDeCredito`.
+:::
+::: {.fragment}
+O cartão pode existir sem aquele cliente; o cliente não depende daquele cartão específico.
+:::
+
+## Independência e Testabilidade
+
+::: {.fragment}
+Composição desmembra mil linhas em dezenas de classes isoladas e coesas.
+:::
+::: {.fragment}
+Regra tributária testável isoladamente, sem instanciar o grafo de `ProdutoFisico`.
+:::
+::: {.fragment}
+Equipes diferentes trabalham em frete e impostos em paralelo, sem conflitos de versão.
+:::
+
+## Evitando a Mistura de Domínios
+
+::: {.fragment}
+Tentação: juntar comunicação, infraestrutura e negócio na mesma classe.
+:::
+::: {.fragment}
+**Especialista da Informação** (revisitado da Aula 5): a responsabilidade recai sobre quem tem os dados.
+:::
+::: {.fragment}
+`Produto` gerencia nome/preço — **não** conecta a SMTP, **não** gera PDF.
+:::
+
+:::
+
+## Composição, Agregação e Associação
+
+::: {.callout-tip}
+## Por que dizer que o Carrinho "tem" Produtos (Agregação) e o Cliente "usa" um Cartão de Crédito (Associação) leva a decisões de código diferentes sobre quem cria e quem destrói cada objeto?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ Se todos os Produtos de um Carrinho fossem deletados do sistema no exato instante em que o Carrinho é deletado, essa relação deixaria de ser uma Agregação clássica e passaria a se comportar como Composição estrita.
+- □ Se o Cliente fosse implementado de forma que a existência do CartaoDeCredito dependesse inteiramente do Cliente (o cartão nunca poderia existir sem aquele cliente específico), essa relação ainda seria corretamente descrita como Associação livre.
+- □ Uma classe Playlist que agrupa referências a Musica, mas cujas músicas continuam existindo na biblioteca mesmo depois que a Playlist é apagada, exemplifica o mesmo padrão de Agregação visto no Carrinho de Compras.
+- □ Aplicar o princípio do Especialista da Informação significa que toda funcionalidade relacionada, de qualquer forma, a um objeto deve ser implementada dentro dele, mesmo que envolva conectar-se a servidores externos.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Composição, Agregação e Associação — Resposta
+
+::: {.callout-tip}
+## Quem cria, quem destrói — Resposta
+
+- ✔ Se todos os Produtos de um Carrinho fossem deletados do sistema no exato instante em que o Carrinho é deletado, essa relação deixaria de ser uma Agregação clássica e passaria a se comportar como Composição estrita — o critério que separa as duas é exatamente a dependência (ou não) de ciclo de vida.
+- ✗ Se o Cliente fosse implementado de forma que a existência do CartaoDeCredito dependesse inteiramente do Cliente, essa relação ainda seria corretamente descrita como Associação livre — Associação pressupõe vidas *completamente autônomas*; uma dependência de ciclo de vida nesse sentido já descaracteriza a Associação.
+- ✔ Uma classe Playlist que agrupa Musica, cujas músicas sobrevivem à exclusão da Playlist, exemplifica o mesmo padrão de Agregação visto no Carrinho — mesmo critério (Todo-Parte sem posse absoluta da vida), domínio diferente.
+- ✗ Aplicar o Especialista da Informação significa que toda funcionalidade relacionada a um objeto deve ser implementada dentro dele, mesmo envolvendo servidores externos — é exatamente o oposto: o princípio existe para **isolar** infraestrutura das classes de domínio puro.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Agregação e Associação diferem em quem é responsável pelo ciclo de vida da parte. Isso muda o código diretamente — quem chama `new`, quem chama a limpeza/remoção, e se um objeto pode sobreviver sozinho depois que seu colaborador desaparece.
+:::
+
+:::
+
+# O Desafio do Checkout: do Labirinto de Condicionais à Herança Fracassada
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O e-commerce cresceu, e o *checkout* agora precisa processar pagamentos por múltiplos meios: Cartão de Crédito, Pix e Boleto. Cada meio tem sua própria regra de cálculo (taxas vs. descontos), sua própria comunicação externa (APIs de bancos) e tempos de processamento distintos. Como acoplar essa variação ao objeto `Pedido` sem explodir a complexidade do sistema?
+
+**A abordagem ingênua: o labirinto do `if/else`.**
+
+```java
+public void processarPagamento(String tipo) {
+    if (tipo.equals("PIX")) {
+        // logica para gerar QR Code e aplicar 5% de desconto
+    } else if (tipo.equals("CARTAO")) {
+        // logica de comunicacao com antifraude e gateways
+    } else if (tipo.equals("BOLETO")) {
+        // logica para codigo de barras e vencimento
+    }
+}
+```
+
+O método cresce indefinidamente a cada novo meio integrado; `Pedido` passa a conhecer detalhes de infraestrutura alheios ao domínio (chaves de API, protocolos de antifraude); e qualquer manutenção na regra do Pix arrisca quebrar a rotina do Cartão — um *code smell* clássico de baixa coesão.
+
+**A tentativa por herança: o colapso da identidade.**
+
+```java
+// Tentando resolver variacoes criando subtipos
+public class PedidoPix extends Pedido { /* ... */ }
+public class PedidoCartao extends Pedido { /* ... */ }
+```
+
+Essa tentativa comete um erro semântico fundamental: confunde **identidade** com **papel**. O meio de pagamento não define o que o `Pedido` *é* — é apenas um evento que ocorre em seu ciclo de vida. A herança introduz dois problemas intransponíveis:
+
+- **Aprisionamento estático:** em Java, a identidade de um objeto é fixada na instanciação (`new`). Se um cliente cria um `PedidoPix` e, no último momento da compra, decide trocar por Cartão, a arquitetura falha — seria necessário instanciar um novo objeto, copiar todo o estado anterior e descartar o antigo.
+- **Explosão da árvore:** como já vimos, a especialização hierárquica não evolui em eixos ortogonais (Logística × Tributação × Meio de Pagamento). Adicionar um novo eixo de variação ao lado de "meio de pagamento" reabriria o mesmo colapso combinatório do bloco anterior.
+
+O que fazer, então? Desmembrar o comportamento do objeto principal e encapsulá-lo em estratégias modulares. Em vez de perguntar "o que este pedido *é*?", perguntamos "qual estratégia de pagamento este pedido *usa*?" — é exatamente essa mudança de pergunta que o próximo bloco resolve.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Novo Requisito: Variação no Checkout
+
+::: {.fragment}
+Pix, Cartão, Boleto — cada um com regra de cálculo, comunicação externa e tempo de processamento próprios.
+:::
+::: {.fragment}
+Como acoplar essa variação a `Pedido` sem explodir a complexidade?
+:::
+
+## A Abordagem Ingênua: o Labirinto do `if/else`
+
+```java
+public void processarPagamento(String tipo) {
+    if (tipo.equals("PIX")) {
+        // QR Code + desconto de 5%
+    } else if (tipo.equals("CARTAO")) {
+        // antifraude + gateway
+    } else if (tipo.equals("BOLETO")) {
+        // codigo de barras + vencimento
+    }
+}
+```
+
+::: {.fragment}
+Cresce indefinidamente; `Pedido` conhece detalhes de infraestrutura alheios; mudar o Pix arrisca quebrar o Cartão.
+:::
+
+## A Tentativa por Herança: o Colapso da Identidade
+
+```java
+// Tentando resolver variacoes criando subtipos
+public class PedidoPix extends Pedido { /* ... */ }
+public class PedidoCartao extends Pedido { /* ... */ }
+```
+
+::: {.fragment}
+**Erro semântico:** confunde identidade (o que `Pedido` *é*) com papel (o que ele *usa* temporariamente).
+:::
+::: {.fragment}
+**Aprisionamento estático:** identidade fixada em `new` — trocar Pix por Cartão no último segundo exige recriar o objeto inteiro.
+:::
+::: {.fragment}
+**Explosão da árvore:** reabre o mesmo colapso combinatório do bloco anterior, agora com "meio de pagamento" como novo eixo.
+:::
+::: {.fragment}
+**A pergunta certa deixa de ser** "o que este Pedido **é**?" **e passa a ser** "qual estratégia de pagamento este Pedido usa?"
+:::
+
+:::
+
+# O Padrão Strategy: Composição, Delegação e o Princípio Aberto/Fechado
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Desmembramos o comportamento financeiro do `Pedido`, transformando o processamento de pagamentos num componente modular. O `Pedido` deixa de ser "processador" para atuar como orquestrador, delegando o trabalho especializado.
+
+**Definindo a fronteira do contrato.**
+
+```java
+// O contrato que define o que uma estrategia de pagamento deve fazer
+public interface Pagavel {
+    boolean processarPagamento(double valorBase);
+}
+
+// Implementacoes concretas, especialistas independentes
+public class PagamentoPix implements Pagavel { /* ... */ }
+public class PagamentoCartao implements Pagavel { /* ... */ }
+```
+
+O `Pedido` conversa única e exclusivamente com a abstração `Pagavel` — não importa o que acontece dentro de `processarPagamento()`, ele confia apenas no contrato. Note que reaproveitamos deliberadamente `Pagavel`, `Pix`, `Cartao` e `Boleto`, os mesmos nomes das Aulas 8–9 — lá, essas classes eram subclasses de `MeioPagamentoBase`; aqui, elas são implementações independentes da mesma interface, injetadas por composição. É o mesmo domínio, resolvido de duas formas estruturalmente diferentes.
+
+**Injeção de dependência e flexibilidade dinâmica.**
+
+```java
+public class Pedido {
+    private Pagavel estrategiaPagamento;
+    private double total;
+
+    // A estrategia e injetada em tempo de execucao
+    public void setEstrategiaPagamento(Pagavel pagamento) {
+        this.estrategiaPagamento = pagamento;
+    }
+}
+```
+
+Graças ao método `set`, o usuário pode transitar do Pix para o Cartão na tela de *checkout*, e o objeto `Pedido` simplesmente troca a peça acoplada — sem ser destruído. É a solução exata para o aprisionamento estático do bloco anterior.
+
+**Execução via delegação.**
+
+```java
+public void finalizarPedido() {
+    if (this.estrategiaPagamento == null) {
+        throw new IllegalStateException("Estrategia de pagamento ausente.");
+    }
+    // Delegacao: o Pedido pede ao especialista que execute a tarefa pesada
+    boolean sucesso = this.estrategiaPagamento.processarPagamento(this.total);
+}
+```
+
+**Associação** (conhecer o objeto via referência) + **Delegação** (usar o objeto) formam a base do design moderno. Não existem mais `if`/`switch`: o roteamento é feito pela própria JVM em tempo de execução.
+
+**A topologia formal do GoF.** O padrão *Strategy* define uma família de algoritmos, encapsula cada um deles e os torna intercambiáveis, permitindo que o algoritmo varie independentemente dos clientes que o utilizam.
+
+::: {.fig-resize style="width: 72%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.0cm and 1.2cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=4.8cm, minimum height=1.1cm},
+  >=Stealth
+]
+  \node[bx, draw=icblue, fill=icblue!10] (context) {Context: \texttt{Pedido}\\\scriptsize mantém referência a Pagavel};
+  \node[bx, draw=icorange, fill=icorange!10, below=of context] (strategy) {Strategy: \texttt{Pagavel} (interface)};
+  \node[bx, draw=icred, fill=icred!10, below left=1.1cm and 0.9cm of strategy] (pix) {ConcreteStrategy\\\texttt{Pix}};
+  \node[bx, draw=icred, fill=icred!10, below=1.1cm of strategy] (cartao) {ConcreteStrategy\\\texttt{Cartao}};
+  \node[bx, draw=icred, fill=icred!10, below right=1.1cm and 0.9cm of strategy] (boleto) {ConcreteStrategy\\\texttt{Boleto}};
+  \draw[->, thick] (context) -- node[right, font=\scriptsize] {has-a} (strategy);
+  \draw[->, thick, dashed] (pix) -- (strategy);
+  \draw[->, thick, dashed] (cartao) -- (strategy);
+  \draw[->, thick, dashed] (boleto) -- (strategy);
+\end{tikzpicture}
+```
+:::
+
+- **Context (`Pedido`):** a entidade que precisa do algoritmo. Mantém uma referência isolada para a interface (*has-a*).
+- **Strategy (`Pagavel`):** a interface que estabelece o contrato comum a todos os algoritmos suportados.
+- **ConcreteStrategy (`Pix`, `Cartao`, `Boleto`):** as implementações específicas, encapsulando a complexidade real da regra de negócio.
+
+**Late Binding, revisitado.** A resolução de qual código roda — `Pix` ou `Cartao` — não existe em tempo de compilação. Em tempo de execução, a JVM consulta a *Virtual Method Table* (VTable) do objeto alocado na Heap para decidir qual implementação acionar — o mesmo mecanismo visto nas Aulas 7 e 9, agora escolhendo entre estratégias de pagamento em vez de entre subtipos de uma hierarquia.
+
+**O Princípio Aberto/Fechado (OCP) em ação.**
+
+```java
+// Novo requisito: pagamento em criptomoedas
+public class PagamentoCriptomoeda implements Pagavel {
+    public boolean processarPagamento(double valor) {
+        // logica de interacao com a blockchain
+        return true;
+    }
+}
+```
+
+Podemos adicionar Criptomoedas, *wallets* ou qualquer novo meio amanhã, apenas criando uma nova classe. A classe `Pedido` **não precisa ser alterada**, não sofre recompilação e não corre risco de quebrar o que já funciona. Este é o triunfo do design: transformar um sistema que seria um monólito crescente de `if` numa arquitetura modular, onde a expansão de requisitos é acomodada pela adição de novas peças, nunca pela destruição do que já foi construído.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Desmembrando a Lógica: Definindo a Fronteira do Contrato
+
+::: {.fragment}
+`Pedido` deixa de processar pagamentos; delega a um especialista financeiro.
+:::
+::: {.fragment}
+Extraímos os blocos do `if/else` em classes independentes e coesas.
+:::
+
+```java
+// O contrato que define o que uma estrategia de pagamento deve fazer
+public interface Pagavel {
+    boolean processarPagamento(double valorBase);
+}
+
+public class PagamentoPix implements Pagavel { /* ... */ }
+public class PagamentoCartao implements Pagavel { /* ... */ }
+```
+
+::: {.fragment}
+`Pedido` conversa só com `Pagavel` — ignorância intencional sobre o "como".
+:::
+::: {.fragment}
+**Mesmos nomes das Aulas 8–9** (`Pagavel`, `Pix`, `Cartao`, `Boleto`) — lá eram subclasses; aqui, implementações independentes injetadas por composição.
+:::
+
+## Injetando a Solução: Flexibilidade Dinâmica
+
+```java
+public class Pedido {
+    private Pagavel estrategiaPagamento;
+    private double total;
+
+    // A estrategia e injetada em tempo de execucao
+    public void setEstrategiaPagamento(Pagavel pagamento) {
+        this.estrategiaPagamento = pagamento;
+    }
+}
+```
+
+::: {.fragment}
+O `set` resolve o aprisionamento estático: trocar Pix por Cartão no checkout sem destruir o `Pedido`.
+:::
+
+## Execução via Delegação
+
+```java
+public void finalizarPedido() {
+    if (this.estrategiaPagamento == null) {
+        throw new IllegalStateException("Estrategia de pagamento ausente.");
+    }
+    // Delegacao: o Pedido pede ao especialista que execute a tarefa pesada
+    boolean sucesso = this.estrategiaPagamento.processarPagamento(this.total);
+}
+```
+
+::: {.fragment}
+**Associação** (conhecer) + **Delegação** (usar) = fim dos `if`/`switch` de roteamento.
+:::
+
+## O Padrão Strategy: Topologia GoF
+
+::: {.fig-resize style="width: 72%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=1.0cm and 1.2cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=4.8cm, minimum height=1.1cm},
+  >=Stealth
+]
+  \node[bx, draw=icblue, fill=icblue!10] (context) {Context: \texttt{Pedido}\\\scriptsize mantém referência a Pagavel};
+  \node[bx, draw=icorange, fill=icorange!10, below=of context] (strategy) {Strategy: \texttt{Pagavel} (interface)};
+  \node[bx, draw=icred, fill=icred!10, below left=1.1cm and 0.9cm of strategy] (pix) {ConcreteStrategy\\\texttt{Pix}};
+  \node[bx, draw=icred, fill=icred!10, below=1.1cm of strategy] (cartao) {ConcreteStrategy\\\texttt{Cartao}};
+  \node[bx, draw=icred, fill=icred!10, below right=1.1cm and 0.9cm of strategy] (boleto) {ConcreteStrategy\\\texttt{Boleto}};
+  \draw[->, thick] (context) -- node[right, font=\scriptsize] {has-a} (strategy);
+  \draw[->, thick, dashed] (pix) -- (strategy);
+  \draw[->, thick, dashed] (cartao) -- (strategy);
+  \draw[->, thick, dashed] (boleto) -- (strategy);
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+Context mantém referência (has-a) à Strategy; ConcreteStrategies implementam o mesmo contrato.
+:::
+::: {.fragment}
+**Late Binding revisitado:** a VTable do objeto real na Heap decide, em tempo de execução, qual `processarPagamento` roda.
+:::
+
+## O OCP em Ação: um Novo Meio de Pagamento
+
+```java
+// Novo requisito: pagamento em criptomoedas
+public class PagamentoCriptomoeda implements Pagavel {
+    public boolean processarPagamento(double valor) {
+        return true; // logica de interacao com a blockchain
+    }
+}
+```
+
+::: {.fragment}
+**Aberto para extensão:** nova classe, sem tocar em nada existente.
+:::
+::: {.fragment}
+**Fechado para modificação:** `Pedido` não muda, não recompila, não arrisca quebrar o que já funciona.
+:::
+
+:::
+
+## O Padrão Strategy e o Princípio Aberto/Fechado
+
+::: {.callout-tip}
+## Se amanhã a loja quiser aceitar pagamento via Criptomoeda, por que a resposta certa nunca deveria envolver abrir e editar o arquivo `Pedido.java`?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ Se o Contexto (`Pedido`) precisasse verificar, com um `if`, se a estratégia injetada é uma instância de `Pix` antes de chamar `processarPagamento()`, isso indicaria que o padrão Strategy não foi implementado corretamente.
+- □ Se a interface `Pagavel` não existisse e o `Pedido` dependesse diretamente da classe concreta `Pix`, ainda seria possível trocar a estratégia de pagamento em tempo de execução sem modificar o código de `Pedido`.
+- □ Um sistema de notificações que aceita diferentes canais (`EmailNotificador`, `SmsNotificador`, `PushNotificador`) implementando uma interface comum `Notificador`, injetada no objeto que dispara os alertas, segue a mesma topologia Context/Strategy/ConcreteStrategy vista no pagamento.
+- □ O Princípio Aberto/Fechado exige que uma classe nunca seja modificada depois de escrita, mesmo para corrigir um bug real dentro de sua própria lógica interna.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Padrão Strategy e o OCP — Resposta
+
+::: {.callout-tip}
+## Por que não editar `Pedido.java` — Resposta
+
+- ✔ Se o Contexto precisasse verificar, com um `if`, se a estratégia é uma instância de `Pix` antes de chamar `processarPagamento()`, isso indicaria que o Strategy não foi implementado corretamente — o Contexto deveria confiar cegamente no contrato, nunca inspecionar o tipo concreto.
+- ✗ Se `Pagavel` não existisse e `Pedido` dependesse diretamente de `Pix`, ainda seria possível trocar a estratégia em tempo de execução sem modificar `Pedido` — sem a interface, `Pedido` estaria acoplado à classe concreta, e qualquer novo meio de pagamento exigiria editar `Pedido` para conhecer a classe nova.
+- ✔ Um sistema de notificações com `EmailNotificador`/`SmsNotificador`/`PushNotificador` implementando `Notificador`, injetada no objeto que dispara alertas, segue a mesma topologia Context/Strategy/ConcreteStrategy — mesmo padrão estrutural, domínio diferente.
+- ✗ O OCP exige que uma classe nunca seja modificada depois de escrita, mesmo para corrigir um bug real em sua própria lógica interna — o OCP é sobre **extensão de comportamento variável** (novos meios de pagamento), não uma proibição absoluta de qualquer edição; corrigir um bug na orquestração de `Pedido` é manutenção legítima, diferente de alterá-lo toda vez que um novo meio de pagamento surge.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** porque `Pedido` só conhece a abstração `Pagavel`. Uma nova classe `PagamentoCriptomoeda` implementando esse contrato basta — nenhuma linha de `Pedido.java` precisa mudar, e o sistema não corre o risco de quebrar Pix, Cartão ou Boleto no processo.
+:::
+
+:::
+
+# Conclusão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando às quatro perguntas da abertura:
+
+1. **Quando um objeto precisa "ser" duas coisas ortogonais:** a herança fracassa, porque força uma prioridade hierárquica entre eixos de variação que, no negócio real, são independentes — o resultado é a explosão combinatória.
+2. **Por que Java proíbe herdar de duas classes:** para evitar o Problema do Diamante — ambiguidades de método e de estado que surgiriam se duas superclasses trouxessem definições conflitantes. A proibição não é capricho; é a linguagem recusando resolver uma ambiguidade que ela não pode resolver com segurança.
+3. **O que substitui a herança para eixos independentes:** a composição — "usar um" (delegar a um especialista via interface, substituível em tempo de execução) em vez de "ser um" (fundir estruturas permanentemente em tempo de compilação).
+4. **Como eliminar o labirinto de `if/else`:** o padrão Strategy — uma interface (`Pagavel`), implementações intercambiáveis injetadas por composição, e delegação pura, entregando o Princípio Aberto/Fechado na prática.
+
+Vocês deixaram de enxergar o software como uma taxonomia biológica (herança) e passaram a compreendê-lo como um sistema de engrenagens intercambiáveis (composição e contratos). Com as regras de negócio delegadas ao padrão correto, `Pedido` voltou a ser leve, focado e coeso.
+
+### Ponte para a Aula 11 {.unnumbered}
+
+O padrão Strategy que construímos hoje é um representante concreto de uma família maior: os **Padrões de Projeto** (*Design Patterns*), catalogados pelo *Gang of Four* em 1994. A Aula 11 dá um passo atrás para ver o quadro completo: de onde vem esse vocabulário (a inspiração na arquitetura civil de Christopher Alexander), o que um padrão de projeto **não** é (não é *framework*, não é algoritmo estrutural, não cura código procedural), e como os 23 padrões originais se organizam em três famílias — Criação, Estrutural e Comportamento — cada uma respondendo a um tipo diferente de problema arquitetural. O Strategy que vocês acabaram de dominar é o primeiro exemplo real de um padrão comportamental; a Aula 11 mostra onde ele se encaixa entre os outros 22.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos
+
+1. A fusão estrutural do `extends` tem custo: acoplamento rígido, peso físico na Heap
+2. Eixos independentes de variação colapsam a herança pura em explosão combinatória — e Java fecha até a saída de herança múltipla (Diamante)
+3. Composição (*has-a*) troca identidade fixa por orquestração dinâmica — Agregação, Associação, Especialista da Informação
+4. O padrão Strategy resolve o labirinto de `if/else` com uma interface, injeção de dependência e delegação — o OCP na prática
+
+::: {.fragment}
+**Próxima aula:** o vocabulário geral de Padrões de Projeto — origem histórica, o marco GoF, e as três famílias (Criação/Estrutural/Comportamento) vistas de cima.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. **(Explosão Combinatória)** Considere um sistema modelado por herança pura que precisa combinar dois eixos de variação independentes, cada um com duas opções (por exemplo, Logística: Físico/Digital; Fiscalidade: Nacional/Importado). Demonstre por que o número de subclasses-folha necessárias cresce da forma que cresce, e explique com precisão por que a proibição de herança múltipla de classes em Java não seria suficiente para resolver esse problema mesmo se ela não existisse — ou seja, mesmo que Java permitisse `class FisicoImportado extends ProdutoFisico, ProdutoImportado`, que outro problema estrutural continuaria existindo?
+
+2. **(Identidade vs. Papel)** Explique por que modelar os meios de pagamento de um `Pedido` através de subclasses (`PedidoPix`, `PedidoCartao`) confunde os conceitos de identidade e papel. Descreva, com precisão técnica, a falha concreta que ocorre na memória quando o cliente decide trocar de meio de pagamento no último segundo do fluxo de checkout, e explique por que essa falha não ocorre na solução por composição/Strategy.
+
+3. **(Topologia do Strategy e o OCP)** Mapeie a topologia formal do padrão Strategy (Context, Strategy, ConcreteStrategy) para as classes do e-commerce discutidas em aula (`Pedido`, `Pagavel`, `Pix`/`Cartao`/`Boleto`). Em seguida, demonstre como a introdução de uma nova estratégia, `PagamentoCriptomoeda`, comprova que o sistema está "aberto para extensão e fechado para modificação" — identificando exatamente qual arquivo não precisa ser tocado e por quê.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-note icon=false}
+## Fusão Estrutural e o Custo da Herança de Estado
+
+- □ Se uma subclasse não acessa nenhum atributo `protected` herdado do pai, ainda assim ela carrega esses atributos fisicamente alocados na Heap para cada instância criada.
+- □ Herdar de uma classe unicamente para reutilizar métodos prontos, sem que exista uma relação de identidade real entre as duas classes, reduz o acoplamento do sistema porque elimina duplicação de código.
+- □ Se `PedidoInternacional` dependesse de `Pedido` por composição em vez de herança, uma mudança no formato interno de armazenamento de itens dentro de `Pedido` teria maior chance de permanecer invisível para `PedidoInternacional`, contanto que a interface pública de `Pedido` não mudasse.
+- □ Um sistema de RH que cria `FuncionarioTerceirizado` estendendo `Funcionario` apenas para reaproveitar o método `calcularHorasTrabalhadas()`, sem que o terceirizado deva ser tratado polimorficamente como um `Funcionario` em folha de pagamento, comete o mesmo erro semântico do `PedidoInternacional`.
+:::
+
+::: {.callout-note icon=false}
+## O Peso Físico na Heap: a Subclasse Gorda
+
+- □ Uma classe `ArquivoDeVideo` que estende uma classe base `ArquivoDeMidia` contendo o atributo `duracaoDeExibicaoEmSala` (relevante só para filmes de cinema) carregaria esse atributo desperdiçado em cada instância, mesmo sendo um vídeo doméstico.
+- □ Se uma classe base abstrata não declarar nenhum atributo próprio, apenas métodos abstratos, suas subclasses não sofrem o fenômeno da Subclasse Gorda relacionado a esses atributos, mesmo herdando de uma hierarquia profunda.
+- □ O desperdício de memória da Subclasse Gorda é resolvido simplesmente tornando os atributos da classe base `private` em vez de `protected`, já que isso impede o acesso indevido por parte das subclasses.
+- □ Se `pesoFisico` e `dimensoesPacote` fossem movidos de `ProdutoBase` para uma classe `DadosLogisticosFisicos` usada por composição apenas nos produtos que realmente precisam de envio físico, um `Ebook` deixaria de alocar espaço para esses dois atributos.
+:::
+
+::: {.callout-note icon=false}
+## Explosão Combinatória e Eixos Ortogonais
+
+- □ Em uma hierarquia de herança pura que já modela três eixos binários de variação independentes (totalizando 8 subclasses-folha), a adição de um quarto eixo binário eleva esse número para 16.
+- □ A explosão combinatória só ocorre quando os eixos de variação envolvidos são eixos técnicos de infraestrutura (como logística); eixos puramente de regra de negócio, como categorias promocionais, não geram o mesmo efeito.
+- □ Um sistema de seguros que precisa combinar Tipo de Veículo (Carro/Moto) com Perfil de Risco (Baixo/Alto) através de subclasses como `CarroBaixoRisco` e `MotoAltoRisco` está sujeito ao mesmo padrão de explosão combinatória visto no e-commerce.
+- □ Se dois eixos de variação de um sistema não forem realmente independentes — por exemplo, se todo produto Importado for necessariamente Físico por regra de negócio —, modelar essa relação por herança direta (`ImportadoFisico extends ProdutoFisico`) não gera o mesmo problema de explosão combinatória.
+:::
+
+::: {.callout-note icon=false}
+## A Proibição da Herança Múltipla em Java (Diamante)
+
+- □ Mesmo que duas superclasses candidatas a uma herança múltipla não compartilhem nenhum método com o mesmo nome, ainda pode haver ambiguidade se ambas herdarem, por caminhos diferentes, de uma mesma superclasse comum mais alta na árvore.
+- □ Java resolve completamente o Problema do Diamante ao permitir que uma classe implemente múltiplas interfaces, porque interfaces nunca podem gerar nenhum tipo de conflito entre implementações.
+- □ Se Java permitisse `class FisicoImportado extends ProdutoFisico, ProdutoImportado`, e as duas superclasses declarassem um atributo `protected` com o mesmo nome mas valores diferentes, o compilador precisaria de alguma regra de desempate para decidir qual valor prevalece em cada acesso.
+- □ A ausência de herança múltipla de classes em Java é a razão fundamental pela qual a linguagem introduziu métodos `default` em interfaces, permitindo simular parte do reaproveitamento de comportamento sem os riscos de ambiguidade de estado.
+:::
+
+::: {.callout-note icon=false}
+## Composição, Agregação e Associação
+
+- □ Se o objeto "Todo" de uma relação de Agregação for destruído, mas os objetos "Parte" continuarem acessíveis e utilizáveis por outras partes do sistema, essa é uma evidência de que a relação realmente era uma Agregação, e não uma Composição estrita.
+- □ Se um `CartaoDeCredito` só pudesse ser instanciado a partir de um `Cliente` já existente e fosse automaticamente destruído quando esse `Cliente` fosse removido do sistema, a relação entre eles deixaria de se encaixar na definição de Associação apresentada na aula.
+- □ Toda relação de composição de objetos em que um objeto guarda uma referência a outro deve, por definição, ser classificada como Agregação, nunca como Associação.
+- □ Uma classe `Equipe` que mantém uma lista de `Jogador`, onde os jogadores continuam existindo no sistema (podem ser transferidos para outra equipe) mesmo se a `Equipe` for extinta, é um exemplo de Agregação e não de Composição estrita.
+:::
+
+::: {.callout-note icon=false}
+## Quase-Decomponibilidade e Sistemas Modulares
+
+- □ Segundo a teoria de Herbert Simon, um sistema perfeitamente decomponível — onde não existe absolutamente nenhuma dependência entre os subsistemas — ainda seria considerado estável e evolutivo, mesmo sem nenhuma coesão interna em cada peça.
+- □ Um monólito de software onde módulos de autenticação, pagamento e notificação compartilham as mesmas variáveis globais e estruturas de dados internas viola o princípio de quase-decomponibilidade, mesmo que a interface externa do sistema pareça organizada em módulos.
+- □ Se a API dos Correios mudasse e o sistema estivesse estruturado por herança (`Pedido` estendendo uma classe `LogisticaCorreios`), a substituição da lógica de logística exigiria uma intervenção estruturalmente mais invasiva do que se o sistema estivesse estruturado por composição.
+- □ A resiliência de um sistema modular decorre exclusivamente do número de classes em que ele foi dividido, independentemente de como essas classes se comunicam entre si.
+:::
+
+::: {.callout-note icon=false}
+## Identidade vs. Papel: a Falha da Herança no Checkout
+
+- □ Se um sistema garantisse que o meio de pagamento de um `Pedido` nunca muda depois de criado (é definido uma única vez, na instanciação, e nunca mais alterado), o problema do aprisionamento estático deixaria de ser um argumento decisivo contra modelar `PedidoPix` como subclasse de `Pedido`.
+- □ Colocar toda a lógica de processamento de Pix, Cartão e Boleto dentro de um único método `processarPagamento()` do `Pedido`, usando `if/else`, melhora a coesão do sistema porque centraliza toda a responsabilidade de pagamento em um único lugar.
+- □ Um sistema de streaming que cria classes `AssinaturaMensal extends Usuario` e `AssinaturaAnual extends Usuario` para representar o plano de cobrança atual do usuário comete o mesmo erro de confundir identidade com papel visto no `PedidoPix`.
+- □ Se o meio de pagamento de um `Pedido` fosse tratado como um papel (uma referência substituível) em vez de uma identidade fixada por herança, um cliente poderia trocar de Pix para Cartão no último segundo do checkout sem que o objeto `Pedido` precisasse ser recriado.
+:::
+
+::: {.callout-note icon=false}
+## O Padrão Strategy e o Princípio Aberto/Fechado
+
+- □ Se uma única implementação concreta de `Pagavel` existisse no sistema (por exemplo, apenas `Pix`), o padrão Strategy ainda traria benefício arquitetural relevante, mesmo sem nenhuma estratégia alternativa em uso.
+- □ Se o `Pedido` chamasse diretamente `new Pix()` dentro do método `processarPagamento()`, em vez de receber uma instância de `Pagavel` injetada, adicionar um novo meio de pagamento ainda seria possível sem modificar a classe `Pedido`.
+- □ O Princípio Aberto/Fechado, quando aplicado ao Strategy, significa que a classe `Pedido` nunca mais poderá ser modificada por nenhum motivo, incluindo correção de bugs em sua própria lógica de orquestração.
+- □ Um sistema de cálculo de frete que aceita diferentes transportadoras (Correios, Transportadora Privada, Retirada em Loja) através de uma interface comum `CalculadoraFrete`, injetada no objeto `Pedido`, aplica a mesma topologia Context/Strategy/ConcreteStrategy vista no processamento de pagamento.
+:::
+
+:::

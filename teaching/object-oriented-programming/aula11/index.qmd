@@ -1,0 +1,1302 @@
+---
+title: "Padrões de Projeto: Vocabulário, Imutabilidade e a Gênese Segura do Objeto"
+subtitle: "Aula 11 — Programação Orientada a Objetos"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: today
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    output-file: notas.html
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+# Proposta da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Na Aula 10, a Composição nos deu uma saída estrutural para o colapso da Herança: em vez de um objeto forçado a *ser* várias coisas ortogonais ao mesmo tempo, ele passou a *usar* especialistas intercambiáveis. Batizamos essa solução — interface, injeção de dependência, delegação — de padrão **Strategy**. Mas o Strategy não caiu do céu: ele é um representante de uma família de 23 soluções catalogadas, cada uma nomeada, documentada e testada por décadas de prática. Antes de continuar empilhando padrões novos, vale dar um passo atrás e entender o mapa completo — de onde vem esse vocabulário, o que ele explicitamente não é, e como os 23 padrões se organizam em famílias.
+
+Com o mapa em mãos, esta aula ataca um problema que o Strategy não resolveu: mesmo com o comportamento de pagamento desacoplado, o `Pedido` ainda pode nascer incompleto, com um total inconsistente, ou carregando um valor monetário que qualquer parte do sistema pode corromper "pelas costas". Se a Aula 10 resolveu *como o objeto se comporta*, esta aula resolve *como o dado é protegido* e *como o objeto nasce em segurança*.
+
+**O roteiro, em quatro perguntas:**
+
+1. De onde vêm os Padrões de Projeto, e por que o vocabulário sozinho já vale a pena aprender, antes mesmo de dominar cada padrão em profundidade?
+2. Por que compartilhar uma referência para um objeto mutável é uma bomba-relógio silenciosa na Heap — e o que muda se esse objeto simplesmente não puder mudar?
+3. Quando a lista de parâmetros de um construtor vira um labirinto de posições, quem deveria assumir a responsabilidade de montar o objeto corretamente?
+4. Se o operador `new` é "a cola mais forte do código", como um sistema decide *qual* classe concreta instanciar sem que o código cliente precise saber?
+
+Considere o `Pedido` do nosso e-commerce, já purificado pelo Strategy na Aula 10. Ele ainda tem um `valorTotal` guardado como `double` mutável, um construtor que aceita cliente, itens, desconto e uma flag de urgência em qualquer ordem, e uma lógica de notificação de status espalhada por vários pontos do sistema. É esse `Pedido`, quase pronto mas ainda frágil em três pontos precisos, que os próximos blocos blindam.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+**Aula 10** resolveu *como o objeto se comporta* — o padrão Strategy trocou o `if/else` de pagamento por uma interface injetável.
+
+::: {.fragment}
+O Strategy não foi um golpe de sorte: é **um** representante de uma família de **23 soluções catalogadas** e nomeadas.
+:::
+
+::: {.fragment}
+Hoje resolvemos *como o dado é protegido* e *como o objeto nasce em segurança* — problemas que o Strategy não tocou.
+:::
+
+::: {.fragment}
+**Roteiro:** o vocabulário dos padrões → o perigo da mutabilidade → o Value Object → construção segura com Builder → Factory Method e DIP.
+:::
+
+:::
+
+# O Vocabulário dos Padrões de Projeto
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**A origem: da construção civil ao software.** Nos anos 1970, o arquiteto civil Christopher Alexander publicou *A Pattern Language*, catalogando topologias recorrentes em construções urbanas bem-sucedidas — como iluminar cômodos, como estruturar praças. Alexander notou que construções bem-sucedidas seguiam topologias de design recorrentes; a comunidade de software percebeu, décadas depois, que sistemas resilientes compartilhavam o mesmo fenômeno. Assim como a engenharia civil não reinventa o formato de uma porta a cada casa nova, a engenharia de software não deveria reinventar a forma de orquestrar objetos dependentes a cada sistema novo.
+
+O marco zero dessa disciplina na computação ocorreu em 1994, com a publicação de *Design Patterns: Elements of Reusable Object-Oriented Software*, escrito pelo grupo conhecido como *Gang of Four* (GoF): Gamma, Helm, Johnson e Vlissides. Eles catalogaram 23 padrões originais que, ainda hoje, formam o vocabulário básico da arquitetura de software moderna. Curiosamente, a esmagadora maioria desses 23 padrões se apoia em apenas dois pilares técnicos, ambos já dominados por vocês: a **Composição** e o **Polimorfismo**.
+
+**Definição formal.** Um Padrão de Projeto é uma solução arquitetural testada e documentada para um problema recorrente no design de software orientado a objetos. A natureza do padrão é importante: ele não é uma biblioteca de código nem um trecho pronto para copiar e colar — é um gabarito, um *template* conceitual que orienta *como* resolver uma classe de problemas, descrevendo as peças envolvidas (classes/interfaces), suas responsabilidades e a topologia das mensagens trocadas entre elas.
+
+**O que os Padrões de Projeto explicitamente NÃO são.** Para evitar erros de aplicação, é preciso delimitar a fronteira do conceito:
+
+- **Não são *frameworks*:** um *framework* (como Spring ou React) chama o seu código — o controle de fluxo pertence a ele. Um Padrão de Projeto é uma organização que *você* dá ao seu próprio código; o controle de fluxo continua seu.
+- **Não são algoritmos estruturais:** eles não resolvem problemas de ordenação, criptografia ou busca (como *QuickSort* ou *Hash*). Eles resolvem problemas de **acoplamento** e **coesão** — a topologia das classes, não a eficiência de um cálculo.
+- **Não curam código procedural:** um Padrão de Projeto pressupõe que você já compreende encapsulamento e troca de mensagens. Aplicar um padrão sobre um sistema de variáveis globais e funções soltas apenas mascara o problema — não o resolve.
+
+**A força oculta: o vocabulário como linguagem ubíqua.** O maior benefício prático dos padrões no mercado de trabalho não é apenas a estrutura que eles impõem — é a densidade de comunicação que eles habilitam. Em vez de um engenheiro sênior dizer "crie uma interface comum para essas variações, isole a execução e injete a instância no construtor do orquestrador", ele apenas diz: **"implemente um Strategy aqui."** Padrões de Projeto são a linguagem universal dos arquitetos de software — condensam horas de debate estrutural numa única palavra.
+
+**As três famílias.** O GoF organizou os 23 padrões em três categorias estritas, baseadas no propósito arquitetural de cada um:
+
+1. **Padrões de Comportamento:** o foco é a comunicação — como os objetos interagem e distribuem obrigações no tempo, permitindo que o fluxo de chamadas mude dinamicamente. O Strategy, que acabamos de dominar na Aula 10, é o exemplo canônico: encapsula "o quê" fazer, permitindo trocar "como" fazer de forma transparente. Outros representantes: *Observer* (inversão do fluxo via notificação de eventos), *State* (transição de estados internos — a Aula 12 mostra por que ele parece o Strategy e não é), *Command* (encapsulamento de requisições).
+2. **Padrões Estruturais:** o foco é a topologia — como objetos e classes se compõem para formar estruturas maiores e flexíveis, sem que as fronteiras se tornem rígidas. Exemplos: *Adapter* (harmoniza duas interfaces incompatíveis, essencial para integrar bibliotecas legadas ou APIs de terceiros como um *gateway* de frete externo), *Decorator* (adiciona responsabilidades a um objeto individual dinamicamente, alternativa flexível à herança estática).
+3. **Padrões de Criação:** o foco é a gênese — como isolar a complexidade do operador `new` e gerenciar o ciclo de vida na Heap. O paradoxo que os motiva: já vimos que garantir Fail-Fast e preservar invariantes é vital (Aula 2), mas quem executa essa validação complexa? Espalhar `new` pelo sistema acopla a regra de negócio à alocação de memória e à minúcia de inicialização de cada classe concreta. O objetivo criacional é centralizar essa lógica: o sistema pede um objeto, e a fábrica entrega pronto e validado. É exatamente esta família — Value Object (proteção do dado), Builder e Factory Method (proteção da gênese) — que o restante desta aula constrói.
+
+::: {.fig-resize style="width: 88%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=0.55cm and 0.9cm,
+  root/.style={draw, rectangle, rounded corners, align=center, font=\small\bfseries, minimum width=6.6cm, minimum height=1.0cm, draw=black, fill=black!5},
+  fam/.style={draw, rectangle, rounded corners, align=center, font=\small\bfseries, minimum width=4.0cm, minimum height=1.0cm},
+  ex/.style={draw, rectangle, rounded corners, align=center, font=\scriptsize, minimum width=4.0cm, minimum height=0.75cm},
+  >=Stealth
+]
+  \node[root] (gof) {Padrões de Projeto (GoF, 1994)\\\scriptsize 23 padrões — Composição + Polimorfismo};
+  \node[fam, draw=icorange, fill=icorange!10, below left=1.1cm and 0.3cm of gof] (comp) {Comportamento\\\scriptsize foco: comunicação no tempo};
+  \node[fam, draw=icblue, fill=icblue!10, below=1.1cm of gof] (estr) {Estrutural\\\scriptsize foco: topologia};
+  \node[fam, draw=icred, fill=icred!10, below right=1.1cm and 0.3cm of gof] (cria) {Criação\\\scriptsize foco: gênese};
+  \node[ex, draw=icorange, below=0.45cm of comp] (compex) {Strategy (Aula 10)\\State (Aula 12), Observer, Command};
+  \node[ex, draw=icblue, below=0.45cm of estr] (estrex) {Adapter, Decorator};
+  \node[ex, draw=icred, below=0.45cm of cria] (criaex) {Value Object, Builder,\\Factory Method (Aula 11)};
+  \draw[->, thick] (gof) -- (comp);
+  \draw[->, thick] (gof) -- (estr);
+  \draw[->, thick] (gof) -- (cria);
+  \draw[->, thick, dashed] (comp) -- (compex);
+  \draw[->, thick, dashed] (estr) -- (estrex);
+  \draw[->, thick, dashed] (cria) -- (criaex);
+\end{tikzpicture}
+```
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Origem: da Construção Civil ao Software
+
+::: {.fragment}
+Anos 1970: Christopher Alexander, *A Pattern Language* — catalogou topologias urbanas/arquitetônicas recorrentes.
+:::
+::: {.fragment}
+Engenharia civil não reinventa o formato de uma porta a cada casa; engenharia de software não deveria reinventar como orquestrar objetos dependentes a cada sistema.
+:::
+
+## O Marco Zero: o *Gang of Four* (1994)
+
+::: {.fragment}
+Gamma, Helm, Johnson e Vlissides — *Design Patterns: Elements of Reusable Object-Oriented Software*.
+:::
+::: {.fragment}
+23 padrões catalogados, ainda hoje o vocabulário básico da arquitetura moderna.
+:::
+::: {.fragment}
+Quase todos se apoiam em só dois pilares: **Composição** e **Polimorfismo** — ambos já dominados por vocês.
+:::
+
+## O Que É um Padrão de Projeto
+
+::: {.fragment}
+Solução arquitetural testada e documentada para um problema recorrente.
+:::
+::: {.fragment}
+**Não** é código para copiar e colar — é um gabarito conceitual: as peças, as responsabilidades, a topologia das mensagens.
+:::
+
+## O Que os Padrões NÃO São
+
+::: {.fragment}
+**Não são *frameworks*:** um framework chama seu código; o padrão é a organização que *você* dá ao seu próprio código.
+:::
+::: {.fragment}
+**Não são algoritmos estruturais:** não ordenam nem buscam — resolvem acoplamento e coesão.
+:::
+::: {.fragment}
+**Não curam código procedural:** pressupõem encapsulamento já estabelecido; aplicados sobre variáveis globais, só mascaram o problema.
+:::
+
+## A Força Oculta: Vocabulário como Linguagem Ubíqua
+
+::: {.fragment}
+Em vez de "crie uma interface comum, isole a execução, injete no construtor do orquestrador"...
+:::
+::: {.fragment}
+...um engenheiro sênior diz apenas: **"implemente um Strategy aqui."**
+:::
+::: {.fragment}
+Padrões condensam horas de debate estrutural numa única palavra — a ferramenta de escala dos arquitetos.
+:::
+
+## As Três Famílias de Padrões
+
+::: {.fig-resize style="width: 88%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=0.55cm and 0.9cm,
+  root/.style={draw, rectangle, rounded corners, align=center, font=\small\bfseries, minimum width=6.6cm, minimum height=1.0cm, draw=black, fill=black!5},
+  fam/.style={draw, rectangle, rounded corners, align=center, font=\small\bfseries, minimum width=4.0cm, minimum height=1.0cm},
+  ex/.style={draw, rectangle, rounded corners, align=center, font=\scriptsize, minimum width=4.0cm, minimum height=0.75cm},
+  >=Stealth
+]
+  \node[root] (gof) {Padrões de Projeto (GoF, 1994)\\\scriptsize 23 padrões — Composição + Polimorfismo};
+  \node[fam, draw=icorange, fill=icorange!10, below left=1.1cm and 0.3cm of gof] (comp) {Comportamento\\\scriptsize foco: comunicação no tempo};
+  \node[fam, draw=icblue, fill=icblue!10, below=1.1cm of gof] (estr) {Estrutural\\\scriptsize foco: topologia};
+  \node[fam, draw=icred, fill=icred!10, below right=1.1cm and 0.3cm of gof] (cria) {Criação\\\scriptsize foco: gênese};
+  \node[ex, draw=icorange, below=0.45cm of comp] (compex) {Strategy (Aula 10)\\State (Aula 12), Observer, Command};
+  \node[ex, draw=icblue, below=0.45cm of estr] (estrex) {Adapter, Decorator};
+  \node[ex, draw=icred, below=0.45cm of cria] (criaex) {Value Object, Builder,\\Factory Method (Aula 11)};
+  \draw[->, thick] (gof) -- (comp);
+  \draw[->, thick] (gof) -- (estr);
+  \draw[->, thick] (gof) -- (cria);
+  \draw[->, thick, dashed] (comp) -- (compex);
+  \draw[->, thick, dashed] (estr) -- (estrex);
+  \draw[->, thick, dashed] (cria) -- (criaex);
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+Comportamento = comunicação no tempo (Strategy, State); Estrutural = topologia (Adapter, Decorator); Criação = gênese (Value Object, Builder, Factory Method).
+:::
+
+## O Paradoxo da Criação
+
+::: {.fragment}
+Fail-Fast e invariantes são vitais (Aula 2) — mas quem executa essa validação complexa?
+:::
+::: {.fragment}
+Espalhar `new` pelo sistema acopla negócio a alocação de memória e a minúcias de inicialização.
+:::
+::: {.fragment}
+**Objetivo criacional:** o sistema pede um objeto, a fábrica entrega pronto e validado — é isso que o resto desta aula constrói.
+:::
+
+:::
+
+## O Vocabulário dos Padrões e as Três Famílias
+
+::: {.callout-tip}
+## Se um colega descrever uma solução como "uma classe que traduz chamadas de uma biblioteca externa incompatível para o formato que meu sistema espera", a que família de padrões essa solução pertence — e por que classificá-la pela família certa importa mais do que decorar o nome "Adapter"?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ Uma solução cujo objetivo é permitir que duas interfaces incompatíveis conversem entre si, sem alterar o comportamento interno de nenhuma das duas, se classifica na família Estrutural, não na Comportamental.
+- □ Se um engenheiro aplicar rigorosamente a estrutura de classes de um Padrão de Projeto sobre um sistema que ainda usa variáveis globais e funções soltas (sem nenhum encapsulamento), o padrão resolverá o problema de coesão do sistema da mesma forma que resolveria num sistema já orientado a objetos.
+- □ Uma biblioteca como o Spring, que instancia os objetos da aplicação e invoca os métodos do desenvolvedor em momentos que ela mesma decide, exemplifica a mesma relação de controle de fluxo que um Padrão de Projeto estabelece com o código do desenvolvedor.
+- □ Dois padrões pertencentes a famílias diferentes (por exemplo, um Estrutural e um Comportamental) podem, ainda assim, ser aplicados na mesma classe simultaneamente, resolvendo problemas arquiteturais distintos e não conflitantes.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Vocabulário dos Padrões — Resposta
+
+::: {.callout-tip}
+## Classificando pela família certa — Resposta
+
+- ✔ Uma solução cujo objetivo é permitir que duas interfaces incompatíveis conversem entre si, sem alterar o comportamento interno de nenhuma das duas, se classifica na família Estrutural, não na Comportamental — o foco é a topologia da comunicação, não a distribuição de obrigações no tempo.
+- ✗ Se um engenheiro aplicar rigorosamente a estrutura de classes de um Padrão de Projeto sobre um sistema que ainda usa variáveis globais e funções soltas (sem nenhum encapsulamento), o padrão resolverá o problema de coesão do sistema da mesma forma que resolveria num sistema já orientado a objetos — padrões pressupõem encapsulamento já estabelecido; sem ele, a estrutura do padrão só mascara o problema procedural, não o resolve.
+- ✗ Uma biblioteca como o Spring, que instancia os objetos da aplicação e invoca os métodos do desenvolvedor em momentos que ela mesma decide, exemplifica a mesma relação de controle de fluxo que um Padrão de Projeto estabelece com o código do desenvolvedor — é o oposto: um framework chama o seu código (inversão de controle), enquanto um padrão é uma organização que você aplica ao seu próprio código, mantendo o controle de fluxo com você.
+- ✔ Dois padrões pertencentes a famílias diferentes (por exemplo, um Estrutural e um Comportamental) podem, ainda assim, ser aplicados na mesma classe simultaneamente, resolvendo problemas arquiteturais distintos e não conflitantes — as famílias descrevem o propósito arquitetural predominante de cada padrão, não uma exclusividade mútua entre eles numa mesma classe.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** a solução descrita é um Adapter, família Estrutural. Classificar pela família importa mais do que o nome porque o *propósito* (harmonizar topologia) é o que orienta a decisão de projeto — o nome é só a etiqueta que vem depois, útil para comunicação rápida entre engenheiros que já concordam sobre o propósito.
+:::
+
+:::
+
+# O Problema da Mutabilidade e o Fenômeno de *Aliasing*
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Com o mapa de padrões em mãos, mergulhamos no primeiro representante Criacional/de proteção de dado: o **Value Object**. Mas, antes de nomear a solução, é preciso sentir o problema — a mutabilidade é uma das maiores fontes de bugs em sistemas orientados a objetos complexos.
+
+**Efeitos colaterais e acoplamento oculto.** Quando permitimos que o estado interno de um objeto seja alterado livremente através de *setters*, criamos uma teia de dependências temporais. Se dois objetos, A e B, possuem uma referência para o mesmo objeto C, e A altera o estado de C, B pode falhar ao assumir que C ainda possui os valores originais. Esse fenômeno, conhecido como *aliasing bug*, é particularmente perigoso em sistemas *multithread* e em lógicas de negócio distribuídas, onde a ordem das operações nem sempre é garantida. A dificuldade de depurar quem e quando alterou o estado de um objeto compartilhado é o segundo custo: o rastro do bug pode estar a centenas de linhas de distância de onde o erro se manifesta.
+
+**O mecanismo, na memória.** Em Java, ao atribuir um objeto a uma nova variável, não copiamos os dados — copiamos o endereço de memória. Se o objeto apontado for mutável, qualquer detentor da referência pode alterar o estado global daquela instância:
+
+```java
+Retangulo r1 = new Retangulo(10, 20);
+Retangulo r2 = r1; // r2 NAO e uma copia, e o mesmo endereco de r1
+
+r2.setLargura(50); // Alteracao via r2...
+System.out.println(r1.getLargura()); // Imprime 50! r1 foi corrompido.
+```
+
+`r2 = r1` não cria um segundo retângulo — cria um segundo caminho até o *mesmo* retângulo na Heap. Quando `r2.setLargura(50)` executa, não existe "a largura de r2" separada de "a largura de r1": existe uma única largura, na Heap, e as duas variáveis da Stack apontam para o mesmo lugar. O compilador não avisa nada, porque, do ponto de vista da linguagem, nada de errado aconteceu — dois nomes válidos para o mesmo objeto, um deles usado para escrever. O erro é inteiramente semântico: quem escreveu `r1.getLargura()` esperava o valor 10 que nunca foi tocado por ali.
+
+**A cópia defensiva como paliativo caro.** Uma tentativa de solução é a "Cópia Defensiva" — clonar o objeto (`new Retangulo(r1)`) sempre que uma referência precisa ser compartilhada sem risco. Isso funciona, mas tem custo real: sobrecarrega o *Garbage Collector* com objetos descartáveis e polui o código com lógica de clonagem repetida em toda fronteira do sistema. É um remédio que trata o sintoma (uma cópia por vez), não a causa (o objeto pode ser mutado por qualquer um que o segure).
+
+::: {.fig-resize style="width: 92%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=0.5cm and 1.0cm,
+  stk/.style={draw, rectangle, align=center, font=\scriptsize, minimum width=2.1cm, minimum height=0.7cm},
+  hp/.style={draw, rectangle, rounded corners, align=center, font=\small},
+  hdr/.style={font=\small\bfseries},
+  >=Stealth
+]
+  % Coluna mutavel (aliasing)
+  \node[hdr, icred] (hM) {Mutável — Aliasing};
+  \node[stk, draw=icblue, fill=icblue!10, below=0.5cm of hM] (r1) {Stack: r1};
+  \node[stk, draw=icblue, fill=icblue!10, below=0.15cm of r1] (r2) {Stack: r2};
+  \node[hp, draw=icred, fill=icred!10, right=1.6cm of r1, yshift=-0.4cm, minimum width=4.2cm, minimum height=1.4cm] (heapM) {Heap: Retangulo\\\scriptsize largura=50 (era 10), altura=20};
+  \draw[->, thick] (r1) -- (heapM);
+  \draw[->, thick] (r2) -- (heapM);
+  \node[font=\scriptsize, text=icred, below=0.2cm of heapM] {r2.setLargura(50) corrompeu r1};
+
+  % Coluna imutavel (Value Object)
+  \node[hdr, icblue, right=4.6cm of hM] (hV) {Imutável — Value Object};
+  \node[stk, draw=icblue, fill=icblue!10, below=0.5cm of hV] (d1) {Stack: d1};
+  \node[stk, draw=icblue, fill=icblue!10, below=0.15cm of d1] (d2) {Stack: d2};
+  \node[hp, draw=icblue, fill=icblue!10, right=1.6cm of d1, minimum width=4.0cm, minimum height=0.9cm] (heapD1) {Heap: Dinheiro\\\scriptsize quantia=10, moeda=BRL};
+  \node[hp, draw=icorange, fill=icorange!10, below=0.55cm of heapD1, minimum width=4.0cm, minimum height=0.9cm] (heapD2) {Heap: Dinheiro (novo)\\\scriptsize quantia=20, moeda=BRL};
+  \draw[->, thick] (d1) -- (heapD1);
+  \draw[->, thick] (d2) -- (heapD2);
+  \node[font=\scriptsize, text=icblue, below=0.2cm of heapD2] {d2 = d1.somar(10): d1 intacto, d2 aponta para instância NOVA};
+\end{tikzpicture}
+```
+:::
+
+O painel da esquerda mostra o cenário do `Retangulo`: duas referências, um único objeto mutável, uma mutação que corrompe as duas visões. O painel da direita antecipa a solução deste bloco: se o objeto simplesmente não permitir mutação, `d2 = d1.somar(10)` não pode "corromper" `d1` — o único jeito de obter um valor diferente é criar uma instância nova, deixando a antiga intocada. É essa garantia estrutural que o Value Object formaliza a seguir.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Fragilidade do Estado Mutável
+
+::: {.fragment}
+Efeitos colaterais: alterar um atributo aqui reverbera em comportamento inesperado ali.
+:::
+::: {.fragment}
+Acoplamento oculto: objetos que compartilham referência para o mesmo dado mutável na Heap.
+:::
+::: {.fragment}
+Se A e B referenciam o mesmo C, e A altera C, B pode assumir (erradamente) que C não mudou — o **aliasing bug**.
+:::
+
+## O Perigo na Prática: `Retangulo`
+
+```java
+Retangulo r1 = new Retangulo(10, 20);
+Retangulo r2 = r1; // r2 NAO e uma copia, e o mesmo endereco de r1
+
+r2.setLargura(50); // Alteracao via r2...
+System.out.println(r1.getLargura()); // Imprime 50! r1 foi corrompido.
+```
+
+::: {.fragment}
+`r2 = r1` não copia dados — copia o **endereço**. Um único objeto na Heap, duas portas de entrada na Stack.
+:::
+::: {.fragment}
+O compilador não avisa nada: do ponto de vista da linguagem, nada de errado aconteceu.
+:::
+
+## A Cópia Defensiva: Remédio Caro
+
+::: {.fragment}
+Clonar (`new Retangulo(r1)`) antes de compartilhar evita a corrupção — mas tem custo real.
+:::
+::: {.fragment}
+Sobrecarrega o Garbage Collector; polui o código com lógica de clonagem em toda fronteira.
+:::
+::: {.fragment}
+Trata o sintoma (uma cópia por vez), não a causa (o objeto ainda pode ser mutado por qualquer um).
+:::
+
+## Aliasing na Memória: Mutável vs. Imutável
+
+::: {.fig-resize style="width: 92%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=0.5cm and 1.0cm,
+  stk/.style={draw, rectangle, align=center, font=\scriptsize, minimum width=2.1cm, minimum height=0.7cm},
+  hp/.style={draw, rectangle, rounded corners, align=center, font=\small},
+  hdr/.style={font=\small\bfseries},
+  >=Stealth
+]
+  \node[hdr, icred] (hM) {Mutável — Aliasing};
+  \node[stk, draw=icblue, fill=icblue!10, below=0.5cm of hM] (r1) {Stack: r1};
+  \node[stk, draw=icblue, fill=icblue!10, below=0.15cm of r1] (r2) {Stack: r2};
+  \node[hp, draw=icred, fill=icred!10, right=1.6cm of r1, yshift=-0.4cm, minimum width=4.2cm, minimum height=1.4cm] (heapM) {Heap: Retangulo\\\scriptsize largura=50 (era 10), altura=20};
+  \draw[->, thick] (r1) -- (heapM);
+  \draw[->, thick] (r2) -- (heapM);
+  \node[font=\scriptsize, text=icred, below=0.2cm of heapM] {r2.setLargura(50) corrompeu r1};
+
+  \node[hdr, icblue, right=4.6cm of hM] (hV) {Imutável — Value Object};
+  \node[stk, draw=icblue, fill=icblue!10, below=0.5cm of hV] (d1) {Stack: d1};
+  \node[stk, draw=icblue, fill=icblue!10, below=0.15cm of d1] (d2) {Stack: d2};
+  \node[hp, draw=icblue, fill=icblue!10, right=1.6cm of d1, minimum width=4.0cm, minimum height=0.9cm] (heapD1) {Heap: Dinheiro\\\scriptsize quantia=10, moeda=BRL};
+  \node[hp, draw=icorange, fill=icorange!10, below=0.55cm of heapD1, minimum width=4.0cm, minimum height=0.9cm] (heapD2) {Heap: Dinheiro (novo)\\\scriptsize quantia=20, moeda=BRL};
+  \draw[->, thick] (d1) -- (heapD1);
+  \draw[->, thick] (d2) -- (heapD2);
+  \node[font=\scriptsize, text=icblue, below=0.2cm of heapD2] {d2 = d1.somar(10): d1 intacto, d2 é instância NOVA};
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+Se o objeto não permite mutação, a única forma de obter um valor diferente é criar uma instância nova — a antiga fica sempre intocada.
+:::
+
+:::
+
+# O Padrão Value Object
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Entidade: identidade persistente, natureza mutável.** Nem todo objeto do sistema deveria virar um Value Object. Uma **Entidade** é definida por um identificador único (ID, CPF, RA) que não muda, independentemente das alterações nos seus outros atributos — e é natural que uma entidade mude de estado ao longo do tempo. No contexto acadêmico, um `Aluno` é definido pelo seu RA; se ele muda de curso, o objeto é atualizado (mutação controlada), mas continua sendo o mesmo aluno. Dois objetos são a mesma entidade se possuírem o mesmo ID, mesmo que todos os outros campos sejam diferentes.
+
+```java
+public class Aluno {
+    private final String ra;  // Identidade imutavel
+    private String curso;     // Atributo mutavel
+
+    public Aluno(String ra, String curso) {
+        this.ra = ra;
+        this.curso = curso;
+    }
+
+    public void transferirCurso(String novoCurso) {
+        this.curso = novoCurso;  // Mutacao controlada
+    }
+}
+```
+
+Por serem inerentemente mutáveis, entidades são onde o estado do sistema reside — exigindo cuidado redobrado com a encapsulação para que essa mutação nunca ocorra de forma descontrolada (todo o arsenal de Fail-Fast, CQS e invariantes da Aula 2 continua valendo aqui, sem exceção).
+
+**Value Object: identidade por atributo, imutabilidade absoluta.** O **Value Object** (VO) é a resposta direta ao problema de *aliasing* do bloco anterior. Enquanto na Entidade nos importa "quem" é o objeto, no VO nos importa apenas "o quê" ele representa — se você tem duas notas de 50 reais, não importa qual delas você usa, o valor é o que conta.
+
+- **Identidade por atributo:** o VO não possui ID. Ele *é* o conjunto dos seus valores; se um valor muda, o objeto deixa de existir e surge um novo.
+- **Imutabilidade absoluta:** uma vez criado, seu estado nunca muda — a proteção definitiva contra efeitos colaterais na Heap.
+- **Substituibilidade:** dois VOs são iguais se seu conteúdo for idêntico (`equals()` baseado em campos, nunca em referência).
+- **Semântica rica:** substitui tipos primitivos genéricos por conceitos de domínio — em vez de `double`, usamos `Dinheiro`.
+
+```java
+public final class Dinheiro {
+    private final double quantia;
+    private final String moeda;
+
+    public Dinheiro(double quantia, String moeda) {
+        if (quantia < 0) throw new IllegalArgumentException("Quantia negativa");
+        this.quantia = quantia;
+        this.moeda = moeda;
+    }
+
+    public Dinheiro somar(double delta) {
+        // Retorna uma NOVA instancia — a original nunca e alterada
+        return new Dinheiro(this.quantia + delta, this.moeda);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        // Comparacao por valor, nao por referencia
+        if (this == o) return true;
+        if (!(o instanceof Dinheiro d)) return false;
+        return Double.compare(d.quantia, quantia) == 0 && moeda.equals(d.moeda);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(quantia, moeda);
+    }
+}
+```
+
+Se o `valorTotal` do nosso `Pedido` fosse representado por `Dinheiro` em vez de `double`, `pedido.getTotal().somar(desconto)` nunca correria o risco de alterar o total "pelas costas" de quem já segurava a referência antiga — o método sempre devolve uma instância nova. Note também que `equals()`/`hashCode()` seguem exatamente o contrato da Aula 2, agora aplicado à comparação por valor em vez de por identidade.
+
+**Operacionalizando a imutabilidade.** Implementar um VO corretamente exige mais rigor do que parece à primeira vista:
+
+- **Campos `final`:** garantem que a referência ou o valor primitivo não seja reatribuído após o construtor.
+- **Classe `final`:** impede que uma subclasse adicione estado mutável por trás do contrato — não basta proteger os campos se alguém pode herdar e estender com um campo novo, mutável.
+- **Ausência de *setters*:** o objeto é uma caixa preta inalterável após sua gênese.
+- **Defesa na cópia:** se o VO contém referências a objetos mutáveis (como `Date` ou `List`), é preciso cloná-los tanto no construtor quanto em qualquer método que os devolva — do contrário, o objeto mutável "vaza" para fora, reabrindo a porta do *aliasing* que o VO deveria fechar.
+
+```java
+public final class Coordenada {
+    private final double x;
+    private final double y;
+
+    public Coordenada(double x, double y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    public Coordenada mover(double dx, double dy) {
+        // Retorna uma NOVA instancia, preservando a original
+        return new Coordenada(this.x + dx, this.y + dy);
+    }
+}
+```
+
+Uma vez validado no construtor (Fail-Fast), um objeto imutável permanece válido por toda a sua existência — o que elimina a necessidade de checagens defensivas espalhadas pelo código: o contrato de validade é garantido pela própria estrutura da memória, não por disciplina do programador em cada ponto de uso.
+
+**A Obsessão por Primitivos: o antipadrão gêmeo.** Confiar em `double`, `int` ou `String` para representar conceitos de domínio (Dinheiro, CPF, Email) é o *code smell* clássico da **Obsessão por Primitivos**, sintoma de um modelo de domínio anêmico. O tipo primitivo diz *como* o dado é guardado na memória, mas não diz *o que* ele significa para o negócio: o compilador aceita qualquer valor — um `int` de idade aceita `-500` ou `2000000000` sem reclamar. As validações e conversões ficam então espalhadas por várias camadas, gerando duplicação e inconsistência, e erros que deveriam ser pegos em tempo de compilação só aparecem em tempo de execução.
+
+```java
+public final class Email {
+    private final String endereco;
+
+    public Email(String endereco) {
+        if (endereco == null || !endereco.contains("@")) {
+            throw new IllegalArgumentException("Email invalido!"); // Fail-Fast
+        }
+        this.endereco = endereco;
+    }
+
+    public String getDominio() {
+        return endereco.split("@")[1];
+    }
+}
+```
+
+Ao criar o Value Object `Email`, a validação migra para o construtor: se o código recebe um objeto do tipo `Email`, existe a garantia de que aquele dado é válido, eliminando a necessidade de repetir `if (email.contains("@"))` em cada camada do sistema. O código deixa de ser "*Stringly Typed*" (tipado por *strings*) e passa a ser verdadeiramente orientado a objetos — o mesmo raciocínio que já vimos com `Dinheiro`, aplicado a um domínio diferente.
+
+**Benefícios arquiteturais.** A imutabilidade não é só uma "boa prática" isolada — é uma ferramenta de redução de entropia arquitetural. Ela garante *thread-safety* inerente (sem escrita, não há necessidade de *locks* nem risco de condição de corrida), habilita "raciocínio local" (ler um método que recebe um VO não exige investigar se ele altera o objeto por dentro — sem "ação fantasmagórica à distância" em outro ponto da Heap), e permite otimizações como o padrão *Flyweight* (reutilizar agressivamente a mesma instância de um valor comum, como `Integer.valueOf()` ou `String.intern()` já fazem internamente na JVM).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Entidade: Identidade Persistente
+
+```java
+public class Aluno {
+    private final String ra;  // Identidade imutavel
+    private String curso;     // Atributo mutavel
+
+    public Aluno(String ra, String curso) {
+        this.ra = ra;
+        this.curso = curso;
+    }
+
+    public void transferirCurso(String novoCurso) {
+        this.curso = novoCurso;  // Mutacao controlada
+    }
+}
+```
+
+::: {.fragment}
+Identidade por ID (RA), não por atributo. É natural que o resto mude — a identidade não.
+:::
+::: {.fragment}
+Dois objetos são a mesma entidade se têm o mesmo ID, mesmo com todos os outros campos diferentes.
+:::
+
+## Value Object: o Padrão do Valor Puro
+
+::: {.fragment}
+**Identidade por atributo:** sem ID — o objeto *é* o conjunto dos seus valores.
+:::
+::: {.fragment}
+**Imutabilidade absoluta:** uma vez criado, o estado nunca muda.
+:::
+::: {.fragment}
+**Substituibilidade:** iguais se o conteúdo for idêntico (`equals()` por campo, nunca por referência).
+:::
+::: {.fragment}
+**Semântica rica:** `Dinheiro` no lugar de `double` — o tipo já carrega o significado de domínio.
+:::
+
+## `Dinheiro`: um Value Object Completo
+
+```java
+public final class Dinheiro {
+    private final double quantia;
+    private final String moeda;
+
+    public Dinheiro(double quantia, String moeda) {
+        if (quantia < 0) throw new IllegalArgumentException("Quantia negativa");
+        this.quantia = quantia;
+        this.moeda = moeda;
+    }
+
+    public Dinheiro somar(double delta) {
+        return new Dinheiro(this.quantia + delta, this.moeda);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Dinheiro d)) return false;
+        return Double.compare(d.quantia, quantia) == 0 && moeda.equals(d.moeda);
+    }
+}
+```
+
+::: {.fragment}
+`pedido.getTotal().somar(desconto)` nunca corrompe o total antigo — sempre devolve instância nova.
+:::
+::: {.fragment}
+`equals()`/`hashCode()` seguem o mesmo contrato da Aula 2 — agora comparando por valor, não por identidade.
+:::
+
+## Operacionalizando a Imutabilidade
+
+::: {.fragment}
+**Campos `final`:** referência/valor não reatribuído após o construtor.
+:::
+::: {.fragment}
+**Classe `final`:** impede que uma subclasse adicione estado mutável por trás do contrato.
+:::
+::: {.fragment}
+**Ausência de *setters*:** caixa preta inalterável após a gênese.
+:::
+::: {.fragment}
+**Defesa na cópia:** referências internas a objetos mutáveis (`Date`, `List`) precisam ser clonadas — senão o mutável "vaza".
+:::
+
+```java
+public final class Coordenada {
+    private final double x;
+    private final double y;
+
+    public Coordenada(double x, double y) { this.x = x; this.y = y; }
+
+    public Coordenada mover(double dx, double dy) {
+        return new Coordenada(this.x + dx, this.y + dy);
+    }
+}
+```
+
+## A Obsessão por Primitivos: Anemia Semântica
+
+::: {.fragment}
+Confiar em `double`/`int`/`String` para Dinheiro, CPF, Email — o tipo diz *como* é guardado, não *o que* significa.
+:::
+::: {.fragment}
+O compilador aceita qualquer valor: `int` de idade aceita `-500` sem reclamar.
+:::
+
+```java
+public final class Email {
+    private final String endereco;
+
+    public Email(String endereco) {
+        if (endereco == null || !endereco.contains("@")) {
+            throw new IllegalArgumentException("Email invalido!");
+        }
+        this.endereco = endereco;
+    }
+}
+```
+
+::: {.fragment}
+Validação migra para o construtor (Fail-Fast) — se o objeto `Email` existe, ele já é válido em qualquer camada.
+:::
+
+## Benefícios Arquiteturais da Imutabilidade
+
+::: {.fragment}
+**Thread-safety inerente:** sem escrita, não há condição de corrida nem necessidade de `locks`.
+:::
+::: {.fragment}
+**Raciocínio local:** ler um método que recebe um VO não exige investigar mutação "à distância".
+:::
+::: {.fragment}
+**Otimização via Flyweight:** reutilizar a mesma instância de um valor comum sem risco de corrupção.
+:::
+
+:::
+
+## Entidade vs. Value Object
+
+::: {.callout-tip}
+## Se um sistema de biblioteca representasse cada exemplar físico de um livro como um Value Object (sem ID, igualdade por atributo), o que quebraria no momento em que dois exemplares idênticos do mesmo título precisassem ser rastreados separadamente (um emprestado, outro na prateleira)?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ Se dois exemplares físicos de um mesmo título tiverem exatamente os mesmos atributos de valor (título, autor, edição), modelá-los como Value Objects tornaria `equals()` incapaz de distinguir qual exemplar específico está emprestado e qual está na prateleira.
+- □ Um `Dinheiro` de R$ 50 criado numa parte do sistema é sempre `equals()` a outro `Dinheiro` de R$ 50 criado em outra parte completamente diferente do sistema, mesmo sem nenhuma relação de criação entre os dois.
+- □ Se a classe `Aluno` permitisse alterar o valor do campo `ra` através de um método público após a construção, isso não comprometeria a modelagem de `Aluno` como Entidade, desde que `curso` continuasse mutável.
+- □ Um sistema de reservas de assento de cinema que precisa saber se o assento B12 da sessão das 20h (especificamente aquele, não outro assento idêntico em atributos) já foi reservado se beneficia de modelar o assento como Entidade, não como Value Object.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Entidade vs. Value Object — Resposta
+
+::: {.callout-tip}
+## O que quebra sem identidade — Resposta
+
+- ✔ Se dois exemplares físicos de um mesmo título tiverem exatamente os mesmos atributos de valor (título, autor, edição), modelá-los como Value Objects tornaria `equals()` incapaz de distinguir qual exemplar específico está emprestado e qual está na prateleira — é exatamente o preço de trocar identidade por valor: dois VOs com o mesmo conteúdo são, por definição, indistinguíveis.
+- ✔ Um `Dinheiro` de R$ 50 criado numa parte do sistema é sempre `equals()` a outro `Dinheiro` de R$ 50 criado em outra parte completamente diferente do sistema, mesmo sem nenhuma relação de criação entre os dois — é exatamente a substituibilidade por valor: a igualdade depende só do conteúdo, nunca da origem.
+- ✗ Se a classe `Aluno` permitisse alterar o valor do campo `ra` através de um método público após a construção, isso não comprometeria a modelagem de `Aluno` como Entidade, desde que `curso` continuasse mutável — comprometeria sim: a identidade persistente (o RA) é exatamente o que não pode mudar numa Entidade; permitir sua alteração quebra a garantia central do padrão, independentemente do que acontece com os outros campos.
+- ✔ Um sistema de reservas de assento de cinema que precisa saber se o assento B12 da sessão das 20h (especificamente aquele, não outro assento idêntico em atributos) já foi reservado se beneficia de modelar o assento como Entidade, não como Value Object — a pergunta de negócio exige identidade persistente, não comparação por valor.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** o rastreio individual de exemplares quebraria — `equals()` por valor confunde "dois livros com o mesmo conteúdo" com "o mesmo exemplar físico". A correção é dar a cada exemplar um ID (ex.: número de patrimônio), modelando-o como Entidade; o *título* do livro (metadados: nome, autor, ISBN), esse sim, pode continuar sendo um Value Object compartilhado por todos os exemplares.
+:::
+
+:::
+
+# Criação Segura: o Construtor Sujo e o Padrão Builder
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Com o dado protegido pelo Value Object, falta proteger a **gênese** do objeto — o momento exato em que ele nasce. A Aula 2 já estabeleceu que o construtor deve agir como um "segurança": se os dados fornecidos não cumprem os requisitos mínimos de integridade, o objeto nem deveria chegar a existir na Heap (Fail-Fast). Isso simplifica todo o código subsequente, que pode assumir que qualquer instância recebida é, por definição, válida.
+
+```java
+public Usuario(String nome, Email email) {
+    if (nome == null || nome.isBlank()) throw new IllegalArgumentException("Nome obrigatorio");
+    if (email == null) throw new IllegalArgumentException("Email obrigatorio");
+    this.nome = nome;
+    this.email = email;
+}
+```
+
+**O Construtor Sujo.** Esse ideal de segurança colide com a realidade assim que um objeto precisa de muitos dados para nascer. Três sintomas concretos:
+
+- **Lista de parâmetros longa:** dificuldade em distinguir a ordem de múltiplos argumentos do mesmo tipo (cinco `String`s seguidas, por exemplo).
+- **Estado inconsistente:** o perigo de instanciar um objeto vazio e só depois preencher seus campos via *setters* — o objeto nasce "mancando", e qualquer código que o toque antes do preenchimento completo encontra um estado inválido.
+- **Acoplamento rígido:** o `new` espalhado pelo código vincula a lógica de negócio à classe concreta e às minúcias de sua inicialização.
+
+```java
+// Exemplo de Construtor Sujo e Perigoso
+Usuario u = new Usuario("Joao", "Silva", "Rua X", "Campinas", "SP", "13000-000", true, false);
+// Qual String e o sobrenome e qual e a rua? O compilador nao ajuda.
+```
+
+O nosso `Pedido`, depois do Strategy da Aula 10, ainda sofre de uma versão leve desse problema: cliente, itens, desconto e a flag de urgência precisam ser configurados antes do `finalizarPedido()`, e nada impede hoje que o código esqueça o desconto ou passe um valor inconsistente sem que ninguém perceba até o pagamento falhar.
+
+**O padrão Builder.** O Builder resolve o problema do construtor gigante introduzindo um objeto intermediário — o construtor (no sentido de "quem constrói", não o `constructor` da linguagem) — que acumula os dados necessários e, apenas ao final, produz a instância do objeto alvo. Isso é especialmente útil para objetos imutáveis que exigem muitos parâmetros: a construção se torna legível e segura, sem abrir mão da imutabilidade do produto final.
+
+A **interface fluente** é o que torna a criação descritiva:
+
+```java
+Pedido p = new PedidoBuilder()
+                .paraCliente("Beatriz")
+                .comItem("Notebook", 4500.0)
+                .comDesconto(500.0)
+                .urgente()
+                .build(); // Aqui a validacao final ocorre
+```
+
+O segredo do encadeamento é simples: cada método de configuração retorna a própria instância do Builder (`return this`), acumulando estado temporariamente; o objeto final só nasce dentro de `build()`. O método `build()` é o "juiz" da instanciação — o local ideal para verificar se a *combinação* de parâmetros fornecida é logicamente consistente (uma validação *cross-field*, que nenhum parâmetro isolado consegue capturar sozinho):
+
+```java
+/**
+ * Classe Alvo: Imutavel e com construtor privado.
+ */
+public final class Pedido {
+    private final String cliente;
+    private final double valorTotal;
+    private final boolean urgente;
+
+    // Construtor privado: so o Builder tem permissao para instanciar
+    private Pedido(PedidoBuilder builder) {
+        this.cliente = builder.getCliente();
+        this.valorTotal = builder.getTotal() - builder.getDesconto();
+        this.urgente = builder.isUrgente();
+    }
+
+    // Getters apenas...
+}
+
+/**
+ * Classe Builder: Responsavel pela genese segura.
+ */
+public class PedidoBuilder {
+    private String cliente;
+    private double total;
+    private double desconto;
+    private boolean urgente = false;
+
+    public PedidoBuilder paraCliente(String nome) {
+        this.cliente = nome;
+        return this;
+    }
+
+    public PedidoBuilder comItem(String nome, double preco) {
+        this.total += preco;
+        return this;
+    }
+
+    public PedidoBuilder comDesconto(double valor) {
+        this.desconto = valor;
+        return this;
+    }
+
+    public PedidoBuilder urgente() {
+        this.urgente = true;
+        return this;
+    }
+
+    /**
+     * O metodo build() e o "juiz" da instanciacao.
+     */
+    public Pedido build() {
+        // 1. Fail-Fast: valida consistencia entre campos
+        if (cliente == null || cliente.isBlank()) {
+            throw new IllegalStateException("Pedido deve ter um cliente.");
+        }
+        if (desconto > total) {
+            throw new IllegalStateException("Desconto maior que o valor total!");
+        }
+        // 2. Retorna o objeto final, pronto e imutavel
+        return new Pedido(this);
+    }
+
+    // Getters usados pelo Pedido para ler os dados do Builder durante a construcao
+    protected String getCliente() { return cliente; }
+    protected double getTotal() { return total; }
+    protected double getDesconto() { return desconto; }
+    protected boolean isUrgente() { return urgente; }
+}
+```
+
+Note a blindagem em dois níveis: o construtor de `Pedido` é **privado**, forçando qualquer criação a passar pelo `PedidoBuilder`, e o `build()` faz a validação *cross-field* (desconto maior que o total) antes de liberar o objeto. Nenhum código externo consegue instanciar um `Pedido` "meio pronto" ou inconsistente — a classe `Pedido` fica extremamente limpa, focada em armazenar os dados finais de forma imutável, enquanto toda a "sujeira" da lógica de construção fica confinada ao Builder.
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=0.9cm and 0.9cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=3.6cm, minimum height=0.85cm},
+  dm/.style={draw, diamond, aspect=2.2, align=center, font=\scriptsize, minimum width=2.6cm},
+  >=Stealth
+]
+  \node[bx, draw=icblue, fill=icblue!10] (b0) {new PedidoBuilder()\\\scriptsize builder vazio, mutável};
+  \node[bx, draw=icblue, fill=icblue!10, right=of b0] (b1) {.paraCliente("Beatriz")\\.comItem("Notebook", 4500)\\.comDesconto(500).urgente()};
+  \node[dm, draw=icorange, fill=icorange!10, right=of b1] (v) {build()\\valida: desconto $\leq$ total?};
+  \node[bx, draw=icred, fill=icred!10, right=1.3cm of v] (p) {Pedido (imutável)\\\scriptsize cliente, valorTotal, urgente\\campos final, sem setters};
+  \draw[->, thick] (b0) -- (b1);
+  \draw[->, thick] (b1) -- (v);
+  \draw[->, thick] (v) -- node[above, font=\scriptsize] {OK} (p);
+  \node[font=\scriptsize, text=icred, below=0.35cm of v] {falha $\Rightarrow$ IllegalStateException, Pedido nunca nasce};
+\end{tikzpicture}
+```
+:::
+
+O diagrama resume a mecânica: o Builder acumula estado passo a passo (mutável, temporário), o `build()` funciona como um portão de validação, e só depois dele o `Pedido` imutável nasce — pronto, ou não nasce de forma alguma.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Revisão: Fail-Fast na Instanciação
+
+```java
+public Usuario(String nome, Email email) {
+    if (nome == null || nome.isBlank()) throw new IllegalArgumentException("Nome obrigatorio");
+    if (email == null) throw new IllegalArgumentException("Email obrigatorio");
+    this.nome = nome;
+    this.email = email;
+}
+```
+
+::: {.fragment}
+Se algo deve falhar, que falhe o mais cedo possível — o construtor como "segurança" (Aula 2, revisitado).
+:::
+
+## O Construtor Sujo
+
+```java
+Usuario u = new Usuario("Joao", "Silva", "Rua X", "Campinas", "SP", "13000-000", true, false);
+// Qual String e o sobrenome e qual e a rua? O compilador nao ajuda.
+```
+
+::: {.fragment}
+**Lista longa:** ordem de argumentos do mesmo tipo vira aposta.
+:::
+::: {.fragment}
+**Estado inconsistente:** objeto vazio preenchido depois via *setters* — nasce "mancando".
+:::
+::: {.fragment}
+**Acoplamento rígido:** `new` espalhado vincula negócio à classe concreta.
+:::
+
+## O Padrão Builder: Construção Passo a Passo
+
+::: {.fragment}
+Objeto intermediário que acumula dados e só ao final produz a instância alvo.
+:::
+::: {.fragment}
+Ideal para objetos imutáveis com muitos parâmetros — legibilidade e segurança sem sacrificar a imutabilidade.
+:::
+
+```java
+Pedido p = new PedidoBuilder()
+                .paraCliente("Beatriz")
+                .comItem("Notebook", 4500.0)
+                .comDesconto(500.0)
+                .urgente()
+                .build(); // Aqui a validacao final ocorre
+```
+
+::: {.fragment}
+Cada método retorna `this` — o encadeamento é só açúcar sintático sobre "configure e devolva-se".
+:::
+
+## Implementação Completa: `PedidoBuilder` e `Pedido`
+
+```java
+public final class Pedido {
+    private final String cliente;
+    private final double valorTotal;
+    private final boolean urgente;
+
+    // Construtor privado: so o Builder tem permissao para instanciar
+    private Pedido(PedidoBuilder builder) {
+        this.cliente = builder.getCliente();
+        this.valorTotal = builder.getTotal() - builder.getDesconto();
+        this.urgente = builder.isUrgente();
+    }
+}
+```
+
+```java
+public class PedidoBuilder {
+    private String cliente;
+    private double total;
+    private double desconto;
+    private boolean urgente = false;
+
+    public PedidoBuilder paraCliente(String nome) { this.cliente = nome; return this; }
+    public PedidoBuilder comItem(String nome, double preco) { this.total += preco; return this; }
+    public PedidoBuilder comDesconto(double valor) { this.desconto = valor; return this; }
+    public PedidoBuilder urgente() { this.urgente = true; return this; }
+
+    public Pedido build() {
+        if (cliente == null || cliente.isBlank())
+            throw new IllegalStateException("Pedido deve ter um cliente.");
+        if (desconto > total)
+            throw new IllegalStateException("Desconto maior que o valor total!");
+        return new Pedido(this);
+    }
+}
+```
+
+::: {.fragment}
+Construtor de `Pedido` **privado**: nenhum código externo instancia sem passar pelo Builder — nem um `Pedido` "meio pronto" sobrevive.
+:::
+
+## A Mecânica do Builder, Passo a Passo
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=0.9cm and 0.9cm,
+  bx/.style={draw, rectangle, rounded corners, align=center, font=\small, minimum width=3.6cm, minimum height=0.85cm},
+  dm/.style={draw, diamond, aspect=2.2, align=center, font=\scriptsize, minimum width=2.6cm},
+  >=Stealth
+]
+  \node[bx, draw=icblue, fill=icblue!10] (b0) {new PedidoBuilder()\\\scriptsize builder vazio, mutável};
+  \node[bx, draw=icblue, fill=icblue!10, right=of b0] (b1) {.paraCliente("Beatriz")\\.comItem("Notebook", 4500)\\.comDesconto(500).urgente()};
+  \node[dm, draw=icorange, fill=icorange!10, right=of b1] (v) {build()\\valida: desconto $\leq$ total?};
+  \node[bx, draw=icred, fill=icred!10, right=1.3cm of v] (p) {Pedido (imutável)\\\scriptsize cliente, valorTotal, urgente\\campos final, sem setters};
+  \draw[->, thick] (b0) -- (b1);
+  \draw[->, thick] (b1) -- (v);
+  \draw[->, thick] (v) -- node[above, font=\scriptsize] {OK} (p);
+  \node[font=\scriptsize, text=icred, below=0.35cm of v] {falha $\Rightarrow$ IllegalStateException, Pedido nunca nasce};
+\end{tikzpicture}
+```
+:::
+
+::: {.fragment}
+`build()` é o portão único de validação *cross-field* — nem `PedidoBuilder`, nem `Pedido` isoladamente conseguiriam checar "desconto vs. total" sozinhos.
+:::
+
+:::
+
+# Factory Method e a Inversão de Dependência na Criação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O Builder resolveu a gênese de *um* tipo de objeto complexo. Mas existe um problema irmão, mais amplo: e se o próprio *tipo concreto* a instanciar depender de uma condição de negócio que só é conhecida em tempo de execução? Se o cliente do código precisar saber qual classe concreta instanciar, ele se acopla a ela — e cada nova classe futura exige editar todos os pontos que fazem essa escolha.
+
+**O padrão Factory Method.** A ideia é adiar a decisão de qual classe concreta usar: uma interface de criação define um método para produzir um objeto, e a lógica de decisão fica confinada a essa única fábrica, nunca espalhada pelo sistema. Suponha que o nosso e-commerce precise notificar o cliente sempre que o status de um `Pedido` mudar — por e-mail ou por SMS, dependendo da preferência cadastrada.
+
+```java
+public class NotificacaoPedidoFactory {
+    public static NotificacaoPedido criar(String meio) {
+        return switch (meio.toUpperCase()) {
+            case "SMS" -> new NotificacaoPedidoSMS();
+            case "EMAIL" -> new NotificacaoPedidoEmail();
+            default -> throw new IllegalArgumentException("Meio desconhecido: " + meio);
+        };
+    }
+}
+
+// Uso pelo cliente do sistema:
+NotificacaoPedido n = NotificacaoPedidoFactory.criar(cliente.getPreferenciaDeContato());
+n.enviar("Seu pedido foi despachado!"); // O cliente nao sabe se e SMS ou Email
+```
+
+```java
+/**
+ * O Contrato (Interface)
+ */
+public interface NotificacaoPedido {
+    void enviar(String mensagem);
+}
+
+/**
+ * Implementacoes Concretas (Ocultas do cliente)
+ */
+class NotificacaoPedidoSMS implements NotificacaoPedido {
+    public void enviar(String msg) { /* integracao com gateway de SMS */ }
+}
+
+class NotificacaoPedidoEmail implements NotificacaoPedido {
+    public void enviar(String msg) { /* integracao com servidor SMTP */ }
+}
+```
+
+O cliente nunca escreve `new NotificacaoPedidoSMS()` — ele pede à fábrica, recebe a abstração `NotificacaoPedido`, e não sabe (nem precisa saber) qual implementação concreta está por trás. Isso traz três benefícios imediatos:
+
+1. **Ponto único de manutenção:** se amanhã o sistema passar a suportar notificação via WhatsApp, alteramos apenas a fábrica — não os dezenas de pontos do sistema onde uma notificação de pedido é disparada.
+2. **Encapsulamento de parâmetros de infraestrutura:** se `NotificacaoPedidoEmail` precisar de credenciais de SMTP e `NotificacaoPedidoSMS` de uma chave de API de um gateway, a fábrica administra essas dependências sem que o cliente precise conhecê-las.
+3. **Polimorfismo real:** o código cliente se torna agnóstico à implementação, interagindo apenas com o contrato `NotificacaoPedido` — o mesmo Late Binding/VTable das Aulas 7, 9 e 10, agora decidindo qual implementação de notificação executa.
+
+**A Inversão de Dependência (DIP) na criação.** O operador `new` é a "cola" mais forte do código: quem instancia uma classe concreta passa a depender dela, e módulos de alto nível não deveriam saber *como* objetos de baixo nível nascem. Compare as duas versões de um serviço que precisa persistir pedidos:
+
+```java
+// Acoplamento Rigido
+public class ServicoDePedidos {
+    // Erro: depende da classe CONCRETA
+    private RepositorioPedidosMySQL repo = new RepositorioPedidosMySQL();
+
+    public void salvar(Pedido p) { repo.inserir(p); }
+}
+
+// DIP (Inversao)
+public class ServicoDePedidos {
+    private final RepositorioPedidos repo;
+
+    // O servico recebe uma fabrica e depende so da ABSTRACAO
+    public ServicoDePedidos(RepositorioPedidosFactory f) {
+        this.repo = f.criar();
+    }
+
+    public void salvar(Pedido p) { repo.inserir(p); }
+}
+```
+
+Na versão com acoplamento rígido, `ServicoDePedidos` só funciona com `RepositorioPedidosMySQL` — testar sem um banco real (com um *mock*) ou trocar de fornecedor de banco de dados exige alterar o código-fonte da lógica de negócio. Ao aplicar o DIP via fábrica: o contrato é o rei (`ServicoDePedidos` conhece só a interface `RepositorioPedidos`); a fábrica é injetada, e o serviço não sabe se ela entrega um repositório que fala com MySQL, PostgreSQL ou um arquivo texto; e o conhecimento sobre "qual classe instanciar" é empurrado para a periferia do sistema (o ponto de entrada da aplicação), mantendo o núcleo de negócio protegido de mudanças tecnológicas. É a mesma lógica de fronteira que a interface `Pagavel` já aplicou ao comportamento na Aula 10 — agora aplicada à própria criação do colaborador.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Factory Method: Desacoplando a Classe Concreta
+
+::: {.fragment}
+O cliente não deveria precisar saber qual classe concreta instanciar.
+:::
+::: {.fragment}
+Interface de criação define o método; a lógica de decisão fica confinada à fábrica.
+:::
+
+```java
+NotificacaoPedido n = NotificacaoPedidoFactory.criar(cliente.getPreferenciaDeContato());
+n.enviar("Seu pedido foi despachado!"); // O cliente nao sabe se e SMS ou Email
+```
+
+## A Fábrica na Prática
+
+```java
+public class NotificacaoPedidoFactory {
+    public static NotificacaoPedido criar(String meio) {
+        return switch (meio.toUpperCase()) {
+            case "SMS" -> new NotificacaoPedidoSMS();
+            case "EMAIL" -> new NotificacaoPedidoEmail();
+            default -> throw new IllegalArgumentException("Meio desconhecido: " + meio);
+        };
+    }
+}
+```
+
+::: {.fragment}
+O retorno é sempre a interface `NotificacaoPedido` — nunca a classe concreta.
+:::
+
+## Três Benefícios da Centralização
+
+::: {.fragment}
+**Ponto único de manutenção:** WhatsApp novo? Só a fábrica muda, não as dezenas de pontos de disparo.
+:::
+::: {.fragment}
+**Encapsulamento de infraestrutura:** credenciais SMTP, chaves de API — o cliente nunca as vê.
+:::
+::: {.fragment}
+**Polimorfismo real:** o cliente interage só com o contrato `NotificacaoPedido`.
+:::
+
+## O `new` como a Cola Mais Forte do Código
+
+```java
+// Acoplamento Rigido
+public class ServicoDePedidos {
+    private RepositorioPedidosMySQL repo = new RepositorioPedidosMySQL();
+    public void salvar(Pedido p) { repo.inserir(p); }
+}
+```
+
+::: {.fragment}
+Quem instancia uma classe concreta passa a depender dela — testar sem banco real, ou trocar de fornecedor, exige editar a lógica de negócio.
+:::
+
+## DIP na Criação: a Inversão
+
+```java
+public class ServicoDePedidos {
+    private final RepositorioPedidos repo;
+
+    public ServicoDePedidos(RepositorioPedidosFactory f) {
+        this.repo = f.criar();  // Depende so da ABSTRACAO
+    }
+
+    public void salvar(Pedido p) { repo.inserir(p); }
+}
+```
+
+::: {.fragment}
+Contrato é o rei; a fábrica é injetada; "qual classe instanciar" migra para a periferia do sistema.
+:::
+::: {.fragment}
+Mesma lógica de fronteira do `Pagavel` na Aula 10 — agora aplicada à criação do colaborador, não ao seu comportamento.
+:::
+
+:::
+
+## Factory Method e Acoplamento Direto
+
+::: {.callout-tip}
+## Se um novo requisito pedir notificação por WhatsApp, por que a resposta correta nunca deveria envolver abrir e editar os 50 pontos do sistema que hoje disparam `NotificacaoPedidoFactory.criar(...)`?
+
+Escreva sua resposta e compare com um colega antes de avançar (2 min).
+
+- □ Se `ServicoDePedidos` chamasse diretamente `new NotificacaoPedidoEmail()` em vez de pedir a `NotificacaoPedidoFactory`, adicionar um novo meio de notificação ainda seria possível sem alterar nenhum código que já dispara notificações.
+- □ Um sistema de geração de relatórios que decide, em tempo de execução, se deve instanciar `RelatorioPDF` ou `RelatorioExcel` a partir de uma preferência do usuário, centralizando essa decisão numa única classe fábrica, aplica a mesma lógica estrutural do Factory Method visto em aula.
+- □ Se `RepositorioPedidosFactory` sempre devolvesse a mesma implementação concreta (`RepositorioPedidosMySQL`), injetar essa fábrica em vez de instanciar diretamente `RepositorioPedidosMySQL` não traria nenhum benefício arquitetural, mesmo pensando em testes automatizados futuros.
+- □ Um `ServicoDePedidos` que recebe uma `RepositorioPedidosFactory` no construtor, mas depois usa `instanceof RepositorioPedidosMySQL` para decidir se aplica uma otimização específica daquele banco, preserva integralmente a Inversão de Dependência que a injeção da fábrica pretendia estabelecer.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Factory Method e Acoplamento Direto — Resposta
+
+::: {.callout-tip}
+## Por que não editar os 50 pontos de disparo — Resposta
+
+- ✗ Se `ServicoDePedidos` chamasse diretamente `new NotificacaoPedidoEmail()` em vez de pedir a `NotificacaoPedidoFactory`, adicionar um novo meio de notificação ainda seria possível sem alterar nenhum código que já dispara notificações — falso: sem a fábrica, `ServicoDePedidos` está acoplado à classe concreta `NotificacaoPedidoEmail`; um novo meio exigiria editar todo ponto que faz essa instanciação direta.
+- ✔ Um sistema de geração de relatórios que decide, em tempo de execução, se deve instanciar `RelatorioPDF` ou `RelatorioExcel` a partir de uma preferência do usuário, centralizando essa decisão numa única classe fábrica, aplica a mesma lógica estrutural do Factory Method visto em aula — mesmo padrão, domínio diferente.
+- ✗ Se `RepositorioPedidosFactory` sempre devolvesse a mesma implementação concreta (`RepositorioPedidosMySQL`), injetar essa fábrica em vez de instanciar diretamente `RepositorioPedidosMySQL` não traria nenhum benefício arquitetural, mesmo pensando em testes automatizados futuros — falso: mesmo com uma única implementação hoje, a injeção já permite substituir por um *mock* em teste sem tocar `ServicoDePedidos`, o que `new` direto jamais permitiria.
+- ✗ Um `ServicoDePedidos` que recebe uma `RepositorioPedidosFactory` no construtor, mas depois usa `instanceof RepositorioPedidosMySQL` para decidir se aplica uma otimização específica daquele banco, preserva integralmente a Inversão de Dependência que a injeção da fábrica pretendia estabelecer — não preserva: o `instanceof` reintroduz conhecimento sobre a classe concreta dentro do módulo de alto nível, exatamente o acoplamento que a injeção da fábrica deveria eliminar.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** porque nenhum dos 50 pontos conhece a classe concreta — todos conversam só com `NotificacaoPedido` através da fábrica. Uma nova classe `NotificacaoPedidoWhatsApp` mais uma linha no `switch` da fábrica bastam; nenhum código cliente precisa mudar, e nenhum risco de quebrar SMS ou Email no processo.
+:::
+
+:::
+
+# Conclusão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Voltando às quatro perguntas da abertura:
+
+1. **De onde vêm os padrões, e por que o vocabulário já vale a pena:** nasceram na arquitetura civil de Christopher Alexander e foram catalogados pelo GoF em 1994 — 23 soluções nomeadas que condensam discussões estruturais inteiras numa única palavra, organizadas em três famílias por propósito (Comportamento, Estrutural, Criação).
+2. **Por que compartilhar uma referência mutável é perigoso:** porque a atribuição em Java copia o endereço, não o dado — duas variáveis podem apontar para o mesmo objeto, e uma mutação por qualquer uma delas corrompe silenciosamente a outra (*aliasing*). O Value Object neutraliza o problema pela raiz: se o objeto não pode mudar, compartilhar sua referência deixa de ser um risco.
+3. **Quem monta um objeto complexo corretamente:** um Builder dedicado, que acumula estado passo a passo através de uma interface fluente e só libera o produto final — imutável, validado — no método `build()`, nunca o construtor gigante nem o objeto "mancando" preenchido por *setters*.
+4. **Como decidir qual classe concreta instanciar sem acoplar o cliente a ela:** uma fábrica (Factory Method) confinando a decisão num único ponto, devolvendo sempre a abstração — o mesmo raciocínio que, levado à fronteira entre módulos de alto e baixo nível, vira a Inversão de Dependência na criação.
+
+O `Pedido` que começou a aula com um `double` mutável, um construtor de ordem arriscada e uma decisão de notificação espalhada termina protegido em três frentes: o dado (Value Object), a gênese (Builder) e a escolha de implementação (Factory Method + DIP). Cada uma dessas proteções tem nome, documentação e um lugar preciso na taxonomia GoF que abriu a aula.
+
+### Ponte para a Aula 12 {.unnumbered}
+
+Falta ainda o terceiro pilar do "tríptico da estabilidade" do material de origem: depois de proteger o **dado** (imutabilidade) e a **gênese** (criação segura), resta proteger o **fluxo** — como um objeto muda de comportamento ao longo do seu ciclo de vida sem recair no labirinto de `if/else` que o Strategy já baniu do pagamento. A Aula 12 apresenta o **State Pattern**, que compartilha uma topologia de classes quase idêntica à do Strategy — e é exatamente por isso que o contraste entre os dois será o fio condutor da próxima aula: mesma estrutura, intenções arquiteturais completamente diferentes.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O que Aprendemos
+
+1. Padrões de Projeto nascem da arquitetura civil, foram catalogados pelo GoF em 1994, e se organizam em 3 famílias por propósito
+2. *Aliasing* corrompe objetos mutáveis compartilhados — o Value Object neutraliza o problema pela raiz, trocando mutação por substituição
+3. O Builder isola a gênese de objetos complexos numa interface fluente, validando no `build()` antes de liberar um produto imutável
+4. O Factory Method confina a escolha de classe concreta numa fábrica — e, levado à fronteira entre camadas, vira a Inversão de Dependência
+
+::: {.fragment}
+**Próxima aula:** o terceiro pilar da estabilidade — o padrão State, contrastado deliberadamente com o Strategy já dominado.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# Exercícios
+
+## Questões discursivas
+
+1. **(Vocabulário e Famílias de Padrões)** Um colega de equipe propõe "criar uma classe que decide, com base num arquivo de configuração lido na inicialização, qual implementação de `Cache` (em memória ou em disco) o sistema usará, sem que nenhum outro módulo precise saber qual das duas está ativa". Classifique essa proposta numa das três famílias de padrões do GoF, justificando pelo propósito arquitetural (não pelo nome de um padrão específico), e explique por que essa proposta não pode ser corretamente descrita como um *framework*.
+
+2. **(Aliasing e Value Object)** Explique detalhadamente a mecânica física que ocorre na memória (Stack e Heap) no fenômeno de *aliasing*, usando como exemplo duas referências apontando para o mesmo `Retangulo` mutável. Em seguida, demonstre por que transformar `Retangulo` num Value Object elimina o problema sem exigir nenhuma "cópia defensiva", e explique o que muda na forma como o `equals()` desse objeto deve ser implementado.
+
+3. **(Builder e Factory Method: quando usar cada um)** Builder e Factory Method resolvem os dois "problemas de gênese" desta aula, mas não são intercambiáveis. Considerando o `PedidoBuilder` e a `NotificacaoPedidoFactory` discutidos em aula, explique com precisão qual problema cada padrão resolve — um objeto com muitos parâmetros opcionais que precisam de validação cruzada, ou a escolha de qual classe concreta instanciar entre alternativas conhecidas — e descreva um cenário de negócio em que os dois padrões seriam aplicados juntos, um dentro do outro.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-note icon=false}
+## O Vocabulário e a Natureza dos Padrões de Projeto
+
+- □ Uma equipe que copia o código-fonte de um projeto anterior para reaproveitar uma solução de design, sem adaptar as classes ao novo domínio, está aplicando corretamente um Padrão de Projeto no sentido em que o GoF definiu o termo.
+- □ Se um engenheiro descrever uma solução dizendo apenas "implemente um Observer aqui" para um colega que também domina o vocabulário GoF, essa frase provavelmente transmite mais informação estrutural precisa do que uma explicação equivalente sem o nome do padrão.
+- □ Um sistema construído inteiramente com funções globais e variáveis compartilhadas, sem nenhuma classe ou encapsulamento, se beneficiaria da mesma forma ao aplicar a estrutura de um padrão GoF que um sistema já orientado a objetos se beneficiaria.
+- □ Um algoritmo de ordenação otimizado para grandes volumes de dados, por mais sofisticado e reutilizável que seja, não se qualifica como um Padrão de Projeto no sentido do catálogo GoF, ainda que resolva um problema recorrente.
+:::
+
+::: {.callout-note icon=false}
+## As Três Famílias de Padrões
+
+- □ Um padrão cujo objetivo é permitir que um objeto adicione responsabilidades novas dinamicamente, sem alterar sua classe original nem depender de herança estática, se encaixa melhor na família Estrutural do que na família de Criação.
+- □ Um sistema de checkout que usa duas soluções ao mesmo tempo — uma para decidir qual meio de pagamento processar (Strategy) e outra para decidir qual classe concreta de repositório instanciar (Factory Method) — está misturando indevidamente duas famílias de padrões incompatíveis entre si.
+- □ Um padrão cujo foco declarado é "isolar a complexidade do operador `new` e gerenciar o ciclo de vida na Heap" pertence, por definição, à família de Criação, independentemente de também usar composição internamente.
+- □ Classificar o Strategy como um padrão Comportamental (e não Estrutural) depende do fato de ele envolver uma interface implementada por múltiplas classes, e não do fato de seu propósito ser distribuir a decisão de "como fazer" no tempo de execução.
+:::
+
+::: {.callout-note icon=false}
+## Aliasing e a Fragilidade do Estado Mutável
+
+- □ Em `Retangulo r2 = r1;`, se `Retangulo` for uma classe (não um primitivo), a variável `r2` recebe uma cópia independente dos valores de `largura` e `altura` de `r1` no momento da atribuição.
+- □ Um sistema que compartilha uma mesma instância de uma classe `Configuracao` mutável entre dois módulos independentes está estruturalmente exposto ao mesmo padrão de bug de *aliasing* descrito para o `Retangulo`, mesmo que o domínio seja diferente.
+- □ Aplicar uma "Cópia Defensiva" antes de cada compartilhamento de uma referência mutável elimina o risco de *aliasing* sem nenhum custo adicional de memória ou processamento sobre o sistema.
+- □ Se um método de uma classe imutável precisasse, para calcular seu retorno, ler o estado de outro objeto imutável passado como parâmetro, o risco de *aliasing bug* sobre esse parâmetro seria estruturalmente idêntico ao risco existente ao ler um parâmetro mutável.
+:::
+
+::: {.callout-note icon=false}
+## Entidade vs. Value Object
+
+- □ Um sistema bancário que precisa diferenciar duas contas correntes com saldo, titular e agência idênticos (por serem contas efetivamente distintas, uma de cada cliente) exige que `ContaCorrente` seja modelada como Entidade, não como Value Object.
+- □ Se dois objetos `Dinheiro` representarem quantias e moedas idênticas, mas tiverem sido instanciados em pontos completamente diferentes do código, `equals()` entre eles deve retornar `false`, pois cada instância ocupa um endereço de memória próprio na Heap.
+- □ Uma classe `Endereco` (rua, número, cidade, CEP) usada apenas para exibir a localização de entrega de um `Pedido`, sem que o sistema precise rastrear "este endereço específico" ao longo do tempo, é uma candidata natural a Value Object.
+- □ Modelar `Aluno` como Entidade (identidade por RA) não impede que um dos seus atributos, como `Endereco`, seja internamente representado por um Value Object imutável.
+:::
+
+::: {.callout-note icon=false}
+## Obsessão por Primitivos e Anemia Semântica
+
+- □ Representar uma idade humana como um `int` sem nenhuma validação adicional permite, do ponto de vista do compilador Java, que o valor `-500` seja atribuído sem qualquer erro de compilação.
+- □ Se duas partes distintas do sistema validarem o formato de um CPF de forma ligeiramente diferente (uma aceitando pontuação, outra não), isso é uma consequência esperada e inofensiva de representar CPF como `String` em vez de como um Value Object dedicado.
+- □ Substituir um parâmetro `double taxaDeJuros` por um Value Object `TaxaDeJuros` que valida, no construtor, que o valor está entre 0 e 1, move um erro de negócio que antes só apareceria em produção para o momento da criação do objeto.
+- □ A "Anemia Semântica" ocorre quando o tipo de um dado (ex.: `String`) descreve completamente o que esse dado representa para o negócio, sem nenhuma perda de informação em relação a um tipo de domínio dedicado.
+:::
+
+::: {.callout-note icon=false}
+## O Padrão Builder e a Interface Fluente
+
+- □ No `PedidoBuilder`, o fato de cada método de configuração retornar `this` é o que torna sintaticamente possível encadear `.paraCliente(...).comItem(...).comDesconto(...)` numa única expressão.
+- □ Se a validação "desconto não pode ser maior que o total" fosse movida do método `build()` para dentro de `comDesconto()`, ela continuaria funcionando corretamente mesmo que `comItem()` fosse chamado depois de `comDesconto()` na cadeia de chamadas.
+- □ Um `PedidoBuilder` cujo construtor da classe `Pedido` alvo fosse `public` (em vez de `private`) ainda impediria, com a mesma eficácia, que código externo criasse um `Pedido` sem passar pelas validações do `build()`.
+- □ A imutabilidade do objeto `Pedido` produzido no final não exige que o próprio `PedidoBuilder`, enquanto acumula dados, também seja imutável — os dois objetos podem ter regras de mutabilidade diferentes por servirem a propósitos diferentes.
+:::
+
+::: {.callout-note icon=false}
+## Factory Method e Desacoplamento
+
+- □ Se `NotificacaoPedidoFactory.criar(String meio)` retornasse o tipo concreto `NotificacaoPedidoEmail` em vez da interface `NotificacaoPedido` quando o meio fosse "EMAIL", o código cliente que só espera a interface ainda compilaria sem nenhuma alteração.
+- □ Adicionar uma nova implementação `NotificacaoPedidoWhatsApp` exige, necessariamente, alterar tanto a fábrica quanto todos os pontos do sistema que hoje chamam `NotificacaoPedidoFactory.criar(...)`.
+- □ Um sistema de geração de convites de evento que decide, a partir de uma preferência do organizador, se instancia um `ConviteDigital` ou um `ConviteImpresso`, centralizando essa decisão numa única classe fábrica, replica a mesma lógica estrutural do Factory Method do e-commerce.
+- □ Se a fábrica de notificações precisar de credenciais de um gateway de SMS para construir `NotificacaoPedidoSMS`, essas credenciais podem ficar inteiramente confinadas à fábrica, sem que o código cliente que chama `criar(...)` precise conhecê-las.
+:::
+
+::: {.callout-note icon=false}
+## Inversão de Dependência na Criação
+
+- □ Um `ServicoDePedidos` que instancia `new RepositorioPedidosMySQL()` diretamente dentro de seu próprio construtor pode ser substituído, em um teste automatizado, por uma versão que usa um repositório falso (*mock*) sem nenhuma alteração no código de `ServicoDePedidos`.
+- □ Injetar uma `RepositorioPedidosFactory` no construtor de `ServicoDePedidos`, em vez de instanciar diretamente uma classe concreta, empurra o conhecimento sobre "qual banco de dados usar" para a periferia do sistema, mantendo o núcleo de negócio isolado dessa decisão.
+- □ Um `ServicoDePedidos` que depende apenas da interface `RepositorioPedidos` ainda estaria violando o Princípio de Inversão de Dependência se essa interface fosse implementada por uma única classe concreta em todo o sistema.
+- □ A Inversão de Dependência na criação é estruturalmente análoga à injeção da interface `Pagavel` no `Pedido` feita na Aula 10 — em ambos os casos, um módulo de alto nível passa a depender de uma abstração em vez de uma implementação concreta.
+:::
+
+:::

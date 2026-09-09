@@ -1,0 +1,2806 @@
+---
+title: "Aula 4: Autovalores, Autovetores e Matrizes Simétricas"
+subtitle: "Álgebra Linear e Otimização para Aprendizado de Máquina"
+author: "Prof. Marcos Medeiros Raimundo"
+date: "2026-09-07"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    fig-width: 8
+    fig-height: 4.5
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    theme: [simple, ../../lesson-theme.scss]
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    fig-width: 8
+    fig-height: 4.5
+jupyter: homepage
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar
+disable_progress_bar()
+from datasets import load_dataset
+
+plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+plt.rcParams.update({"figure.dpi": 120, "font.size": 11})
+
+# Paleta preferencial do IC
+COR_A   = "#0085CA"   # azul — elemento principal / classe A
+COR_B   = "#FF5E00"   # laranja — elemento de contraste / destaque
+COR_C   = "#E03C31"   # vermelho — alerta / segunda classe
+COR_NEU = "#5D6D7E"   # neutro
+
+# --- Problema-fio da aula: mesmo dataset real das Aulas 1-3 ----------
+_housing = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+COLS = ["MedInc", "HouseAge", "AveRooms", "AveBedrms"]
+
+# --- Matriz-fio da Intuição/Polinômio Característico (MathML Ex. 4.5) -
+A_exemplo = np.array([[4.0, 2.0], [1.0, 3.0]])
+
+# --- Matriz simétrica de contraste (MathML Ex. 4.11) ------------------
+A_sim = 0.5 * np.array([[5.0, -2.0], [-2.0, 5.0]])
+```
+
+# Revisão e Introdução
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Revisão Rápida: Onde a Aula 3 Parou
+
+A Aula 3 resolveu o problema da regressão sobredeterminada por completo,
+em três passos. **Primeiro**, formalizou a "sombra" (a projeção
+ortogonal $\hat{\mathbf{y}}$ de $\mathbf{y}$ sobre $\text{col}(X)$) como
+o ponto de menor distância, provando que essa condição é equivalente a
+uma condição algébrica exata: o resíduo $\mathbf{y}-X\hat{\mathbf{w}}$
+ortogonal a todo o espaço-coluna. **Segundo**, transformou essa condição
+de ortogonalidade nas **Equações Normais**,
+$X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$, e mostrou que — sob posto completo
+de $X$ (herdado da Aula 2) — $X^TX$ é invertível e
+$\hat{\mathbf{w}}=(X^TX)^{-1}X^T\mathbf{y}$ é a única solução. **Terceiro**,
+no Bloco 6, mostrou que "posto completo" não é garantia de robustez
+numérica: comparando o par de atributos quase-colinear
+(`AveRooms`/`AveBedrms`, correlação $0{,}865$) com o par bem-condicionado
+(`MedInc`/`HouseAge`), a mesma perturbação de $1\%$ nos dados produzia
+uma oscilação de $\approx 29{,}5\%$ no peso do primeiro par contra
+$\approx 0{,}1\%$ no segundo — quase $300$ vezes mais sensível. Vale
+relembrar o que essa perturbação faz e o que ela mede: soma-se a
+`MedHouseVal` um ruído gaussiano de média zero e desvio-padrão igual a
+apenas $1\%$ do desvio-padrão da própria variável (uma mudança
+minúscula, do tamanho de um erro de medição), reajusta-se por mínimos
+quadrados, e mede-se a **taxa de amplificação** entre essa mudança
+pequena na entrada e a mudança resultante no peso estimado — quanto
+maior a amplificação, mais frágil o par de atributos.
+
+Essa fragilidade foi **medida**, não **explicada**. A Aula 3 batizou a
+quantidade certa para isso — o **número de condição** de $X^TX$ — mas só
+soube calculá-lo perturbando os dados e observando o efeito
+($\text{cond}(X^TX)\approx 23\,460$ para os 4 atributos completos,
+$\approx 420$ para o par quase-colinear, $\approx 169$ para o par
+bem-condicionado, todos via `np.linalg.cond`). A própria aula fechou com
+essa promessa explícita, que serve de gancho direto para hoje: "o número
+de condição foi usado aqui de forma empírica (perturbar os dados e medir
+o efeito) — a Aula 4 dá a ferramenta exata para medi-lo diretamente a
+partir da estrutura de $X^TX$ (seus **autovalores** e **autovetores**),
+sem precisar perturbar nada."
+
+## Organizador Prévio: De Perturbar os Dados Para Olhar Direto Para Dentro de $X^TX$
+
+Perturbar os dados e medir o efeito é um experimento — funciona, mas não
+explica *por que* um par de atributos é mais frágil que outro, nem
+permite prever a fragilidade **antes** de perturbar nada. Olhando com
+mais cuidado para o que esse experimento faz: ao somar um ruído pequeno
+a $\mathbf{y}$ e reajustar, o que se está medindo, por fora, é uma **taxa
+de amplificação** — o quanto uma perturbação pequena na entrada se
+transforma numa oscilação grande (ou pequena) na saída ($\hat{\mathbf{w}}$).
+Essa taxa não é uma propriedade do ruído específico usado no experimento
+— é uma propriedade fixa da própria matriz $X^TX$, que existiria mesmo
+que ninguém nunca tivesse perturbado nada. Esta aula propõe uma mudança
+de estratégia: em vez de sacudir a matriz $X^TX$ de fora e observar como
+ela reage, vamos abrir $X^TX$ por dentro e encontrar os números que já
+determinam essa taxa de amplificação de antemão, de forma exata — os
+**autovalores**. A ideia central, que vai se repetir em cada bloco: a
+maioria das direções do espaço, quando atravessa uma transformação
+linear $A$, gira e muda de tamanho ao mesmo tempo; mas existem direções
+especiais que só mudam de tamanho, nunca de direção — e são exatamente
+essas direções, e os fatores de escala associados a elas, que carregam
+toda a informação sobre o comportamento numérico de uma matriz, incluindo
+a taxa de amplificação que o experimento de perturbação só conseguia
+estimar de fora.
+
+## Roteiro da Aula
+
+A pergunta que fecha o Organizador Prévio — "que números, dentro de
+$X^TX$, já determinam a fragilidade antes de qualquer perturbação?" — se
+desdobra em quatro perguntas mais específicas, cada uma resolvida em um
+ou mais blocos desta aula:
+
+1. O que é, geometricamente, um autovalor e um autovetor de uma matriz?
+2. Como calcular autovalores e autovetores à mão, de forma sistemática,
+   via o **polinômio característico**?
+3. Por que toda matriz simétrica — como $X^TX$, sempre — tem autovalores
+   reais e autovetores ortogonais entre si? Esse é o **Teorema Espectral
+   Real**.
+4. Como o sinal e a razão entre os autovalores definem, respectivamente,
+   a **definitude positiva** de uma matriz e o **número de condição
+   exato** de $X^TX$ — fechando, sem perturbar nada, o ciclo aberto na
+   Aula 3?
+
+## Problema Motivador
+
+Volte aos mesmos dois pares de atributos do *California Housing
+Dataset* que a Aula 3 comparou no Bloco 6: `AveRooms`/`AveBedrms`
+(quase-colinear, correlação $0{,}865$) e `MedInc`/`HouseAge`
+(bem-condicionado). A Aula 3 só soube dizer *qual* par era mais frágil
+depois de perturbar os dados e observar a oscilação no peso estimado.
+Pense por um instante, sem fazer nenhuma conta ainda: será que existe
+alguma propriedade de $X^TX$ — algo que se possa calcular olhando só
+para a matriz, sem perturbar absolutamente nada nos dados — que já
+anteciparia qual par vai se comportar mal?
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Revisão Rápida
+
+::: {.fragment}
+Aula 3: projeção $\hat{\mathbf{y}}$ (a "sombra") $\equiv$ resíduo
+ortogonal a $\text{col}(X)$ $\Rightarrow$ **Equações Normais**
+$X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$ $\Rightarrow$, sob posto completo,
+$\hat{\mathbf{w}}=(X^TX)^{-1}X^T\mathbf{y}$.
+:::
+
+::: {.fragment}
+Bloco 6 da Aula 3: `AveRooms`/`AveBedrms` (quase-colinear) oscila
+$\approx 29{,}5\%$ sob perturbação de $1\%$; `MedInc`/`HouseAge`
+(bem-condicionado) oscila só $\approx 0{,}1\%$ — quase $300\times$ mais
+sensível.
+:::
+
+::: {.fragment}
+**O que essa perturbação faz:** soma-se a `MedHouseVal` um ruído
+gaussiano de desvio-padrão igual a $1\%$ do desvio-padrão da própria
+variável, reajusta-se por mínimos quadrados. **O que ela mede:** a taxa
+de amplificação entre uma mudança pequena na entrada e a oscilação
+resultante no peso estimado.
+:::
+
+::: {.fragment}
+Essa fragilidade foi **medida** (perturbar e observar), não
+**explicada**. $\text{cond}(X^TX)\approx 23\,460$ (completo), $\approx
+420$ (quase-colinear), $\approx 169$ (bem-condicionado) — via
+`np.linalg.cond`, sem saber ainda de onde vêm esses números.
+:::
+
+## O que a perturbação revela sobre $X^TX$
+
+::: {.fragment}
+O experimento de perturbação mede, por fora, uma **taxa de
+amplificação**: entrada perturbada pouco $\to$ saída ($\hat{\mathbf{w}}$)
+oscila muito ou pouco. Essa taxa não depende do ruído usado — é uma
+propriedade fixa da matriz $X^TX$.
+:::
+
+::: {.fragment}
+Em vez de sacudir $X^TX$ de fora, abrir a matriz por dentro: os
+**autovalores** já determinam essa taxa de amplificação de forma exata,
+sem perturbar nada.
+:::
+
+::: {.fragment}
+Ideia central: a maioria das direções gira **e** muda de tamanho sob uma
+transformação $A$; direções especiais só mudam de tamanho, **nunca** de
+direção.
+:::
+
+## Roteiro da Aula
+
+::: {.fragment}
+**1.** O que é, geometricamente, um autovalor e um autovetor?
+:::
+
+::: {.fragment}
+**2.** Como calcular à mão, via o **polinômio característico**?
+:::
+
+::: {.fragment}
+**3.** Por que toda matriz simétrica ($X^TX$, sempre) tem autovalores
+reais e autovetores ortogonais — o **Teorema Espectral Real**?
+:::
+
+::: {.fragment}
+**4.** Como sinal e razão dos autovalores definem **definitude
+positiva** e o **número de condição exato** — fechando o ciclo da Aula 3?
+:::
+
+## Problema Motivador
+
+::: {.fragment}
+Mesmos dois pares da Aula 3: `AveRooms`/`AveBedrms` (quase-colinear,
+$r=0{,}865$) vs. `MedInc`/`HouseAge` (bem-condicionado). A Aula 3 só
+soube qual era mais frágil **depois** de perturbar.
+:::
+
+::: {.fragment}
+Existe alguma propriedade de $X^TX$ — calculável **sem perturbar nada**
+— que já antecipe qual par vai se comportar mal?
+:::
+:::
+
+::: {.fig-resize style="width: 85%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  node distance=0.7cm and 0.9cm,
+  block/.style={rectangle, draw=icblue, fill=icblue!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=2.7cm, minimum height=1.1cm},
+  concl/.style={rectangle, draw=icred, fill=icred!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=2.7cm, minimum height=1.1cm}
+]
+  \node (A) [block] {$X^TX$\\(sempre simétrica)};
+  \node (B) [block, right=of A] {autovalores $\lambda$,\\autovetores $\mathbf{x}$};
+  \node (C) [block, right=of B] {polinômio\\característico};
+  \node (D) [block, right=of C] {Teorema\\Espectral Real};
+  \node (E) [concl, right=of D] {sinal/razão de $\lambda$:\\definitude,\\número de condição};
+
+  \draw [-Stealth, thick, color=gray!70] (A) -- (B);
+  \draw [-Stealth, thick, color=gray!70] (B) -- (C);
+  \draw [-Stealth, thick, color=gray!70] (C) -- (D);
+  \draw [-Stealth, thick, color=gray!70] (D) -- (E);
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se dois pares de atributos têm a mesma correlação entre si, eles necessariamente têm o mesmo número de condição de $X^TX$?
+
+Dica: o número de condição da Aula 3 foi medido via perturbação nos
+dados; pense se a *escala* dos atributos (não só a correlação entre
+eles) poderia influenciar o resultado.
+
+- □ Dois pares de atributos com a mesma correlação de Pearson entre si
+  necessariamente têm o mesmo número de condição de $X^TX$, porque
+  correlação e número de condição medem exatamente a mesma coisa.
+- □ Se um par de atributos fosse exatamente ortogonal (correlação zero,
+  como duas colunas perfeitamente descorrelacionadas), isso por si só
+  não garante que o número de condição de $X^TX$ para esse par seja
+  igual a $1$ — a escala relativa das duas colunas também importa.
+- □ Num problema de engenharia estrutural, com duas variáveis de projeto
+  fortemente correlacionadas (ex.: espessura de duas vigas adjacentes que
+  quase sempre variam juntas), o mesmo tipo de fragilidade numérica de
+  $X^TX$ discutido aqui se aplicaria, mesmo fora do contexto de imóveis.
+- □ Como a Aula 3 mediu a fragilidade só perturbando os dados, isso
+  significa que não existe nenhuma forma de calcular o número de
+  condição de $X^TX$ sem realizar, na prática, uma perturbação real dos
+  dados.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Mesma correlação implica mesmo número de condição de $X^TX$?
+
+Dica: pense se a *escala* dos atributos (não só a correlação) poderia
+influenciar o número de condição.
+
+- □ Mesma correlação de Pearson $\Rightarrow$ mesmo número de condição
+  de $X^TX$ — as duas quantidades medem a mesma coisa.
+- □ Correlação zero (ortogonalidade) não garante, por si só, número de
+  condição igual a $1$ — a escala relativa das colunas também importa.
+- □ Vigas adjacentes com espessuras fortemente correlacionadas
+  (engenharia estrutural): mesmo tipo de fragilidade numérica se aplica.
+- □ Como a Aula 3 só perturbou os dados para medir, não existe forma de
+  calcular o número de condição sem perturbação real.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Correlação e número de condição — Resposta
+
+- ✗ Correlação mede alinhamento angular entre colunas; número de
+  condição de $X^TX$ mistura esse alinhamento **com** a escala/variância
+  de cada coluna — duas quantidades relacionadas, não idênticas.
+- ✔ Ortogonalidade (correlação $0$) só garante $X^TX$ diagonal; se as
+  variâncias das duas colunas forem muito diferentes, o número de
+  condição ainda pode ser grande.
+- ✔ Mesma mecânica (colunas quase-redundantes $\Rightarrow$ $X^TX$
+  mal-condicionada), outro domínio de engenharia.
+- ✗ É exatamente o que esta aula resolve: calcular o número de condição
+  **direto da estrutura** de $X^TX$ (autovalores), sem perturbar nada.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não — correlação e escala são, em geral,
+independentes, e o número de condição de $X^TX$ depende dos dois. O
+Bloco 6 vai calcular os autovalores exatos e confirmar isso nos mesmos
+dois pares.
+:::
+:::
+
+# Intuição -- Autovetores
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Uma Matriz Agindo sobre um Conjunto de Direções
+
+Antes de qualquer fórmula, uma imagem concreta. Tome a matriz
+$$
+A = \begin{bmatrix} 4 & 2 \\ 1 & 3 \end{bmatrix}
+$$
+(a mesma matriz do MathML, Exemplo 4.5, reaproveitada no Bloco 3 para o
+cálculo à mão) e pense nela como uma transformação linear
+$\mathbf{v}\mapsto A\mathbf{v}$ agindo sobre todo o plano
+$\mathbb{R}^2$. Escolha um punhado de vetores unitários apontando em
+direções diferentes ao redor da origem, e observe o que $A$ faz com cada
+um deles.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Uma Matriz Agindo sobre um Conjunto de Direções
+
+::: {.fragment}
+**Antes de qualquer fórmula, uma imagem concreta.** Matriz
+$A=\begin{bmatrix}4&2\\1&3\end{bmatrix}$ (MathML, Exemplo 4.5,
+reaproveitada no Bloco 3) como transformação linear
+$\mathbf{v}\mapsto A\mathbf{v}$ agindo sobre todo o plano $\mathbb{R}^2$.
+:::
+
+::: {.fragment}
+Escolha um punhado de vetores unitários apontando em direções diferentes
+ao redor da origem, e observe o que $A$ faz com cada um deles.
+:::
+
+## O Que os Dois Painéis Mostram
+:::
+
+::: {.fig-resize style="width: 60%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+theta_grid = np.linspace(0, 2*np.pi, 200)
+circulo = np.stack([np.cos(theta_grid), np.sin(theta_grid)])
+elipse = A_exemplo @ circulo
+
+angulos_setas = np.linspace(0, 2*np.pi, 12, endpoint=False)
+setas = np.stack([np.cos(angulos_setas), np.sin(angulos_setas)])
+setas_img = A_exemplo @ setas
+
+autovalores_ex, autovetores_ex = np.linalg.eig(A_exemplo)
+# A_exemplo tem autovalores reais (2 e 5); numpy.linalg.eig devolve dtype
+# complexo por padrão para matrizes não-simétricas — tomamos a parte real
+# (a parte imaginária é numericamente zero neste caso).
+autovalores_ex = autovalores_ex.real
+autovetores_ex = autovetores_ex.real
+ordem = np.argsort(autovalores_ex)
+autovalores_ex = autovalores_ex[ordem]
+autovetores_ex = autovetores_ex[:, ordem]
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 5.2))
+
+# Painel 1: um leque de vetores unitários e suas imagens sob A
+for k in range(setas.shape[1]):
+    ax1.annotate("", xy=setas[:, k], xytext=(0, 0),
+                 arrowprops=dict(arrowstyle="->", color=COR_NEU, lw=1.3, alpha=0.75))
+    ax1.annotate("", xy=setas_img[:, k], xytext=(0, 0),
+                 arrowprops=dict(arrowstyle="->", color=COR_A, lw=1.6, alpha=0.85))
+# direções especiais (autovetores), destacadas em laranja/vermelho
+for k, cor in zip(range(2), [COR_B, COR_C]):
+    v = autovetores_ex[:, k]
+    ax1.annotate("", xy=3.2*v, xytext=(-3.2*v[0], -3.2*v[1]),
+                 arrowprops=dict(arrowstyle="-", color=cor, lw=2.2, ls="--"))
+ax1.set_xlim(-6, 6); ax1.set_ylim(-6, 6)
+ax1.set_aspect("equal")
+ax1.set_title("Vetores unitários (cinza) e suas imagens $A\\mathbf{v}$ (azul)", fontsize=10, fontweight="bold")
+ax1.set_xlabel("$x_1$"); ax1.set_ylabel("$x_2$")
+
+# Painel 2: círculo unitário -> elipse, com as direções especiais marcadas
+ax2.plot(circulo[0], circulo[1], color=COR_NEU, lw=1.8, ls=":", label="círculo unitário")
+ax2.plot(elipse[0], elipse[1], color=COR_A, lw=2.2, label="imagem sob $A$ (elipse)")
+for k, cor, nome in zip(range(2), [COR_B, COR_C], ["direção 1", "direção 2"]):
+    v = autovetores_ex[:, k]
+    lam = autovalores_ex[k]
+    ax2.annotate("", xy=lam*v, xytext=(0, 0),
+                 arrowprops=dict(arrowstyle="->", color=cor, lw=2.4))
+    ax2.text(lam*v[0]*1.08, lam*v[1]*1.08, f"{nome}\n($\\lambda={lam:.0f}$)", fontsize=8.5, color=cor)
+ax2.set_xlim(-6, 6); ax2.set_ylim(-6, 6)
+ax2.set_aspect("equal")
+ax2.legend(fontsize=8.5, loc="upper left")
+ax2.set_title("As duas direções que só esticam, nunca giram", fontsize=10, fontweight="bold")
+ax2.set_xlabel("$x_1$"); ax2.set_ylabel("$x_2$")
+
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+No painel esquerdo, cada seta cinza é um vetor unitário original, e a
+seta azul correspondente é sua imagem $A\mathbf{v}$: a maioria delas gira
+visivelmente — a direção de chegada não é a mesma da direção de partida.
+Mas as duas retas tracejadas (laranja e vermelha) marcam duas direções
+específicas em que **isso não acontece**: qualquer vetor sobre essas
+retas continua, depois de multiplicado por $A$, sobre a **mesma reta** —
+só o comprimento muda (nesse caso, sempre esticando, nunca invertendo,
+porque os dois fatores de escala são positivos). O painel direito mostra
+a mesma ideia de outro ângulo: o círculo unitário inteiro (pontilhado)
+vira uma elipse (linha cheia azul) sob a ação de $A$, e os eixos dessa
+elipse caem **exatamente** sobre as duas direções especiais — cada eixo
+esticado por um fator diferente ($\lambda=2$ numa direção, $\lambda=5$ na
+outra, valores que o Bloco 3 vai calcular à mão, à mão).
+
+Vale nomear informalmente o que o desenho já mostra, antes de qualquer
+equação: essas duas direções especiais são os **autovetores** de $A$, e
+os fatores de escala associados a cada uma são os **autovalores**
+correspondentes. Repare em um detalhe que vai ficar importante no Bloco
+4: as duas retas tracejadas do painel esquerdo **não são perpendiculares
+uma à outra** — o ângulo entre elas não é de $90°$. Isso não é um
+detalhe cosmético; é uma propriedade de $A$ **não ser simétrica**
+($A\ne A^T$, já que a entrada $(1,2)=2$ é diferente da entrada
+$(2,1)=1$), e vai mudar completamente quando a matriz for simétrica —
+gancho direto para o Bloco 4.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+Esquerda: seta cinza = vetor original; seta azul = imagem $A\mathbf{v}$.
+A maioria **gira**. Duas retas tracejadas (laranja/vermelha): sobre elas,
+$A\mathbf{v}$ fica na **mesma reta** — só o comprimento muda (aqui,
+sempre esticando, nunca invertendo o sentido, porque os dois fatores de
+escala são positivos — isso muda quando um autovalor é negativo,
+Pergunta a seguir).
+:::
+
+::: {.fragment}
+Direita: círculo unitário (pontilhado) $\to$ elipse (azul) sob $A$. Os
+eixos da elipse caem **exatamente** sobre as duas direções especiais —
+cada eixo esticado por um fator diferente ($\lambda=2$ e $\lambda=5$,
+calculados à mão no Bloco 3).
+:::
+
+## Nomeando a Intuição
+
+::: {.fragment}
+Direções especiais = **autovetores** de $A$; fatores de escala
+associados = **autovalores** correspondentes. É isso que o desenho já
+mostrava — só faltava o nome.
+:::
+
+::: {.fragment}
+**Observação plantada:** meça o ângulo entre as duas retas tracejadas —
+não são perpendiculares ($90°$). Repare: **simetria é propriedade da
+matriz** ($A=A^T$ ou não); **ortogonalidade é propriedade dos
+autovetores** (perpendiculares entre si, ou não) — são duas coisas
+diferentes, ligadas por um teorema, não sinônimos.
+:::
+
+::: {.fragment}
+Aqui, $A=\begin{bmatrix}4&2\\1&3\end{bmatrix}$ **não é simétrica**
+($A\ne A^T$: a entrada $(1,2)=2$ é diferente da entrada $(2,1)=1$) — e os
+autovetores, de fato, não são ortogonais. Bloco 4 prova que essa ligação
+não é coincidência: **se a matriz for simétrica, os autovetores são
+sempre ortogonais entre si**, garantido. É o gancho direto para lá.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Equação Formal
+
+A intuição visual do painel acima tem um nome e uma equação precisos. O
+MathML define (tradução nossa, §4.2, Definição 4.6, p. 105):
+
+> "Seja $A\in\mathbb{R}^{n\times n}$ uma matriz quadrada. Então
+> $\lambda\in\mathbb{R}$ é um **autovalor** de $A$ e
+> $\mathbf{x}\in\mathbb{R}^n\setminus\{\mathbf{0}\}$ é o **autovetor**
+> correspondente de $A$ se
+> $$A\mathbf{x} = \lambda\mathbf{x}.$$
+> Chamamos essa equação de **equação de autovalor**."
+
+Essa é exatamente a propriedade que o desenho já mostrou: multiplicar o
+autovetor $\mathbf{x}$ por $A$ dá o mesmo resultado que simplesmente
+esticá-lo por um número $\lambda$ — nenhuma rotação, só escala (com
+inversão de sentido se $\lambda<0$, caso que não aparece no exemplo
+desta figura, mas vai aparecer mais adiante no curso). Vale notar, desde
+já, uma propriedade que vai evitar uma confusão comum: o autovetor
+$\mathbf{x}$ associado a um autovalor **não é único**. O MathML observa
+(tradução nossa, mesma seção): "se $\mathbf{x}$ é um autovetor de $A$
+associado ao autovalor $\lambda$, então, para qualquer $c\in\mathbb{R}
+\setminus\{0\}$, vale que $c\mathbf{x}$ também é um autovetor de $A$ com
+o mesmo autovalor, já que $A(c\mathbf{x})=cA\mathbf{x}=c\lambda\mathbf{x}
+=\lambda(c\mathbf{x})$. Assim, todos os vetores colineares a
+$\mathbf{x}$ também são autovetores de $A$." Ou seja: o que a figura
+chama de "direção especial" é literalmente isso — uma **reta** inteira
+de autovetores (menos a origem), não um vetor específico; qualquer
+múltiplo escalar não-nulo de um autovetor serve igualmente bem.
+
+Essa não-unicidade é o motivo para tratar um autovetor, antes de mais
+nada, como uma **direção** — não como "o" vetor com um comprimento
+fixo. Um vetor propriamente dito carrega duas informações, direção **e**
+amplitude (o próprio comprimento da seta); num autovetor, a amplitude é
+arbitrária — qualquer $c\ne 0$ serve igualmente bem, inclusive $c<0$,
+que aponta para o lado oposto da mesma reta — só a direção (a reta que
+passa pela origem) é a informação que de fato pertence a $A$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Equação Formal
+
+::: {.fragment}
+**Definição 4.6 (MathML, tradução nossa):** $\lambda\in\mathbb{R}$ é
+**autovalor** de $A\in\mathbb{R}^{n\times n}$ e
+$\mathbf{x}\in\mathbb{R}^n\setminus\{\mathbf{0}\}$ é o **autovetor**
+correspondente se
+$$A\mathbf{x} = \lambda\mathbf{x}$$
+(a **equação de autovalor**) — exatamente "esticar sem girar" do desenho
+acima: nenhuma rotação, só escala.
+:::
+
+::: {.fragment}
+**Caso que não aparece no desenho, mas conta:** se $\lambda<0$, a escala
+inverte o sentido do vetor ($\mathbf{x}$ e $A\mathbf{x}$ apontam para
+lados opostos da mesma reta) — ainda "sem girar" no sentido da equação
+(a reta é a mesma), só que com sentido trocado. No exemplo desta figura
+os dois autovalores são positivos ($\lambda=2,5$), por isso nenhuma seta
+se inverte.
+:::
+
+::: {.fragment}
+**Não-unicidade (MathML):** se $\mathbf{x}$ é autovetor de autovalor
+$\lambda$, qualquer $c\mathbf{x}$ ($c\ne 0$) também é, com o **mesmo**
+autovalor — não é só uma afirmação, sai direto da equação:
+$$A(c\mathbf{x}) = cA\mathbf{x} = c\lambda\mathbf{x} = \lambda(c\mathbf{x}).$$
+:::
+
+::: {.fragment}
+Logo, "direção especial" é uma **reta** inteira de autovetores, não um
+vetor específico. Por isso um autovetor é melhor pensado como uma
+**direção**, não como "o" vetor: um vetor de verdade carrega direção
+**e** amplitude, mas aqui a amplitude é arbitrária — só a direção
+pertence a $A$.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se um vetor $\mathbf{v}$ fosse mapeado por $A$ exatamente para $-3\mathbf{v}$, isso significaria que $\mathbf{v}$ não é autovetor de $A$, já que a direção "inverteu"?
+
+Dica: releia a equação de autovalor — ela permite $\lambda$ negativo?
+"Mesma reta, sentido oposto" ainda conta como "não girar"?
+
+- □ Se $A\mathbf{v}=-3\mathbf{v}$ para algum $\mathbf{v}\ne\mathbf{0}$,
+  isso significa que $\mathbf{v}$ **não** é autovetor de $A$, porque a
+  direção do vetor se inverteu.
+- □ Se todos os vetores do plano fossem autovetores de uma mesma matriz
+  $A$ (não só duas direções especiais, mas qualquer direção), isso
+  forçaria $A$ a ser um múltiplo escalar da identidade, $A=cI$.
+- □ Num sistema de molas lineares acopladas, os "modos normais de
+  vibração" (frequências e formatos de oscilação que se mantêm
+  proporcionais ao longo do tempo, sem misturar) correspondem, na
+  matriz que descreve o sistema, exatamente a autovetores dessa matriz.
+- □ Como o autovetor associado a um autovalor não é único (qualquer
+  múltiplo escalar serve), isso implica que o autoespaço associado a um
+  autovalor sempre tem dimensão maior que 1.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## $A\mathbf{v}=-3\mathbf{v}$ significa que $\mathbf{v}$ não é autovetor, já que a direção inverteu?
+
+Dica: a equação de autovalor permite $\lambda$ negativo? "Mesma reta,
+sentido oposto" ainda conta como "não girar"?
+
+- □ $A\mathbf{v}=-3\mathbf{v}$ ($\mathbf{v}\ne\mathbf{0}$) significa que
+  $\mathbf{v}$ **não** é autovetor, pela inversão de direção.
+- □ Se **todo** vetor do plano fosse autovetor de $A$, isso forçaria
+  $A=cI$ (múltiplo escalar da identidade).
+- □ Modos normais de vibração de molas acopladas correspondem a
+  autovetores da matriz que descreve o sistema.
+- □ Autovetor não-único (múltiplo escalar) $\Rightarrow$ autoespaço
+  sempre tem dimensão $>1$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Sinal do autovalor e o que "não girar" realmente exige — Resposta
+
+- ✗ $\lambda=-3$ é um autovalor válido (é real); "mesma reta, sentido
+  oposto" continua sendo "não girar" no sentido da equação — a direção
+  (a reta) é preservada, só o sentido e o comprimento mudam.
+- ✔ Se toda direção é preservada, em particular os vetores canônicos
+  $\mathbf{e}_1,\mathbf{e}_2$ são autovetores, o que força $A$ diagonal;
+  e se toda direção compartilha o mesmo comportamento de escala, a única
+  matriz consistente é $A=cI$.
+- ✔ Exatamente a interpretação física padrão de autovalores/autovetores
+  em sistemas físicos lineares — mesma matemática, outro domínio.
+- ✗ Não-unicidade do autovetor (múltiplos escalares) não implica
+  dimensão $>1$ do autoespaço — é o contrário do que Bloco 3 vai mostrar
+  para $A_{\text{exemplo}}$: cada autoespaço aqui tem dimensão $1$ (uma
+  reta), mesmo contendo infinitos vetores (a reta menos a origem).
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não — o sinal de $\lambda$ decide se a direção
+é preservada com o mesmo sentido ($\lambda>0$) ou invertida
+($\lambda<0$), mas em ambos os casos $\mathbf{v}$ continua autovetor. O
+que de fato desqualificaria $\mathbf{v}$ seria $A\mathbf{v}$ apontar para
+uma direção **diferente** da reta de $\mathbf{v}$.
+:::
+:::
+
+# O Polinômio Característico
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Premissas: O Que Precisamos Resolver
+
+O Bloco 2 mostrou a existência das direções especiais só visualmente.
+Para encontrá-las **sem depender de um desenho**, precisamos transformar
+a equação de autovalor $A\mathbf{x}=\lambda\mathbf{x}$ num problema de
+álgebra resolvível passo a passo. Deixando as premissas explícitas antes
+de qualquer manipulação:
+
+::: {.callout-note}
+## Premissas
+
+1. Temos uma matriz quadrada $A\in\mathbb{R}^{n\times n}$ fixa (no nosso
+   caso, $n=2$, a matriz do Bloco 2).
+2. Procuramos pares $(\lambda,\mathbf{x})$, com
+   $\mathbf{x}\in\mathbb{R}^n\setminus\{\mathbf{0}\}$, satisfazendo
+   $A\mathbf{x}=\lambda\mathbf{x}$.
+3. Não sabemos ainda quantos autovalores existem, nem seus valores — só
+   sabemos, do Bloco 2, que **pelo menos dois** existem nesse exemplo
+   específico (as duas direções desenhadas).
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Premissas: O Que Precisamos Resolver
+
+::: {.callout-note icon=false}
+**Premissas**
+
+1. Matriz quadrada $A\in\mathbb{R}^{n\times n}$ fixa ($n=2$ no exemplo).
+2. Procuramos $(\lambda,\mathbf{x})$, $\mathbf{x}\ne\mathbf{0}$, com
+   $A\mathbf{x}=\lambda\mathbf{x}$.
+3. Não sabemos quantos existem — só que **pelo menos dois** existem
+   neste exemplo (Bloco 2).
+:::
+
+::: {.fragment}
+Objetivo: transformar $A\mathbf{x}=\lambda\mathbf{x}$ num problema de
+álgebra resolvível passo a passo, sem depender de desenho.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Passo (i): Reescrevendo a Equação de Autovalor Como um Sistema Homogêneo
+
+A manipulação decisiva é puramente algébrica: subtrair
+$\lambda\mathbf{x}$ dos dois lados,
+$$
+A\mathbf{x} = \lambda\mathbf{x}
+\quad\Longleftrightarrow\quad
+A\mathbf{x} - \lambda\mathbf{x} = \mathbf{0}
+\quad\Longleftrightarrow\quad
+(A-\lambda I)\mathbf{x} = \mathbf{0},
+$$
+usando $I$ (a identidade) para poder subtrair uma matriz de outra
+matriz. Essa última forma é um **sistema linear homogêneo**
+$B\mathbf{x}=\mathbf{0}$, com $B=A-\lambda I$ — a mesma estrutura de
+sistema linear já estudada nas Aulas 2-3, só que agora a incógnita não é
+só $\mathbf{x}$: o próprio $\lambda$ também é desconhecido, e está
+embutido dentro de $B$.
+
+Um sistema homogêneo $B\mathbf{x}=\mathbf{0}$ **sempre** tem a solução
+trivial $\mathbf{x}=\mathbf{0}$ — mas a Premissa 2 exige
+$\mathbf{x}\ne\mathbf{0}$. Isso só é possível quando o sistema tem
+**mais de uma** solução (a trivial e outras) — e a Aula 2 já ensinou o
+critério exato para isso: um sistema quadrado homogêneo tem soluções
+não-triviais se, e somente se, sua matriz de coeficientes **não** tem
+posto completo, ou seja, é **singular** (não-invertível).
+
+Falta um elo, e ele não é óbvio: por que "singular" equivale a
+$\det(B)=0$? Não é uma definição nem uma consequência imediata do que
+já vimos — é um teorema, na verdade dois, que o MathML enuncia
+separadamente (tradução nossa, §4.1): "para qualquer matriz quadrada
+$A\in\mathbb{R}^{n\times n}$ vale que $A$ é invertível se, e somente
+se, $\det(A)\ne 0$" (Teorema 4.1, p.&nbsp;100), e "uma matriz quadrada
+$A\in\mathbb{R}^{n\times n}$ tem $\det(A)\ne 0$ se, e somente se,
+$\text{rk}(A)=n$; em outras palavras, $A$ é invertível se, e somente
+se, tem posto completo" (Teorema 4.3, p.&nbsp;103). Encadeando os dois
+teoremas com o critério de posto da Aula 2:
+$$
+B\mathbf{x}=\mathbf{0} \text{ tem solução não-trivial}
+\;\overset{\text{Aula 2}}{\iff}\; B \text{ não tem posto completo}
+\;\overset{\text{Teo. 4.3}}{\iff}\; B \text{ não é invertível}
+\;\overset{\text{Teo. 4.1}}{\iff}\; \det(B) = 0.
+$$
+Com $B=A-\lambda I$, isso equivale a
+$$
+\det(A-\lambda I) = 0.
+$$
+Essa equação — não $A\mathbf{x}=\lambda\mathbf{x}$ diretamente — é o
+alvo do resto deste bloco: ela só tem $\lambda$ como incógnita (o
+$\mathbf{x}$ já foi eliminado), o que a torna resolvível por conta
+própria.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Passo (i): Reescrevendo Como um Sistema Homogêneo
+
+::: {.fragment}
+$$A\mathbf{x} = \lambda\mathbf{x} \iff (A-\lambda I)\mathbf{x} = \mathbf{0}$$
+Sistema linear homogêneo $B\mathbf{x}=\mathbf{0}$, $B=A-\lambda I$ — mas
+$\lambda$ também é incógnita, embutida em $B$.
+:::
+
+::: {.fragment}
+Premissa 2 exige $\mathbf{x}\ne\mathbf{0}$ (não iremos usar solução trivial $\mathbf{x}=\mathbf{0}$).
+:::
+
+::: {.fragment}
+Com isso temos que $B\mathbf{x}=\mathbf{0}$ tem solução não-trivial $\iff$ $B$ é singular (não-invertível). Então precisamos de $\det(B)=0$ para que haja autovetor não-trivial.
+:::
+
+::: {.fragment}
+Essa equação só tem $\lambda$ como incógnita ($\mathbf{x}$ já
+eliminado) — resolvível por conta própria.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Polinômio Característico
+
+O MathML batiza a expressão $\det(A-\lambda I)$ vista como função de
+$\lambda$ (tradução nossa, §4.1, Definição 4.5, p. 104):
+
+> "Para $\lambda\in\mathbb{R}$ e uma matriz quadrada
+> $A\in\mathbb{R}^{n\times n}$,
+> $$
+> p_A(\lambda) := \det(A-\lambda I) = c_0+c_1\lambda+c_2\lambda^2+\cdots
+> +c_{n-1}\lambda^{n-1}+(-1)^n\lambda^n,\quad c_0,\dots,c_{n-1}
+> \in\mathbb{R},
+> $$
+> é o **polinômio característico** de $A$."
+
+E o MathML conecta essa definição diretamente ao problema que queremos
+resolver (tradução nossa, §4.2, Teorema 4.8, p. 106): "$\lambda\in
+\mathbb{R}$ é um autovalor de $A\in\mathbb{R}^{n\times n}$ se, e somente
+se, $\lambda$ é uma raiz do polinômio característico $p_A(\lambda)$ de
+$A$." Ou seja: **os autovalores de $A$ são exatamente as raízes reais de
+um único polinômio**, $p_A(\lambda)$ — encontrar todos os autovalores
+de uma matriz $2\times 2$ vira, literalmente, resolver uma equação do
+segundo grau.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+**Definição 4.5 - O Polinômio Característico (MathML):**
+$$p_A(\lambda) := \det(A-\lambda I) = c_0+c_1\lambda+\cdots+(-1)^n\lambda^n$$
+é o **polinômio característico** de $A$.
+:::
+
+::: {.fragment}
+**Teorema 4.8 (MathML, tradução nossa):** $\lambda\in\mathbb{R}$ é
+autovalor de $A$ $\iff$ $\lambda$ é raiz de $p_A(\lambda)$.
+:::
+
+::: {.fragment}
+Autovalores de $A$ = raízes reais de **um único** polinômio — para
+$2\times 2$, literalmente resolver uma equação do 2º grau.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Passo (ii): Aplicando ao Exemplo do Bloco 2 — o Polinômio
+
+Vamos calcular à mão, do zero, usando a mesma matriz do Bloco 2,
+$A=\begin{bmatrix}4&2\\1&3\end{bmatrix}$ (MathML, Exemplo 4.5, p. 107).
+$$
+A-\lambda I = \begin{bmatrix}4-\lambda & 2\\ 1 & 3-\lambda\end{bmatrix},
+\qquad
+p_A(\lambda) = \det(A-\lambda I) = (4-\lambda)(3-\lambda) - 2\cdot 1.
+$$
+Expandindo o produto: $(4-\lambda)(3-\lambda) = 12-7\lambda+\lambda^2$,
+logo
+$$
+p_A(\lambda) = 12-7\lambda+\lambda^2-2 = \lambda^2-7\lambda+10.
+$$
+O MathML resolve essa mesma equação por fatoração direta (tradução
+nossa): "fatorizamos o polinômio característico e obtemos
+$p(\lambda)=(4-\lambda)(3-\lambda)-2\cdot 1=10-7\lambda+\lambda^2=
+(2-\lambda)(5-\lambda)$, dando as raízes $\lambda_1=2$ e $\lambda_2=5$."
+Confirmando por Bhaskara, para não depender só de "ver" a fatoração:
+raízes de $\lambda^2-7\lambda+10=0$ são
+$$
+\lambda=\frac{7\pm\sqrt{49-40}}{2}=\frac{7\pm\sqrt{9}}{2}=\frac{7\pm 3}{2},
+$$
+ou seja $\lambda\in\{2,5\}$ — exatamente os dois valores que a elipse do
+Bloco 2 já tinha marcado nos eixos.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Passo (ii): O Polinômio do Exemplo
+
+::: {.fragment}
+$A=\begin{bmatrix}4&2\\1&3\end{bmatrix}$ (Bloco 2, MathML Ex. 4.5):
+$$A-\lambda I = \begin{bmatrix}4-\lambda & 2\\ 1 & 3-\lambda\end{bmatrix}$$
+$$p_A(\lambda) = (4-\lambda)(3-\lambda)-2\cdot 1 = \lambda^2-7\lambda+10$$
+:::
+
+::: {.fragment}
+**MathML (tradução nossa):** fatorando,
+$p(\lambda)=(2-\lambda)(5-\lambda)$ $\Rightarrow$ raízes
+$\lambda_1=2$, $\lambda_2=5$.
+:::
+
+::: {.fragment}
+Confirmando por Bhaskara:
+$$
+\lambda=\frac{7\pm\sqrt{49-40}}{2}=\frac{7\pm\sqrt{9}}{2}=\frac{7\pm 3}{2}
+$$
+$\lambda\in\{2,5\}$ — exatamente os eixos da elipse do Bloco 2.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Passo (iii): De Volta à Equação Original — Achando os Autovetores
+
+Achar $\lambda$ resolveu metade do problema; falta achar, para cada
+$\lambda$, o(s) autovetor(es) associado(s), resolvendo
+$(A-\lambda I)\mathbf{x}=\mathbf{0}$ com o valor de $\lambda$ já
+conhecido. Para $\lambda_2=5$:
+$$
+A - 5I = \begin{bmatrix}-1 & 2\\ 1 & -2\end{bmatrix},
+\qquad
+(A-5I)\mathbf{x}=\mathbf{0} \;\Longrightarrow\; -x_1+2x_2=0
+\;\Longrightarrow\; x_1=2x_2.
+$$
+A equação $x_1=2x_2$ tem uma variável livre: qualquer valor de $x_2$
+determina $x_1$. Parametrizando $x_2=t$ para $t\in\mathbb{R}$
+arbitrário, obtemos $x_1=2t$, ou seja
+$$
+(x_1,x_2) = (2t,t) = t\cdot(2,1).
+$$
+Esse é, por definição, o conjunto de todos os múltiplos escalares de
+$(2,1)$ — $\text{span}((2,1)) := \{t\cdot(2,1) : t\in\mathbb{R}\}$. O
+**autoespaço** $E_5$ é, por definição, o conjunto-solução inteiro de
+$(A-5I)\mathbf{x}=\mathbf{0}$ (uma reta pela origem, incluindo o caso
+$t=0$, que dá a solução trivial); os **autovetores** propriamente ditos
+são os elementos não-nulos desse conjunto ($t\ne 0$, pela Premissa 2).
+Logo
+$$
+E_5=\text{span}((2,1))
+$$
+(MathML: "obtemos o espaço-solução $E_5=\text{span}([2,1])$"). Para
+$\lambda_1=2$:
+$$
+A-2I = \begin{bmatrix}2 & 2\\ 1 & 1\end{bmatrix},
+\qquad
+(A-2I)\mathbf{x}=\mathbf{0} \;\Longrightarrow\; x_1+x_2=0
+\;\Longrightarrow\; x_1=-x_2,
+$$
+mesmo processo: parametrizando $x_2=t$, $(x_1,x_2)=(-t,t)=t\cdot(-1,1)$,
+dando $E_2=\text{span}((-1,1))$. Como $(-1,1)=-1\cdot(1,-1)$, essa é a
+mesma reta que $\text{span}((1,-1))$ — trocar o sinal do parâmetro
+$t$ não muda o conjunto de múltiplos escalares, só relabeia qual $t$
+gera qual ponto. Escrevemos $E_2=\text{span}((1,-1))$ por convenção;
+isso é consistente com o autovetor ser uma **direção**, não um vetor de
+sinal fixo (Bloco 2, "A Equação Formal"). Note que $(2,1)$ e
+$(1,-1)$ são exatamente as duas direções (laranja e vermelha)
+desenhadas no painel do Bloco 2 — o cálculo algébrico confirma, número
+por número, o que o desenho já tinha mostrado visualmente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Passo (iii): Achando os Autovetores
+
+::: {.fragment}
+Para $\lambda_2=5$: $A-5I=\begin{bmatrix}-1&2\\1&-2\end{bmatrix}$
+$\Rightarrow$ $-x_1+2x_2=0 \Rightarrow x_1=2x_2$.
+:::
+
+::: {.fragment}
+Variável livre $x_2=t$ $\Rightarrow$
+$(x_1,x_2)=(2t,t)=t\cdot(2,1)$ — por definição, o conjunto de todos
+os múltiplos escalares de $(2,1)$:
+$$E_5=\text{span}((2,1)) := \{t\cdot(2,1) : t\in\mathbb{R}\}$$
+(MathML).
+:::
+
+::: {.fragment}
+Para $\lambda_1=2$: $A-2I=\begin{bmatrix}2&2\\1&1\end{bmatrix}$
+$\Rightarrow$ $x_1+x_2=0 \Rightarrow x_1=-x_2$. 
+:::
+
+::: {.fragment}
+Parametrizando
+$x_2=t$: $(x_1,x_2)=t\cdot(-1,1)$, mesma reta que $\text{span}((1,-1))$
+(sinal do parâmetro só relabeia os pontos) $\Rightarrow$
+$E_2=\text{span}((1,-1))$.
+:::
+
+::: {.fragment}
+$(2,1)$ e $(1,-1)$: **exatamente** as duas direções (laranja/vermelha)
+do Bloco 2 — o cálculo confirma, número por número, o desenho.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Verificação Numérica: `numpy.linalg.eig`
+
+Fazer essa conta à mão é indispensável para entender **de onde** vêm os
+autovalores/autovetores, mas na prática — matrizes maiores que
+$2\times 2$, ou o caso $X^TX\in\mathbb{R}^{4\times 4}$ do Bloco 6 — o
+polinômio característico vira inviável de resolver manualmente
+(polinômios de grau $\ge 5$ nem sempre têm raiz em forma fechada).
+`numpy.linalg.eig` resolve o mesmo problema numericamente:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Verificação Numérica
+
+::: {.fragment}
+À mão é indispensável para entender a origem; mas para matrizes maiores
+(ex.: $X^TX\in\mathbb{R}^{4\times 4}$ do Bloco 6), o polinômio
+característico vira inviável (grau $\ge 5$ nem sempre tem raiz fechada).
+`numpy.linalg.eig` resolve numericamente:
+:::
+:::
+
+```{python}
+#| echo: true
+
+autovalores, autovetores = np.linalg.eig(A_exemplo)
+# Autovalores reais (2 e 5); numpy.linalg.eig devolve dtype complexo por
+# padrão para matrizes não-simétricas — parte imaginária é zero aqui.
+autovalores = autovalores.real
+autovetores = autovetores.real
+print("Autovalores:", autovalores)
+print("Autovetores (colunas, normalizados por numpy):")
+print(autovetores)
+
+# Conferindo A x = lambda x diretamente, para cada par
+for k in range(2):
+    lhs = A_exemplo @ autovetores[:, k]
+    rhs = autovalores[k] * autovetores[:, k]
+    print(f"  lambda={autovalores[k]:.1f}: ||A x - lambda x|| = {np.linalg.norm(lhs - rhs):.2e}")
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Os autovalores batem exatamente com $\{2,5\}$ calculados à mão, e a
+igualdade $A\mathbf{x}=\lambda\mathbf{x}$ é confirmada numericamente até
+erro de arredondamento. Uma diferença importante de convenção: o
+`numpy` sempre devolve os autovetores **normalizados** (norma $1$) — é
+só mais uma escolha dentro da reta de infinitos múltiplos escalares
+válidos (a não-unicidade do Bloco 2), não uma contradição com o
+$(2,1)$/$(1,-1)$ calculado à mão.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que a Verificação Confirma
+
+::: {.fragment}
+Autovalores batem exatamente com $\{2,5\}$; $A\mathbf{x}=\lambda\mathbf{x}$
+confirmado até erro de arredondamento.
+:::
+
+::: {.fragment}
+`numpy` sempre normaliza autovetores (norma $1$) — só mais uma escolha
+dentro da reta de múltiplos escalares válidos, não contradição com
+$(2,1)$/$(1,-1)$ calculado à mão.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se o polinômio característico de uma matriz $3\times 3$ tivesse grau 3 mas só uma raiz real, quantos autovalores reais essa matriz teria?
+
+Dica: o Teorema 4.8 conecta autovalor a **raiz real** do polinômio
+característico — o que acontece quando algumas raízes não são reais?
+
+- □ Uma matriz $3\times 3$ cujo polinômio característico (grau 3) tem só
+  uma raiz real teria exatamente **um** autovalor real — as outras duas
+  raízes, sendo complexas, não correspondem a autovalores reais da
+  matriz.
+- □ Se o polinômio característico de uma matriz $2\times 2$ não tivesse
+  nenhuma raiz real (discriminante negativo em Bhaskara), essa matriz
+  não teria autovalor real algum, mas ainda seria uma transformação
+  linear perfeitamente válida sobre $\mathbb{R}^2$ (ex.: uma rotação
+  pura por um ângulo diferente de $0°$/$180°$).
+- □ Num modelo de crescimento populacional descrito por uma matriz de
+  transição $2\times 2$, encontrar os autovalores dessa matriz por
+  polinômio característico é uma aplicação válida da mesma técnica, mesmo
+  a matriz não vindo de geometria.
+- □ Como o autovetor associado a um autovalor não é único, isso implica
+  que, ao resolver $(A-\lambda I)\mathbf{x}=\mathbf{0}$ à mão para achar
+  $E_\lambda$, sempre existe mais de uma equação linearmente
+  independente restringindo $\mathbf{x}$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Polinômio de grau 3 com só uma raiz real: quantos autovalores reais?
+
+Dica: autovalor = raiz **real** do polinômio característico (Teorema
+4.8) — raízes complexas contam?
+
+- □ Grau 3, só uma raiz real: exatamente **um** autovalor real — as
+  outras duas (complexas) não correspondem a autovalor real.
+- □ Se o polinômio característico $2\times 2$ não tivesse raiz real
+  (discriminante negativo), a matriz não teria autovalor real, mas ainda
+  seria transformação linear válida (ex.: rotação pura).
+- □ Modelo de crescimento populacional ($2\times 2$): achar autovalores
+  por polinômio característico é aplicação válida, fora da geometria.
+- □ Autovetor não-único $\Rightarrow$ ao resolver
+  $(A-\lambda I)\mathbf{x}=\mathbf{0}$, sempre há mais de uma equação
+  linearmente independente restringindo $\mathbf{x}$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Raízes reais vs. complexas, e o autoespaço — Resposta
+
+- ✔ Exatamente a leitura correta do Teorema 4.8: só raízes reais do
+  polinômio característico contam como autovalor (real) da matriz.
+- ✔ Rotação pura por ângulo $\ne 0°,180°$ não tem direção que só
+  estique/encolha (toda direção gira) — consistente com polinômio
+  característico sem raiz real.
+- ✔ Mesma técnica algébrica, aplicada fora de contexto geométrico.
+- ✗ É o oposto do exemplo desta aula: $A-\lambda I$ deu **uma** equação
+  independente por autovalor ($x_1=2x_2$ e $x_1=-x_2$), não várias — o
+  autoespaço de $A_{\text{exemplo}}$ tem dimensão $1$ em cada caso,
+  apesar da não-unicidade do autovetor dentro dessa reta.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** só raízes reais do polinômio característico
+contam. Uma matriz $n\times n$ real pode ter menos de $n$ autovalores
+reais — o caso extremo é a rotação pura, sem nenhum.
+:::
+:::
+
+# O Teorema Espectral Real para Matrizes Simétricas
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Por Que Isso Importa Para $X^TX$
+
+Antes de qualquer prova, a razão de este bloco existir: a Aula 3 usou
+$X^TX$ o tempo todo, e uma propriedade dela nunca foi explorada a fundo
+— **$X^TX$ é sempre simétrica**, para qualquer $X$, mesmo retangular
+($(X^TX)^T=X^T(X^T)^T=X^TX$, pela regra $(AB)^T=B^TA^T$ seguida de
+$(X^T)^T=X$ — uma linha de álgebra). O MathML vai além:
+(tradução nossa, §4.2, Teorema 4.14, p. 111) "dada uma matriz
+$A\in\mathbb{R}^{m\times n}$, sempre podemos obter uma matriz simétrica,
+semidefinida positiva $S\in\mathbb{R}^{n\times n}$ definindo
+$S:=A^TA$." O próprio MathML separa a segunda metade num comentário à
+parte (Observação, p. 111): "se $\text{rk}(A)=n$, então $S:=A^TA$ é
+simétrica, definida positiva." **As duas condições são diferentes, e só
+uma delas depende do posto:** "semidefinida positiva" vale **sempre**,
+para qualquer $A$ — mesmo singular, mesmo retangular, sem nenhuma
+hipótese extra; é **só** "definida positiva" (a versão mais forte, que
+exclui vetores não-nulos no núcleo de $S$ — definição formal logo a
+seguir) que exige $\text{rk}(A)=n$, posto completo. Aplicando a
+$X^TX$: **$X^TX$ é
+sempre semidefinida positiva**, tenha $X$ posto completo ou não; ela só
+é **definida** positiva sob posto completo — a mesma condição que a
+Aula 3 já usou para garantir invertibilidade. Este bloco prova o que a
+simetria de $X^TX$ garante sobre seus autovalores e autovetores — a
+peça que faltava para o Bloco 5 fechar o ciclo da Aula 3.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Por Que Isso Importa Para $X^TX$
+
+::: {.fragment}
+$X^TX$ é **sempre simétrica**, para qualquer $X$ (mesmo retangular):
+$(X^TX)^T = X^T(X^T)^T = X^TX$ — uma linha de álgebra (regra
+$(AB)^T=B^TA^T$, depois $(X^T)^T=X$).
+:::
+
+::: {.fragment}
+**Teorema 4.14 (MathML, tradução nossa):** para qualquer
+$A\in\mathbb{R}^{m\times n}$, $S:=A^TA$ é sempre simétrica,
+semidefinida positiva; se $\text{rk}(A)=n$, $S$ é definida positiva.
+:::
+
+::: {.fragment}
+**Só uma das duas condições depende do posto:** "semidefinida
+positiva" vale **sempre**, mesmo $A$ singular ou retangular; **só**
+"definida positiva" exige $\text{rk}(A)=n$ (definição formal a seguir).
+Logo $X^TX$ é sempre semidefinida positiva — e só é definida positiva
+sob posto completo.
+:::
+
+::: {.fragment}
+Este bloco prova o que a simetria de $X^TX$ garante sobre seus
+autovalores/autovetores — peça que falta para o Bloco 5 fechar o ciclo
+da Aula 3.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Definição: Matrizes Definidas e Semidefinidas Positivas
+
+Antes de provar que $X^TX$ tem essa propriedade, falta a definição
+formal — "semidefinida positiva" foi usado acima antes de ser
+definido, e essa lacuna se fecha agora. O MathML define (tradução
+nossa, §3.2.3, Definição 3.4, p. 74):
+
+> "Uma matriz simétrica $A\in\mathbb{R}^{n\times n}$ que satisfaz [...]
+> $\mathbf{x}^TA\mathbf{x}>0$ para todo $\mathbf{x}\in V\setminus
+> \{\mathbf{0}\}$ é chamada simétrica, definida positiva, ou apenas
+> **positiva definida**. Se vale apenas $\ge$ [...], então $A$ é chamada
+> simétrica, **semidefinida positiva**."
+
+Duas cláusulas, uma definição, uma hipótese comum: $A$ precisa ser
+**simétrica** ($A=A^T$) — sem isso a definição nem se aplica, "definida
+positiva" e "semidefinida positiva" só classificam matrizes simétricas.
+Dada essa hipótese, o que separa as duas é só o tipo de desigualdade
+sobre $\mathbf{x}^TA\mathbf{x}$: estrita ($>0$) para "definida",
+fraca ($\ge 0$) para "semidefinida" — e em ambos os casos a desigualdade
+precisa valer para **todo** $\mathbf{x}\ne\mathbf{0}$, não para um
+$\mathbf{x}$ escolhido a dedo. Com a definição em mãos, o teorema a
+seguir mostra por que $X^TX$ sempre satisfaz a versão fraca.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Definição: Matrizes Definidas e Semidefinidas Positivas
+
+::: {.fragment}
+**Definição 3.4 (MathML, tradução nossa):** $A$ **simétrica**
+($A=A^T$) é **definida positiva** se $\mathbf{x}^TA\mathbf{x}>0$ para
+todo $\mathbf{x}\ne\mathbf{0}$; é **semidefinida positiva** se vale
+apenas $\mathbf{x}^TA\mathbf{x}\ge 0$ para todo $\mathbf{x}\ne\mathbf{0}$.
+:::
+
+::: {.fragment}
+Simetria é **hipótese**, não conclusão — sem $A=A^T$ a definição nem se
+aplica. "Definida" vs. "semidefinida": desigualdade estrita ($>0$)
+vs. fraca ($\ge 0$), testada para **todo** $\mathbf{x}\ne\mathbf{0}$.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Teorema: $A^TA$ é Simétrica e Semidefinida Positiva
+
+Isso é exatamente o Teorema 4.14 citado acima — mas citar não é provar,
+e a prova é curta o bastante para não pular. O MathML só esboça a ideia
+(tradução nossa, p. 111); reconstruímos os dois passos por extenso.
+
+::: {.callout-note icon=false}
+## Teorema (MathML 4.14, parte 1 — simetria)
+
+Para qualquer $A\in\mathbb{R}^{m\times n}$, a matriz
+$S:=A^TA\in\mathbb{R}^{n\times n}$ é simétrica.
+:::
+
+*Prova.* Por definição, $S$ é simétrica se $S=S^T$. Calculamos $S^T$ a
+partir de $S:=A^TA$, aplicando a regra $(BC)^T=C^TB^T$ com $B=A^T$ e
+$C=A$:
+$$
+S^T = (A^TA)^T = A^T(A^T)^T = A^TA = S,
+$$
+usando $(A^T)^T=A$ na penúltima igualdade. Logo $S=S^T$. $\blacksquare$
+
+::: {.callout-note icon=false}
+## Teorema (MathML 4.14, parte 2 — semidefinitude positiva)
+
+Para qualquer $A\in\mathbb{R}^{m\times n}$, a matriz $S:=A^TA$ satisfaz
+$\mathbf{x}^TS\mathbf{x}\ge 0$ para todo $\mathbf{x}\in\mathbb{R}^n$.
+:::
+
+*Prova.* Seja $\mathbf{x}\in\mathbb{R}^n$ arbitrário. Substituindo
+$S=A^TA$ e reagrupando por associatividade do produto de matrizes:
+$$
+\mathbf{x}^TS\mathbf{x} = \mathbf{x}^T(A^TA)\mathbf{x}
+= (\mathbf{x}^TA^T)(A\mathbf{x}).
+$$
+Pela mesma regra $(BC)^T=C^TB^T$ (com $B=A$, $C=\mathbf{x}$),
+$\mathbf{x}^TA^T=(A\mathbf{x})^T$, logo
+$$
+\mathbf{x}^TS\mathbf{x} = (A\mathbf{x})^T(A\mathbf{x}) = \|A\mathbf{x}\|^2,
+$$
+usando que o produto de um vetor pela sua própria transposta é a soma
+dos quadrados de suas entradas, ou seja, a norma ao quadrado — sempre
+$\ge 0$, qualquer que seja o vetor $A\mathbf{x}$. Como $\mathbf{x}$ era
+arbitrário, isso vale para todo $\mathbf{x}\in\mathbb{R}^n$, que é
+exatamente a Definição 3.4 de semidefinida positiva. $\blacksquare$
+
+Aplicando os dois teoremas com $A=X$: $X^TX$ é simétrica e semidefinida
+positiva, para **qualquer** $X$, com ou sem posto completo — a prova
+não usa hipótese nenhuma sobre o posto de $A$ em nenhum dos dois
+passos. É esse fato, agora demonstrado e não só citado, que o resto
+deste bloco explora: o que a simetria (e a semidefinitude, quando for
+estritamente definida) garante sobre os autovalores e autovetores de
+$X^TX$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Teorema: $A^TA$ é Simétrica e Semidefinida Positiva
+
+::: {.callout-note icon=false}
+**Teorema (MathML 4.14):** para qualquer $A\in\mathbb{R}^{m\times n}$,
+$S:=A^TA$ é simétrica e satisfaz $\mathbf{x}^TS\mathbf{x}\ge 0$ para
+todo $\mathbf{x}\in\mathbb{R}^n$.
+:::
+
+::: {.fragment}
+**Prova (simetria).** $S:=A^TA \Rightarrow$
+$$S^T=(A^TA)^T=A^T(A^T)^T=A^TA=S$$
+(regra $(BC)^T=C^TB^T$, depois $(A^T)^T=A$). $\blacksquare$
+:::
+
+::: {.fragment}
+**Prova (semidefinitude positiva).** Para todo $\mathbf{x}\in\mathbb{R}^n$:
+$$\mathbf{x}^TS\mathbf{x} = \mathbf{x}^T(A^TA)\mathbf{x} = (\mathbf{x}^TA^T)(A\mathbf{x}) = (A\mathbf{x})^T(A\mathbf{x}) = \|A\mathbf{x}\|^2 \ge 0$$
+usando $\mathbf{x}^TA^T=(A\mathbf{x})^T$ (mesma regra de transposta).
+$\blacksquare$
+:::
+
+::: {.fragment}
+Com $A=X$: prova completa (não só citação) de por que $X^TX$ é sempre
+simétrica e semidefinida positiva — com ou sem posto completo, nenhuma
+das duas provas usa essa hipótese.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Premissas e Prova: Autovetores de Autovalores Distintos São Ortogonais
+
+::: {.callout-note}
+## Premissas
+
+1. $A\in\mathbb{R}^{n\times n}$ é **simétrica**, ou seja, $A=A^T$.
+2. $\mathbf{x}_1,\mathbf{x}_2$ são autovetores de $A$ associados a
+   autovalores **distintos**, $\lambda_1\ne\lambda_2$:
+   $A\mathbf{x}_1=\lambda_1\mathbf{x}_1$,
+   $A\mathbf{x}_2=\lambda_2\mathbf{x}_2$.
+:::
+
+**Nota de precisão:** a prova a seguir é exposição nossa, não uma
+citação literal de nenhuma das fontes — o MathML e o Boyd enunciam o
+Teorema Espectral diretamente, sem detalhar este passo intermediário no
+nível que este curso quer mostrar. A prova em si é padrão (manipulação
+de $\mathbf{x}_1^TA\mathbf{x}_2$ dos dois lados), mas construída aqui,
+não copiada.
+
+Calculamos o escalar $\mathbf{x}_1^TA\mathbf{x}_2$ de duas formas
+diferentes. **Primeiro**, aplicando $A$ diretamente a $\mathbf{x}_2$
+(Premissa 2):
+$$
+\mathbf{x}_1^TA\mathbf{x}_2 = \mathbf{x}_1^T(\lambda_2\mathbf{x}_2) =
+\lambda_2\,(\mathbf{x}_1^T\mathbf{x}_2).
+$$
+**Segundo**, usando que $\mathbf{x}_1^TA\mathbf{x}_2$ é um escalar
+$1\times 1$ (logo igual à sua própria transposta) e que $A$ é simétrica
+(Premissa 1):
+$$
+\mathbf{x}_1^TA\mathbf{x}_2 = (\mathbf{x}_1^TA\mathbf{x}_2)^T =
+\mathbf{x}_2^TA^T\mathbf{x}_1 = \mathbf{x}_2^TA\mathbf{x}_1 =
+\mathbf{x}_2^T(\lambda_1\mathbf{x}_1) = \lambda_1\,(\mathbf{x}_2^T\mathbf{x}_1).
+$$
+Como $\mathbf{x}_1^T\mathbf{x}_2=\mathbf{x}_2^T\mathbf{x}_1$ (produto
+interno é simétrico), as duas contas dão o mesmo escalar por dois
+caminhos, logo
+$$
+\lambda_2\,(\mathbf{x}_1^T\mathbf{x}_2) = \lambda_1\,(\mathbf{x}_1^T\mathbf{x}_2)
+\quad\Longrightarrow\quad
+(\lambda_2-\lambda_1)\,(\mathbf{x}_1^T\mathbf{x}_2) = 0.
+$$
+Pela Premissa 2, $\lambda_2-\lambda_1\ne 0$; logo o único jeito de o
+produto ser zero é $\mathbf{x}_1^T\mathbf{x}_2=0$ — **autovetores de
+autovalores distintos de uma matriz simétrica são automaticamente
+ortogonais**. Note onde a simetria de $A$ entrou: exatamente na troca
+$A^T\to A$ no segundo cálculo — sem ela, os dois caminhos não
+coincidiriam, e é por isso que o Bloco 2 encontrou autovetores
+**não**-ortogonais numa matriz não-simétrica.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Premissas e Prova: Ortogonalidade
+
+::: {.callout-note icon=false}
+## Premissas
+
+1. $A\in\mathbb{R}^{n\times n}$ **simétrica** ($A=A^T$).
+2. $\mathbf{x}_1,\mathbf{x}_2$ autovetores de autovalores **distintos**
+   $\lambda_1\ne\lambda_2$.
+:::
+
+::: {.fragment}
+**Prova.** Calculamos o escalar $\mathbf{x}_1^TA\mathbf{x}_2$ de duas
+formas diferentes.
+:::
+
+::: {.fragment}
+**Primeiro**, aplicando $A$ diretamente a $\mathbf{x}_2$ (Premissa 2):
+$$\mathbf{x}_1^TA\mathbf{x}_2 = \mathbf{x}_1^T(\lambda_2\mathbf{x}_2) =
+\lambda_2\,(\mathbf{x}_1^T\mathbf{x}_2)$$
+:::
+
+::: {.fragment}
+**Segundo**, usando que é um escalar $1\times 1$ (igual à própria
+transposta) e que $A$ é simétrica (Premissa 1):
+$$\mathbf{x}_1^TA\mathbf{x}_2 = (\mathbf{x}_1^TA\mathbf{x}_2)^T =
+\mathbf{x}_2^TA^T\mathbf{x}_1 = \mathbf{x}_2^TA\mathbf{x}_1 =
+\lambda_1\,(\mathbf{x}_2^T\mathbf{x}_1)$$
+:::
+
+::: {.fragment}
+Como $\mathbf{x}_1^T\mathbf{x}_2=\mathbf{x}_2^T\mathbf{x}_1$ (produto
+interno é simétrico), os dois caminhos calculam o mesmo escalar por
+rotas diferentes, logo
+$$\lambda_2\,(\mathbf{x}_1^T\mathbf{x}_2) = \lambda_1\,(\mathbf{x}_1^T\mathbf{x}_2)
+\;\Longrightarrow\; (\lambda_2-\lambda_1)\,(\mathbf{x}_1^T\mathbf{x}_2) = 0.$$
+:::
+
+::: {.fragment}
+Pela Premissa 2, $\lambda_2-\lambda_1\ne 0$; o único jeito de o produto
+ser zero é $\mathbf{x}_1^T\mathbf{x}_2=0$ — **autovetores de autovalores
+distintos de uma matriz simétrica são automaticamente ortogonais**.
+$\blacksquare$
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Teorema Espectral Real
+
+A prova acima garante ortogonalidade **entre** autovetores de
+autovalores distintos, mas o Teorema Espectral Real garante mais: que os
+autovalores de uma matriz simétrica são sempre **reais** (nunca
+complexos, ao contrário do que o Bloco 3 mostrou ser possível em
+geral), e que existe uma base ortonormal **inteira** feita de
+autovetores — mesmo quando há autovalores repetidos (caso em que a
+ortogonalidade entre autovetores do *mesmo* autoespaço não vem de graça
+da prova acima, e precisa de um processo à parte, Gram-Schmidt, que o
+MathML ilustra no Exemplo 4.8, sem aprofundar aqui).
+
+::: {.callout-note icon=false}
+## Teorema 4.15 — Teorema Espectral Real (MathML, tradução nossa, §4.2, p. 111)
+
+Se $A\in\mathbb{R}^{n\times n}$ é simétrica, existe uma base ortonormal
+do espaço vetorial correspondente $V$ formada por autovetores de $A$, e
+cada autovalor é real.
+:::
+
+O Boyd enuncia a mesma garantia de forma equivalente, já na forma
+matricial que vamos usar no resto da aula:
+
+::: {.callout-note icon=false}
+## Teorema — Forma Matricial Equivalente (Boyd & Vandenberghe, tradução nossa, Apêndice A.5.2, p. 646-647)
+
+Suponha $A\in\mathcal{S}^n$, ou seja, $A$ é uma matriz real simétrica
+$n\times n$. Então $A$ pode ser fatorada como $A=Q\Lambda Q^T$, onde
+$Q\in\mathbb{R}^{n\times n}$ é ortogonal (isto é, $Q^TQ=I$) e
+$\Lambda=\text{diag}(\lambda_1,\dots,\lambda_n)$.
+:::
+
+"$Q$ ortogonal" significa exatamente $Q^TQ=I$ — as colunas de $Q$ (os
+autovetores) formam uma base ortonormal, a mesma garantia do teorema
+anterior, escrita em forma de fatoração matricial: $A=Q\Lambda Q^T$ é a
+**decomposição espectral** de $A$. Os dois teoremas acima dizem
+exatamente a mesma coisa, em duas notações: o MathML fala em "base do
+espaço vetorial $V$", o Boyd fala em "matriz ortogonal $Q$" cujas
+colunas são essa base — a ponte entre as duas é literalmente
+$Q=[\mathbf{x}_1\;\cdots\;\mathbf{x}_n]$, os autovetores empilhados
+como colunas.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Teorema Espectral Real
+
+::: {.fragment}
+Garante mais que a prova de ortogonalidade: autovalores de matriz
+simétrica são sempre **reais**, e existe uma base ortonormal **inteira**
+de autovetores (mesmo com autovalores repetidos — Gram-Schmidt, MathML
+Exemplo 4.8, não aprofundado aqui).
+:::
+
+::: {.callout-note icon=false}
+**Teorema 4.15 (MathML, tradução nossa):** $A$ simétrica $\Rightarrow$
+existe base ortonormal de $V$ de autovetores de $A$, cada autovalor
+real.
+:::
+
+::: {.callout-note icon=false}
+**Teorema (Boyd, Apêndice A.5.2, tradução nossa):** $A\in\mathcal{S}^n$
+simétrica $\Rightarrow$ $A=Q\Lambda Q^T$, $Q$ ortogonal ($Q^TQ=I$),
+$\Lambda=\text{diag}(\lambda_1,\dots,\lambda_n)$ — a **decomposição
+espectral** de $A$.
+:::
+
+::: {.fragment}
+Os dois dizem a mesma coisa: MathML fala em "base de $V$", Boyd em
+"colunas de $Q$" — a ponte é $Q=[\mathbf{x}_1\;\cdots\;\mathbf{x}_n]$.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Contraste Direto: Exemplo Resolvido de uma Matriz Simétrica
+
+Para ver a diferença na prática, refazemos o cálculo à mão do Bloco 3,
+agora com uma matriz **simétrica**,
+$$
+A_{\text{sim}} = \frac12\begin{bmatrix}5 & -2\\ -2 & 5\end{bmatrix},
+$$
+o mesmo exemplo do MathML (tradução nossa, §4.2, Exemplo 4.11, p.
+117-118): "vamos calcular a decomposição em autovalores de
+$A=\frac12\begin{bmatrix}5&-2\\-2&5\end{bmatrix}$. [...] os autovalores
+de $A$ são $\lambda_1=7/2$ e $\lambda_2=3/2$ [...]
+$\mathbf{p}_1=\frac{1}{\sqrt2}[1,-1]$,
+$\mathbf{p}_2=\frac{1}{\sqrt2}[1,1]$." Repare já na diferença mais
+imediata: **$A_{\text{sim}}=A_{\text{sim}}^T$**, diferente da matriz do
+Bloco 2/3 ($A\ne A^T$ ali). Vamos verificar numericamente — os
+autovalores, e principalmente o ângulo entre os autovetores, comparado
+lado a lado com o exemplo não-simétrico:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Contraste Direto: Matriz Simétrica
+
+::: {.fragment}
+$A_{\text{sim}}=\frac12\begin{bmatrix}5&-2\\-2&5\end{bmatrix}$ (MathML,
+Exemplo 4.11) — diferente do Bloco 2/3, $A_{\text{sim}}=A_{\text{sim}}^T$.
+:::
+
+::: {.fragment}
+**MathML (tradução nossa):** $\lambda_1=7/2$, $\lambda_2=3/2$,
+$\mathbf{p}_1=\frac{1}{\sqrt2}(1,-1)$, $\mathbf{p}_2=\frac{1}{\sqrt2}(1,1)$.
+:::
+:::
+
+::: {.fig-resize style="width: 60%; margin: 0 auto;"}
+```{python}
+#| echo: true
+
+autovalores_sim, autovetores_sim = np.linalg.eigh(A_sim)
+print("Autovalores de A_sim:", autovalores_sim)
+print("Autovetores de A_sim (colunas):")
+print(autovetores_sim)
+
+def angulo_entre(u, v):
+    cos_ang = np.clip((u @ v) / (np.linalg.norm(u) * np.linalg.norm(v)), -1, 1)
+    return np.degrees(np.arccos(cos_ang))
+
+ang_sim = angulo_entre(autovetores_sim[:, 0], autovetores_sim[:, 1])
+ang_nao_sim = angulo_entre(autovetores_ex[:, 0], autovetores_ex[:, 1])
+print(f"\nÂngulo entre autovetores de A_sim (simétrica):        {ang_sim:.2f} graus")
+print(f"Ângulo entre autovetores de A_exemplo (não-simétrica): {ang_nao_sim:.2f} graus")
+print(f"\nA_sim é simétrica? {np.allclose(A_sim, A_sim.T)}")
+print(f"A_exemplo é simétrica? {np.allclose(A_exemplo, A_exemplo.T)}")
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Os autovalores $3{,}5$ e $1{,}5$ conferem exatamente com o MathML, e o
+ângulo entre os autovetores de $A_{\text{sim}}$ dá $90°$ — ortogonais,
+como a prova deste bloco garantiu. Já o ângulo entre os autovetores de
+$A_{\text{exemplo}}$ (o exemplo não-simétrico dos Blocos 2-3) fica
+visivelmente diferente de $90°$. A distinção não é sutil nem
+coincidência de arredondamento: é exatamente a diferença entre "matriz
+simétrica" e "matriz qualquer" que a prova deste bloco isolou.
+(Chamamos `np.linalg.eigh`, não `np.linalg.eig`, porque `eigh` é a
+rotina especializada em matrizes simétricas — mais precisa e mais
+rápida, e devolve autovalores em ordem crescente por convenção; para uma
+matriz não-simétrica como $A_{\text{exemplo}}$, `eigh` não seria
+aplicável.)
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que os Números Confirmam
+
+::: {.fragment}
+Autovalores $3{,}5$ e $1{,}5$: conferem com o MathML. Ângulo entre
+autovetores de $A_{\text{sim}}$: $90°$ — ortogonais, como a prova
+garantiu.
+:::
+
+::: {.fragment}
+Ângulo entre autovetores de $A_{\text{exemplo}}$ (não-simétrica, Blocos
+2-3): visivelmente diferente de $90°$. Não é coincidência de
+arredondamento — é a diferença exata entre "simétrica" e "qualquer".
+:::
+
+::: {.fragment}
+`np.linalg.eigh` (não `eig`): rotina especializada em matrizes
+simétricas — mais precisa/rápida, ordena autovalores crescente; não
+aplicável a $A_{\text{exemplo}}$ (não-simétrica).
+:::
+:::
+
+::: {.fig-resize style="width: 60%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10.5, 5.0))
+
+for ax, vecs, titulo, ang in [
+    (ax1, autovetores_ex, "Não-simétrica ($A_{\\mathrm{exemplo}}$)", ang_nao_sim),
+    (ax2, autovetores_sim, "Simétrica ($A_{\\mathrm{sim}}$)", ang_sim),
+]:
+    for k, cor in zip(range(2), [COR_B, COR_C]):
+        v = vecs[:, k]
+        ax.annotate("", xy=v, xytext=(-v[0], -v[1]),
+                    arrowprops=dict(arrowstyle="-", color=cor, lw=2.5))
+    ax.set_xlim(-1.3, 1.3); ax.set_ylim(-1.3, 1.3)
+    ax.set_aspect("equal")
+    ax.axhline(0, color=COR_NEU, lw=0.6); ax.axvline(0, color=COR_NEU, lw=0.6)
+    ax.set_title(f"{titulo}\nângulo entre autovetores: {ang:.1f}$^\\circ$", fontsize=9.5, fontweight="bold")
+
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O painel esquerdo repete as duas direções do Bloco 2/3 — visivelmente
+não perpendiculares. O painel direito mostra as duas direções de
+$A_{\text{sim}}$, em ângulo reto exato — a mesma comparação numérica
+acima, agora visível.
+
+## Decomposição Espectral: o Caso Geral e o Caso Simétrico
+
+Vale encaixar o Teorema Espectral Real dentro de um resultado mais
+geral. O MathML define a **decomposição em autovalores** para qualquer
+matriz quadrada cujos autovetores formem uma base:
+
+::: {.callout-note icon=false}
+## Teorema 4.20 (MathML, tradução nossa, §4.4, p. 116)
+
+Uma matriz quadrada $A\in\mathbb{R}^{n\times n}$ pode ser fatorada como
+$A=PDP^{-1}$, onde $P\in\mathbb{R}^{n\times n}$ e $D$ é uma matriz
+diagonal cujas entradas são os autovalores de $A$, se, e somente se, os
+autovetores de $A$ formam uma base de $\mathbb{R}^n$.
+:::
+
+Essa é a forma geral — $P$ é só invertível, não necessariamente
+ortogonal, e nem toda matriz quadrada admite essa fatoração (uma matriz
+cujos autovetores não geram todo o espaço, caso que foge do escopo
+desta aula, não é diagonalizável dessa forma).
+
+O Teorema Espectral Real mostra que matrizes simétricas são sempre um
+caso particular, sempre bem-comportado, desse resultado geral:
+
+::: {.callout-note icon=false}
+## Teorema 4.21 (MathML, tradução nossa, §4.4, p. 116)
+
+Uma matriz simétrica $S\in\mathbb{R}^{n\times n}$ pode sempre ser
+diagonalizada: existe uma base ortonormal (BON) de autovetores de
+$\mathbb{R}^n$, o que faz de $P$ (a matriz cujas colunas são essa base)
+uma matriz ortogonal, de modo que $D=P^TAP$.
+:::
+
+Trocando a notação $P\to Q$ (a convenção do Boyd, que usamos daqui em
+diante) e isolando $A$:
+$D=Q^TAQ \iff A=QDQ^T$ (usando $Q^{-1}=Q^T$, a própria definição de
+matriz ortogonal) — a mesma equação $A=Q\Lambda Q^T$ do Boyd. Ou seja: a
+decomposição espectral não é um resultado à parte da decomposição em
+autovalores geral, é o caso especial em que a simetria garante
+diagonalização **sempre**, com uma matriz de mudança de base
+**ortogonal**, nunca só invertível.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Decomposição Espectral: Caso Geral e Caso Simétrico
+
+::: {.callout-note icon=false}
+**Teorema 4.20 (MathML, tradução nossa):** $A\in\mathbb{R}^{n\times n}$
+$=PDP^{-1}$ ($D$ diagonal de autovalores) $\iff$ autovetores de $A$
+formam base de $\mathbb{R}^n$ — $P$ só invertível, **não**
+necessariamente ortogonal.
+:::
+
+::: {.callout-note icon=false}
+**Teorema 4.21 (MathML, tradução nossa):** $S$ simétrica $\Rightarrow$
+sempre diagonalizável, com BON de autovetores de $\mathbb{R}^n$; logo
+$P$ (colunas = essa base) é **ortogonal**, $D=P^TAP$.
+:::
+
+::: {.fragment}
+Trocando $P\to Q$ (convenção Boyd) e isolando: $A=QDQ^T$ — mesma
+equação do Boyd, $\Lambda=D$. Decomposição espectral = caso especial
+**sempre** diagonalizável, com mudança de base **ortogonal**.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Duas matrizes simétricas comutam ($AB=BA$)? Se sim, o que isso implica sobre seus autovetores?
+
+Dica: pense no caso mais simples — duas matrizes simétricas que já são
+diagonais na mesma base. Elas comutam?
+
+- □ Duas matrizes simétricas quaisquer $A,B\in\mathbb{R}^{n\times n}$
+  sempre comutam, ou seja, $AB=BA$ vale para qualquer par de matrizes
+  simétricas, independentemente de seus autovalores/autovetores.
+- □ Se uma matriz simétrica $A$ tivesse **todos** os autovalores iguais
+  entre si (ex.: $A=3I$), então **qualquer** vetor não-nulo de
+  $\mathbb{R}^n$ seria autovetor de $A$, não só duas direções especiais.
+- □ Numa rede de sensores cuja matriz de covariância é, por construção,
+  sempre simétrica e semidefinida positiva, o Teorema Espectral Real
+  garante autovalores reais e autovetores ortogonais entre si, mesmo
+  sem nenhuma relação com o problema de regressão desta disciplina.
+- □ Como a prova deste bloco só cobre autovalores **distintos**, isso
+  significa que autovetores associados ao **mesmo** autovalor (repetido)
+  de uma matriz simétrica nunca podem ser escolhidos ortogonais entre
+  si.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Duas matrizes simétricas sempre comutam ($AB=BA$)?
+
+Dica: pense no caso mais simples — duas matrizes já diagonais na mesma
+base. Elas comutam?
+
+- □ Duas matrizes simétricas quaisquer sempre comutam ($AB=BA$),
+  independentemente de autovalores/autovetores.
+- □ Se $A$ simétrica tivesse **todos** os autovalores iguais (ex.:
+  $A=3I$), **qualquer** vetor não-nulo seria autovetor de $A$.
+- □ Matriz de covariância (sempre simétrica, PSD): Teorema Espectral
+  garante autovalores reais, autovetores ortogonais — mesmo fora de
+  regressão.
+- □ Prova só cobre autovalores distintos $\Rightarrow$ autovetores do
+  **mesmo** autovalor repetido nunca podem ser escolhidos ortogonais.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Comutatividade, autovalores repetidos e generalidade do teorema — Resposta
+
+- ✗ Falso em geral: duas matrizes simétricas comutam **apenas** quando
+  compartilham a mesma base de autovetores (são simultaneamente
+  diagonalizáveis) — não é uma propriedade automática de "ser simétrica".
+- ✔ $A=3I$: $A\mathbf{v}=3\mathbf{v}$ para todo $\mathbf{v}$ — o
+  autoespaço único ocupa o espaço inteiro, consistente com autovalor
+  repetido $n$ vezes.
+- ✔ Aplicação direta e correta do Teorema Espectral Real a qualquer
+  matriz simétrica PSD, de qualquer origem.
+- ✗ É o oposto: autovetores do mesmo autoespaço **podem sempre** ser
+  escolhidos ortogonais entre si via Gram-Schmidt (MathML Exemplo 4.8) —
+  a prova deste bloco só não é necessária nesse caso porque a
+  ortogonalidade não vem "de graça", precisa ser imposta.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não, em geral — comutar exige compartilhar a
+base de autovetores, uma condição extra além de "ambas simétricas".
+:::
+:::
+
+# Definitude Positiva: o Sinal dos Autovalores
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Retomando a Forma Quadrática da Aula 1
+
+A Aula 1 já usou a forma quadrática $\mathbf{x}^TA\mathbf{x}$ (dentro do
+produto interno geral) sem nomear a propriedade central deste bloco: o
+**sinal** dessa expressão, para todo $\mathbf{x}\ne\mathbf{0}$, classifica
+a matriz simétrica $A$. O MathML define (tradução nossa, §3.2.3,
+Definição 3.4, p. 74):
+
+> "Uma matriz simétrica $A\in\mathbb{R}^{n\times n}$ que satisfaz [...]
+> $\mathbf{x}^TA\mathbf{x}>0$ para todo $\mathbf{x}\in V\setminus
+> \{\mathbf{0}\}$ é chamada simétrica, definida positiva, ou apenas
+> **positiva definida**. Se vale apenas $\ge$ [...], então $A$ é chamada
+> simétrica, **semidefinida positiva**."
+
+E resolve, no próprio texto, dois exemplos que vamos reaproveitar
+(tradução nossa, mesma seção, Exemplo 3.4): "considere as matrizes
+$A_1=\begin{bmatrix}9&6\\6&5\end{bmatrix}$,
+$A_2=\begin{bmatrix}9&6\\6&3\end{bmatrix}$. $A_1$ é definida positiva
+porque é simétrica e
+$\mathbf{x}^TA_1\mathbf{x}=9x_1^2+12x_1x_2+5x_2^2=(3x_1+2x_2)^2+x_2^2>0$
+para todo $\mathbf{x}\in V\setminus\{\mathbf{0}\}$. Em contraste, $A_2$
+é simétrica mas não é definida positiva porque
+$\mathbf{x}^TA_2\mathbf{x}=9x_1^2+12x_1x_2+3x_2^2=(3x_1+2x_2)^2-x_2^2$
+pode ser menor que $0$, por exemplo, para $\mathbf{x}=[2,-3]^T$."
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando a Forma Quadrática da Aula 1
+
+::: {.fragment}
+**Definição 3.4 (MathML, tradução nossa):** $A$ simétrica é **definida
+positiva** se $\mathbf{x}^TA\mathbf{x}>0$ para todo
+$\mathbf{x}\ne\mathbf{0}$; **semidefinida positiva** se vale só $\ge 0$.
+:::
+
+::: {.fragment}
+**Exemplo 3.4 (MathML, tradução nossa):**
+$A_1=\begin{bmatrix}9&6\\6&5\end{bmatrix}$: $\mathbf{x}^TA_1\mathbf{x} =
+(3x_1+2x_2)^2+x_2^2>0$ sempre — definida positiva.
+:::
+
+::: {.fragment}
+$A_2=\begin{bmatrix}9&6\\6&3\end{bmatrix}$: $\mathbf{x}^TA_2\mathbf{x} =
+(3x_1+2x_2)^2-x_2^2$, negativo p.ex. em $\mathbf{x}=(2,-3)$ — **não**
+definida positiva.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Ponte: Definitude Via o Sinal dos Autovalores
+
+Testar o sinal de $\mathbf{x}^TA\mathbf{x}$ para **todo** $\mathbf{x}$
+não parece, à primeira vista, uma tarefa finita — são infinitos vetores
+para checar. O Teorema Espectral Real do Bloco 4 dá exatamente a saída:
+como $A$ simétrica se escreve $A=Q\Lambda Q^T$, qualquer $\mathbf{x}$ se
+decompõe na base ortonormal de $Q$, e a forma quadrática vira uma soma
+ponderada pelos autovalores — o sinal de $\mathbf{x}^TA\mathbf{x}$ para
+**todo** $\mathbf{x}$ passa a depender só do sinal dos $n$ autovalores,
+não de infinitos vetores. O Boyd enuncia essa equivalência diretamente
+(tradução nossa, Apêndice A.5.2, p. 646-647): "vemos que $A\succ 0$ se,
+e somente se, todos os seus autovalores são positivos, ou seja,
+$\lambda_{\min}(A)>0$." (A notação $A\succ 0$ é a forma compacta de "$A$
+é definida positiva"; $A\succeq 0$, semidefinida positiva.) Verificando
+nos mesmos $A_1$, $A_2$ do MathML:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Ponte: Definitude Via o Sinal dos Autovalores
+
+::: {.fragment}
+Testar $\mathbf{x}^TA\mathbf{x}>0$ para **todo** $\mathbf{x}$ parece
+infinito. Teorema Espectral ($A=Q\Lambda Q^T$): decompor $\mathbf{x}$ na
+base de $Q$ vira a forma quadrática numa soma ponderada pelos
+autovalores.
+:::
+
+::: {.fragment}
+**Boyd, Apêndice A.5.2 (tradução nossa):** $A\succ 0 \iff$ todos os
+autovalores positivos, $\lambda_{\min}(A)>0$.
+:::
+
+::: {.fragment}
+Verificando em $A_1$/$A_2$ do MathML:
+:::
+:::
+
+```{python}
+#| echo: true
+
+A1 = np.array([[9.0, 6.0], [6.0, 5.0]])
+A2 = np.array([[9.0, 6.0], [6.0, 3.0]])
+
+autoval_A1 = np.linalg.eigh(A1)[0]
+autoval_A2 = np.linalg.eigh(A2)[0]
+print("Autovalores de A1:", autoval_A1, "-> definida positiva?", np.all(autoval_A1 > 0))
+print("Autovalores de A2:", autoval_A2, "-> definida positiva?", np.all(autoval_A2 > 0))
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+$A_1$ tem os dois autovalores positivos — definida positiva, confirmando
+o exemplo resolvido do MathML sem precisar testar infinitos
+$\mathbf{x}$. $A_2$ tem um autovalor negativo — a mesma informação que o
+contraexemplo $\mathbf{x}=(2,-3)$ já tinha revelado, mas agora visível
+de antemão, olhando só para a matriz.
+
+## Intuição Geométrica: o Formato da Tigela
+
+Vale conectar essa ideia a uma imagem: a forma quadrática
+$f(\mathbf{x})=\mathbf{x}^TA\mathbf{x}$, vista como uma função de
+$\mathbf{x}\in\mathbb{R}^2$, desenha uma superfície. Quando $A$ é
+definida positiva, essa superfície tem o formato de uma tigela — um
+único mínimo na origem, subindo em toda direção. Quando $A$ é indefinida
+(nem positiva nem negativa definida, o caso de $A_2$), a superfície tem
+formato de sela: sobe em algumas direções, desce em outras — exatamente
+consistente com $\mathbf{x}^TA_2\mathbf{x}$ trocar de sinal.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que os Autovalores Confirmam
+
+::: {.fragment}
+$A_1$: os dois autovalores positivos — definida positiva, sem testar
+infinitos $\mathbf{x}$.
+:::
+
+::: {.fragment}
+$A_2$: um autovalor negativo — mesma informação do contraexemplo
+$\mathbf{x}=(2,-3)$, visível de antemão.
+:::
+
+## Intuição Geométrica: o Formato da Tigela
+
+::: {.fragment}
+$f(\mathbf{x})=\mathbf{x}^TA\mathbf{x}$ como superfície: $A$ definida
+positiva $\Rightarrow$ formato de **tigela** (mínimo único na origem,
+sobe em toda direção).
+:::
+
+::: {.fragment}
+$A$ indefinida (caso $A_2$): formato de **sela** — sobe em algumas
+direções, desce em outras, consistente com o sinal trocando.
+:::
+:::
+
+::: {.fig-resize style="width: 85%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+x1_grade, x2_grade = np.meshgrid(np.linspace(-1.5, 1.5, 100), np.linspace(-1.5, 1.5, 100))
+
+def forma_quadratica(A, x1, x2):
+    return A[0, 0]*x1**2 + (A[0, 1]+A[1, 0])*x1*x2 + A[1, 1]*x2**2
+
+Z1 = forma_quadratica(A1, x1_grade, x2_grade)
+Z2 = forma_quadratica(A2, x1_grade, x2_grade)
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.8))
+
+for ax, Z, titulo, cmap in [(ax1, Z1, "$A_1$ — definida positiva (tigela)", "Blues"),
+                             (ax2, Z2, "$A_2$ — indefinida (sela)", "RdBu_r")]:
+    vmax = np.max(np.abs(Z))
+    if titulo.startswith("$A_1$"):
+        cs = ax.contourf(x1_grade, x2_grade, Z, levels=14, cmap=cmap)
+    else:
+        cs = ax.contourf(x1_grade, x2_grade, Z, levels=14, cmap=cmap, vmin=-vmax, vmax=vmax)
+    ax.contour(x1_grade, x2_grade, Z, levels=[0], colors=COR_C, linewidths=1.8)
+    ax.set_aspect("equal")
+    ax.set_title(titulo, fontsize=10, fontweight="bold")
+    ax.set_xlabel("$x_1$"); ax.set_ylabel("$x_2$")
+    fig.colorbar(cs, ax=ax, shrink=0.85, label="$\\mathbf{x}^TA\\mathbf{x}$")
+
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+No painel esquerdo ($A_1$), as curvas de nível são elipses concêntricas
+crescendo em todas as direções a partir da origem — nenhuma curva de
+nível zero aparece porque o valor mínimo, zero, só é atingido em
+$\mathbf{x}=\mathbf{0}$. No painel direito ($A_2$), a linha vermelha
+marca onde $\mathbf{x}^TA_2\mathbf{x}=0$ — e o mapa de cores muda de azul
+(positivo) para vermelho (negativo) atravessando essa linha, o retrato
+visual direto de "indefinida".
+
+## O Quociente de Rayleigh: Isolando $\lambda_{\max}$ e $\lambda_{\min}$
+
+Falta uma última peça para fechar exatamente o número de condição: uma
+forma de isolar o **maior** e o **menor** autovalor de $A$ diretamente da
+forma quadrática, sem calcular todos os autovalores primeiro. O Boyd
+define essa peça — o **quociente de Rayleigh** — e prova a desigualdade
+que o conecta à forma quadrática (tradução nossa, Apêndice A.5.2, p.
+646-647):
+
+> "O maior e o menor autovalor satisfazem
+> $\lambda_{\max}(A)=\sup_{\mathbf{x}\ne 0}
+> \frac{\mathbf{x}^TA\mathbf{x}}{\mathbf{x}^T\mathbf{x}}$,
+> $\lambda_{\min}(A)=\inf_{\mathbf{x}\ne 0}
+> \frac{\mathbf{x}^TA\mathbf{x}}{\mathbf{x}^T\mathbf{x}}$. Em particular,
+> para qualquer $\mathbf{x}$, temos
+> $\lambda_{\min}(A)\,\mathbf{x}^T\mathbf{x}\le\mathbf{x}^TA\mathbf{x}
+> \le\lambda_{\max}(A)\,\mathbf{x}^T\mathbf{x}$."
+
+A prova é uma aplicação direta do Teorema Espectral: decompondo
+$\mathbf{x}=\sum_i c_i\mathbf{q}_i$ na base ortonormal de autovetores
+($\mathbf{q}_i$, colunas de $Q$), a forma quadrática vira
+$\mathbf{x}^TA\mathbf{x}=\sum_i\lambda_ic_i^2$ e a norma
+$\mathbf{x}^T\mathbf{x}=\sum_ic_i^2$ — o quociente
+$\frac{\sum_i\lambda_ic_i^2}{\sum_ic_i^2}$ é, literalmente, uma **média
+ponderada** dos autovalores (pesos $c_i^2\ge 0$), e toda média ponderada
+fica entre o menor e o maior valor pesado. É exatamente essa média
+ponderada que dá nome ao quociente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Quociente de Rayleigh
+
+::: {.fragment}
+Falta isolar $\lambda_{\max}$/$\lambda_{\min}$ direto da forma
+quadrática, sem calcular todos os autovalores.
+:::
+
+::: {.fragment}
+**Boyd, Apêndice A.5.2 (tradução nossa):**
+$$\lambda_{\min}(A)\,\mathbf{x}^T\mathbf{x} \leq \mathbf{x}^TA\mathbf{x}
+\leq \lambda_{\max}(A)\,\mathbf{x}^T\mathbf{x}$$
+via $\lambda_{\max}=\sup_{\mathbf{x}\ne 0}
+\frac{\mathbf{x}^TA\mathbf{x}}{\mathbf{x}^T\mathbf{x}}$,
+$\lambda_{\min}=\inf_{\mathbf{x}\ne 0}
+\frac{\mathbf{x}^TA\mathbf{x}}{\mathbf{x}^T\mathbf{x}}$.
+:::
+
+::: {.fragment}
+Prova: $\mathbf{x}=\sum_ic_i\mathbf{q}_i$ (base de autovetores)
+$\Rightarrow$ $\mathbf{x}^TA\mathbf{x}=\sum_i\lambda_ic_i^2$,
+$\mathbf{x}^T\mathbf{x}=\sum_ic_i^2$. Quociente = **média ponderada**
+dos autovalores (pesos $c_i^2\ge 0$) — sempre entre o menor e o maior.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Número de Condição, Agora Exato
+
+Essa é a peça que fecha, com precisão, o ciclo aberto na Aula 3. O Boyd
+define (tradução nossa, Apêndice A.5.2, p. 649): "o número de condição
+de uma matriz não-singular $A\in\mathbb{R}^{n\times n}$, denotado
+$\text{cond}(A)$ ou $\kappa(A)$, é definido como
+$\text{cond}(A)=\|A\|_2\|A^{-1}\|_2=\sigma_{\max}(A)/\sigma_{\min}(A)$" —
+uma definição em termos de valores singulares $\sigma$, que se aplica a
+qualquer matriz (mesmo retangular). Para uma matriz **simétrica**
+definida positiva (o caso de $X^TX$ sob posto completo), os valores
+singulares coincidem exatamente com os autovalores (todos positivos), e
+a definição colapsa para
+$$
+\text{cond}(A) = \frac{\lambda_{\max}(A)}{\lambda_{\min}(A)}.
+$$
+Essa é a fórmula que faltava desde a Aula 3: o número de condição de
+$X^TX$ não precisa ser estimado perturbando os dados — é, literalmente,
+a razão entre o maior e o menor autovalor de $X^TX$, calculável de uma
+só vez via `numpy.linalg.eigh`. O Bloco 6 aplica exatamente essa fórmula
+aos mesmos números que a Aula 3 só tinha medido empiricamente.
+
+## Ponte Breve (Sem Aprofundar): Hessiana e Convexidade
+
+Vale uma menção, sem desenvolver agora: a mesma forma quadrática
+$\mathbf{x}^TA\mathbf{x}$ que classifica $A$ aqui é, literalmente, a
+segunda derivada (Hessiana) de uma função quadrática — e definitude
+positiva da Hessiana é exatamente a condição que caracteriza convexidade
+(um único mínimo, sem sela nem máximo espúrio), tema formal da Aula 7
+desta disciplina. A Aula 3 já usou isso de relance, sem nomear: a
+Hessiana $2X^TX$ da função de mínimos quadrados era sempre semidefinida
+positiva, o que garantia convexidade e, portanto, que a condição de
+gradiente-zero das Equações Normais era suficiente para um mínimo
+global — o mesmo raciocínio deste bloco, aplicado antes de ter o nome.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Número de Condição, Agora Exato
+
+::: {.fragment}
+**Boyd, Apêndice A.5.2 (tradução nossa):**
+$\text{cond}(A)=\|A\|_2\|A^{-1}\|_2=\sigma_{\max}(A)/\sigma_{\min}(A)$
+(valores singulares, qualquer matriz).
+:::
+
+::: {.fragment}
+Para $A$ simétrica definida positiva ($X^TX$ sob posto completo):
+valores singulares = autovalores $\Rightarrow$
+$$\text{cond}(A) = \frac{\lambda_{\max}(A)}{\lambda_{\min}(A)}$$
+:::
+
+::: {.fragment}
+A peça que faltava desde a Aula 3: número de condição = razão entre
+autovalores de $X^TX$, sem perturbar nada. Bloco 6 aplica isso aos
+mesmos números da Aula 3.
+:::
+
+## Ponte Breve: Hessiana e Convexidade
+
+::: {.fragment}
+$\mathbf{x}^TA\mathbf{x}$ = segunda derivada (Hessiana) de função
+quadrática; definitude positiva da Hessiana $\equiv$ convexidade (Aula
+7).
+:::
+
+::: {.fragment}
+Aula 3 já usou isso sem nomear: Hessiana $2X^TX$ sempre PSD
+$\Rightarrow$ convexidade $\Rightarrow$ gradiente-zero era suficiente
+para mínimo global.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se $\lambda_{\min}(A)$ estivesse muito próximo de zero (mas ainda positivo), o que aconteceria com o número de condição, mesmo $A$ continuando definida positiva?
+
+Dica: releia a fórmula $\text{cond}(A)=\lambda_{\max}(A)/\lambda_{\min}(A)$
+— o que acontece com uma fração quando o denominador tende a zero?
+
+- □ Se $\lambda_{\min}(A)$ estivesse muito próximo de zero, mas ainda
+  estritamente positivo, o número de condição de $A$ ficaria muito
+  grande, mesmo com $A$ continuando definida positiva (todos os
+  autovalores positivos).
+- □ Se todos os autovalores de uma matriz simétrica $A$ fossem iguais
+  entre si ($A=cI$, $c>0$), o número de condição de $A$ seria
+  necessariamente igual a $1$, o menor valor possível.
+- □ Num sistema de controle descrito por uma matriz de ganho simétrica
+  positiva definida, um número de condição muito alto sinalizaria o
+  mesmo tipo de sensibilidade numérica discutida aqui, mesmo fora do
+  contexto de regressão.
+- □ Como o quociente de Rayleigh é uma média ponderada dos autovalores,
+  isso implica que o quociente $\mathbf{x}^TA\mathbf{x}/\mathbf{x}^T
+  \mathbf{x}$ é sempre igual à média aritmética simples dos autovalores,
+  qualquer que seja $\mathbf{x}$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## $\lambda_{\min}(A)$ perto de zero (mas positivo): o que acontece com o número de condição?
+
+Dica: $\text{cond}(A)=\lambda_{\max}/\lambda_{\min}$ — o que acontece com
+uma fração quando o denominador tende a zero?
+
+- □ $\lambda_{\min}(A)$ próximo de zero (positivo): número de condição
+  fica muito **grande**, mesmo $A$ continuando definida positiva.
+- □ Se todos os autovalores de $A$ simétrica fossem iguais ($A=cI$,
+  $c>0$): número de condição necessariamente $=1$ (o menor possível).
+- □ Sistema de controle com ganho simétrico PD: número de condição alto
+  sinaliza a mesma sensibilidade numérica, fora do contexto de regressão.
+- □ Quociente de Rayleigh sendo média ponderada implica que
+  $\mathbf{x}^TA\mathbf{x}/\mathbf{x}^T\mathbf{x}$ é sempre igual à
+  média **aritmética simples** dos autovalores, para qualquer
+  $\mathbf{x}$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Autovalor próximo de zero, matriz escalar e a média do quociente — Resposta
+
+- ✔ Denominador $\to 0^+$ com numerador fixo positivo $\Rightarrow$
+  razão $\to\infty$ — exatamente o mecanismo de mal-condicionamento, sem
+  violar definitude positiva (ainda $\lambda_{\min}>0$, só pequeno).
+- ✔ $A=cI$: único autovalor $c$ (repetido $n$ vezes) $\Rightarrow$
+  $\lambda_{\max}=\lambda_{\min}=c$ $\Rightarrow$ $\text{cond}(A)=1$ —
+  o melhor condicionamento possível.
+- ✔ Aplicação correta e direta do conceito fora do domínio de regressão.
+- ✗ É uma média **ponderada** pelos pesos $c_i^2$ (as componentes de
+  $\mathbf{x}$ na base de autovetores) — só coincide com a média
+  aritmética simples se todos os pesos forem iguais, o que não vale para
+  $\mathbf{x}$ arbitrário.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** número de condição muito grande, sinal exato de
+fragilidade numérica mesmo com $A$ tecnicamente definida positiva e
+invertível — é precisamente o que a Aula 3 observou empiricamente no par
+quase-colinear, e que o Bloco 6 confirma agora via autovalores.
+:::
+:::
+
+# Aplicação e Verificação no Dado Real
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Recalculando o Número de Condição da Aula 3 — Agora Exato
+
+Chegou a hora de fechar o ciclo prometido no início desta aula.
+Reaproveitando exatamente $X^TX$ da Aula 3 — os mesmos 4 atributos
+completos e os mesmos dois pares na amostra de 20 bairros — vamos
+calcular os autovalores exatos via `numpy.linalg.eigh` (a rotina
+especializada em matrizes simétricas, já usada no Bloco 4) e confirmar
+que a razão $\lambda_{\max}/\lambda_{\min}$ reproduz, número por número,
+os números que a Aula 3 só tinha obtido via `np.linalg.cond` e
+perturbação:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Recalculando o Número de Condição da Aula 3 — Agora Exato
+
+::: {.fragment}
+Reaproveitando $X^TX$ da Aula 3 (4 atributos completos + os mesmos dois
+pares na amostra de 20 bairros): autovalores exatos via
+`numpy.linalg.eigh`, confirmando se $\lambda_{\max}/\lambda_{\min}$
+reproduz os números da Aula 3:
+:::
+:::
+
+```{python}
+#| echo: true
+
+X_completo = _housing[COLS].to_numpy()
+XtX = X_completo.T @ X_completo
+
+autoval_XtX, autovec_XtX = np.linalg.eigh(XtX)
+cond_completo_exato = autoval_XtX.max() / autoval_XtX.min()
+
+print("Autovalores de X^T X (4 atributos, ordem crescente):")
+print(autoval_XtX)
+print(f"\ncond(X^T X) via autovalores exatos: {cond_completo_exato:,.1f}")
+print(f"cond(X^T X) via np.linalg.cond (Aula 3): {np.linalg.cond(XtX):,.1f}")
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Os dois números coincidem até a primeira casa decimal —
+$\text{cond}(X^TX)\approx 23\,460{,}5$, exatamente o valor que a Aula 3
+tinha medido de forma indireta (`np.linalg.cond`, que por baixo dos
+panos já usa os valores singulares — para uma matriz simétrica PSD como
+$X^TX$, os mesmos autovalores calculados aqui). A diferença é que agora
+sabemos **de onde** esse número vem: da razão entre o maior autovalor
+($\approx 1{,}75\times 10^7$) e o menor ($\approx 747$) de $X^TX$ — uma
+propriedade da própria matriz, não do resultado de nenhuma perturbação.
+Repetindo para os dois pares de 20 bairros:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que os Autovalores Confirmam
+
+::: {.fragment}
+$\text{cond}(X^TX)\approx 23\,460{,}5$ via autovalores — coincide com o
+valor da Aula 3 (`np.linalg.cond`), até a primeira casa decimal.
+:::
+
+::: {.fragment}
+Agora sabemos **de onde** vem: razão entre maior autovalor
+($\approx1{,}75\times10^7$) e menor ($\approx747$) — propriedade da
+própria matriz, sem perturbação nenhuma.
+:::
+
+## Repetindo Para os Dois Pares de 20 Bairros
+
+::: {.fragment}
+Mesma amostra, mesmos dois pares da Aula 3:
+:::
+:::
+
+```{python}
+#| echo: true
+
+_amostra_20 = _housing.sample(n=20, random_state=7)
+X_quase_dep = _amostra_20[["AveRooms", "AveBedrms"]].to_numpy()
+X_bem_cond = _amostra_20[["MedInc", "HouseAge"]].to_numpy()
+
+autoval_qd = np.linalg.eigh(X_quase_dep.T @ X_quase_dep)[0]
+autoval_bc = np.linalg.eigh(X_bem_cond.T @ X_bem_cond)[0]
+
+cond_qd_exato = autoval_qd.max() / autoval_qd.min()
+cond_bc_exato = autoval_bc.max() / autoval_bc.min()
+
+print("Autovalores de X^T X (AveRooms, AveBedrms):", autoval_qd)
+print(f"cond exato (quase-colinear):    {cond_qd_exato:,.1f}")
+print()
+print("Autovalores de X^T X (MedInc, HouseAge):    ", autoval_bc)
+print(f"cond exato (bem-condicionado):  {cond_bc_exato:,.1f}")
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Os três números reproduzem exatamente os valores da Aula 3:
+$\text{cond}(X^TX)\approx 419{,}8$ para o par quase-colinear e
+$\approx 169{,}1$ para o par bem-condicionado — mais que o dobro de
+diferença, agora explicado, não só medido. A resposta à pergunta do
+Bloco 1 ("existe alguma propriedade de $X^TX$ calculável sem perturbar
+nada que já anteciparia a fragilidade?") é, enfim, sim: o menor
+autovalor de $X^TX$ para o par quase-colinear ($\approx 1{,}77$) é
+minúsculo perto do maior ($\approx 742$) — um sintoma direto de que uma
+das direções do espaço gerado pelas duas colunas quase não é "vista"
+pela matriz, exatamente a direção em que `AveRooms` e `AveBedrms`
+praticamente coincidem. Já no par bem-condicionado, os dois autovalores
+($\approx 139{,}6$ e $\approx 23\,613{,}0$) ainda diferem bastante em
+escala bruta — lembrando que `MedInc` e `HouseAge` têm variâncias
+naturais bem diferentes —, mas a razão entre eles é quase $2{,}5\times$
+menor que no par quase-colinear, o suficiente para tornar o sistema
+consideravelmente mais estável.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Os Números Reproduzem Exatamente a Aula 3
+
+::: {.fragment}
+$\text{cond}(X^TX)\approx 419{,}8$ (quase-colinear) e $\approx 169{,}1$
+(bem-condicionado) — idênticos aos da Aula 3, agora **explicados**, não
+só medidos.
+:::
+
+::: {.fragment}
+Resposta ao Bloco 1: sim, existe. Menor autovalor do par quase-colinear
+($\approx1{,}77$) é minúsculo perto do maior ($\approx742$) — sintoma de
+uma direção quase "invisível" para a matriz (onde `AveRooms` $\approx$
+`AveBedrms`).
+:::
+
+::: {.fragment}
+Par bem-condicionado: autovalores ($\approx139{,}6$, $\approx23\,613{,}0$)
+ainda diferem em escala bruta (variâncias naturais diferentes de
+`MedInc`/`HouseAge`), mas a **razão** é bem menor — mais estável.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Uma Segunda Matriz Simétrica PSD: a Covariância Empírica
+
+$X^TX$ não é a única matriz simétrica semidefinida positiva que aparece
+naturalmente em dados. Outra, de natureza um pouco diferente — **não**
+mais colunas brutas, mas colunas **centradas** na própria média — é a
+**matriz de covariância empírica**. Para as duas colunas `AveRooms` e
+`AveBedrms` (o mesmo par quase-colinear de cima), a covariância mede
+como elas variam juntas em torno das respectivas médias:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Uma Segunda Matriz Simétrica PSD: Covariância Empírica
+
+::: {.fragment}
+$X^TX$ não é a única matriz PSD natural em dados. A **matriz de
+covariância empírica** — colunas **centradas**, não brutas — é outra:
+:::
+:::
+
+```{python}
+#| echo: true
+
+X_cov_dados = _housing[["AveRooms", "AveBedrms"]].to_numpy()
+cov_empirica = np.cov(X_cov_dados, rowvar=False)
+
+print("Matriz de covariância (AveRooms, AveBedrms):")
+print(cov_empirica)
+print("\nÉ simétrica?", np.allclose(cov_empirica, cov_empirica.T))
+
+autoval_cov, autovec_cov = np.linalg.eigh(cov_empirica)
+print("\nAutovalores:", autoval_cov)
+print("Autovetores (colunas):")
+print(autovec_cov)
+print("\nOrtogonalidade (produto interno entre os dois autovetores):",
+      autovec_cov[:, 0] @ autovec_cov[:, 1])
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A matriz é simétrica (por construção — covariância entre $i$ e $j$ é
+sempre igual à covariância entre $j$ e $i$) e semidefinida positiva
+(nenhum autovalor negativo, $\approx 0{,}064$ e $\approx 7{,}213$), e os
+dois autovetores são ortogonais entre si até erro de arredondamento —
+exatamente o Teorema Espectral Real do Bloco 4 se aplicando de novo,
+desta vez a uma matriz de covariância, não a $X^TX$ bruta. O autovetor
+principal — o de **maior** autovalor, $\approx (-0{,}986;-0{,}166)$ (ou,
+de forma equivalente, $(0{,}986;0{,}166)$, já que o sinal de um
+autovetor não importa, Bloco 2) — aponta na direção de **maior
+variância** dos dados: geometricamente, é a direção ao longo da qual a
+nuvem de pontos `AveRooms`/`AveBedrms` está mais "esticada".
+
+## Interpretando o Autovetor Principal sobre os Dados Reais
+
+Vale ver essa direção sobreposta ao espalhamento real das duas
+variáveis, não só como um vetor abstrato:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que os Autovalores/Autovetores Confirmam
+
+::: {.fragment}
+Simétrica (por construção) e semidefinida positiva (autovalores
+$\approx0{,}064$ e $\approx7{,}213$, nenhum negativo). Autovetores
+ortogonais até arredondamento — Teorema Espectral de novo, agora em
+covariância.
+:::
+
+::: {.fragment}
+Autovetor principal (maior autovalor) $\approx(0{,}986;0{,}166)$: aponta
+na direção de **maior variância** dos dados — onde a nuvem está mais
+"esticada".
+:::
+
+## Interpretando sobre os Dados Reais
+
+::: {.fragment}
+Sobrepondo essa direção ao espalhamento real de
+`AveRooms`/`AveBedrms`:
+:::
+:::
+
+::: {.fig-resize style="width: 75%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+media_cov = X_cov_dados.mean(axis=0)
+fig, ax = plt.subplots(figsize=(9.5, 3.2))
+
+idx_amostra_plot = np.random.default_rng(0).choice(len(X_cov_dados), size=1500, replace=False)
+ax.scatter(X_cov_dados[idx_amostra_plot, 0], X_cov_dados[idx_amostra_plot, 1],
+           s=8, alpha=0.25, color=COR_NEU, label="bairros (amostra de 1500)")
+ax.plot(*media_cov, "o", color="black", ms=8, label="média")
+
+for k, cor, nome in zip([1, 0], [COR_C, COR_B], ["principal (maior variância)", "secundário"]):
+    # np.linalg.eigh devolve autovalores em ordem ASCENDENTE — o maior
+    # autovalor (a direção "principal") está no índice 1, não 0.
+    v = autovec_cov[:, k]
+    lam = autoval_cov[k]
+    escala = 2.2 * np.sqrt(lam)
+    ax.annotate("", xy=media_cov + escala*v, xytext=media_cov - escala*v,
+                arrowprops=dict(arrowstyle="-", color=cor, lw=2.6))
+    ax.text(*(media_cov + escala*v*1.05), f"{nome}\n($\\lambda={lam:.2f}$)", fontsize=8.5, color=cor)
+
+ax.set_xlim(-2, 20); ax.set_ylim(-0.5, 4.5)
+ax.set_aspect("equal", adjustable="box")
+ax.set_xlabel("AveRooms (cômodos por domicílio, média do bairro)")
+ax.set_ylabel("AveBedrms (quartos por domicílio, média do bairro)")
+ax.set_title("Autovetores da covariância empírica sobre os dados reais", fontsize=10.5, fontweight="bold")
+ax.legend(fontsize=8, loc="upper left")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O autovetor principal (vermelho) segue quase exatamente ao longo do
+eixo `AveRooms` — coerente com `AveRooms` ter variância bruta bem maior
+que `AveBedrms` ($\approx 7{,}02$ contra $\approx 0{,}26$, quase
+$27\times$) —, mas ligeiramente inclinado na direção de `AveBedrms`
+positiva, refletindo a covariância positiva entre as duas ($\approx
+1{,}17$: bairros com mais cômodos por domicílio tendem a ter também mais
+quartos por domicílio, o que já era esperado). O autovetor secundário
+(laranja), ortogonal ao principal, captura a variação residual — a
+parte de `AveBedrms` que **não** é só "proporcional a `AveRooms`" —, e
+seu autovalor muito menor ($\approx 0{,}064$ contra $\approx 7{,}213$)
+mostra que essa direção secundária carrega bem pouca informação
+adicional sobre a nuvem de pontos.
+
+## Semente Para PCA (Sem Aprofundar) — e um Aviso Honesto sobre Escala
+
+O que acabamos de fazer — encontrar a direção de maior variância de um
+conjunto de dados via a autodecomposição da matriz de covariância — é,
+sem exagero nenhum, o primeiro passo da **Análise de Componentes
+Principais** (PCA), tema que a disciplina de Aprendizado Não
+Supervisionado desenvolve por completo; esta aula planta a semente, sem
+desenvolvê-la. Antes de fechar o bloco, um aviso honesto sobre um
+detalhe fácil de esconder: essa análise é **sensível à escala**. Se, em
+vez de só `AveRooms`/`AveBedrms`, calculássemos a covariância dos **4**
+atributos brutos, o resultado seria dominado por `HouseAge` — o
+atributo de maior variância numérica bruta, não necessariamente o mais
+"importante" para qualquer tarefa:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que os Autovetores Mostram
+
+::: {.fragment}
+Principal (vermelho) quase ao longo de `AveRooms` (variância
+$\approx7{,}02$ vs. $\approx0{,}26$ de `AveBedrms`, quase $27\times$),
+levemente inclinado — covariância positiva $\approx1{,}17$.
+:::
+
+::: {.fragment}
+Secundário (laranja), ortogonal: variação residual de `AveBedrms` **não
+explicada** por `AveRooms`; autovalor bem menor ($\approx0{,}064$ vs.
+$\approx7{,}213$) — pouca informação adicional.
+:::
+
+## Semente Para PCA — e um Aviso sobre Escala
+
+::: {.fragment}
+Direção de maior variância via autodecomposição da covariância =
+primeiro passo de **PCA** (Aprendizado Não Supervisionado) — semente,
+não desenvolvida aqui.
+:::
+
+::: {.fragment}
+**Aviso honesto:** sensível à escala. Covariância dos 4 atributos brutos
+seria dominada por `HouseAge` (maior variância numérica bruta), não
+necessariamente o mais "importante":
+:::
+:::
+
+```{python}
+#| echo: true
+
+X_cov4 = _housing[COLS].to_numpy()
+cov4 = np.cov(X_cov4, rowvar=False)
+
+print("Variância de cada atributo (diagonal da covariância):")
+for nome, var in zip(COLS, np.diag(cov4)):
+    print(f"  {nome:10s}: {var:10.4f}")
+
+autoval_cov4 = np.linalg.eigh(cov4)[0]
+print("\nAutovalores da covariância (4 atributos):", autoval_cov4)
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A variância de `HouseAge` ($\approx 163{,}8$) é mais de $20\times$ maior
+que a de qualquer outro atributo — e o maior autovalor da covariância
+completa ($\approx 164{,}0$) reflete quase só essa escala, não a
+estrutura de correlação entre os quatro atributos que de fato
+interessaria numa análise de PCA. É exatamente por isso que aplicar PCA
+a sério exige **padronizar** os atributos antes (subtrair a média e
+dividir pelo desvio-padrão de cada coluna) — sem isso, a "direção de
+maior variância" tende a só apontar para o atributo de maior escala
+numérica bruta, não para a estrutura real dos dados. Não vamos
+desenvolver a padronização nem o PCA aqui — só deixamos o aviso, e a
+ponte, explícitos.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Aviso Confirmado nos Números
+
+::: {.fragment}
+Variância de `HouseAge` ($\approx163{,}8$) é $>20\times$ maior que
+qualquer outro atributo. Maior autovalor da covariância completa
+($\approx164{,}0$) reflete quase só essa escala — não a estrutura de
+correlação entre os 4 atributos.
+:::
+
+::: {.fragment}
+PCA a sério exige **padronizar** antes (média $0$, desvio-padrão $1$) —
+sem isso, "maior variância" só aponta para a maior escala numérica
+bruta. Não desenvolvido aqui — só o aviso e a ponte.
+:::
+:::
+
+# Fechamento e Ponte para a Aula 5
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### Retomando as perguntas de abertura {.unnumbered}
+
+1. **O que é, geometricamente, um autovalor e um autovetor?** Um
+   autovetor é uma direção que uma transformação linear $A$ não gira —
+   só estica ou encolhe (e inverte, se o autovalor for negativo); o
+   autovalor é exatamente esse fator de escala.
+2. **Como calcular à mão, via o polinômio característico?** A equação
+   $A\mathbf{x}=\lambda\mathbf{x}$ vira o sistema homogêneo
+   $(A-\lambda I)\mathbf{x}=\mathbf{0}$, que só tem solução não-trivial
+   quando $\det(A-\lambda I)=0$ — os autovalores são as raízes reais
+   desse polinômio, os autovetores resolvem o sistema com $\lambda$ já
+   conhecido.
+3. **Por que toda matriz simétrica — como $X^TX$ — tem autovalores
+   reais e autovetores ortogonais?** O Teorema Espectral Real garante
+   isso sempre; provamos a ortogonalidade entre autovalores distintos
+   via $\mathbf{x}_1^TA\mathbf{x}_2$ calculado de duas formas, usando a
+   simetria de $A$ exatamente no passo decisivo.
+4. **Como sinal e razão dos autovalores definem definitude e o número
+   de condição exato?** $A\succ 0 \iff \lambda_{\min}(A)>0$; e, para
+   $A$ simétrica definida positiva, $\text{cond}(A)=
+   \lambda_{\max}(A)/\lambda_{\min}(A)$ — a fórmula que o Bloco 6 usou
+   para reproduzir, exatamente, os números que a Aula 3 só tinha medido
+   por perturbação.
+
+### O Que Fica em Aberto {.unnumbered}
+
+Autovalores e autovetores reais, na forma garantida pelo Teorema
+Espectral, só existem de forma incondicional para matrizes **quadradas
+simétricas** — $X^TX$ sempre se encaixa aí, mas $X$ em si, a matriz de
+design retangular ($N\ne d$ linhas e colunas), não. A pergunta que fica
+aberta: o que fazer quando se quer decompor a própria $X$, não $X^TX$?
+A resposta é a **Decomposição em Valores Singulares** (SVD), tema da
+Aula 5 — e o Boyd já deixou uma pista, sem desenvolver: a própria
+definição de número de condição usada neste bloco ($\sigma_{\max}/
+\sigma_{\min}$) foi escrita em termos de **valores singulares**, não de
+autovalores — a generalização exata que a Aula 5 vai construir.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as Perguntas de Abertura
+
+::: {.fragment}
+**1.** Autovetor = direção que $A$ não gira, só estica/encolhe
+(inverte se $\lambda<0$); autovalor = o fator de escala.
+:::
+
+::: {.fragment}
+**2.** $A\mathbf{x}=\lambda\mathbf{x}\Rightarrow(A-\lambda I)\mathbf{x}=
+\mathbf{0}$, solução não-trivial $\iff\det(A-\lambda I)=0$ — autovalores
+= raízes reais; autovetores resolvem o sistema com $\lambda$ conhecido.
+:::
+
+::: {.fragment}
+**3.** Teorema Espectral Real: matriz simétrica $\Rightarrow$
+autovalores reais, autovetores ortogonais — provado via
+$\mathbf{x}_1^TA\mathbf{x}_2$ de duas formas, usando a simetria no passo
+decisivo.
+:::
+
+::: {.fragment}
+**4.** $A\succ 0\iff\lambda_{\min}(A)>0$; para simétrica PD,
+$\text{cond}(A)=\lambda_{\max}/\lambda_{\min}$ — reproduziu, exato, os
+números empíricos da Aula 3.
+:::
+
+## Ponte para a Aula 5
+
+::: {.fragment}
+Teorema Espectral só garante autovalores/autovetores reais
+incondicionalmente para matrizes **quadradas simétricas**. $X^TX$
+sempre se encaixa; $X$ em si (retangular, $N\ne d$), não.
+:::
+
+::: {.fragment}
+O que fazer para decompor $X$ diretamente? **Decomposição em Valores
+Singulares (SVD)**, Aula 5.
+:::
+
+::: {.fragment}
+Pista já deixada pelo Boyd: o número de condição foi definido em termos
+de **valores singulares** ($\sigma_{\max}/\sigma_{\min}$), não
+autovalores — a generalização exata que a Aula 5 constrói.
+:::
+:::
+
+::: {.fig-resize style="width: 65%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  block/.style={rectangle, draw=icblue, fill=icblue!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=3.0cm, minimum height=1.1cm},
+  decision/.style={diamond, draw=icorange, fill=icorange!10, align=center,
+                    font=\small, inner sep=1pt, text width=2.6cm, aspect=2.0},
+  concl/.style={rectangle, draw=icred, fill=icred!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=3.4cm, minimum height=1.1cm}
+]
+  \node (A) [block] at (0,0) {matriz quadrada?};
+  \node (Q) [decision] at (5.0,0) {$A$ simétrica?};
+  \node (S) [concl] at (10.9,2.3) {Teorema Espectral:\\$A=Q\Lambda Q^T$\\autovalores reais,\\autovetores ortogonais};
+  \node (N) [concl] at (10.9,-2.3) {sem garantia geral\\(pode ter autovalor\\complexo, Bloco 3)};
+  \node (SVD) [concl] at (0,-3.5) {não é quadrada:\\Teorema Espectral\\não se aplica\\direto $\to$ SVD\\(Aula 5)};
+
+  \draw [-Stealth, thick, color=gray!70] (A) -- (Q);
+  \draw [-Stealth, thick, color=gray!70] (Q) -- (S);
+  \draw [-Stealth, thick, color=gray!70] (Q) -- (N);
+  \draw [-Stealth, thick, color=gray!70] (A) -- (SVD);
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+# Exercícios
+
+## Questões discursivas
+
+1. Explique, com suas próprias palavras, por que a condição
+   $\det(A-\lambda I)=0$ (e não a equação de autovalor
+   $A\mathbf{x}=\lambda\mathbf{x}$ diretamente) é o alvo certo para
+   encontrar os autovalores de uma matriz. Que propriedade de sistemas
+   lineares homogêneos, já estudada na Aula 2, torna essa equivalência
+   possível?
+
+2. A prova de ortogonalidade do Bloco 4 (autovetores de autovalores
+   distintos de uma matriz simétrica são ortogonais) usa a simetria de
+   $A$ em exatamente um passo da manipulação algébrica. Reproduza a
+   prova e aponte esse passo com precisão — o que aconteceria à
+   conclusão se $A$ não fosse simétrica?
+
+3. Compare os dois papéis que $X^TX$ desempenha nesta disciplina: como
+   a matriz das Equações Normais (Aula 3) e como o objeto central desta
+   aula (autovalores/autovetores, definitude, número de condição).
+   Explique por que a simetria de $X^TX$ — garantida para **qualquer**
+   $X$, mesmo retangular — é a peça que conecta os dois papéis.
+
+## Questões de Verdadeiro/Falso
+
+::: {.callout-note icon=false}
+## Autovalores e autovetores: a equação básica
+
+- □ Se $\mathbf{x}$ é autovetor de $A$ associado ao autovalor
+  $\lambda=0$, então $\mathbf{x}$ pertence ao núcleo (espaço-nulo) de
+  $A$, no mesmo sentido definido na Aula 2 para sistemas homogêneos.
+- □ Uma matriz de rotação pura em $\mathbb{R}^2$ por um ângulo de $90°$
+  não tem nenhum autovetor real, porque nenhuma direção não-nula do
+  plano é mapeada sobre si mesma (nem esticada, nem invertida) por essa
+  rotação.
+- □ Num sistema dinâmico discreto $\mathbf{x}_{k+1}=A\mathbf{x}_k$, se
+  $\mathbf{x}_0$ for exatamente um autovetor de $A$ com autovalor
+  $\lambda$, então toda a trajetória futura $\mathbf{x}_1,\mathbf{x}_2,
+  \dots$ permanece sobre a mesma reta que $\mathbf{x}_0$, só variando em
+  magnitude por potências de $\lambda$.
+- □ Como o autovetor associado a um autovalor não é único, a equação de
+  autovalor $A\mathbf{x}=\lambda\mathbf{x}$ admite, para qualquer $A$ e
+  qualquer $\lambda$ real, pelo menos um autovetor não-nulo que a
+  satisfaça.
+:::
+
+::: {.callout-note icon=false}
+## O polinômio característico
+
+- □ Se o polinômio característico de uma matriz $A\in\mathbb{R}^{2
+  \times 2}$ tiver uma raiz **dupla** (discriminante zero em Bhaskara),
+  isso garante automaticamente que $A$ tem apenas um autovetor
+  linearmente independente associado a essa raiz.
+- □ Multiplicar uma matriz $A$ inteira por um escalar $c\ne 0$ (obtendo
+  $cA$) preserva exatamente os mesmos autovetores de $A$, mas multiplica
+  cada autovalor por $c$.
+- □ Num modelo de epidemiologia descrito por uma matriz de transição de
+  estados $3\times 3$, encontrar os autovalores dessa matriz via seu
+  polinômio característico (grau 3) é uma aplicação legítima da mesma
+  técnica usada nesta aula para matrizes $2\times 2$.
+- □ Como $\det(A-\lambda I)=0$ é a condição para autovalor, isso implica
+  que $\det(A)=0$ é condição necessária para que $A$ tenha algum
+  autovalor real.
+:::
+
+::: {.callout-note icon=false}
+## Não-unicidade e autoespaços
+
+- □ Se dois autovetores distintos, $\mathbf{x}_1$ e $\mathbf{x}_2$, de
+  uma mesma matriz $A$ (não necessariamente simétrica) estiverem
+  associados ao **mesmo** autovalor $\lambda$, então qualquer combinação
+  linear não-nula $c_1\mathbf{x}_1+c_2\mathbf{x}_2$ também é autovetor de
+  $A$ com esse mesmo autovalor $\lambda$.
+- □ Se uma matriz $A\in\mathbb{R}^{2\times 2}$ tivesse dois autovalores
+  distintos, mas um deles com autoespaço de dimensão $2$, isso seria
+  matematicamente possível para essa matriz.
+- □ Num problema de classificação de imagens em que cada "direção" do
+  espaço de atributos representasse uma característica visual, um
+  autoespaço de dimensão maior que $1$ significaria, na prática, que
+  existe mais de uma direção de atributos igualmente "especial" (mesmo
+  fator de escala) para a transformação em questão.
+- □ Como o vetor nulo nunca é considerado autovetor por definição, isso
+  implica que um autoespaço $E_\lambda$ nunca contém o vetor
+  $\mathbf{0}$.
+:::
+
+::: {.callout-note icon=false}
+## Teorema Espectral Real
+
+- □ Se duas matrizes simétricas $A$ e $B$ compartilhassem exatamente a
+  mesma base ortonormal de autovetores (mesmo $Q$ na decomposição
+  espectral, com $\Lambda$ possivelmente diferentes), então $A$ e $B$
+  comutariam, ou seja, $AB=BA$.
+- □ O Teorema Espectral Real garante que toda matriz simétrica
+  $A\in\mathbb{R}^{n\times n}$ tem exatamente $n$ autovalores **distintos**
+  entre si.
+- □ Numa rede elétrica descrita por uma matriz de admitância simétrica,
+  o Teorema Espectral Real garante autovalores reais e autovetores
+  ortogonais, ainda que o contexto físico não tenha nenhuma relação com
+  regressão ou projeção.
+- □ Se uma matriz $A$ tivesse autovalores reais, mas seus autovetores
+  associados a autovalores distintos não fossem ortogonais entre si,
+  isso seria suficiente para concluir que $A$ não é simétrica.
+:::
+
+::: {.callout-note icon=false}
+## Definitude positiva
+
+- □ Se uma matriz simétrica $A\in\mathbb{R}^{n\times n}$ tiver
+  exatamente um autovalor igual a zero e todos os demais estritamente
+  positivos, então $A$ é semidefinida positiva, mas não definida
+  positiva.
+- □ A soma de duas matrizes simétricas definidas positivas de mesma
+  dimensão, $A+B$, é sempre definida positiva.
+- □ Num problema de otimização de portfólio financeiro, se a matriz de
+  covariância dos retornos dos ativos não fosse definida positiva (algum
+  autovalor exatamente zero), isso indicaria a existência de uma
+  combinação de ativos com variância nula — um portfólio livre de risco
+  a partir de ativos individualmente arriscados.
+- □ Como a forma quadrática $\mathbf{x}^TA\mathbf{x}$ de uma matriz
+  definida positiva nunca é negativa, isso implica que
+  $\mathbf{x}^TA\mathbf{x}=0$ é impossível para $A$ definida positiva e
+  $\mathbf{x}$ não-nulo qualquer.
+:::
+
+::: {.callout-note icon=false}
+## Quociente de Rayleigh e número de condição
+
+- □ Se $\mathbf{x}$ for exatamente um autovetor de $A$ associado ao
+  autovalor $\lambda_{\max}(A)$, então o quociente de Rayleigh
+  $\mathbf{x}^TA\mathbf{x}/\mathbf{x}^T\mathbf{x}$ avaliado nesse
+  $\mathbf{x}$ é exatamente igual a $\lambda_{\max}(A)$.
+- □ Se todos os autovalores de uma matriz simétrica definida positiva
+  $A$ dobrarem de valor (cada $\lambda_i\to 2\lambda_i$), o número de
+  condição de $A$ também dobra.
+- □ Num sistema de equações normais mal-condicionado por causa de dois
+  sensores redundantes (quase a mesma leitura), remover fisicamente um
+  dos dois sensores tende a aumentar o menor autovalor relativo de
+  $X^TX$ e, com isso, reduzir o número de condição.
+- □ Como o número de condição de uma matriz simétrica definida positiva
+  é sempre maior ou igual a $1$, isso implica que qualquer matriz com
+  número de condição exatamente igual a $1$ tem que ser, necessariamente,
+  a matriz identidade.
+:::
+
+::: {.callout-note icon=false}
+## $X^TX$: simetria e as duas faces desta aula
+
+- □ Se duas colunas de uma matriz de design $X$ fossem exatamente
+  ortogonais entre si (produto interno zero) e tivessem a mesma norma,
+  a submatriz $2\times 2$ correspondente de $X^TX$ restrita a essas duas
+  colunas seria um múltiplo escalar da identidade, com número de
+  condição igual a $1$.
+- □ Para qualquer matriz retangular $X\in\mathbb{R}^{N\times d}$ com
+  $N\ne d$, a própria matriz $X$ (não $X^TX$) sempre tem $\min(N,d)$
+  autovalores reais, pela mesma lógica do polinômio característico
+  aplicada a $X^TX$.
+- □ Numa matriz de covariância genética (relacionando a expressão de
+  vários genes numa amostra de pacientes), o mesmo raciocínio de
+  autovalor pequeno $\Rightarrow$ direção quase redundante entre
+  variáveis se aplicaria, ainda que o domínio seja biológico, não
+  imobiliário.
+- □ Como $X^TX$ é sempre simétrica semidefinida positiva
+  (independentemente do posto de $X$), isso implica que $X^TX$ é sempre
+  invertível, qualquer que seja $X$.
+:::
+
+::: {.callout-note icon=false}
+## Covariância empírica e a semente de PCA
+
+- □ Se a matriz de covariância empírica de dois atributos tiver um dos
+  autovalores muito próximo de zero, isso indica que os dados, nesse
+  par de atributos, estão quase inteiramente concentrados ao longo de
+  uma única direção no plano.
+- □ Padronizar cada atributo (subtrair a média, dividir pelo
+  desvio-padrão) antes de calcular a covariância nunca muda a **direção**
+  do autovetor principal, só a magnitude do autovalor associado.
+- □ Num conjunto de dados de sensores industriais com escalas físicas
+  muito diferentes entre si (ex.: temperatura em graus Celsius e pressão
+  em milhares de Pascals), calcular a covariância bruta (sem padronizar)
+  tende a produzir um autovetor principal dominado pelo sensor de maior
+  variância numérica, não necessariamente o fisicamente mais relevante.
+- □ Como a matriz de covariância é sempre semidefinida positiva, isso
+  implica que a soma das variâncias de todos os atributos (o traço da
+  matriz) é sempre igual à soma dos quadrados das covariâncias fora da
+  diagonal.
+:::
+:::

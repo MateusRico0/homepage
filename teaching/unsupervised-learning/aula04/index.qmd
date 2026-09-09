@@ -1,0 +1,2455 @@
+---
+title: "Aula 4: Modelos de Mistura Gaussiana e o Algoritmo EM"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-09-07"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: homepage
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar
+disable_progress_bar()
+from datasets import load_dataset
+
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+from matplotlib.patches import Ellipse
+from sklearn.preprocessing import StandardScaler
+from sklearn.mixture import GaussianMixture
+from sklearn.cluster import KMeans, HDBSCAN
+from itertools import permutations
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({
+    "figure.dpi": 130,
+    "font.size": 11,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "legend.frameon": True,
+    "legend.framealpha": 0.9,
+})
+
+rng = np.random.default_rng(20260907)
+
+# --- Paleta do IC, ordem preferencial (mesma das Aulas 1-3) -----------
+COR_A   = "#0085CA"   # componente/cluster "1" (majoritariamente benigno)
+COR_B   = "#FF5E00"   # componente/cluster "2" (majoritariamente maligno)
+COR_LIM = "#E03C31"   # avisos, casos ambíguos
+COR_NEU = "#5D6D7E"   # dados brutos, elementos neutros
+
+# --- Problema-fio: Breast Cancer Wisconsin (569 x 30 atributos) -------
+# Mesmo carregamento e mesmo par de atributos 2D da Aula 3, para permitir
+# a comparação direta HDBSCAN (partição rígida) vs. GMM (atribuição
+# probabilística) sobre exatamente a mesma figura.
+ds = load_dataset("scikit-learn/breast-cancer-wisconsin")["train"].to_pandas()
+ds = ds.drop(columns=["id", "Unnamed: 32"])
+feat_cols = [c for c in ds.columns if c != "diagnosis"]
+diagnosis = ds["diagnosis"].values  # só usado para AVALIAR a partição encontrada
+
+FEAT_2D = ["radius_worst", "concave points_worst"]
+X_2d = StandardScaler().fit_transform(ds[FEAT_2D].values)
+
+
+def best_acc(y_true, y_pred):
+    """Acurácia de y_pred contra y_true, testando as permutações de rótulo."""
+    best = 0.0
+    for perm in permutations(np.unique(y_pred)):
+        mapping = {lab: perm[i] for i, lab in enumerate(np.unique(y_pred))}
+        mapped = np.array([mapping[l] for l in y_pred])
+        best = max(best, (mapped == y_true).mean())
+    return best
+
+
+def blend_color(resp, cA=COR_A, cB=COR_B):
+    """Interpola linearmente entre duas cores hex, por responsabilidade
+    (resp=0 -> cA puro, resp=1 -> cB puro), uma cor por ponto."""
+    a = np.array(mcolors.to_rgb(cA))
+    b = np.array(mcolors.to_rgb(cB))
+    return (1 - resp)[:, None] * a[None, :] + resp[:, None] * b[None, :]
+
+
+def cov_ellipse(mean, cov, ax, n_std=2.0, **kwargs):
+    """Desenha uma elipse de n_std desvios-padrão de uma gaussiana 2D."""
+    vals, vecs = np.linalg.eigh(cov)
+    order = vals.argsort()[::-1]
+    vals, vecs = vals[order], vecs[:, order]
+    theta = np.degrees(np.arctan2(*vecs[:, 0][::-1]))
+    width, height = 2 * n_std * np.sqrt(vals)
+    ell = Ellipse(xy=mean, width=width, height=height, angle=theta, **kwargs)
+    ax.add_patch(ell)
+    return ell
+
+
+# --- HDBSCAN da Aula 3, recomputado aqui para a comparação lado a lado -
+hdb_bc = HDBSCAN(min_cluster_size=15).fit(X_2d)
+
+# --- GMM ajustado nos mesmos 2 atributos, sem usar o diagnóstico -------
+gmm_bc = GaussianMixture(n_components=2, random_state=20260830, n_init=10).fit(X_2d)
+resp_bc = gmm_bc.predict_proba(X_2d)
+labels_gmm_bc = gmm_bc.predict(X_2d)
+# resp_B = responsabilidade do componente 1 (o majoritariamente maligno,
+# confirmado por composição: componente 0 tem 349 B / 23 M; componente 1
+# tem 189 M / 8 B) — usada para colorir do azul (benigno) ao laranja
+# (maligno) de forma consistente com o HDBSCAN da Aula 3.
+resp_B = resp_bc[:, 1]
+ambig_mask = np.abs(resp_B - 0.5) < 0.05
+```
+
+# Revisão e Introdução
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## Revisão Rápida: O Que a Aula 3 Deixou Pronto, e Onde Ela Parou
+
+A Aula 3 definiu **cluster** como uma componente conexa de um conjunto
+de nível de densidade $L_\lambda=\{\mathbf{x}:p(\mathbf{x})\ge\lambda\}$,
+e construiu um algoritmo computável para essa definição — o HDBSCAN —
+sem exigir nenhuma suposição de forma: primeiro a **distância de
+alcançabilidade mútua** $d_{\mathrm{mreach}}(a,b)=\max(\mathrm{core}_K(a),
+\mathrm{core}_K(b), d(a,b))$, depois a **MST** sobre essa distância
+(capturando toda a hierarquia de clusters possível de uma vez), e por
+fim a extração de clusters reais por **persistência** na árvore
+condensada, descartando o que é só flutuação amostral.
+
+Aplicado ao Breast Cancer Wisconsin, usando só dois atributos
+(`radius_worst` e `concave points_worst`, sem o rótulo `diagnosis`
+durante o ajuste), o HDBSCAN encontrou dois clusters — um de $54$
+pacientes $100\%$ malignos, outro de $347$ pacientes $\approx90{,}8\%$
+benignos — e marcou $168$ pacientes ($\approx29{,}5\%$) como **ruído**.
+Esse resultado é bom (ARI $=0{,}644$ excluindo o ruído da comparação,
+$0{,}493$ incluindo-o como um rótulo próprio), mas expõe uma limitação
+estrutural: o HDBSCAN entrega uma **partição rígida**. Cada paciente
+pertence a exatamente um cluster, ou vira ruído — nunca "um pouco de
+cada". Um paciente cuja combinação de `radius_worst`/`concave
+points_worst` fica bem na fronteira entre o núcleo maligno denso e a
+massa benigna não é "um pouco maligno, um pouco benigno" para o
+HDBSCAN: ele é forçado para um lado, ou descartado.
+
+## Ideia Central
+
+Essa rigidez é uma escolha do método, não um fato necessário sobre os
+dados. Se duas populações clínicas realmente se sobrepõem numa faixa
+contínua de biomarcadores — sem um vale de densidade genuíno separando-as
+—, forçar uma escolha binária esconde informação real: "quão parecido
+com cada grupo este paciente é" é, nesse caso, uma pergunta cuja
+resposta honesta é um número entre $0$ e $1$, não um rótulo único. A
+ideia-ponte desta aula é justamente essa: trocar "a qual cluster este
+ponto pertence?" por "**com que probabilidade** este ponto pertence a
+cada cluster?" — a mesma tarefa de agrupamento, mas com uma resposta
+relaxada, probabilística, em vez de uma resposta binária.
+
+## Roteiro da Aula
+
+Essa troca — de atribuição rígida para atribuição probabilística — se
+desdobra em quatro perguntas, cada uma resolvida em um bloco desta aula:
+
+1. Formalmente, o que significa dizer que um ponto "nasceu de uma entre
+   $K$ populações", quando não se sabe **qual**?
+2. Dado esse modelo gerador, como transformar a incerteza sobre a
+   origem de cada ponto numa probabilidade concreta, calculável?
+3. Uma vez com essas probabilidades, como usá-las para reajustar os
+   parâmetros do próprio modelo — e por que esse processo precisa ser
+   iterativo?
+4. Essa ideia nova é uma generalização do que já se conhece (o KMeans),
+   ou é uma ferramenta completamente diferente?
+
+## Problema Motivador
+
+Volte ao resultado da Aula 3: $168$ pacientes marcados como ruído, dos
+quais $126$ eram malignos e $42$ benignos. O HDBSCAN não tem vocabulário
+para dizer mais nada sobre eles — "ruído" é um rótulo terminal, não um
+grau de pertencimento. A pergunta que abre esta aula é literal: e se,
+em vez de "ruído" ou "cluster $k$", cada um desses $168$ pacientes
+recebesse dois números — a probabilidade de pertencer ao grupo mais
+maligno, e a probabilidade de pertencer ao grupo mais benigno, somando
+$1$? Essa é exatamente a saída que os **Modelos de Mistura Gaussiana**
+(GMM) produzem, e que o restante da aula constrói do zero.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Da Aula 3: O Que Já Temos
+
+::: {.fragment}
+**Cluster** = componente conexa de $L_\lambda=\{\mathbf{x}:p(\mathbf{x})
+\ge\lambda\}$. Construído via $d_{\mathrm{mreach}}$ + MST + persistência
+na árvore condensada — o **HDBSCAN**.
+:::
+
+::: {.fragment}
+No Breast Cancer Wisconsin (`radius_worst`/`concave points_worst`, sem
+rótulo): $54$ pacientes $100\%$ malignos num cluster; $347$
+$\approx90{,}8\%$ benignos noutro; $168$ ($\approx29{,}5\%$) viram
+**ruído**. ARI $=0{,}644$ (excl. ruído) / $0{,}493$ (incl. ruído).
+:::
+
+::: {.fragment  .callout-note}
+Limitação estrutural: o HDBSCAN entrega uma **partição rígida** — cada
+paciente é de um cluster, ou é ruído. Sem meio-termo.
+:::
+
+## Ideia Central
+
+::: {.fragment}
+Rigidez é uma escolha do método, não um fato necessário sobre os dados.
+Se duas populações se sobrepõem numa faixa contínua — sem vale de
+densidade genuíno — forçar um rótulo único esconde informação real.
+:::
+
+::: {.fragment}
+Troca proposta: em vez de "a qual cluster pertence?", perguntar **"com
+que probabilidade pertence a cada cluster?"** Mesma tarefa, resposta
+relaxada.
+:::
+
+## Roteiro da Aula
+
+::: {.fragment}
+**1.** O que significa "nascer de uma entre $K$ populações", sem saber
+qual?
+:::
+
+::: {.fragment}
+**2.** Como transformar essa incerteza numa probabilidade concreta por
+ponto?
+:::
+
+::: {.fragment}
+**3.** Como usar essas probabilidades para reajustar os parâmetros do
+modelo — por que isso é iterativo?
+:::
+
+::: {.fragment}
+**4.** Isso generaliza o KMeans já conhecido, ou é outra coisa?
+:::
+
+## Problema Motivador
+
+::: {.fragment}
+Dos $168$ pacientes marcados como **ruído** na Aula 3, $126$ eram
+malignos e $42$ benignos — o HDBSCAN não tem vocabulário para dizer
+mais nada sobre eles.
+:::
+
+::: {.fragment}
+E se, em vez de "ruído", cada um recebesse **dois números**: a
+probabilidade de vir do grupo mais maligno, e a de vir do mais benigno,
+somando $1$? É exatamente o que o **GMM** produz — construído do zero
+a partir daqui.
+:::
+
+:::
+
+## Pergunta
+
+::: {.callout-tip}
+## Um paciente marcado como ruído pelo HDBSCAN não pertence a nenhuma componente conexa de alta densidade nos dois atributos usados. Isso significa que ele é igualmente parecido com as duas populações (benigna e maligna), ou pode significar outra coisa?
+
+Dica: pense se "estar num vale geométrico de densidade local" (o que o
+HDBSCAN mede) é a mesma coisa que "ter uma probabilidade intermediária
+de pertencer a cada grupo, sob um modelo probabilístico ajustado aos
+dados" (o que o GMM vai medir) — os dois métodos usam noções diferentes
+de "parecido".
+
+- □ Um paciente marcado como ruído pode, sob um modelo de mistura
+  gaussiana ajustado aos mesmos dados, receber uma responsabilidade bem
+  próxima de $1$ para um único componente — "estar num vale geométrico
+  local" e "ter atribuição probabilística ambígua sob um modelo global"
+  não são a mesma coisa.
+- □ Se um paciente recebe responsabilidade exatamente $0{,}5$ para cada
+  um dos dois componentes de um GMM, isso implica necessariamente que
+  ele está geometricamente equidistante das duas médias $\mu_1$ e
+  $\mu_2$ na distância euclidiana bruta.
+- □ Se as duas populações gaussianas subjacentes tivessem exatamente a
+  mesma média e a mesma matriz de covariância (colapsando numa única
+  gaussiana), a responsabilidade de qualquer ponto para cada componente
+  seria exatamente $\pi_k$ (o peso de mistura), independente da posição
+  do ponto.
+- □ Numa aplicação de perfil de consumo em que um cliente compra tanto
+  itens "econômicos" quanto "premium" em proporções parecidas, um GMM
+  ajustado ao histórico de gastos tenderia a atribuir a esse cliente
+  responsabilidades intermediárias a ambos os segmentos, enquanto uma
+  regra de corte único baseada em densidade local tenderia a isolá-lo
+  como ruído ou a forçá-lo para um segmento só.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Resposta
+
+::: {.callout-tip}
+## Resposta — ruído do HDBSCAN vs. ambiguidade do GMM
+
+- ✔ Vale geométrico local $\ne$ ambiguidade probabilística global — um
+  ponto pode escapar da densidade local exigida pelo HDBSCAN e, ainda
+  assim, ficar claramente mais próximo de um componente sob o GMM.
+- ✗ Responsabilidade $0{,}5/0{,}5$ depende da densidade ponderada por
+  $\pi_k$ e $\Sigma_k$, não só da distância euclidiana bruta às médias —
+  covariâncias ou pesos diferentes deslocam o ponto de equilíbrio.
+- ✔ Com densidades idênticas nos dois componentes, o termo de densidade
+  cancela na razão de Bayes, sobrando só $\pi_k$ — verdade para
+  qualquer $\mathbf{x}$.
+- ✔ A mesma lógica de "sobreposição contínua pede resposta contínua"
+  transfere para qualquer domínio com segmentos que se misturam, não só
+  para pacientes.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** os dois métodos respondem perguntas diferentes
+— um mede densidade local geométrica, o outro mede probabilidade sob um
+modelo global. O resto da aula constrói esse segundo modelo.
+:::
+
+:::
+
+# Intuição — Duas Nuvens
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Antes de qualquer fórmula, veja o resultado inteiro primeiro — só vai
+faltar nomear os passos. A figura abaixo mostra, lado a lado, os mesmos
+$569$ pacientes, nos mesmos dois atributos padronizados
+(`radius_worst` e `concave points_worst`) já usados na Aula 3. À
+esquerda, a partição rígida do HDBSCAN: cada ponto tem uma cor sólida —
+azul para o cluster majoritariamente benigno, laranja para o
+majoritariamente maligno, vermelho para ruído. À direita, o resultado
+de um Modelo de Mistura Gaussiana com $2$ componentes ajustado aos
+mesmos dados (ainda sem ter sido explicado como): cada ponto recebe uma
+cor **misturada**, interpolada entre azul e laranja de acordo com a sua
+probabilidade de pertencer a cada componente — quanto mais próximo do
+roxo, mais ambígua a origem daquele paciente.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Resultado Final, Antes da Matemática
+
+::: {.fragment}
+Mesmos $569$ pacientes, mesmos dois atributos padronizados
+(`radius_worst`, `concave points_worst`) da Aula 3.
+:::
+
+::: {.fragment}
+**Esquerda:** HDBSCAN — cor sólida por ponto (azul/laranja/vermelho
+para ruído).
+:::
+
+::: {.fragment}
+**Direita:** GMM com $2$ componentes — cor **misturada**, interpolada
+por probabilidade de pertencimento; mais roxo = mais ambíguo.
+:::
+
+:::
+
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 2, figsize=(9.8, 4.3))
+
+_hdb_colors = {-1: COR_LIM, 0: COR_B, 1: COR_A}
+axes[0].scatter(X_2d[:, 0], X_2d[:, 1],
+                c=[_hdb_colors[l] for l in hdb_bc.labels_], s=14, alpha=0.85)
+axes[0].set_title("HDBSCAN (Aula 3): partição rígida\n168 pacientes viram 'ruído'", fontsize=10)
+axes[0].set_xlabel("radius_worst (padronizado)")
+axes[0].set_ylabel("concave points_worst (padronizado)")
+
+axes[1].scatter(X_2d[:, 0], X_2d[:, 1], c=blend_color(resp_B), s=14, alpha=0.9)
+axes[1].scatter(X_2d[ambig_mask, 0], X_2d[ambig_mask, 1],
+                facecolors='none', edgecolors='black', s=90, linewidth=1.4,
+                label=f"{ambig_mask.sum()}" + r" pacientes ambíguos ($|\gamma-0{,}5|<0{,}05$)")
+axes[1].set_title("GMM (esta aula): atribuição probabilística\nnenhum paciente é descartado", fontsize=10)
+axes[1].set_xlabel("radius_worst (padronizado)")
+axes[1].legend(loc="upper left", fontsize=7.5)
+
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Duas diferenças estruturais saltam aos olhos. Primeiro, o GMM **nunca
+descarta ninguém**: os $168$ pacientes que a Aula 3 jogou fora como
+ruído aparecem no painel direito com uma cor — talvez ambígua, talvez
+não, mas sempre uma resposta. Segundo, a cor não é binária: existe um
+gradiente contínuo entre azul e laranja, e os $9$ pacientes circulados
+em preto (responsabilidade entre $0{,}45$ e $0{,}55$ para cada
+componente) são o retrato exato do que "sobreposição real entre duas
+populações" deveria parecer — não um artefato de um algoritmo confuso,
+mas a honestidade de um modelo que admite que, para aquele paciente
+específico, a evidência realmente não pende para nenhum lado.
+
+Isso já responde, em germe, à Pergunta da Abertura: a "ambiguidade" de
+um paciente não é mais uma falha do algoritmo (como seria com uma
+regra de corte único) — é uma **quantidade calculável**, um número
+entre $0$ e $1$ por componente, que soma exatamente $1$ por paciente.
+Falta nomear de onde esse número vem, e como o próprio modelo (as
+posições e formatos das duas "nuvens" coloridas) é ajustado a partir
+dos dados. Essas são as perguntas dos Blocos 3 a 6.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Duas Diferenças Estruturais
+
+::: {.fragment}
+**GMM nunca descarta ninguém** — os $168$ pacientes que viraram ruído
+na Aula 3 aparecem à direita com uma cor, ambígua ou não.
+:::
+
+::: {.fragment}
+**Cor não é binária** — gradiente contínuo azul↔laranja; os $9$
+pacientes circulados (responsabilidade $\approx0{,}5/0{,}5$) são
+sobreposição real, não confusão do algoritmo.
+:::
+
+::: {.fragment .callout-note}
+Ambiguidade vira uma **quantidade calculável** — um número por
+componente, somando $1$ por paciente. Falta nomear de onde vem, e como
+o modelo (posição/formato das nuvens) é ajustado — Blocos 3 a 6.
+:::
+
+:::
+
+## Pergunta
+
+::: {.callout-tip}
+## Os 9 pacientes circulados no painel direito têm responsabilidade próxima de 50/50. Isso significa que o modelo "não sabe nada" sobre eles, no mesmo sentido em que uma moeda não viciada "não sabe" se vai dar cara ou coroa?
+
+Dica: pense na diferença entre "incerteza sobre um evento futuro
+aleatório" (a moeda) e "incerteza sobre um fato já determinado, mas
+desconhecido" (a origem populacional de um paciente que já existe).
+
+- □ A responsabilidade $50/50$ de um paciente reflete a melhor estimativa
+  do modelo sobre um fato **já fixado** (o paciente pertence, de fato, a
+  uma população só) — diferente da moeda, cujo resultado ainda não
+  existe no momento da previsão.
+- □ Aumentar o número de atributos usados no ajuste do GMM (de $2$ para,
+  digamos, $10$) necessariamente reduziria a responsabilidade ambígua
+  desses $9$ pacientes específicos, porque mais informação sempre
+  reduz ambiguidade estatística em qualquer situação.
+- □ Um paciente com responsabilidade $50/50$ contribui, no Passo M
+  (ainda não visto), com metade do seu peso para a reestimação de cada
+  um dos dois componentes — ele não é ignorado, é dividido.
+- □ Se o GMM verdadeiro subjacente aos dados tivesse apenas $1$
+  componente (não $2$), esperaríamos ver muito mais pacientes com
+  responsabilidade próxima de $50/50$ do que os $9$ observados aqui.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Resposta
+
+::: {.callout-tip}
+## Resposta — o que significa responsabilidade 50/50
+
+- ✔ É incerteza sobre um fato já determinado (de qual população o
+  paciente veio), não sobre um evento aleatório futuro — a moeda é uma
+  analogia imperfeita.
+- ✗ Mais atributos não garante menos ambiguidade para pontos
+  específicos — pode até aumentar (maldição da dimensionalidade, Aula
+  2) ou revelar que a sobreposição é real em mais dimensões também.
+- ✔ Responsabilidade fracionária = peso fracionário no Passo M — nunca
+  descartado, sempre dividido proporcionalmente.
+- ✔ Com um único componente verdadeiro, todo mundo tenderia a
+  responsabilidade $\approx\pi_k$ (Bloco 3) — muito mais gente perto de
+  $50/50$ do que os $9$ casos genuinamente raros observados aqui.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** a responsabilidade fracionária não é uma falha
+de informação recuperável por mais dados — é a resposta correta quando
+a sobreposição entre populações é real. O Bloco 3 formaliza de onde
+esse número vem.
+:::
+
+:::
+
+# O Modelo de Mistura Gaussiana: Variável Latente
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Premissas desta construção.** Antes de escrever qualquer fórmula,
+anuncie o que está sendo assumido: (1) existem $K$ populações
+("componentes") distintas, cada uma gaussiana; (2) todo paciente nasce
+de exatamente uma dessas populações, nunca de uma mistura física real —
+a mistura está só na nossa incerteza sobre qual foi; (3) não observamos
+diretamente de qual população um paciente veio, só observamos
+$\mathbf{x}$ (seus atributos). A Aula 1 já assumiu uma única gaussiana
+para toda a população; o GMM generaliza isso permitindo $K$ gaussianas,
+cada paciente vindo de uma delas.
+
+**Formalizando "de qual população".** Introduza uma variável aleatória
+$\mathbf{z}$ categórica, com codificação 1-de-$K$: $\mathbf{z}$ é um
+vetor binário de tamanho $K$ com exatamente uma coordenada igual a $1$
+(indicando a população de origem) e as demais iguais a $0$. Escreva
+$z_k=1$ para "este ponto nasceu da população $k$". A probabilidade a
+priori de cada população é o **peso de mistura** $\pi_k$:
+
+$$p(z_k=1) = \pi_k, \qquad 0\le\pi_k\le 1, \qquad \sum_{k=1}^K \pi_k = 1.$$
+
+Dado que o ponto nasceu da população $k$, sua distribuição é uma
+gaussiana com média e covariância próprias dessa população:
+
+$$p(\mathbf{x}\mid z_k=1) = \mathcal{N}(\mathbf{x}\mid \mu_k, \Sigma_k).$$
+
+Bishop (PRML, 2006, p. 430-431) descreve exatamente essa construção —
+tradução livre:
+
+> "Vamos introduzir uma variável aleatória binária $K$-dimensional $z$
+> com uma representação 1-de-$K$, na qual um elemento particular $z_k$ é
+> igual a $1$ e todos os outros elementos são iguais a $0$. [...] A
+> distribuição marginal sobre $z$ é especificada em termos dos
+> coeficientes de mistura $\pi_k$, de tal forma que $p(z_k=1)=\pi_k$."
+
+A figura abaixo é o **modelo gerador** completo, em forma de diagrama:
+para cada paciente $n$, primeiro sorteia-se a população de origem
+$z_n$ (com probabilidades $\pi_1,\dots,\pi_K$), depois sorteia-se
+$\mathbf{x}_n$ da gaussiana daquela população específica
+($\mu_k,\Sigma_k$). O nó de $\mathbf{x}_n$ aparece preenchido porque é
+o único **observado** — $z_n$ (contorno vazio) nunca é visto
+diretamente, é justamente o que o restante da aula vai aprender a
+inferir.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Premissas Desta Construção
+
+::: {.fragment}
+**(1)** Existem $K$ populações distintas, cada uma gaussiana.
+:::
+
+::: {.fragment}
+**(2)** Todo paciente nasce de exatamente **uma** população — a mistura
+está na nossa incerteza sobre qual, não numa origem física misturada.
+:::
+
+::: {.fragment}
+**(3)** Não observamos a população de origem, só $\mathbf{x}$. A Aula 1
+assumiu $1$ gaussiana para todos; o GMM permite $K$.
+:::
+
+## Formalizando "De Qual População"
+
+::: {.fragment}
+$\mathbf{z}$: vetor binário 1-de-$K$ — $z_k=1$ indica "nasceu da
+população $k$".
+:::
+
+::: {.fragment}
+$$p(z_k=1) = \pi_k, \qquad 0\le\pi_k\le 1, \qquad \sum_{k=1}^K \pi_k = 1$$
+:::
+
+::: {.fragment}
+$$p(\mathbf{x}\mid z_k=1) = \mathcal{N}(\mathbf{x}\mid \mu_k, \Sigma_k)$$
+:::
+
+::: {.fragment}
+PRML (p. 430-431), tradução livre: *"a distribuição marginal sobre $z$
+é especificada em termos dos coeficientes de mistura $\pi_k$, de tal
+forma que $p(z_k=1)=\pi_k$."*
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## O Modelo Gerador, em Diagrama
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Modelo Gerador, em Diagrama
+
+::: {.fragment}
+Para cada paciente $n$: sorteia-se $z_n$ (probabilidades
+$\pi_1,\dots,\pi_K$), depois $\mathbf{x}_n$ da gaussiana da população
+sorteada.
+:::
+
+:::
+
+::: {.fig-resize style="width: 55%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{icblue}{RGB}{0,133,202}
+\definecolor{icorange}{RGB}{255,94,0}
+\definecolor{icneutral}{RGB}{93,109,126}
+
+\begin{tikzpicture}[
+  latente/.style={circle, draw=icblue, very thick, minimum size=1.15cm, fill=icblue!12},
+  observado/.style={circle, draw=icorange, very thick, minimum size=1.15cm, fill=icorange!25},
+  rotulo/.style={font=\small, color=icneutral}
+]
+\node[rotulo] (pi) at (0,3.1) {$\pi_1,\dots,\pi_K$};
+\node[latente] (z) at (0,1.5) {$z_n$};
+\node[observado] (x) at (0,-0.5) {$\mathbf{x}_n$};
+\node[rotulo] (mu) at (2.9,-0.5) {$\mu_k,\Sigma_k$};
+
+\draw[->, very thick, icneutral] (pi) -- (z);
+\draw[->, very thick, icneutral] (z) -- (x);
+\draw[->, very thick, icneutral] (mu) -- (x);
+
+% placa N (um paciente por vez)
+\draw[rounded corners, thick, icneutral] (-1.15,-1.6) rectangle (1.15,2.2);
+\node[font=\scriptsize, color=icneutral] at (0,-1.3) {$n=1,\dots,N$};
+
+% placa K (um componente por vez)
+\draw[rounded corners, thick, icneutral] (1.9,-1.6) rectangle (3.9,0.15);
+\node[font=\scriptsize, color=icneutral] at (2.9,-1.3) {$k=1,\dots,K$};
+
+\node[font=\small, color=icblue] at (-2.35,1.5) {latente};
+\node[font=\small, color=icorange] at (-2.35,-0.5) {observado};
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Recuperando a mistura já conhecida.** Somando (marginalizando) sobre
+os $K$ estados possíveis de $\mathbf{z}$, a distribuição de
+$\mathbf{x}$ sozinho é
+
+$$p(\mathbf{x}) = \sum_{k=1}^K p(z_k=1)\,p(\mathbf{x}\mid z_k=1) = \sum_{k=1}^K \pi_k\,\mathcal{N}(\mathbf{x}\mid\mu_k,\Sigma_k),$$
+
+exatamente a soma ponderada de gaussianas que já era, em princípio,
+possível de escrever desde a Aula 1 (nada impede somar duas
+gaussianas). A diferença é que agora essa soma vem de uma **história
+geradora explícita**: não é só "uma função matemática que soma bem",
+é "cada ponto nasceu de uma população específica, que não vemos". Essa
+diferença importa porque é o que torna possível a pergunta central do
+resto da aula — dado um ponto $\mathbf{x}$ observado, qual é a
+probabilidade **a posteriori** de cada valor de $z$, isto é, de cada
+origem possível?
+
+Essa probabilidade a posteriori tem nome: **responsabilidade**, e por
+Bayes ela vale
+
+$$\gamma(z_{nk}) \equiv p(z_{nk}=1\mid\mathbf{x}_n) = \frac{\pi_k\,\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)}{\sum_{j=1}^K \pi_j\,\mathcal{N}(\mathbf{x}_n\mid\mu_j,\Sigma_j)}$$
+
+— a dedução completa dessa razão, passo a passo a partir da definição
+de probabilidade condicional, fica para o Passo E (Bloco 5), quando
+essa fórmula se torna parte do algoritmo; por ora, vale nomear a
+quantidade e ver a figura que ela produz. Bishop (PRML, 2006, p. 432)
+nomeia essa quantidade — tradução livre:
+
+> "Vamos considerar $\pi_k$ como a probabilidade a priori de $z_{nk}=1$, e
+> a quantidade $\gamma(z_{nk})$ como a probabilidade a posteriori
+> correspondente, uma vez observado $\mathbf{x}_n$. [...] $\gamma(z_{nk})$
+> também pode ser vista como a **responsabilidade** que o componente
+> $k$ assume por 'explicar' a observação $\mathbf{x}_n$."
+
+Essa é exatamente a fórmula por trás da Figura do Bloco 2: para cada
+paciente $n$, calcular $\gamma(z_{nk})$ para $k=1,2$ e usar esses dois
+números para misturar as cores azul e laranja. Falta só uma peça para poder
+calcular isso de verdade: de onde vêm $\pi_k$, $\mu_k$, $\Sigma_k$? Eles
+não são conhecidos de antemão — precisam ser **ajustados aos dados**, e
+é aí que a dificuldade começa (Bloco 4).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Recuperando a Mistura Já Conhecida
+
+::: {.fragment}
+Marginalizando sobre os $K$ estados de $\mathbf{z}$:
+$$p(\mathbf{x}) = \sum_{k=1}^K \pi_k\,\mathcal{N}(\mathbf{x}\mid\mu_k,\Sigma_k)$$
+:::
+
+::: {.fragment}
+Já era possível escrever essa soma desde a Aula 1 — a diferença é a
+**história geradora explícita** por trás dela: cada ponto nasceu de uma
+população específica, não observada.
+:::
+
+::: {.fragment}
+Isso abre a pergunta central: dado $\mathbf{x}$ observado, qual a
+probabilidade **a posteriori** de cada origem $z$?
+:::
+
+## Responsabilidade: A Probabilidade a Posteriori
+
+::: {.fragment}
+Por Bayes:
+$$\gamma(z_{nk}) \equiv p(z_{nk}=1\mid\mathbf{x}_n) = \frac{\pi_k\,\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)}{\sum_{j=1}^K \pi_j\,\mathcal{N}(\mathbf{x}_n\mid\mu_j,\Sigma_j)}$$
+Dedução completa: Passo E, Bloco 5.
+:::
+
+::: {.fragment}
+PRML (p. 432), tradução livre: *"$\gamma(z_{nk})$ também pode ser vista
+como a **responsabilidade** que o componente $k$ assume por 'explicar'
+a observação $\mathbf{x}_n$."*
+:::
+
+::: {.fragment .callout-note}
+É exatamente essa fórmula por trás da mistura de cores do Bloco 2. Falta
+uma peça: de onde vêm $\pi_k,\mu_k,\Sigma_k$? Precisam ser ajustados aos
+dados (Bloco 4 em diante).
+:::
+
+:::
+
+# Por Que Não Maximizar a Verossimilhança Direto
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Na Aula 1, ajustar uma única gaussiana a um conjunto de dados por
+máxima verossimilhança teve solução fechada: derivar o log da
+verossimilhança em relação a $\mu$ e $\Sigma$, igualar a zero, e
+resolver — $\hat\mu$ e $\hat\Sigma$ saíram diretamente como média e
+covariância amostrais. A pergunta natural é: por que não fazer o mesmo
+aqui, só que para $K$ gaussianas de uma vez?
+
+Para $N$ pacientes observados $\mathbf{x}_1,\dots,\mathbf{x}_N$
+(assumidos i.i.d.), a log-verossimilhança do GMM é
+
+$$\ln p(X\mid\pi,\mu,\Sigma) = \sum_{n=1}^N \ln\left\{\sum_{k=1}^K \pi_k\,\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)\right\}.$$
+
+Compare com a Aula 1: lá, dentro do $\ln$, havia só **uma** gaussiana —
+e $\ln$ de uma exponencial cancela limpo, sobrando uma expressão
+quadrática fácil de derivar. Aqui, dentro do $\ln$ há uma **soma** de
+$K$ termos. Bishop (PRML, 2006, p. 433-434) nomeia exatamente essa
+dificuldade — tradução livre:
+
+> "A dificuldade surge da presença do somatório sobre $k$ que aparece
+> dentro do logaritmo em (9.14), de forma que a função logaritmo não
+> age mais diretamente sobre a gaussiana. Se igualarmos as derivadas da
+> log-verossimilhança a zero, não obteremos mais uma solução em forma
+> fechada."
+
+Derivar $\ln p(X\mid\pi,\mu,\Sigma)$ em relação a $\mu_k$ e igualar a
+zero ainda é possível — mas o resultado, como se verá no Bloco 6,
+**não isola $\mu_k$** algebricamente, porque $\mu_k$ continua
+aparecendo escondido dentro de uma razão de exponenciais somada com as
+outras $K-1$. Não há como "resolver para $\mu_k$" numa única passada.
+
+**Um aviso técnico, sem aprofundar.** Maximizar essa verossimilhança
+tem, além da dificuldade algébrica, um problema mais sério:
+degenerações (*singularidades*). Se a média de um componente colapsar
+exatamente sobre um único ponto de dado e a variância desse componente
+for levada a zero, a densidade naquele ponto tende a infinito, e a
+log-verossimilhança tende a infinito junto — um "ajuste perfeito" que
+não é generalização nenhuma, só *overfitting* patológico de um único
+ponto. Bishop (p. 434), tradução livre:
+
+> "Se considerarmos o limite $\sigma_j\to 0$, veremos que esse termo
+> tende ao infinito, e portanto a função de log-verossimilhança também
+> tende ao infinito. Assim, a maximização da log-verossimilhança não é
+> um problema bem posto, pois tais singularidades estarão sempre
+> presentes."
+
+Na prática, isso significa: ao ajustar um GMM, buscar um máximo local
+bem-comportado da verossimilhança, não o máximo global (que é sempre
+degenerado) — o `sklearn.mixture.GaussianMixture` usado no Bloco 7 já
+inclui salvaguardas para isso (um piso mínimo de variância), então não
+é algo que o código precisa tratar manualmente aqui.
+
+**A saída.** Já que não há solução fechada, mas as equações de derivada
+zero têm uma estrutura reconhecível (Bloco 6), a estratégia é
+**iterativa**: alternar entre calcular responsabilidades com os
+parâmetros atuais (Passo E) e reajustar os parâmetros com as
+responsabilidades atuais (Passo M), repetindo até convergir. Esse é o
+algoritmo **EM** (*Expectation-Maximization*).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Por Que Não Repetir a Solução Fechada da Aula 1?
+
+::: {.fragment}
+Aula 1: uma única gaussiana, $\ln$ de uma exponencial cancela limpo —
+solução fechada para $\hat\mu,\hat\Sigma$.
+:::
+
+::: {.fragment}
+GMM: $$\ln p(X\mid\pi,\mu,\Sigma) = \sum_{n=1}^N \ln\left\{\sum_{k=1}^K \pi_k\,\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)\right\}$$
+:::
+
+::: {.fragment}
+**Soma dentro do $\ln$** — o $\ln$ não age mais direto sobre a
+gaussiana. PRML (p. 433-434), tradução livre: *"a função logaritmo não
+age mais diretamente sobre a gaussiana [...] não obteremos mais uma
+solução em forma fechada."*
+:::
+
+::: {.fragment}
+Derivar e igualar a zero ainda é possível, mas $\mu_k$ fica escondido
+numa razão de exponenciais somada com as outras $K-1$ — não dá para
+isolar numa passada só.
+:::
+
+## Aviso Técnico: Singularidades
+
+::: {.fragment}
+Se a média de um componente colapsa sobre um único ponto e a variância
+$\to 0$: densidade $\to\infty$, log-verossimilhança $\to\infty$ —
+*overfitting* patológico, não generalização.
+:::
+
+::: {.fragment}
+PRML (p. 434), tradução livre: *"a maximização da log-verossimilhança
+não é um problema bem posto, pois tais singularidades estarão sempre
+presentes."*
+:::
+
+::: {.fragment}
+Na prática: buscar um máximo local bem-comportado, não o global
+(sempre degenerado). `GaussianMixture` do scikit-learn já tem
+salvaguardas (piso mínimo de variância).
+:::
+
+## A Saída: Iterar
+
+::: {.fragment}
+Sem solução fechada, mas as equações de derivada zero têm estrutura
+reconhecível (Bloco 6) — a estratégia é **iterativa**.
+:::
+
+::: {.fragment .callout-note}
+Alternar: responsabilidades com parâmetros atuais (**Passo E**) $\to$
+reajustar parâmetros com responsabilidades atuais (**Passo M**) $\to$
+repetir até convergir. O algoritmo **EM**.
+:::
+
+:::
+
+# O Passo E: Responsabilidades Posteriores
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Premissa deste passo.** Fixe os parâmetros atuais do modelo
+($\pi_k,\mu_k,\Sigma_k$ para todo $k$) — não importa se eles ainda
+estão longe do ajuste final, o Passo E só pergunta: "sob **estes**
+parâmetros, qual a probabilidade posterior de cada origem, para cada
+ponto observado?"
+
+**Deduzindo a responsabilidade.** Por definição de probabilidade
+condicional,
+
+$$p(z_{nk}=1\mid\mathbf{x}_n) = \frac{p(z_{nk}=1,\mathbf{x}_n)}{p(\mathbf{x}_n)}.$$
+
+O numerador é a probabilidade conjunta do evento "paciente $n$ nasceu
+da população $k$" **e** "paciente $n$ tem atributos $\mathbf{x}_n$" —
+pela regra da cadeia de probabilidade (*chain rule*), essa conjunta
+fatora como prior vezes verossimilhança condicional:
+
+$$p(z_{nk}=1,\mathbf{x}_n) = p(z_{nk}=1)\,p(\mathbf{x}_n\mid z_{nk}=1) = \pi_k\,\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k),$$
+
+usando diretamente as duas premissas do modelo gerador (Bloco 3):
+$p(z_{nk}=1)=\pi_k$ e $p(\mathbf{x}_n\mid z_{nk}=1)=\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)$.
+O denominador $p(\mathbf{x}_n)$ é a marginal — pela **lei da
+probabilidade total**, somando essa mesma conjunta sobre os $K$ estados
+de $z_n$ (mutuamente exclusivos e exaustivos, já que $z_n$ é 1-de-$K$),
+exatamente como no Bloco 3:
+
+$$p(\mathbf{x}_n) = \sum_{j=1}^K p(z_{nj}=1,\mathbf{x}_n) = \sum_{j=1}^K \pi_j\,\mathcal{N}(\mathbf{x}_n\mid\mu_j,\Sigma_j).$$
+
+Substituindo numerador e denominador na razão original:
+
+$$\gamma(z_{nk}) \equiv p(z_{nk}=1\mid\mathbf{x}_n) = \frac{\pi_k\,\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)}{\displaystyle\sum_{j=1}^K \pi_j\,\mathcal{N}(\mathbf{x}_n\mid\mu_j,\Sigma_j)},$$
+
+agora indexada por paciente $n$ e componente $k$ — cada um dos $N$
+pacientes recebe seu próprio vetor de $K$ responsabilidades, somando
+$1$. Note que, embora a fórmula pareça "só" um cálculo de Bayes, ela é
+o motor de toda a diferença desta aula em relação à Aula 3: em vez de
+uma regra de corte (dentro/fora de $L_\lambda$), cada ponto participa,
+em algum grau, de **todos** os componentes.
+
+**Verificação numérica.** Aplicando essa fórmula aos $569$ pacientes do
+Breast Cancer Wisconsin (com os parâmetros de um GMM de $2$ componentes
+já ajustado — o ajuste completo é assunto do Passo M, Bloco 6; aqui só
+se **avalia** a fórmula do Passo E nos parâmetros finais, para ver a
+forma da resposta), $9$ pacientes caem na faixa $|\gamma-0{,}5|<0{,}05$
+— a mesma faixa já destacada na figura do Bloco 2. Três exemplos reais:
+
+| Paciente (índice) | `radius_worst` | `concave points_worst` | Diagnóstico | $\gamma$(comp. benigno) | $\gamma$(comp. maligno) |
+|---|---|---|---|---|---|
+| 41  | 12,84 | 0,1424 | M | 0,486 | 0,514 |
+| 112 | 15,30 | 0,1505 | B | 0,520 | 0,480 |
+| 501 | 16,01 | 0,1521 | M | 0,481 | 0,519 |
+
+Repare que o diagnóstico real (nunca usado no ajuste) não decide para
+que lado a responsabilidade pende — o paciente 112 é benigno com
+responsabilidade levemente maior para o componente benigno, mas o
+paciente 501 é maligno com responsabilidade levemente maior para o
+componente maligno; ambos ficam a menos de $2$ pontos percentuais do
+empate. Isso é exatamente o que se espera de pacientes que, nesses dois
+atributos, ficam genuinamente na zona de transição entre as duas
+populações — nem o modelo "erra" ao hesitar, nem o rótulo real
+resolveria a hesitação de antemão (o modelo nunca o viu).
+
+Uma checagem mais ampla: contando pacientes com responsabilidade máxima
+abaixo de $0{,}9$ (ambiguidade moderada, não só extrema) chega-se a
+$101$ dos $569$ pacientes ($\approx17{,}7\%$) — uma fração bem maior do
+que os $9$ casos de ambiguidade quase perfeita, mostrando que a
+sobreposição entre as duas "nuvens" de densidade não é um fenômeno raro
+de pontuinhos isolados, é uma faixa de transição real com largura
+própria.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Premissa do Passo E
+
+::: {.fragment}
+Fixar os parâmetros atuais $\pi_k,\mu_k,\Sigma_k$ — não importa se
+ainda estão longe do ajuste final. Perguntar: sob **estes** parâmetros,
+qual a probabilidade posterior de cada origem, por ponto?
+:::
+
+::: {.fragment}
+Definição de probabilidade condicional:
+$$p(z_{nk}=1\mid\mathbf{x}_n) = \frac{p(z_{nk}=1,\mathbf{x}_n)}{p(\mathbf{x}_n)}$$
+:::
+
+::: {.fragment}
+Numerador, pela regra da cadeia (*chain rule*): $p(z_{nk}=1,\mathbf{x}_n)
+= p(z_{nk}=1)\,p(\mathbf{x}_n\mid z_{nk}=1) = \pi_k\,\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)$
+— as duas premissas do modelo gerador (Bloco 3).
+:::
+
+::: {.fragment}
+Denominador, pela lei da probabilidade total (soma sobre os $K$
+estados de $z_n$, mutuamente exclusivos e exaustivos):
+$$p(\mathbf{x}_n) = \sum_{j=1}^K \pi_j\,\mathcal{N}(\mathbf{x}_n\mid\mu_j,\Sigma_j)$$
+:::
+
+## O Resultado
+
+::: {.fragment}
+Substituindo numerador e denominador:
+$$\gamma(z_{nk}) \equiv p(z_{nk}=1\mid\mathbf{x}_n) = \frac{\pi_k\,\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)}{\displaystyle\sum_{j=1}^K \pi_j\,\mathcal{N}(\mathbf{x}_n\mid\mu_j,\Sigma_j)}$$
+:::
+
+::: {.fragment}
+Cada um dos $N$ pacientes recebe seu próprio vetor de $K$
+responsabilidades, somando $1$ — em vez de uma regra de corte, cada
+ponto participa, em algum grau, de **todos** os componentes.
+:::
+
+## Verificação Numérica: 3 Pacientes Reais
+
+::: {.fragment}
+| Paciente | `radius_worst` | `concave pts._worst` | Diagnóstico | $\gamma$(benigno) | $\gamma$(maligno) |
+|---|---|---|---|---|---|
+| 41  | 12,84 | 0,1424 | M | 0,486 | 0,514 |
+| 112 | 15,30 | 0,1505 | B | 0,520 | 0,480 |
+| 501 | 16,01 | 0,1521 | M | 0,481 | 0,519 |
+:::
+
+::: {.fragment}
+O diagnóstico real (nunca visto no ajuste) não decide o lado — 112 é
+benigno com $\gamma$ levemente maior para benigno; 501 é maligno com
+$\gamma$ levemente maior para maligno. Ambos a $<2$ p.p. do empate.
+:::
+
+::: {.fragment .callout-note}
+$101$ de $569$ pacientes ($\approx17{,}7\%$) têm responsabilidade
+máxima $<0{,}9$ — ambiguidade moderada é uma faixa de transição real,
+não um fenômeno raro de pontos isolados.
+:::
+
+:::
+
+## Pergunta
+
+::: {.callout-tip}
+## Um paciente tem responsabilidade $\gamma=0{,}9$ para o componente maligno e $\gamma=0{,}1$ para o benigno. Se, no meio de uma sessão de reajuste do modelo, os parâmetros do componente maligno mudarem bastante (por exemplo, sua covariância $\Sigma$ dobrar de tamanho), o que necessariamente acontece com essa responsabilidade $\gamma=0{,}9$?
+
+Dica: pense se $\gamma(z_{nk})$ é uma propriedade fixa do ponto
+$\mathbf{x}_n$, ou uma função dos parâmetros correntes do modelo — e
+lembre que a fórmula de Bayes usada aqui depende de $\mu_k$ e
+$\Sigma_k$ dos dois lados da razão, não só do componente $k$.
+
+- □ A responsabilidade $\gamma(z_{nk})$ é recalculada do zero a cada vez
+  que os parâmetros do modelo mudam — ela não é uma propriedade fixa do
+  ponto $\mathbf{x}_n$, é uma função corrente de $\pi,\mu,\Sigma$.
+- □ Se a covariância do componente maligno dobrar de tamanho (ficando
+  mais "espalhada"), isso necessariamente aumenta a responsabilidade
+  $\gamma(z_{n,\text{maligno}})$ para qualquer ponto, porque uma
+  gaussiana mais espalhada sempre atribui mais densidade a todo ponto
+  do espaço.
+- □ Dois pacientes com exatamente a mesma responsabilidade
+  $\gamma=(0{,}9,0{,}1)$ sob os parâmetros atuais do modelo podem ter
+  responsabilidades bem diferentes entre si depois de uma rodada de
+  reestimação de parâmetros (Passo M), mesmo que os dois tivessem
+  originalmente o mesmo par de atributos observados.
+- □ Se $K=1$ (um único componente), a responsabilidade $\gamma(z_{n1})$
+  é sempre igual a $1$ para todo ponto, independentemente dos
+  parâmetros — não há nenhum outro componente para "competir" na razão
+  de Bayes.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Resposta
+
+::: {.callout-tip}
+## Resposta — responsabilidade muda com os parâmetros
+
+- ✔ $\gamma(z_{nk})$ é função corrente dos parâmetros — recalculada a
+  cada rodada, nunca fixa ao ponto.
+- ✗ Uma covariância maior espalha densidade, mas também **reduz o pico**
+  (a densidade se normaliza a $1$); o efeito líquido sobre $\gamma$
+  depende de onde $\mathbf{x}_n$ está, não é sempre "aumenta".
+- ✔ Dois pacientes idênticos em atributos, com a mesma $\gamma$ hoje,
+  divergem se entrarem com pesos diferentes nas somas do Passo M (por
+  exemplo, se um deles for repetido no dataset e o outro não) — a
+  reestimação usa todos os pontos conjuntamente, não cada um isolado.
+- ✔ Com $K=1$ não há denominador com mais de um termo — a razão de
+  Bayes degenera em $1$ para o único componente, sempre.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** a responsabilidade é uma função dos parâmetros
+correntes, não uma etiqueta fixa — é exatamente por isso que o
+algoritmo pode iterar: mudar os parâmetros (Passo M) muda as
+responsabilidades (novo Passo E), e vice-versa, até estabilizar.
+:::
+
+:::
+
+# O Passo M: Atualizações Ponderadas
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Premissa deste passo.** Agora inverta o papel: fixe as
+responsabilidades $\gamma(z_{nk})$ calculadas no Passo E (tratando-as
+como constantes conhecidas, não mais como função dos parâmetros), e
+pergunte que novos valores de $\pi_k,\mu_k,\Sigma_k$ maximizam a
+log-verossimilhança **esperada** dos dados completos sob essas
+responsabilidades. Essa é uma maximização bem mais simples do que a do
+Bloco 4, porque, com $\gamma(z_{nk})$ fixo, o problema se separa em $K$
+ajustes de máxima verossimilhança **ponderada**, um por componente —
+não há mais soma dentro do $\ln$ competindo entre componentes. A
+receita para maximizar é a de sempre para uma função diferenciável sem
+restrição ativa: **derivar a log-verossimilhança em relação a cada
+parâmetro e igualar a zero** — é exatamente isso que os três blocos a
+seguir fazem, um parâmetro de cada vez.
+
+**Por que $\gamma(z_{nk})$ aparece em toda derivada.** Antes de calcular
+cada atualização, vale isolar o mecanismo comum a $\mu_k$ e a $\Sigma_k$
+— parâmetros **privados** do componente $k$, não compartilhados com os
+outros $K-1$. Escreva $\mathcal{N}_k(\mathbf{x}_n)\equiv
+\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)$ e seja $\theta_k$ um desses
+parâmetros privados ($\mu_k$ ou $\Sigma_k$). Dentro da soma
+$\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)$, só o termo $j=k$ depende de
+$\theta_k$, então
+
+$$\frac{\partial}{\partial\theta_k}\ln\left(\sum_{j=1}^K\pi_j\mathcal{N}_j(\mathbf{x}_n)\right) = \frac{1}{\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)}\cdot\pi_k\,\frac{\partial \mathcal{N}_k(\mathbf{x}_n)}{\partial\theta_k}.$$
+
+Pela regra da cadeia do logaritmo aplicada a $\mathcal{N}_k$ (isto é,
+$\partial \mathcal{N}_k/\partial\theta_k = \mathcal{N}_k\cdot\partial\ln\mathcal{N}_k/\partial\theta_k$),
+o lado direito vira
+
+$$\frac{\pi_k\,\mathcal{N}_k(\mathbf{x}_n)}{\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)}\cdot\frac{\partial\ln\mathcal{N}_k(\mathbf{x}_n)}{\partial\theta_k} = \gamma(z_{nk})\cdot\frac{\partial\ln\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)}{\partial\theta_k}.$$
+
+Somando sobre os $N$ pacientes (a log-verossimilhança é uma soma sobre
+$n$):
+
+$$\frac{\partial \ln p(X\mid\pi,\mu,\Sigma)}{\partial\theta_k} = \sum_{n=1}^N \gamma(z_{nk})\,\frac{\partial\ln\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)}{\partial\theta_k}.$$
+
+Essa identidade responde à pergunta natural: por que fixar $\gamma$
+(tratando-a como constante) transforma um problema sem solução fechada
+(Bloco 4) num problema resolvível? Porque, com $\gamma$ fixo, a
+derivada da log-verossimilhança da mistura inteira, em relação a um
+parâmetro privado do componente $k$, **colapsa exatamente numa versão
+ponderada da equação de derivada de uma única gaussiana** — a mesma do
+MLE da Aula 1 — com $\gamma(z_{nk})$ como peso de cada ponto na soma.
+É esse colapso que separa o problema em $K$ ajustes independentes.
+
+**Atualização de $\mu_k$.** Falta a peça específica de $\mu_k$:
+$\partial\ln\mathcal{N}(\mathbf{x}\mid\mu_k,\Sigma_k)/\partial\mu_k$.
+Escrevendo a densidade gaussiana por extenso,
+
+$$\ln\mathcal{N}(\mathbf{x}\mid\mu_k,\Sigma_k) = -\frac{D}{2}\ln(2\pi) - \frac12\ln|\Sigma_k| - \frac12(\mathbf{x}-\mu_k)^T\Sigma_k^{-1}(\mathbf{x}-\mu_k),$$
+
+só o termo quadrático depende de $\mu_k$. Para uma forma quadrática
+$(\mathbf{x}-\mu)^TA(\mathbf{x}-\mu)$ com $A$ simétrica, o gradiente em
+relação a $\mu$ é $-2A(\mathbf{x}-\mu)$ — fazendo $\mathbf{u}=\mathbf{x}-\mu$
+(logo $\partial\mathbf{u}/\partial\mu=-I$) e usando que o gradiente de
+$\mathbf{u}^TA\mathbf{u}$ em $\mathbf{u}$ é $2A\mathbf{u}$, a regra da
+cadeia dá $\partial(\mathbf{u}^TA\mathbf{u})/\partial\mu = -2A\mathbf{u}$.
+Logo
+
+$$\frac{\partial\ln\mathcal{N}(\mathbf{x}\mid\mu_k,\Sigma_k)}{\partial\mu_k} = -\frac12\cdot(-2)\Sigma_k^{-1}(\mathbf{x}-\mu_k) = \Sigma_k^{-1}(\mathbf{x}-\mu_k).$$
+
+Pela identidade geral acima (com $\theta_k=\mu_k$):
+
+$$\frac{\partial \ln p(X\mid\pi,\mu,\Sigma)}{\partial\mu_k} = \sum_{n=1}^N \gamma(z_{nk})\,\Sigma_k^{-1}(\mathbf{x}_n-\mu_k).$$
+
+Igualando a zero e multiplicando por $\Sigma_k$ (assumida não-singular):
+
+$$\sum_{n=1}^N \gamma(z_{nk})(\mathbf{x}_n-\mu_k) = \mathbf{0} \;\Longrightarrow\; \mu_k = \frac{1}{N_k}\sum_{n=1}^N \gamma(z_{nk})\,\mathbf{x}_n, \qquad\text{onde}\qquad N_k = \sum_{n=1}^N \gamma(z_{nk}).$$
+
+Bishop (PRML, 2006, p. 436) interpreta $N_k$ diretamente — tradução
+livre:
+
+> "Podemos interpretar $N_k$ como o número efetivo de pontos atribuídos
+> ao cluster $k$."
+
+A leitura de $\mu_k$ é direta: é uma **média ponderada** de todos os
+$N$ pacientes, em que o peso do paciente $n$ é a sua responsabilidade
+$\gamma(z_{nk})$ para o componente $k$ — pacientes com responsabilidade
+alta para $k$ pesam quase como um voto inteiro; pacientes ambíguos
+(como os $9$ do Bloco 5) contribuem uma fração pequena para **os dois**
+componentes ao mesmo tempo. Compare com a Aula 1: lá, a média amostral
+usava todos os pontos com peso igual ($1/N$); aqui, o peso é a própria
+responsabilidade — a mesma ideia de MLE, generalizada para responder
+"quanto este ponto conta para este componente específico".
+
+**Atualização de $\Sigma_k$.** A mesma identidade geral vale com
+$\theta_k=\Sigma_k$, mas a peça específica agora exige duas ferramentas
+de cálculo matricial (Bishop, PRML, Apêndice C, p. 698): a derivada do
+log-determinante,
+
+$$\frac{\partial\ln|\Sigma_k|}{\partial\Sigma_k} = \Sigma_k^{-1} \qquad\text{(eq. C.28, válida para $\Sigma_k$ simétrica)},$$
+
+e a derivada da inversa de uma matriz em relação a um de seus elementos,
+
+$$\frac{\partial\,\Sigma_k^{-1}}{\partial(\Sigma_k)_{ij}} = -\Sigma_k^{-1}E_{ij}\Sigma_k^{-1} \qquad\text{(eq. C.21)},$$
+
+onde $E_{ij}$ é a matriz com $1$ na posição $(i,j)$ e $0$ no resto (a
+derivada de $\Sigma_k$ em relação ao seu próprio elemento $(i,j)$).
+Usando a propriedade cíclica do traço ($\mathrm{tr}(ABC)=\mathrm{tr}(BCA)$,
+válida sempre que os produtos estão definidos) para reescrever a forma
+quadrática como um traço, $(\mathbf{x}-\mu_k)^T\Sigma_k^{-1}(\mathbf{x}-\mu_k)
+= \mathrm{tr}\big(\Sigma_k^{-1}M\big)$ com $M=(\mathbf{x}-\mu_k)(\mathbf{x}-\mu_k)^T$
+(constante em relação a $\Sigma_k$), a eq. C.21 dá, elemento a elemento,
+
+$$\frac{\partial}{\partial(\Sigma_k)_{ij}}\mathrm{tr}(\Sigma_k^{-1}M) = \mathrm{tr}\Big({-}\Sigma_k^{-1}E_{ij}\Sigma_k^{-1}M\Big) = -\mathrm{tr}\big(E_{ij}\,\Sigma_k^{-1}M\Sigma_k^{-1}\big) = -\big[\Sigma_k^{-1}M\Sigma_k^{-1}\big]_{ji},$$
+
+isto é, em forma matricial (usando que $\Sigma_k^{-1}M\Sigma_k^{-1}$ é
+simétrica, por $\Sigma_k$ e $M$ serem ambas simétricas),
+$\partial\,\mathrm{tr}(\Sigma_k^{-1}M)/\partial\Sigma_k = -\Sigma_k^{-1}M\Sigma_k^{-1}$.
+Combinando os dois termos da log-densidade:
+
+$$\frac{\partial\ln\mathcal{N}(\mathbf{x}\mid\mu_k,\Sigma_k)}{\partial\Sigma_k} = -\frac12\Sigma_k^{-1} + \frac12\Sigma_k^{-1}(\mathbf{x}-\mu_k)(\mathbf{x}-\mu_k)^T\Sigma_k^{-1}.$$
+
+Pela identidade geral, $\partial \ln p(X\mid\pi,\mu,\Sigma)/\partial\Sigma_k$
+é essa expressão ponderada por $\gamma(z_{nk})$ e somada em $n$;
+igualando a zero e multiplicando por $\Sigma_k$ dos dois lados:
+
+$$\Sigma_k\sum_{n=1}^N\gamma(z_{nk}) = \sum_{n=1}^N\gamma(z_{nk})(\mathbf{x}_n-\mu_k)(\mathbf{x}_n-\mu_k)^T \;\Longrightarrow\; \Sigma_k = \frac{1}{N_k}\sum_{n=1}^N \gamma(z_{nk})\,(\mathbf{x}_n-\mu_k)(\mathbf{x}_n-\mu_k)^T.$$
+
+Bishop (p. 436), tradução livre:
+
+> "[Essa expressão] tem a mesma forma que o resultado correspondente
+> para uma única gaussiana ajustada ao conjunto de dados, mas
+> novamente com cada ponto de dado ponderado pela probabilidade a
+> posteriori correspondente."
+
+**Atualização de $\pi_k$.** Maximizar em relação a $\pi_k$ precisa
+respeitar a restrição $\sum_k \pi_k=1$ — isso pede um multiplicador de
+Lagrange $\lambda$, maximizando
+
+$$\ln p(X\mid\pi,\mu,\Sigma) + \lambda\left(\sum_{k=1}^K \pi_k - 1\right).$$
+
+Diferente de $\mu_k$ e $\Sigma_k$, $\pi_k$ não é um parâmetro "escondido
+dentro" de uma única gaussiana — ele multiplica $\mathcal{N}_k(\mathbf{x}_n)$
+inteira, de forma linear, então a derivada é mais direta. Só o termo
+$j=k$ da soma $\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)$ depende de $\pi_k$,
+e depende linearmente dele, então
+
+$$\frac{\partial}{\partial\pi_k}\ln\left(\sum_{j=1}^K\pi_j\mathcal{N}_j(\mathbf{x}_n)\right) = \frac{\mathcal{N}_k(\mathbf{x}_n)}{\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)}.$$
+
+Derivando o Lagrangiano acima em relação a $\pi_k$ e igualando a zero:
+
+$$0 = \sum_{n=1}^N \frac{\mathcal{N}_k(\mathbf{x}_n)}{\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)} + \lambda.$$
+
+Multiplicando a equação inteira por $\pi_k$ — e notando que
+$\pi_k\,\mathcal{N}_k(\mathbf{x}_n)/\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)$
+é, pela própria definição do Bloco 5, $\gamma(z_{nk})$:
+
+$$0 = \sum_{n=1}^N \gamma(z_{nk}) + \lambda\pi_k = N_k + \lambda\pi_k.$$
+
+Somando essa equação sobre $k=1,\dots,K$: à esquerda,
+$\sum_k N_k=\sum_k\sum_n\gamma(z_{nk})=\sum_n\big(\sum_k\gamma(z_{nk})\big)=\sum_n 1=N$
+(as $K$ responsabilidades de cada paciente somam $1$); à direita,
+$\lambda\sum_k\pi_k=\lambda$ (pela própria restrição $\sum_k\pi_k=1$).
+Logo $N+\lambda=0\Rightarrow\lambda=-N$. Substituindo de volta em
+$N_k+\lambda\pi_k=0$:
+
+$$N_k - N\pi_k = 0 \;\Longrightarrow\; \pi_k = \frac{N_k}{N}.$$
+
+Bishop (p. 436), tradução livre:
+
+> "de forma que o coeficiente de mistura do $k$-ésimo componente é dado
+> pela responsabilidade média que aquele componente assume por explicar
+> os pontos de dados."
+
+Essa é uma leitura elegante: o peso de mistura de um componente não é
+"quantos pontos foram atribuídos a ele" (isso exigiria uma atribuição
+rígida) — é a **soma das responsabilidades fracionárias**, dividida por
+$N$. Um componente que "convence" $50$ pacientes por completo e mais
+$20$ pacientes pela metade tem $N_k=60$, não $50$ nem $70$.
+
+**Um ciclo, não uma solução.** As três atualizações
+($\mu_k,\Sigma_k,\pi_k$) não formam, juntas, uma solução fechada, porque
+$\gamma(z_{nk})$ (Bloco 5) depende dos próprios parâmetros que este
+bloco acabou de reestimar. É exatamente por isso que o processo é
+iterativo: Passo E com os parâmetros atuais, Passo M com as
+responsabilidades atuais, repetir — o algoritmo **EM** completo, reunido
+no próximo bloco.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Premissa do Passo M
+
+::: {.fragment}
+Fixar as responsabilidades $\gamma(z_{nk})$ do Passo E (agora
+constantes) — perguntar que $\pi_k,\mu_k,\Sigma_k$ maximizam a
+log-verossimilhança esperada sob elas.
+:::
+
+::: {.fragment}
+Com $\gamma$ fixo, o problema se separa em $K$ ajustes de MLE
+**ponderada** — sem soma dentro do $\ln$ competindo entre componentes.
+:::
+
+::: {.fragment .callout-note}
+A receita de sempre: **derivar em relação a cada parâmetro e igualar a
+zero** — um parâmetro de cada vez, a seguir.
+:::
+
+## Por Que $\gamma(z_{nk})$ Aparece em Toda Derivada
+
+::: {.fragment}
+$\mu_k,\Sigma_k$ são **privados** do componente $k$: dentro de
+$\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)$, só o termo $j=k$ depende
+deles. Para $\theta_k\in\{\mu_k,\Sigma_k\}$:
+$$\frac{\partial}{\partial\theta_k}\ln\Big(\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)\Big) = \frac{\pi_k}{\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)}\frac{\partial \mathcal{N}_k(\mathbf{x}_n)}{\partial\theta_k}$$
+:::
+
+::: {.fragment}
+Regra da cadeia do $\ln$ ($\partial\mathcal N_k/\partial\theta_k=\mathcal N_k\cdot\partial\ln\mathcal N_k/\partial\theta_k$)
+faz o lado direito virar exatamente $\gamma(z_{nk})\cdot\partial\ln\mathcal{N}_k/\partial\theta_k$.
+Somando sobre $n$:
+$$\frac{\partial \ln p(X\mid\pi,\mu,\Sigma)}{\partial\theta_k} = \sum_{n=1}^N \gamma(z_{nk})\,\frac{\partial\ln\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)}{\partial\theta_k}$$
+:::
+
+::: {.fragment .callout-note}
+Com $\gamma$ fixo, a derivada da mistura **colapsa** numa versão
+ponderada da equação de derivada de uma única gaussiana (Aula 1) — é
+esse colapso que separa o problema em $K$ ajustes independentes.
+:::
+
+## Atualização de $\mu_k$: a Peça Que Falta
+
+::: {.fragment}
+$\ln\mathcal{N}(\mathbf{x}\mid\mu_k,\Sigma_k) = \text{const} - \dfrac12\ln|\Sigma_k| - \dfrac12(\mathbf{x}-\mu_k)^T\Sigma_k^{-1}(\mathbf{x}-\mu_k)$
+— só o termo quadrático depende de $\mu_k$.
+:::
+
+::: {.fragment}
+Gradiente de forma quadrática ($\mathbf{u}=\mathbf{x}-\mu$,
+$\partial\mathbf{u}/\partial\mu=-I$, gradiente de $\mathbf{u}^TA\mathbf{u}$
+em $\mathbf{u}$ é $2A\mathbf{u}$):
+$$\frac{\partial\ln\mathcal{N}(\mathbf{x}\mid\mu_k,\Sigma_k)}{\partial\mu_k} = \Sigma_k^{-1}(\mathbf{x}-\mu_k)$$
+:::
+
+## Atualização de $\mu_k$: o Resultado
+
+::: {.fragment}
+Pela identidade geral (slide anterior), com $\theta_k=\mu_k$:
+$$\frac{\partial \ln p(X\mid\pi,\mu,\Sigma)}{\partial\mu_k} = \sum_{n=1}^N \gamma(z_{nk})\,\Sigma_k^{-1}(\mathbf{x}_n-\mu_k)$$
+Igualando a zero e multiplicando por $\Sigma_k$:
+$$\mu_k = \frac{1}{N_k}\sum_{n=1}^N \gamma(z_{nk})\,\mathbf{x}_n, \qquad N_k = \sum_{n=1}^N \gamma(z_{nk})$$
+:::
+
+::: {.fragment}
+PRML (p. 436): *"podemos interpretar $N_k$ como o número efetivo de
+pontos atribuídos ao cluster $k$."*
+:::
+
+::: {.fragment}
+$\mu_k$ é **média ponderada** por $\gamma(z_{nk})$ — pacientes de alta
+responsabilidade pesam quase um voto inteiro; ambíguos contribuem uma
+fração pequena para **os dois** componentes. Compare com a Aula 1: lá
+o peso era $1/N$ para todos; aqui é a própria responsabilidade.
+:::
+
+## Atualização de $\Sigma_k$: as Ferramentas
+
+::: {.fragment}
+Duas identidades de cálculo matricial (Bishop, PRML, Apêndice C, p. 698):
+$$\frac{\partial\ln|\Sigma_k|}{\partial\Sigma_k} = \Sigma_k^{-1} \;\text{(C.28)}, \qquad \frac{\partial\,\Sigma_k^{-1}}{\partial(\Sigma_k)_{ij}} = -\Sigma_k^{-1}E_{ij}\Sigma_k^{-1} \;\text{(C.21)}$$
+onde $E_{ij}$ tem $1$ na posição $(i,j)$ e $0$ no resto.
+:::
+
+::: {.fragment}
+Propriedade cíclica do traço ($\mathrm{tr}(ABC)=\mathrm{tr}(BCA)$)
+reescreve a forma quadrática como traço:
+$(\mathbf{x}-\mu_k)^T\Sigma_k^{-1}(\mathbf{x}-\mu_k)=\mathrm{tr}(\Sigma_k^{-1}M)$,
+$M=(\mathbf{x}-\mu_k)(\mathbf{x}-\mu_k)^T$.
+:::
+
+::: {.fragment}
+Aplicando C.21 elemento a elemento:
+$$\frac{\partial}{\partial(\Sigma_k)_{ij}}\mathrm{tr}(\Sigma_k^{-1}M) = -\big[\Sigma_k^{-1}M\Sigma_k^{-1}\big]_{ji} \;\Longrightarrow\; \frac{\partial\,\mathrm{tr}(\Sigma_k^{-1}M)}{\partial\Sigma_k} = -\Sigma_k^{-1}M\Sigma_k^{-1}$$
+:::
+
+## Atualização de $\Sigma_k$: o Resultado
+
+::: {.fragment}
+Combinando as duas partes da log-densidade:
+$$\frac{\partial\ln\mathcal{N}(\mathbf{x}\mid\mu_k,\Sigma_k)}{\partial\Sigma_k} = -\frac12\Sigma_k^{-1} + \frac12\Sigma_k^{-1}(\mathbf{x}-\mu_k)(\mathbf{x}-\mu_k)^T\Sigma_k^{-1}$$
+:::
+
+::: {.fragment}
+Pela identidade geral, ponderando por $\gamma(z_{nk})$, somando em $n$,
+igualando a zero e multiplicando por $\Sigma_k$ dos dois lados:
+$$\Sigma_k = \frac{1}{N_k}\sum_{n=1}^N \gamma(z_{nk})\,(\mathbf{x}_n-\mu_k)(\mathbf{x}_n-\mu_k)^T$$
+:::
+
+::: {.fragment}
+PRML (p. 436): *"tem a mesma forma que o resultado [...] para uma única
+gaussiana, mas com cada ponto ponderado pela probabilidade a
+posteriori."*
+:::
+
+## Atualização de $\pi_k$: a Derivada
+
+::: {.fragment}
+$\pi_k$ não está "escondido" numa gaussiana — multiplica
+$\mathcal{N}_k(\mathbf{x}_n)$ inteira, **linearmente**:
+$$\frac{\partial}{\partial\pi_k}\ln\Big(\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)\Big) = \frac{\mathcal{N}_k(\mathbf{x}_n)}{\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)}$$
+:::
+
+::: {.fragment}
+Restrição $\sum_k\pi_k=1$ pede multiplicador de Lagrange — derivando
+$\ln p(X\mid\pi,\mu,\Sigma)+\lambda(\sum_k\pi_k-1)$ em $\pi_k$:
+$$0 = \sum_{n=1}^N \frac{\mathcal{N}_k(\mathbf{x}_n)}{\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)} + \lambda$$
+:::
+
+## Atualização de $\pi_k$: Eliminando $\lambda$
+
+::: {.fragment}
+Multiplicando por $\pi_k$ (e usando que
+$\pi_k\mathcal{N}_k(\mathbf{x}_n)/\sum_j\pi_j\mathcal{N}_j(\mathbf{x}_n)=\gamma(z_{nk})$):
+$$0 = \sum_{n=1}^N \gamma(z_{nk}) + \lambda\pi_k = N_k + \lambda\pi_k$$
+:::
+
+::: {.fragment}
+Somando sobre $k$: $\sum_k N_k = \sum_n\sum_k\gamma(z_{nk}) = \sum_n 1 = N$,
+e $\lambda\sum_k\pi_k=\lambda$ — logo $\lambda=-N$. Substituindo:
+$$N_k - N\pi_k = 0 \;\Longrightarrow\; \pi_k = \frac{N_k}{N}$$
+:::
+
+::: {.fragment}
+PRML (p. 436): *"o coeficiente de mistura [...] é dado pela
+responsabilidade média que aquele componente assume por explicar os
+pontos de dados."*
+:::
+
+::: {.fragment .callout-note}
+$N_k$ é **soma de responsabilidades fracionárias**, não contagem
+rígida: um componente que "convence" $50$ pacientes por completo e
+$20$ pela metade tem $N_k=60$.
+:::
+
+## Um Ciclo, Não Uma Solução
+
+::: {.fragment}
+$\mu_k,\Sigma_k,\pi_k$ **não** formam solução fechada — $\gamma(z_{nk})$
+(Bloco 5) depende dos parâmetros que este bloco acabou de reestimar.
+:::
+
+::: {.fragment}
+Por isso é iterativo: Passo E $\to$ Passo M $\to$ repetir. O algoritmo
+**EM** completo, no próximo bloco.
+:::
+
+:::
+
+# O Algoritmo EM Completo, em Ação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Juntando os Blocos 5 e 6 num ciclo, o algoritmo **EM para Misturas
+Gaussianas** (Bishop, PRML, 2006, p. 438-439, resumido e traduzido) é:
+
+1. Inicializar $\mu_k$, $\Sigma_k$ e $\pi_k$ (por exemplo, a partir de
+   um KMeans rodado antes, como o `sklearn` faz por padrão), e avaliar
+   a log-verossimilhança inicial.
+2. **Passo E.** Calcular $\gamma(z_{nk})$ para todo $n,k$, usando os
+   valores correntes dos parâmetros (Bloco 5).
+3. **Passo M.** Reestimar $\mu_k,\Sigma_k,\pi_k$ usando as
+   responsabilidades do Passo E (Bloco 6) — calculando primeiro
+   $\mu_k$, depois usando o novo $\mu_k$ para $\Sigma_k$, na mesma
+   ordem da Aula 1 para uma única gaussiana.
+4. Avaliar a log-verossimilhança; se a mudança (nos parâmetros ou na
+   verossimilhança) for menor que um limiar, parar; senão, voltar ao
+   Passo E.
+
+Bishop (p. 437) garante uma propriedade importante deste ciclo —
+tradução livre:
+
+> "Cada atualização dos parâmetros resultante de um Passo E seguido de
+> um Passo M tem a garantia de aumentar a função de log-verossimilhança."
+
+Isso não garante o **máximo global** (lembrando o aviso de
+singularidades do Bloco 4) — só que cada rodada não piora. Na prática,
+o EM converge tipicamente para um máximo local razoável, e rodar
+algumas inicializações diferentes (o parâmetro `n_init` do
+`sklearn.mixture.GaussianMixture`) reduz o risco de parar num máximo
+local ruim.
+
+**Ajustando de verdade.** Aplicando `GaussianMixture(n_components=2)`
+aos mesmos dois atributos do Breast Cancer Wisconsin usados desde a
+Aula 3 (sem usar `diagnosis`), o EM converge para:
+
+- Pesos de mistura: $\pi\approx(0{,}637,\ 0{,}363)$ — o componente
+  majoritariamente benigno é responsável, em média, por
+  $\approx63{,}7\%$ da "massa" de responsabilidade.
+- Componente $0$ (o mais benigno): $349$ dos $372$ pacientes com
+  responsabilidade máxima ali são benignos ($23$ malignos) — comparável
+  ao cluster de $347$ pacientes ($90{,}8\%$ benigno) da Aula 3.
+- Componente $1$ (o mais maligno): $189$ dos $197$ pacientes com
+  responsabilidade máxima ali são malignos ($8$ benignos) — mais puro
+  até que o cluster de $54$ pacientes $100\%$ malignos da Aula 3, mas
+  cobrindo quase 4 vezes mais pacientes malignos ($189$ vs. $54$).
+- Acurácia da atribuição rígida (argmax da responsabilidade) contra o
+  diagnóstico real: $94{,}55\%$. Índice de Rand Ajustado (ARI):
+  $0{,}792$ — bem acima do ARI do HDBSCAN da Aula 3 ($0{,}644$
+  excluindo ruído, $0{,}493$ incluindo-o).
+
+A comparação de ARI é honesta, não injusta com o HDBSCAN: o GMM tem uma
+vantagem estrutural aqui — ele **atribui todo mundo** a algum
+componente (via argmax da responsabilidade), enquanto o HDBSCAN
+deliberadamente se recusa a decidir sobre $168$ pacientes ($29{,}5\%$
+do total), tratando-os como ruído. Essa é exatamente a troca anunciada
+na Abertura: o GMM nunca fica "sem resposta", ao custo de forçar uma
+resposta (mesmo que parcial, via responsabilidade) mesmo em regiões
+onde a evidência é genuinamente fraca.
+
+A figura abaixo mostra o resultado completo: os $569$ pacientes
+coloridos pela mistura azul-laranja de responsabilidade (mesma
+convenção do Bloco 2), com as elipses de $2$ desvios-padrão de cada
+componente ajustado sobrepostas — a forma exata que $\Sigma_0$ e
+$\Sigma_1$ assumiram depois de convergir.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Algoritmo Completo (PRML, p. 438-439)
+
+::: {.fragment}
+**1.** Inicializar $\mu_k,\Sigma_k,\pi_k$ (tipicamente a partir de um
+KMeans); avaliar log-verossimilhança inicial.
+:::
+
+::: {.fragment}
+**2. Passo E.** Calcular $\gamma(z_{nk})$ com os parâmetros correntes.
+:::
+
+::: {.fragment}
+**3. Passo M.** Reestimar $\mu_k$, depois $\Sigma_k$ (usando o novo
+$\mu_k$), depois $\pi_k$ — mesma ordem da Aula 1.
+:::
+
+::: {.fragment}
+**4.** Reavaliar log-verossimilhança; parar se a mudança for pequena;
+senão, voltar ao Passo E.
+:::
+
+::: {.fragment .callout-note}
+PRML (p. 437): *"cada atualização [...] tem a garantia de aumentar a
+função de log-verossimilhança."* Não garante o máximo global —
+`n_init` com múltiplas inicializações reduz o risco de máximo local
+ruim.
+:::
+
+## Ajustando de Verdade: Breast Cancer Wisconsin
+
+::: {.fragment}
+`GaussianMixture(n_components=2)`, mesmos 2 atributos da Aula 3, sem
+`diagnosis`: $\pi\approx(0{,}637,\ 0{,}363)$.
+:::
+
+::: {.fragment}
+Componente $0$ (benigno): $349$B / $23$M. Componente $1$ (maligno):
+$189$M / $8$B — mais puro que o cluster $100\%$ maligno da Aula 3, mas
+cobrindo $189$ vs. $54$ malignos.
+:::
+
+::: {.fragment}
+Acurácia (argmax) vs. diagnóstico: $94{,}55\%$. **ARI $=0{,}792$** —
+acima do HDBSCAN ($0{,}644$ excl. ruído / $0{,}493$ incl.).
+:::
+
+::: {.fragment}
+Comparação honesta: GMM atribui **todo mundo**; HDBSCAN se recusa a
+decidir sobre $29{,}5\%$ dos pacientes. Troca anunciada na Abertura —
+nunca "sem resposta", ao custo de forçar decisão mesmo onde a evidência
+é fraca.
+:::
+
+:::
+
+::: {.fig-resize style="width: 47%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(6.2, 5.2))
+ax.scatter(X_2d[:, 0], X_2d[:, 1], c=blend_color(resp_B), s=16, alpha=0.85)
+
+cov_ellipse(gmm_bc.means_[0], gmm_bc.covariances_[0], ax, n_std=2.0,
+            edgecolor=COR_A, facecolor='none', linewidth=2.2, linestyle='-')
+cov_ellipse(gmm_bc.means_[1], gmm_bc.covariances_[1], ax, n_std=2.0,
+            edgecolor=COR_B, facecolor='none', linewidth=2.2, linestyle='-')
+ax.scatter(*gmm_bc.means_[0], marker='x', color=COR_A, s=110, linewidth=2.5)
+ax.scatter(*gmm_bc.means_[1], marker='x', color=COR_B, s=110, linewidth=2.5)
+
+ax.set_xlabel("radius_worst (padronizado)")
+ax.set_ylabel("concave points_worst (padronizado)")
+ax.set_title("GMM convergido: elipses de 2 desvios-padrão\nde cada componente ($\\mu_k$, $\\Sigma_k$)", fontsize=10.5)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Note como as elipses se **sobrepõem** numa faixa central — é exatamente
+essa região de sobreposição geométrica que produz os pacientes de
+responsabilidade ambígua do Bloco 5. Diferente do HDBSCAN, que
+desenharia uma fronteira única entre "dentro" e "fora" de cada
+componente conexo, o GMM não tem fronteira: a transição de cor é
+suave, proporcional a quão dentro de cada elipse (ponderada pela
+respectiva covariância) um ponto está.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Onde as Elipses se Sobrepõem
+
+::: {.fragment}
+Faixa central de sobreposição geométrica = exatamente a região dos
+pacientes de responsabilidade ambígua (Bloco 5).
+:::
+
+::: {.fragment}
+Sem fronteira única (diferente do HDBSCAN): transição de cor suave,
+proporcional a quão "dentro" de cada elipse ponderada um ponto está.
+:::
+
+:::
+
+# O KMeans e Sua Relação com o GMM
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Falta responder a última pergunta do Roteiro: essa ideia nova é uma
+ferramenta completamente diferente do que já se conhece, ou generaliza
+algo já visto? A resposta é concreta: o **KMeans** é exatamente o que
+sobra do GMM quando duas premissas adicionais são impostas — mas a
+Aula 3 só citou o KMeans de passagem, como um dos três paradigmas de
+clustering do ESL (Bloco 3 daquela aula), sem detalhar o algoritmo em
+si. Antes de mostrar a equivalência, é preciso conhecer o que está
+sendo comparado.
+
+**O objetivo do KMeans.** Dado um conjunto de $N$ pontos
+$\mathbf{x}_1,\dots,\mathbf{x}_N$ e um número fixo $K$ de clusters, o
+KMeans busca $K$ vetores protótipo $\mu_1,\dots,\mu_K$ (os centróides)
+e uma atribuição de cada ponto a exatamente um deles, de forma a
+minimizar a soma das distâncias ao quadrado entre cada ponto e o
+centróide ao qual foi atribuído. Para formalizar "atribuição", define-se
+a variável indicadora
+
+$$r_{nk} \in \{0,1\}, \qquad \sum_{k=1}^K r_{nk}=1 \text{ para todo } n$$
+
+— a mesma ideia de codificação 1-de-$K$ usada para $z_{nk}$ no Bloco 3,
+só que aqui **rígida e determinística**, não uma variável latente
+aleatória. Bishop (PRML, 2006, p. 424) define a medida de distorção que
+o KMeans minimiza — tradução livre:
+
+> "[...] uma função objetivo, às vezes chamada de medida de distorção,
+> dada por $J=\sum_{n=1}^N\sum_{k=1}^K r_{nk}\|\mathbf{x}_n-\mu_k\|^2$,
+> que representa a soma dos quadrados das distâncias de cada ponto de
+> dado ao seu vetor $\mu_k$ atribuído."
+
+$$J = \sum_{n=1}^N \sum_{k=1}^K r_{nk} \|\mathbf{x}_n - \mu_k\|^2.$$
+
+**O algoritmo: dois passos alternados.** $J$ depende de duas famílias
+de variáveis, $\{r_{nk}\}$ e $\{\mu_k\}$, e minimizar as duas ao mesmo
+tempo não tem solução direta — mas, exatamente como será o caso do EM
+(Blocos 5 e 6), fixar uma família de cada vez torna cada subproblema
+tratável, e Bishop nomeia essas duas fases justamente de "passo E" e
+"passo M" do KMeans, para prefigurar o paralelo.
+
+Fixando $\mu_k$ e minimizando $J$ sobre $r_{nk}$: como $J$ é **linear**
+em cada $r_{nk}$ (nenhum produto $r_{nk}r_{n'k'}$ aparece na soma) e os
+termos de pacientes diferentes são independentes entre si, cada $n$
+pode ser otimizado sozinho — a soma $\sum_k r_{nk}\|\mathbf{x}_n-\mu_k\|^2$
+é minimizada colocando o único $r_{nk}=1$ no índice $k$ que dá o menor
+$\|\mathbf{x}_n-\mu_k\|^2$ (qualquer outra escolha soma um termo maior
+ou igual). Isso é exatamente (Bishop, PRML, eq. 9.2, p. 425):
+
+$$r_{nk} = \begin{cases}1 & \text{se } k=\displaystyle\arg\min_j \|\mathbf{x}_n-\mu_j\|^2 \\ 0 & \text{caso contrário,}\end{cases}$$
+
+ou seja: **atribua cada ponto ao centróide mais próximo**.
+
+Fixando $r_{nk}$ e minimizando $J$ sobre $\mu_k$: para um componente
+$k$ fixo, só os termos com $r_{nk}=1$ dependem de $\mu_k$, e cada um é
+uma forma quadrática em $\mu_k$. Derivando essa soma em relação a
+$\mu_k$ (regra da cadeia sobre $\|\mathbf{x}_n-\mu_k\|^2=(\mathbf{x}_n-\mu_k)^T(\mathbf{x}_n-\mu_k)$,
+cuja derivada em $\mu_k$ é $-2(\mathbf{x}_n-\mu_k)$):
+
+$$\frac{\partial J}{\partial \mu_k} = \sum_{n=1}^N r_{nk}\cdot\big({-2}\big)(\mathbf{x}_n-\mu_k).$$
+
+Igualando a zero (Bishop, eq. 9.3, p. 425) e isolando $\mu_k$ (eq. 9.4):
+
+$$2\sum_{n=1}^N r_{nk}(\mathbf{x}_n-\mu_k)=0 \;\Longrightarrow\; \sum_n r_{nk}\mathbf{x}_n = \mu_k\sum_n r_{nk} \;\Longrightarrow\; \mu_k = \frac{\sum_n r_{nk}\,\mathbf{x}_n}{\sum_n r_{nk}}$$
+
+— o novo centróide $\mu_k$ é simplesmente a **média dos pontos
+atualmente atribuídos a ele** (o denominador conta quantos pontos
+isso é). Compare com a atualização de $\mu_k$ do GMM (Bloco 6): a
+mesma estrutura de "média ponderada pela atribuição", só que lá o peso
+é a responsabilidade fracionária $\gamma(z_{nk})\in[0,1]$, aqui é o
+indicador rígido $r_{nk}\in\{0,1\}$.
+
+**Convergência por iteração.** Cada uma das duas fases resolve
+exatamente seu subproblema de minimização, então nenhuma pode aumentar
+$J$ — alternar as duas até que $r_{nk}$ pare de mudar garante que $J$
+converge (Bishop, p. 425), embora possivelmente para um mínimo local,
+não o global. Por isso o ajuste abaixo usa `n_init=10`: repetir o
+algoritmo inteiro a partir de $10$ conjuntos de centróides iniciais
+diferentes, e manter o resultado de menor $J$ final.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Objetivo do KMeans
+
+::: {.fragment}
+Dados $N$ pontos e $K$ fixo: achar $K$ centróides $\mu_1,\dots,\mu_K$ e
+uma atribuição de cada ponto a um deles, minimizando a soma das
+distâncias ao quadrado ponto–centróide.
+:::
+
+::: {.fragment}
+Indicador rígido: $r_{nk}\in\{0,1\}$, $\sum_k r_{nk}=1$ — mesma
+codificação 1-de-$K$ de $z_{nk}$ (Bloco 3), mas determinística, não
+latente.
+:::
+
+::: {.fragment}
+PRML (p. 424), tradução livre: *"medida de distorção
+$J=\sum_n\sum_k r_{nk}\|\mathbf{x}_n-\mu_k\|^2$, a soma dos quadrados
+das distâncias de cada ponto ao seu $\mu_k$ atribuído."*
+$$J = \sum_{n=1}^N \sum_{k=1}^K r_{nk} \|\mathbf{x}_n - \mu_k\|^2$$
+:::
+
+## Dois Passos Alternados
+
+::: {.fragment}
+$J$ tem duas famílias de variáveis, $\{r_{nk}\}$ e $\{\mu_k\}$ —
+minimizar as duas juntas não é direto, mas fixar uma de cada vez torna
+cada subproblema tratável. Bishop já chama as duas fases de "passo E"
+e "passo M" do KMeans, prefigurando o EM (Blocos 5-6).
+:::
+
+## Passo 1: Fixar $\mu_k$, Resolver $r_{nk}$
+
+::: {.fragment}
+$J$ é **linear** em cada $r_{nk}$, termos de pacientes diferentes são
+independentes — cada $n$ se resolve sozinho, escolhendo o $k$ de menor
+$\|\mathbf{x}_n-\mu_k\|^2$.
+:::
+
+::: {.fragment}
+PRML (eq. 9.2, p. 425):
+$$r_{nk} = \begin{cases}1 & \text{se } k=\arg\min_j \|\mathbf{x}_n-\mu_j\|^2 \\ 0 & \text{caso contrário}\end{cases}$$
+**Atribua cada ponto ao centróide mais próximo.**
+:::
+
+## Passo 2: Fixar $r_{nk}$, Resolver $\mu_k$
+
+::: {.fragment}
+Para $k$ fixo, só os pontos com $r_{nk}=1$ importam — forma quadrática
+em $\mu_k$. Derivada de $\|\mathbf{x}_n-\mu_k\|^2$ em $\mu_k$ é
+$-2(\mathbf{x}_n-\mu_k)$:
+$$\frac{\partial J}{\partial \mu_k} = \sum_{n=1}^N r_{nk}\cdot(-2)(\mathbf{x}_n-\mu_k)$$
+:::
+
+::: {.fragment}
+Igualando a zero (eq. 9.3-9.4, p. 425) e isolando:
+$$\mu_k = \frac{\sum_n r_{nk}\,\mathbf{x}_n}{\sum_n r_{nk}}$$
+Centróide = **média dos pontos atribuídos a ele**.
+:::
+
+::: {.fragment .callout-note}
+Mesma estrutura da atualização de $\mu_k$ do GMM (Bloco 6) — "média
+ponderada pela atribuição" — só que lá o peso é $\gamma(z_{nk})\in[0,1]$
+fracionário, aqui é $r_{nk}\in\{0,1\}$ rígido.
+:::
+
+## Convergência
+
+::: {.fragment}
+Cada fase resolve seu subproblema exatamente — nenhuma pode aumentar
+$J$. Alternar até $r_{nk}$ estabilizar garante convergência de $J$
+(Bishop, p. 425), possivelmente para um **mínimo local**.
+:::
+
+::: {.fragment}
+Por isso `n_init=10` no ajuste: repetir com centróides iniciais
+diferentes, manter o menor $J$ final.
+:::
+
+:::
+
+::: {.fig-resize style="width: 78%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+_km_ref = KMeans(n_clusters=2, n_init=10, random_state=20260830).fit(X_2d)
+_mu_km = _km_ref.cluster_centers_
+_pi_km = np.array([np.mean(_km_ref.labels_ == 0), np.mean(_km_ref.labels_ == 1)])
+
+fig, axes = plt.subplots(1, 2, figsize=(9.8, 4.3))
+
+_km_colors = {0: COR_A, 1: COR_B}
+axes[0].scatter(X_2d[:, 0], X_2d[:, 1],
+                c=[_km_colors[l] for l in _km_ref.labels_], s=14, alpha=0.85)
+axes[0].scatter(_mu_km[:, 0], _mu_km[:, 1], marker="x", c="black", s=110, linewidth=2.5)
+axes[0].set_title("KMeans: atribuição rígida\nfronteira reta (mediatriz dos centróides)", fontsize=10)
+axes[0].set_xlabel("radius_worst (padronizado)")
+axes[0].set_ylabel("concave points_worst (padronizado)")
+
+axes[1].scatter(X_2d[:, 0], X_2d[:, 1], c=blend_color(resp_B), s=14, alpha=0.9)
+axes[1].set_title("GMM (Bloco 7): atribuição probabilística\ntransição suave entre os dois centros", fontsize=10)
+axes[1].set_xlabel("radius_worst (padronizado)")
+
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A diferença salta aos olhos. O KMeans (painel esquerdo) corta o espaço
+em duas regiões de **fronteira reta** — a mediatriz entre os dois
+centróides, já que qualquer tesselação por distância euclidiana a um
+conjunto de protótipos produz fronteiras retas entre vizinhos — e cada
+paciente pertence a exatamente uma delas, sem gradação nenhuma. O GMM
+(painel direito, o mesmo ajuste do Bloco 7) produz uma transição de cor
+suave, com uma faixa inteira de pacientes em tons intermediários —
+exatamente os pacientes ambíguos já identificados no Bloco 5. O KMeans
+nunca representa incerteza sobre a origem de um ponto: decide sempre,
+mesmo quando a decisão está quase empatada.
+
+Essa diferença visual é a pista de que os dois métodos não são
+incomparáveis — o KMeans parece um GMM que **perdeu a capacidade de
+hesitar**. A próxima pergunta é: sob que condições precisas essa
+hesitação desaparece?
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## KMeans vs. GMM, Mesmos Dados
+
+::: {.fragment}
+KMeans (esquerda): fronteira **reta** (mediatriz dos centróides), cada
+paciente numa região só, sem gradação.
+:::
+
+::: {.fragment}
+GMM (direita, Bloco 7): transição **suave**, com uma faixa de
+pacientes em tons intermediários — os mesmos ambíguos do Bloco 5.
+:::
+
+::: {.fragment .callout-note}
+O KMeans parece um GMM que **perdeu a capacidade de hesitar**. Sob que
+condições precisas essa hesitação desaparece?
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Premissas deste resultado.** (1) Todas as covariâncias são
+**esféricas e idênticas** entre componentes: $\Sigma_k=\epsilon I$ para
+todo $k$, onde $\epsilon$ é um único parâmetro de variância
+compartilhado — não $K$ matrizes $\Sigma_k$ livres. (2) $\epsilon$ é
+tratado como uma **constante fixa**, não reestimada pelo Passo M —
+só $\pi_k$ e $\mu_k$ continuam sendo ajustados. Sob essas duas
+premissas, a densidade de cada componente é
+
+$$p(\mathbf{x}\mid\mu_k,\Sigma_k) = \frac{1}{(2\pi\epsilon)^{D/2}}\exp\left\{-\frac{1}{2\epsilon}\|\mathbf{x}-\mu_k\|^2\right\},$$
+
+e a responsabilidade (Bloco 5) se reduz a
+
+$$\gamma(z_{nk}) = \frac{\pi_k\exp\{-\|\mathbf{x}_n-\mu_k\|^2/2\epsilon\}}{\sum_j \pi_j\exp\{-\|\mathbf{x}_n-\mu_j\|^2/2\epsilon\}}.$$
+
+**O limite $\epsilon\to 0$.** Bishop (PRML, 2006, p. 443-444) trabalha
+esse limite diretamente — tradução livre:
+
+> "Consideremos um modelo de mistura gaussiana no qual as matrizes de
+> covariância dos componentes da mistura são dadas por $\epsilon I$,
+> onde $\epsilon$ é um parâmetro de variância compartilhado por todos
+> os componentes [...] Tratamos $\epsilon$ como uma constante fixa, em
+> vez de um parâmetro a ser reestimado."
+
+> "Se considerarmos o limite $\epsilon\to 0$, veremos que, no
+> denominador, o termo para o qual $\|\mathbf{x}_n-\mu_j\|^2$ é o menor
+> tenderá a zero mais lentamente, e portanto as responsabilidades
+> $\gamma(z_{nk})$ para o ponto de dado $\mathbf{x}_n$ tenderão todas a
+> zero, exceto para o termo $j$, para o qual a responsabilidade
+> $\gamma(z_{nj})$ tenderá a um. [...] Assim, nesse limite, obtemos uma
+> atribuição rígida dos pontos de dados aos clusters, exatamente como
+> no algoritmo KMeans."
+
+A intuição por trás da matemática: com $\epsilon$ minúsculo, o termo
+$\exp\{-\|\mathbf{x}_n-\mu_j\|^2/2\epsilon\}$ do componente **mais
+próximo** de $\mathbf{x}_n$ domina exponencialmente todos os outros —
+a diferença de distância ao quadrado, dividida por um $\epsilon$
+minúsculo, vira uma diferença enorme dentro da exponencial, e o
+componente perdedor é esmagado a zero relativo. Isso vale
+**independentemente** dos valores de $\pi_k$ (desde que nenhum seja
+exatamente zero) — o peso de mistura não consegue competir com uma
+exponencial indo a zero.
+
+**A atualização de $\mu_k$ também converge.** Bishop (p. 444) continua:
+
+> "A equação de reestimação do EM para os $\mu_k$ [...] então se reduz
+> ao resultado do KMeans [...] a expectativa da log-verossimilhança de
+> dados completos [...] se torna
+> $-\dfrac{1}{2}\sum_n\sum_k r_{nk}\|\mathbf{x}_n-\mu_k\|^2 + \text{const}$.
+> Assim vemos que, nesse limite, maximizar a log-verossimilhança
+> esperada de dados completos é equivalente a minimizar a medida de
+> distorção $J$ do algoritmo KMeans."
+
+Ou seja: no limite $\epsilon\to 0$, a atualização ponderada
+$\mu_k=\dfrac{1}{N_k}\sum_n\gamma(z_{nk})\mathbf{x}_n$ do Bloco 6 se reduz
+exatamente à média do KMeans $\mu_k=\dfrac{\sum_n r_{nk}\mathbf{x}_n}{\sum_n
+r_{nk}}$ (Aula 3, Bloco 2), porque $\gamma(z_{nk})\to r_{nk}\in\{0,1\}$.
+E o objetivo que o EM está implicitamente maximizando converge para
+exatamente $-J/2$ (a menos de uma constante), onde $J$ é a medida de
+distorção do KMeans. O KMeans não é uma ferramenta diferente — é o
+**GMM com as mãos amarradas**: covariância travada, esférica,
+compartilhada, e levada a zero.
+
+**Verificação numérica própria.** Para tornar esse limite tangível,
+tome as $2$ médias do KMeans ajustado ao Breast Cancer Wisconsin como
+referência ($\mu_1,\mu_2$ fixos) e calcule a responsabilidade
+$\gamma(z_{nk})$ pela fórmula acima, para três valores decrescentes de
+$\epsilon$:
+
+| $\epsilon$ | Responsabilidade média máxima | Acurácia da atribuição rígida vs. KMeans |
+|---|---|---|
+| $1{,}0$    | $0{,}904$  | $95{,}78\%$ |
+| $0{,}1$    | $0{,}9916$ | $99{,}30\%$ |
+| $0{,}01$   | $0{,}9996$ | $100{,}00\%$ |
+
+Conforme $\epsilon$ cai, a responsabilidade média máxima sobe em
+direção a $1$ (atribuição cada vez mais rígida) e a concordância entre
+a atribuição por argmax e o KMeans de referência sobe até $100\%$ —
+exatamente o comportamento previsto pela derivação acima, confirmado
+numericamente, não só afirmado.
+
+**O que o KMeans perde ao ganhar simplicidade.** Bishop (p. 444) nota
+uma consequência importante:
+
+> "Note que o algoritmo KMeans não estima as covariâncias dos clusters,
+> apenas as médias dos clusters."
+
+Isso é o preço da premissa (1): ao forçar $\Sigma_k=\epsilon I$ igual
+para todos os componentes, o KMeans perde a capacidade de representar
+clusters com formatos, orientações ou espalhamentos diferentes entre
+si — a elipse do componente maligno do Bloco 7, mais alongada e maior
+que a do benigno, simplesmente não existiria sob KMeans; ambos os
+clusters seriam forçados a "bolas" circulares do mesmo tamanho. Uma
+versão de atribuição rígida que mantém covariâncias gerais por
+componente existe (o *elliptical K-means*, citado por Bishop a partir
+de Sung & Poggio, 1994), mas isso já é um meio-termo entre KMeans puro
+e GMM completo, não coberto nesta aula.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Premissas do Resultado
+
+::: {.fragment}
+**(1)** $\Sigma_k=\epsilon I$ para todo $k$ — esféricas, **idênticas**
+entre componentes, não $K$ matrizes livres.
+:::
+
+::: {.fragment}
+**(2)** $\epsilon$ tratado como **constante fixa**, não reestimada —
+só $\pi_k,\mu_k$ continuam sendo ajustados.
+:::
+
+::: {.fragment}
+$$\gamma(z_{nk}) = \frac{\pi_k\exp\{-\|\mathbf{x}_n-\mu_k\|^2/2\epsilon\}}{\sum_j \pi_j\exp\{-\|\mathbf{x}_n-\mu_j\|^2/2\epsilon\}}$$
+:::
+
+## O Limite $\epsilon\to 0$ (PRML, p. 443-444)
+
+::: {.fragment}
+Tradução livre: *"o termo para o qual $\|\mathbf{x}_n-\mu_j\|^2$ é o
+menor tenderá a zero mais lentamente [...] obtemos uma atribuição
+rígida [...] exatamente como no algoritmo KMeans."*
+:::
+
+::: {.fragment}
+Intuição: com $\epsilon$ minúsculo, o componente **mais próximo** domina
+exponencialmente — a diferença de distância ao quadrado, dividida por
+$\epsilon\to0$, vira diferença enorme na exponencial. Vale
+independente de $\pi_k$ (se nenhum for zero).
+:::
+
+## A Atualização de $\mu_k$ Também Converge
+
+::: {.fragment}
+PRML (p. 444): *"a equação de reestimação [...] se reduz ao resultado
+do KMeans [...] maximizar a log-verossimilhança esperada é equivalente
+a minimizar a medida de distorção $J$ do KMeans."*
+:::
+
+::: {.fragment .callout-note}
+No limite, $\gamma(z_{nk})\to r_{nk}\in\{0,1\}$: a média ponderada do
+Bloco 6 vira exatamente a média do KMeans (Aula 3). O KMeans é o
+**GMM de mãos amarradas** — covariância travada, esférica, $\to 0$.
+:::
+
+## Verificação Numérica Própria
+
+::: {.fragment}
+| $\epsilon$ | Resp. média máx. | Acurácia vs. KMeans |
+|---|---|---|
+| $1{,}0$  | $0{,}904$  | $95{,}78\%$ |
+| $0{,}1$  | $0{,}9916$ | $99{,}30\%$ |
+| $0{,}01$ | $0{,}9996$ | $100{,}00\%$ |
+:::
+
+::: {.fragment}
+Conforme $\epsilon$ cai: responsabilidade $\to$ rígida, concordância
+com KMeans $\to100\%$ — confirmado numericamente, não só afirmado.
+:::
+
+:::
+
+::: {.fig-resize style="width: 85%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+def _spherical_resp(X, mu, pi, eps):
+    d2 = np.sum((X[:, None, :] - mu[None, :, :]) ** 2, axis=2)
+    unnorm = pi[None, :] * np.exp(-d2 / (2 * eps))
+    return unnorm / unnorm.sum(axis=1, keepdims=True)
+
+
+_epsilons = [1.0, 0.1, 0.01]
+fig, axes = plt.subplots(1, 3, figsize=(10.5, 3.9))
+for ax, eps in zip(axes, _epsilons):
+    resp_eps = _spherical_resp(X_2d, _mu_km, _pi_km, eps)
+    avg_max = resp_eps.max(axis=1).mean()
+    ax.scatter(X_2d[:, 0], X_2d[:, 1], c=blend_color(resp_eps[:, 1]), s=10, alpha=0.85)
+    ax.set_title(f"$\\epsilon={eps}$\nresp. média máx. $={avg_max:.4f}$", fontsize=9.5)
+    ax.set_xticks([]); ax.set_yticks([])
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Da esquerda para a direita, a transição de cor entre azul e laranja
+fica cada vez mais **abrupta** — quase toda a área do gráfico já é azul
+sólido ou laranja sólido em $\epsilon=0{,}01$, com uma fronteira fina
+exatamente onde o KMeans traçaria sua bissetriz perpendicular entre os
+dois centróides.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Da Transição Suave à Fronteira Rígida
+
+::: {.fragment}
+Cor cada vez mais **abrupta** da esquerda para a direita — em
+$\epsilon=0{,}01$ quase tudo é azul ou laranja sólido, fronteira fina
+exatamente na bissetriz do KMeans.
+:::
+
+:::
+
+## Pergunta
+
+::: {.callout-tip}
+## O KMeans, no limite $\epsilon\to 0$, não estima covariância nenhuma — só médias. Isso significa que um GMM com covariâncias esféricas gerais (não travadas em $\epsilon$ fixo) é sempre estritamente melhor que o KMeans para qualquer conjunto de dados?
+
+Dica: pense no que "melhor" significaria aqui — ajuste mais fiel à
+verossimilhança dos dados observados, ou algum outro critério prático
+(velocidade, interpretabilidade, robustez a pouco dado).
+
+- □ Um GMM com covariâncias livres tem mais parâmetros a estimar do que
+  o KMeans (que só estima médias) — com poucos dados por cluster, isso
+  pode fazer o GMM overfitar a covariância, enquanto o KMeans, mais
+  restrito, generalizaria melhor.
+- □ Se os clusters verdadeiros nos dados tiverem, de fato, covariâncias
+  esféricas idênticas entre si, o GMM completo, ao convergir, deve
+  recuperar covariâncias estimadas próximas dessa forma esférica
+  comum — e nesse cenário específico, a vantagem prática do GMM sobre
+  o KMeans se estreita.
+- □ Um cluster alongado (covariância muito diferente entre duas
+  direções) é sempre mais bem representado pelo GMM do que pelo KMeans,
+  porque o GMM pode orientar e esticar a elipse; o KMeans, restrito a
+  bolas circulares de mesmo tamanho, cortaria esse cluster de forma
+  artificial se ele fizer fronteira com outro.
+- □ Como o KMeans é matematicamente um caso particular do GMM, o KMeans
+  nunca pode convergir mais rápido (em menos iterações até
+  estabilizar) do que o GMM completo no mesmo conjunto de dados.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Resposta
+
+::: {.callout-tip}
+## Resposta — GMM completo é sempre melhor?
+
+- ✔ Mais parâmetros (covariância livre) com poucos dados por cluster
+  pode overfitar — KMeans, mais restrito, generaliza melhor nesse
+  regime.
+- ✔ Com covariâncias verdadeiramente esféricas e idênticas, o GMM
+  convergiria para algo próximo do que o KMeans já assume — a vantagem
+  prática do GMM encolhe nesse cenário específico.
+- ✔ Cluster alongado: GMM pode orientar/esticar a elipse; KMeans,
+  restrito a bolas do mesmo tamanho, corta artificialmente na
+  fronteira.
+- ✗ "Caso particular" é uma relação matemática de limite, não uma
+  relação de velocidade de convergência — o KMeans, sendo mais simples
+  por iteração e com menos parâmetros, tipicamente converge em **menos**
+  iterações, não mais.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não existe "sempre melhor" — o GMM generaliza
+o KMeans matematicamente, mas essa generalidade custa mais parâmetros
+para estimar, o que só compensa quando os dados de fato sustentam essa
+riqueza extra.
+:::
+
+:::
+
+# Fechamento e Ponte para a Aula 5
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Retomando as quatro perguntas da Abertura, uma frase cada:
+
+1. **O que significa "nascer de uma população desconhecida"?** Uma
+   variável latente categórica $z$, 1-de-$K$, com prior $\pi_k$ — o
+   ponto observado $\mathbf{x}$ vem de $\mathcal{N}(\mu_k,\Sigma_k)$
+   para o $k$ sorteado, mas $k$ nunca é visto.
+2. **Como transformar a incerteza numa probabilidade concreta?** Bayes
+   — a responsabilidade $\gamma(z_{nk})$, calculada no Passo E a partir
+   dos parâmetros correntes.
+3. **Como reajustar os parâmetros, e por que iterar?** MLE ponderada
+   pelas responsabilidades (Passo M) — $\mu_k,\Sigma_k,\pi_k$ não têm
+   solução fechada porque dependem de $\gamma$, que depende deles;
+   por isso EM alterna E e M até convergir, cada rodada garantidamente
+   não piorando a log-verossimilhança.
+4. **Isso generaliza o KMeans, ou é outra coisa?** Generaliza: KMeans é
+   o GMM com covariâncias esféricas, idênticas, e levadas a
+   $\epsilon\to 0$ — verificado tanto analiticamente (PRML) quanto
+   numericamente (Bloco 8).
+
+**O que fica em aberto.** O GMM resolve o problema da atribuição rígida,
+mas introduz um problema novo, silenciosamente adiado ao longo de toda
+esta aula: em nenhum momento se discutiu **como escolher $K$**, o
+número de componentes — foi sempre fixado em $2$, escolhido porque já
+se sabia (do rótulo `diagnosis`, usado só para *avaliar*, nunca para
+ajustar) que fazia sentido nesse dataset. Em um problema real de
+verdade, sem rótulo nenhum, $K$ é uma escolha aberta — e o instinto
+óbvio, "escolher $K$ que maximiza a log-verossimilhança", falha:
+aumentar $K$ sempre pode aumentar (ou no mínimo não piorar) a
+verossimilhança, no limite ajustando um componente minúsculo a cada
+ponto individual — o mesmo problema de *overfitting* já anunciado como
+singularidade no Bloco 4, agora em escala maior.
+
+::: {.callout-tip}
+## Ponte para a Aula 5
+
+A Aula 5 ataca exatamente essa lacuna: **como escolher $K$** sem cair
+no overfitting da pura verossimilhança, usando o **BIC** (*Bayesian
+Information Criterion*) como aproximação assintótica da evidência do
+modelo. E, indo além da escolha de $K$, a Aula 5 introduz a
+**Inferência Variacional** e a divergência KL como ferramentas gerais
+para contornar a intratabilidade da evidência exata em modelos com
+variáveis latentes — estabelecendo o **ELBO** (*Evidence Lower Bound*)
+como critério tanto para selecionar quanto para ajustar modelos como o
+GMM desta aula.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Retomando as Quatro Perguntas
+
+::: {.fragment}
+**1.** Variável latente $z$ (1-de-$K$, prior $\pi_k$); $\mathbf{x}\mid
+z_k=1\sim\mathcal{N}(\mu_k,\Sigma_k)$; $z$ nunca observado.
+:::
+
+::: {.fragment}
+**2.** Bayes $\to$ responsabilidade $\gamma(z_{nk})$ (Passo E, a partir
+dos parâmetros correntes).
+:::
+
+::: {.fragment}
+**3.** MLE ponderada (Passo M) — sem solução fechada ($\gamma$ depende
+dos parâmetros que ela mesma ajuda a reestimar); EM itera E/M,
+garantidamente sem piorar a cada rodada.
+:::
+
+::: {.fragment}
+**4.** Generaliza: KMeans = GMM com $\Sigma_k=\epsilon I$ idêntico,
+$\epsilon\to0$ — analítico (PRML) e numérico (Bloco 8).
+:::
+
+## O Que Fica em Aberto
+
+::: {.fragment}
+$K$ foi sempre $2$, fixado porque o rótulo (usado só para avaliar)
+já sugeria isso. Sem rótulo, $K$ é uma escolha aberta.
+:::
+
+::: {.fragment}
+"Maximizar a verossimilhança" para escolher $K$ falha: mais componentes
+sempre pode aumentar (ou não piorar) a verossimilhança — no limite, um
+componente minúsculo por ponto. Mesma singularidade do Bloco 4, em
+escala maior.
+:::
+
+::: {.callout-tip}
+## Ponte para a Aula 5
+
+Como escolher $K$ sem esse overfitting: **BIC** como aproximação da
+evidência do modelo. Além disso: **Inferência Variacional** e KL como
+ferramentas gerais para a evidência intratável — o **ELBO** como
+critério de seleção e de ajuste.
+:::
+
+:::
+
+## Pergunta
+
+::: {.callout-tip}
+## Se, em vez de fixar $K=2$, alguém rodasse o GMM desta aula com $K=10$ no mesmo par de atributos do Breast Cancer Wisconsin, o que aconteceria com a log-verossimilhança final, comparada à obtida com $K=2$?
+
+Dica: pense se adicionar componentes pode, na pior das hipóteses, só
+"copiar" o comportamento de uma solução com menos componentes (por
+exemplo, atribuindo peso $\pi_k\approx0$ a componentes extras) — e o
+que isso implica sobre a direção da mudança na verossimilhança.
+
+- □ A log-verossimilhança ótima obtida com $K=10$ nunca pode ser pior
+  (menor) do que a obtida com $K=2$, porque qualquer solução de $K=2$
+  pode ser reproduzida com $K=10$ atribuindo peso $\pi_k\approx0$ aos
+  $8$ componentes extras.
+- □ Escolher o valor de $K$ que maximiza a log-verossimilhança nos
+  dados de treino é, por esse motivo, um critério confiável para
+  encontrar o número "certo" de componentes.
+- □ O mesmo tipo de problema (mais parâmetros sempre ajustando melhor
+  aos dados observados, sem necessariamente generalizar melhor) já
+  apareceu nesta disciplina antes desta aula, embora em outro contexto
+  matemático.
+- □ Se um dos $10$ componentes colapsar sua covariância sobre um único
+  ponto de dado (a singularidade do Bloco 4), isso tornaria a
+  log-verossimilhança bem definida, porém artificialmente baixa.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Resposta
+
+::: {.callout-tip}
+## Resposta — mais componentes, mais verossimilhança?
+
+- ✔ $K=10$ nunca fica pior que $K=2$ no treino — pode sempre "imitar"
+  a solução menor zerando o peso dos componentes extras.
+- ✗ Justamente por isso não é confiável — o critério tende sempre a
+  favorecer mais componentes, não o número real.
+- ✔ Sim — é a mesma lógica de overfitting já vista (por exemplo, mais
+  atributos/flexibilidade sempre ajustando melhor os dados de treino,
+  sem generalizar).
+- ✗ Colapsar sobre um ponto **não** dá uma verossimilhança baixa — dá
+  uma verossimilhança tendendo a **infinito** (Bloco 4), o oposto de
+  "baixa" e ainda mais artificial.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** mais componentes sempre ajuda a verossimilhança
+de treino — por isso ela sozinha não serve para escolher $K$. A Aula 5
+equipa o aluno com uma ferramenta (BIC) que penaliza essa flexibilidade
+extra.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+# <i class="bi bi-pencil-square" style="color:#0085CA;"></i> Exercícios
+
+## Questões discursivas
+
+1. A Aula 1 ajustou uma única gaussiana por máxima verossimilhança com
+   solução fechada ($\hat\mu$ e $\hat\Sigma$ diretamente como média e
+   covariância amostrais). O Bloco 4 desta aula mostrou que o mesmo não
+   vale para o GMM. Explique, em termos da forma da log-verossimilhança
+   nos dois casos, exatamente **onde** a álgebra que funcionava na Aula
+   1 deixa de funcionar quando se passa de uma para $K\ge 2$ gaussianas
+   — não basta dizer "porque tem uma soma dentro do log", explique por
+   que essa soma especificamente impede isolar $\mu_k$ ao derivar.
+
+2. O Bloco 6 definiu $N_k=\sum_n\gamma(z_{nk})$ e interpretou $\pi_k=
+   N_k/N$ como "responsabilidade média". Construa um argumento de por
+   que essa forma é a atualização de máxima verossimilhança **esperada**
+   correta para $\pi_k$ — isto é, por que ponderar cada ponto pela sua
+   responsabilidade (em vez de usar uma contagem rígida de pontos "do"
+   componente $k$) é a escolha coerente com o resto do algoritmo EM, e
+   não uma aproximação arbitrária.
+
+3. O Bloco 8 mostrou que o KMeans não estima covariância nenhuma — só
+   médias — porque a derivação assume $\Sigma_k=\epsilon I$ idêntico
+   para todos os componentes, com $\epsilon\to0$. Usando o resultado do
+   Bloco 7 (as elipses de covariância do GMM ajustado ao Breast Cancer
+   Wisconsin, visivelmente diferentes em tamanho e orientação entre os
+   dois componentes), discuta um cenário de dados em que essa
+   diferença de forma entre as elipses seria decisiva para separar
+   corretamente dois clusters — e o que o KMeans faria de errado nesse
+   mesmo cenário, especificamente por causa da premissa de covariância
+   esférica e idêntica.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada
+correta se todos os 4 itens forem julgados corretamente (deixar em
+branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-note icon=false}
+## Partição rígida vs. probabilística
+
+- □ Uma partição probabilística (GMM) e uma partição rígida (HDBSCAN ou
+  KMeans) respondem exatamente à mesma pergunta matemática, diferindo
+  apenas na forma de apresentar a resposta final (arredondar ou não a
+  probabilidade).
+- □ Se dois clusters verdadeiros nos dados são separados por um vale de
+  densidade genuíno (densidade exatamente zero em algum ponto do
+  caminho entre eles), o GMM, ao convergir bem, tende a atribuir
+  responsabilidades próximas de $0$ ou $1$ para a maioria dos pontos de
+  cada lado, mesmo sendo, por definição, um método probabilístico.
+- □ A principal vantagem prática do GMM sobre o HDBSCAN nesta aula é
+  que o GMM nunca deixa nenhum ponto sem uma atribuição (mesmo que
+  fracionária) a algum componente, enquanto o HDBSCAN pode descartar
+  pontos como ruído.
+- □ Um paciente com responsabilidade $\gamma=(0{,}5,0{,}5)$ para os dois
+  componentes de um GMM é, necessariamente, um erro de convergência do
+  algoritmo — um GMM bem ajustado nunca deveria produzir essa saída.
+:::
+
+::: {.callout-note icon=false}
+## Variável latente e a história geradora do GMM
+
+- □ Na formulação por variável latente, $z_n$ é observado durante o
+  ajuste do modelo aos dados — é justamente essa observação que permite
+  calcular $\gamma(z_{nk})$ diretamente, sem precisar de Bayes.
+- □ A codificação 1-de-$K$ de $\mathbf{z}$ garante que, para qualquer
+  ponto gerado pelo modelo, exatamente uma população é responsável por
+  ele — nunca zero, nunca mais de uma.
+- □ Se $\pi_1=1$ e todos os demais $\pi_k=0$ para $k>1$, a distribuição
+  marginal $p(\mathbf{x})=\sum_k\pi_k\mathcal{N}(\mathbf{x}\mid\mu_k,
+  \Sigma_k)$ se reduz exatamente ao modelo de uma única gaussiana da
+  Aula 1.
+- □ Marginalizar a variável latente $z$ (somar sobre seus $K$ estados
+  possíveis) é o que conecta a formulação generativa nova desta aula
+  à fórmula de mistura de gaussianas $p(\mathbf{x})=\sum_k\pi_k
+  \mathcal{N}(\mathbf{x}\mid\mu_k,\Sigma_k)$, que já seria escrevível
+  desde a Aula 1.
+:::
+
+::: {.callout-note icon=false}
+## Log-verossimilhança do GMM e a necessidade do EM
+
+- □ A dificuldade de maximizar $\ln p(X\mid\pi,\mu,\Sigma)$ diretamente
+  desaparece se $K=1$ (um único componente), porque nesse caso a soma
+  dentro do logaritmo tem um único termo, recuperando a mesma álgebra
+  fechada da Aula 1.
+- □ Uma singularidade da log-verossimilhança do GMM (um componente
+  colapsando sobre um único ponto de dado) representa, na prática, um
+  bom ajuste generalizável do modelo aos dados, só que num regime
+  numérico extremo.
+- □ Rodar o algoritmo EM a partir de várias inicializações diferentes
+  (`n_init` no `sklearn`) e escolher a de maior log-verossimilhança
+  final é uma forma de mitigar o risco de convergir para um máximo
+  local ruim — não uma forma de evitar singularidades.
+- □ Se a log-verossimilhança do GMM tivesse, de fato, uma solução
+  fechada análoga à da Aula 1, o algoritmo EM ainda assim seria
+  necessário para ajustar o modelo, só que como uma alternativa
+  igualmente rápida.
+:::
+
+::: {.callout-note icon=false}
+## O Passo E: responsabilidades e Bayes
+
+- □ $\gamma(z_{nk})$ é, por construção, a probabilidade a **priori** de
+  o ponto $n$ vir do componente $k$, calculada antes de observar
+  $\mathbf{x}_n$.
+- □ Para um ponto $n$ fixo, a soma $\sum_{k=1}^K\gamma(z_{nk})$ é
+  sempre igual a $1$, independentemente dos valores correntes de
+  $\pi,\mu,\Sigma$.
+- □ Se dois componentes tiverem exatamente os mesmos $\mu_k$ e
+  $\Sigma_k$, mas pesos de mistura diferentes ($\pi_1\ne\pi_2$), a
+  responsabilidade de qualquer ponto para o componente de maior peso
+  será sempre estritamente maior que para o de menor peso.
+- □ Recalcular $\gamma(z_{nk})$ para todos os $N$ pontos após cada
+  atualização do Passo M é necessário porque os parâmetros
+  $\pi,\mu,\Sigma$ usados na fórmula de Bayes do Passo E mudaram.
+:::
+
+::: {.callout-note icon=false}
+## O Passo M: atualizações ponderadas
+
+- □ A atualização $\mu_k=\dfrac{1}{N_k}\sum_n\gamma(z_{nk})\mathbf{x}_n$
+  se reduz à média aritmética simples de todos os $N$ pontos quando
+  $\gamma(z_{nk})=1/K$ para todo ponto e todo componente.
+- □ $N_k$ pode, em princípio, assumir um valor não inteiro, mesmo que o
+  número de pacientes $N$ seja inteiro.
+- □ A atualização de $\Sigma_k$ do Passo M usa o $\mu_k$ da **rodada
+  anterior** do Passo M (antes de ser atualizado nesta mesma rodada),
+  em vez do $\mu_k$ recém-calculado, para manter a ordem correta de
+  dependência entre os parâmetros.
+- □ A restrição $\sum_k\pi_k=1$ é o único motivo pelo qual a
+  atualização de $\pi_k$ precisa de um multiplicador de Lagrange — as
+  atualizações de $\mu_k$ e $\Sigma_k$ não têm nenhuma restrição
+  análoga a respeitar.
+:::
+
+::: {.callout-note icon=false}
+## KMeans como caso limite do GMM
+
+- □ A redução do GMM ao KMeans depende de covariâncias esféricas
+  **idênticas entre os componentes** ($\Sigma_k=\epsilon I$ para todo
+  $k$) — covariâncias esféricas, porém diferentes entre componentes
+  (por exemplo, $\Sigma_1=\epsilon_1 I\ne\Sigma_2=\epsilon_2 I$), não
+  bastariam para reproduzir exatamente a atribuição rígida do KMeans
+  no limite.
+- □ O limite $\epsilon\to 0$ produz atribuição rígida porque a
+  exponencial do componente mais próximo domina exponencialmente as
+  demais no denominador de Bayes — não porque os pesos de mistura
+  $\pi_k$ se tornam iguais entre si.
+- □ Um GMM com covariâncias esféricas idênticas, mas $\epsilon$ grande
+  (não pequeno), produziria responsabilidades próximas às do KMeans,
+  porque o formato esférico e idêntico já é, por si só, suficiente
+  para uma atribuição quase rígida.
+- □ O KMeans, ao não estimar covariância nenhuma, é incapaz, por
+  construção, de representar clusters com formas alongadas ou giradas
+  de forma diferente entre si — só bolas do mesmo tamanho.
+:::
+
+::: {.callout-note icon=false}
+## O resultado no Breast Cancer Wisconsin e a comparação com a Aula 3
+
+- □ O ARI do GMM ($0{,}792$) ser maior que o do HDBSCAN ($0{,}644$
+  excluindo ruído) é, sozinho, uma prova de que o GMM é um algoritmo
+  estritamente superior ao HDBSCAN para clustering em geral, e não uma
+  consequência específica de como cada método trata os pontos difíceis
+  deste dataset.
+- □ O fato de o GMM atribuir uma responsabilidade máxima a **todos** os
+  $569$ pacientes (nunca "ruído") é o que permite calcular seu ARI
+  sobre a população inteira, sem precisar excluir nenhum paciente da
+  comparação, ao contrário do que a Aula 3 fez com o ARI do HDBSCAN
+  excluindo ruído.
+- □ O componente $1$ do GMM (o mais maligno, $189$M/$8$B) é mais puro
+  proporcionalmente do que o cluster $100\%$ maligno de $54$ pacientes
+  encontrado pelo HDBSCAN na Aula 3.
+- □ Os $9$ pacientes de responsabilidade mais ambígua identificados no
+  Bloco 5 estão necessariamente entre os $168$ pacientes que o HDBSCAN
+  havia marcado como ruído na Aula 3, já que ambos os fenômenos vêm da
+  mesma região de sobreposição entre as duas populações.
+:::
+
+## Aviso
+
+As questões de Verdadeiro/Falso e discursivas ficam sem solução neste
+arquivo — são para resolução autônoma do aluno, fora do horário de
+aula.
+
+:::
