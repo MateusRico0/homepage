@@ -1,0 +1,148 @@
+---
+title: "Exercícios — Aula 3: Projeções Ortogonais e Subespaços"
+subtitle: "Álgebra Linear e Otimização para Aprendizado de Máquina"
+author: "Prof. Marcos Medeiros Raimundo"
+lang: pt-BR
+format:
+  html:
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 2
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+## Convenções usadas nesta lista
+
+- $X\in\mathbb{R}^{N\times d}$ é uma **matriz de design** (linhas = observações, colunas = atributos), $\mathbf{y}\in\mathbb{R}^N$ é o vetor-alvo, e $\hat{\mathbf{w}}\in\mathbb{R}^d$ são os pesos que minimizam $\|\mathbf{y}-X\mathbf{w}\|$ (mínimos quadrados). A previsão/projeção resultante é $\hat{\mathbf{y}}=X\hat{\mathbf{w}}\in\mathbb{R}^N$.
+- As **Equações Normais** são $X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$. Quando $X$ tem **posto completo** ($\text{rk}(X)=d$, colunas linearmente independentes), $X^TX$ é invertível e a solução é única, $\hat{\mathbf{w}}=(X^TX)^{-1}X^T\mathbf{y}$.
+- Uma **projeção** sobre um subespaço $U\subseteq V$ é um operador $\pi:V\to U$ idempotente, $\pi^2=\pi$ (aplicar duas vezes equivale a aplicar uma vez). A matriz de projeção ortogonal sobre $\text{col}(X)$ (o espaço gerado pelas colunas de $X$) é $P_\pi=X(X^TX)^{-1}X^T$, e $\hat{\mathbf{y}}=P_\pi\mathbf{y}$ é o ponto de $\text{col}(X)$ mais próximo de $\mathbf{y}$.
+- Dado um subespaço $U$ de um espaço $V$ de dimensão $D$, com $\dim(U)=M$, o **complemento ortogonal** $U^\perp=\{\mathbf{v}\in V:\mathbf{v}\perp\mathbf{u},\,\forall\mathbf{u}\in U\}$ tem dimensão $D-M$, e todo vetor de $V$ se decompõe de forma única como $V=U\oplus U^\perp$ (uma parte em $U$, uma parte em $U^\perp$).
+- O **resíduo** é $\mathbf{r}=\mathbf{y}-\hat{\mathbf{y}}$. Sempre que $\hat{\mathbf{w}}$ resolve as Equações Normais, $\mathbf{r}$ é ortogonal a cada coluna de $X$ (e, portanto, a todo $\text{col}(X)$).
+- $R^2$ é a fração da variação de $\mathbf{y}$ explicada pelo modelo: $R^2=1$ é ajuste perfeito (resíduo nulo); $R^2=0$ é um modelo que não prevê melhor do que a própria média de $\mathbf{y}$.
+- O **posto** de $X$ é o número de colunas linearmente independentes. **Multicolinearidade exata** é quando uma coluna é combinação linear exata de outras (reduz o posto). **Quase-multicolinearidade** é quando colunas são fortemente correlacionadas, mas não exatamente dependentes (não reduz o posto, mas deixa $X^TX$ mal-condicionada). O **número de condição** de $X^TX$ (razão entre maior e menor autovalor) mede o quanto $\hat{\mathbf{w}}$ é sensível a pequenas perturbações nos dados, mesmo com $X$ de posto completo.
+- **Exemplo concreto usado nesta lista:** o *California Housing Dataset* (preço de imóveis por bairro na Califórnia), $X\in\mathbb{R}^{16\,640\times4}$, com atributos `MedInc` (renda mediana do bairro, dezenas de milhares de dólares), `HouseAge` (idade média dos imóveis, anos), `AveRooms` (média de cômodos por domicílio) e `AveBedrms` (média de quartos por domicílio), prevendo o alvo `MedHouseVal` (valor mediano do imóvel). Ajustado por mínimos quadrados com os 4 atributos, o modelo tem $R^2\approx0{,}518$ (explica pouco mais da metade da variação do preço) e número de condição de $X^TX\approx23\,460$. Os atributos `AveRooms` e `AveBedrms` têm correlação empírica $0{,}865$ (quase-multicolineares, mas linearmente independentes): isolado, esse par tem número de condição de $X^TX\approx420$, contra $\approx169$ do par bem-condicionado `MedInc`/`HouseAge`. Perturbar `MedHouseVal` com ruído gaussiano de desvio-padrão igual a $1\%$ do desvio-padrão da própria variável faz o peso de `AveBedrms` oscilar $\approx29{,}5\%$ no par quase-dependente, contra $\approx0{,}1\%$ no par bem-condicionado. Fabricar uma quinta coluna $2\times$`AveRooms` (combinação linear exata de uma coluna já existente) não altera o posto de $X$ (permanece $4$), mas torna $X^TX$ singular.
+:::
+
+## Questões discursivas
+
+1. Explique, com suas próprias palavras e usando a linguagem geométrica da "sombra" (a projeção ortogonal de um ponto $\mathbf{y}$ sobre um subespaço $U$ como o ponto de $U$ mais próximo de $\mathbf{y}$), por que minimizar $\|\mathbf{y}-X\mathbf{w}\|$ é equivalente à condição de ortogonalidade $(\mathbf{y}-X\hat{\mathbf{w}})\perp\text{col}(X)$. Por que essa equivalência é o que permite transformar um problema de otimização (minimizar uma distância) numa equação linear (as Equações Normais)?
+
+2. Compare os dois casos descritos nas Convenções acima: multicolinearidade **exata** (fabricar a coluna $2\times$`AveRooms`, que torna $X^TX$ singular) e **quase**-multicolinearidade (o par `AveRooms`/`AveBedrms`, correlação $0{,}865$, que deixa $X^TX$ apenas mal-condicionada). Para cada um, explique o que acontece com a projeção $\hat{\mathbf{y}}$ e o que acontece com o vetor de pesos $\hat{\mathbf{w}}$. Por que a distinção entre essas duas grandezas é a chave para entender os dois casos?
+
+3. Sabe-se (resultado provado em aula anterior) que $X^TX$ é invertível se, e somente se, $X$ tem posto completo. Explique como essa condição de invertibilidade entra exatamente na etapa da derivação das Equações Normais em que se isola $\hat{\mathbf{w}}$ a partir de $X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$, e o que aconteceria à derivação (não só ao resultado final) se essa condição não fosse satisfeita.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-note icon=false}
+## Sistemas sobredeterminados e a melhor aproximação
+
+- □ Se um sistema $A\mathbf{x}=\mathbf{b}$ fosse subdeterminado ($n>m$) em vez de sobredeterminado, ainda haveria um sentido útil para "melhor aproximação" via projeção, mas ele coincidiria trivialmente com uma das infinitas soluções exatas, não com um ponto fora do espaço-coluna de $A$.
+- □ No caso-limite em que $\mathbf{y}$ está exatamente sobre o espaço-coluna de $X$, a "melhor aproximação" $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$ coincide com $\mathbf{y}$, e o problema de mínimos quadrados se reduz ao caso mais simples de um sistema linear com solução exata, sem necessidade de aproximação.
+- □ Num problema de avaliação de risco de crédito (dataset German Credit), com muito mais clientes registrados (equações) do que atributos considerados no modelo (incógnitas), a mesma lógica de "sistema sobredeterminado sem solução exata, resolvido por projeção" se aplicaria.
+- □ Como um sistema sobredeterminado não tem solução exata, isso implica que qualquer $\mathbf{w}$ escolhido produzirá um erro de magnitude semelhante — a escolha de $\mathbf{w}$ não afetaria significativamente a qualidade da aproximação.
+:::
+
+::: {.callout-note icon=false}
+## A intuição da sombra
+
+- □ Se a fonte de luz da analogia da sombra viesse de um ângulo oblíquo fixo (não perpendicular ao subespaço), o ponto de chegada no subespaço, em geral, não seria mais o ponto mais próximo do ponto original.
+- □ No caso-limite em que o subespaço $U$ tem a mesma dimensão do espaço ambiente ($U=V$), a "sombra" de qualquer ponto sobre $U$ coincide com o próprio ponto, para qualquer ponto escolhido.
+- □ A ideia de reduzir a dimensionalidade de dados de alta dimensão para visualização (ex.: reduzir os atributos de um dataset para 2 dimensões e plotar um gráfico de dispersão) usa, na essência, a mesma operação geométrica de projeção perpendicular definida acima.
+- □ Como a projeção perpendicular minimiza a distância ao subespaço, ela produz sempre o ponto de menor norma dentro do subespaço, entre todos os candidatos.
+:::
+
+::: {.callout-note icon=false}
+## Subespaços e o complemento ortogonal
+
+- □ Se $U$ e $W$ são dois subespaços distintos de mesma dimensão $M$ dentro de um espaço $V$ de dimensão $D$, seus complementos ortogonais $U^\perp$ e $W^\perp$ têm, necessariamente, a mesma dimensão entre si ($D-M$), ainda que $U^\perp \ne W^\perp$ como conjuntos.
+- □ No caso-limite $M=D$ (o subespaço é o espaço inteiro), o complemento ortogonal se reduz ao subespaço trivial $\{\mathbf{0}\}$.
+- □ Num sistema de recomendação por fatoração de matrizes, decompor o vetor de preferências de um usuário numa componente dentro do subespaço latente aprendido (um subespaço) e numa componente ortogonal a ele (o resíduo não explicado pelos fatores latentes) usa a mesma lógica de decomposição única $V=U\oplus U^\perp$ definida acima.
+- □ Como todo vetor de $V$ se decompõe de forma única em $U\oplus U^\perp$, isso implica que essa decomposição é a única forma possível de escrever qualquer vetor de $V$ como soma de dois vetores de $V$.
+:::
+
+::: {.callout-note icon=false}
+## Definição formal de projeção
+
+- □ Se $\pi:V\to U$ satisfaz $\pi^2=\pi$, então, para qualquer vetor $\mathbf{u}$ que já pertença a $U$, necessariamente $\pi(\mathbf{u}) = \mathbf{u}$.
+- □ No caso-limite em que a matriz de projeção $P_\pi$ é a matriz identidade, o subespaço $U$ sobre o qual ela projeta é o espaço ambiente $V$ inteiro.
+- □ Num sistema de compressão de embeddings via PCA que descarta certas componentes principais (mantendo só um subconjunto delas), a operação de manter as componentes retidas e descartar as demais pode ser descrita, de forma exata, por uma matriz de projeção $P_\pi$ com $P_\pi^2=P_\pi$.
+- □ Como toda matriz de projeção satisfaz $P_\pi^2=P_\pi$, isso significa que qualquer matriz quadrada que satisfaça essa condição algébrica também é, necessariamente, simétrica.
+:::
+
+::: {.callout-note icon=false}
+## Derivação das Equações Normais
+
+- □ Se a condição de ortogonalidade fosse verificada apenas para algumas colunas de $X$ (não todas), em vez de todas as $d$ colunas, isso não seria suficiente, em geral, para garantir que o resíduo é ortogonal a todo o espaço-coluna de $X$.
+- □ No caso-limite $d=1$ (uma única coluna, isto é, $X$ é um vetor-coluna $\mathbf{x}\in\mathbb{R}^N$), as Equações Normais $X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$ se reduzem a uma única equação escalar, $\hat{w}=\dfrac{\mathbf{x}^T\mathbf{y}}{\mathbf{x}^T\mathbf{x}}$.
+- □ Num problema de estimar a verdadeira nota de qualidade de uma imagem (usada como rótulo de treino) a partir de $N$ anotações redundantes de anotadores humanos (crowdsourcing, cada anotação sendo $y_i = \theta + \text{ruído}$), a mesma derivação das Equações Normais levaria a uma estimativa que é, essencialmente, a média das anotações.
+- □ Como as Equações Normais são obtidas impondo ortogonalidade coluna a coluna, isso implica que, se duas colunas de $X$ forem ortogonais entre si, a equação normal correspondente a cada uma delas pode ser resolvida de forma totalmente independente da outra, sem nenhum termo cruzado.
+:::
+
+::: {.callout-note icon=false}
+## Invertibilidade de $X^TX$ e a pseudo-inversa
+
+- □ Se $X$ tivesse posto deficiente (colunas linearmente dependentes), $X^TX$ deixaria de ser invertível, mas isso não impediria, por si só, que existisse **algum** $\hat{\mathbf{w}}$ satisfazendo as Equações Normais — apenas deixaria de haver um único.
+- □ No caso-limite em que $X$ tem uma única coluna não-nula ($d=1$, $\mathbf{x}\ne\mathbf{0}$), $X^TX$ é sempre invertível (é um escalar positivo).
+- □ Num problema de regressão sobre um dataset com atributos linearmente dependentes (matriz de design $X$ de posto deficiente), a pseudo-inversa $(X^TX)^{-1}X^T$ não pode ser calculada da forma usual, mas existem generalizações (pseudo-inversa de Moore-Penrose, via SVD) que contornam exatamente esse problema.
+- □ Como $(X^TX)^{-1}X^T$ é chamada de pseudo-inversa de $X$, isso significa que ela satisfaz $X\cdot(X^TX)^{-1}X^T = I$ (a identidade), do mesmo jeito que uma inversa de matriz quadrada de verdade.
+:::
+
+::: {.callout-note icon=false}
+## Aplicação numérica e verificação de ortogonalidade
+
+- □ Se, em vez de comparar $\hat{\mathbf{w}}$ obtido pela fórmula fechada com o algoritmo `lstsq` (mínimos quadrados) de uma biblioteca numérica, comparássemos com uma resolução por eliminação de Gauss do sistema $X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$, esperaríamos, a menos de erro de arredondamento, o mesmo vetor.
+- □ No caso-limite em que $\mathbf{y}$ é o vetor nulo, o $\hat{\mathbf{w}}$ que resolve as Equações Normais (com $X$ de posto completo) é necessariamente o vetor nulo também.
+- □ Num modelo de regressão que prevê o preço de um ativo financeiro a partir de indicadores técnicos (outro dataset, não o California Housing), verificar que o resíduo entre o valor previsto e o valor real é ortogonal aos atributos do modelo é um teste válido de correção, do mesmo jeito que se aplicaria ao ajuste do California Housing descrito acima.
+- □ Como o resíduo é ortogonal a cada coluna de $X$, isso implica que o modelo captura toda a informação relevante contida nos dados disponíveis para prever $\mathbf{y}$.
+:::
+
+::: {.callout-note icon=false}
+## $R^2$ e o que a ortogonalidade do resíduo garante
+
+- □ Se o $R^2$ do ajuste fosse exatamente $0$ (o modelo não explica nada da variação de $\mathbf{y}$ além da média), o resíduo ainda seria ortogonal a cada coluna de $X$, contanto que $\hat{\mathbf{w}}$ resolva as Equações Normais.
+- □ No caso-limite $R^2=1$ (ajuste perfeito), o resíduo $\mathbf{y}-X\hat{\mathbf{w}}$ é o vetor nulo.
+- □ Num modelo de previsão de nota de estudantes usando só o número de horas de sono (um único atributo, claramente insuficiente para prever notas), seria possível obter um $R^2$ baixo e, ainda assim, um resíduo perfeitamente ortogonal a essa única coluna — exatamente como ocorre no ajuste com os 4 atributos do California Housing descrito acima ($R^2\approx0{,}518$ com resíduo ortogonal).
+- □ Como o resíduo é sempre ortogonal ao espaço-coluna de $X$ quando $\hat{\mathbf{w}}$ resolve as Equações Normais, um $R^2$ baixo indica necessariamente um erro no cálculo de $\hat{\mathbf{w}}$, não uma limitação dos atributos escolhidos.
+:::
+
+::: {.callout-note icon=false}
+## Posto e multicolinearidade exata
+
+- □ Se a coluna redundante fabricada no exemplo acima fosse $-5\times$`AveRooms` em vez de $2\times$`AveRooms`, o posto de $X$ ainda cairia da mesma forma ao ser adicionada (permaneceria em 4, não subiria para 5).
+- □ No caso-limite em que todas as $d$ colunas de $X$ fossem múltiplos escalares de uma única coluna não-nula, o posto de $X$ seria exatamente $1$, independentemente do valor de $d$.
+- □ Num dataset usado para prever demanda de energia elétrica em que um atributo de temperatura é reportado tanto em Celsius quanto em Fahrenheit (uma transformação linear afim exata da outra, não apenas um múltiplo escalar), a inclusão de ambas as colunas na matriz de design também produziria posto deficiente, pelo mesmo princípio da coluna duplicada exata descrita acima.
+- □ Como a coluna redundante fabricada não acrescenta nenhuma direção independente ao espaço-coluna de $X$, isso implica que removê-la necessariamente reduz a qualidade das previsões do modelo ajustado.
+:::
+
+::: {.callout-note icon=false}
+## Quase-multicolinearidade e número de condição
+
+- □ Se, em vez de perturbar `MedHouseVal` em 1% do desvio-padrão, perturbássemos em 10 vezes esse valor (10% do desvio-padrão), a variação relativa esperada no peso de `AveBedrms` no par quase-dependente seria, ao menos aproximadamente, também maior do que a observada com a perturbação de 1% — o número de condição alto amplifica perturbações maiores tanto quanto amplifica as pequenas.
+- □ No caso-limite em que o número de condição de $X^TX$ tende a infinito, $X^TX$ se torna, no limite, singular (não invertível).
+- □ Num modelo de precificação de opções financeiras com duas variáveis de entrada quase redundantes (ex.: duas medidas de volatilidade calculadas por métodos ligeiramente diferentes), a mesma fragilidade numérica (pesos instáveis sob pequena perturbação dos dados) apareceria, mesmo com o posto de $X$ tecnicamente completo.
+- □ Como o número de condição de $X^TX$ com os 4 atributos completos ($\approx 23\,460$) é maior do que o do par isolado `AveRooms`/`AveBedrms` ($\approx 420$), isso implica que a previsão $\hat{\mathbf{y}}=X\hat{\mathbf{w}}$ do modelo completo é proporcionalmente mais instável do que a previsão do modelo com só esse par de atributos.
+:::
+
+::: {.callout-note icon=false}
+## A matriz de projeção $P_\pi$
+
+- □ Se, em vez de projetar $\mathbf{y}$ sobre $\text{col}(X)$, quiséssemos projetar sobre um subespaço diferente gerado pelas colunas de outra matriz $Z$ (mesmas dimensões de $X$), a matriz de projeção correspondente seria $P_\pi'=Z(Z^TZ)^{-1}Z^T$, com a mesma propriedade $P_\pi'^2=P_\pi'$.
+- □ No caso-limite em que as colunas de $X$ já são ortonormais ($X^TX=I$), a matriz de projeção se simplifica para $P_\pi=XX^T$.
+- □ Em compressão de imagem via PCA, manter apenas as $k$ componentes principais mais informativas e descartar as demais pode ser descrito por uma matriz de projeção $P_\pi$ com as mesmas propriedades ($P_\pi^2=P_\pi$, simétrica) definidas acima.
+- □ Como $P_\pi=X(X^TX)^{-1}X^T\in\mathbb{R}^{N\times N}$ e toda matriz quadrada invertível que satisfaz $P^2=P$ só pode ser a identidade, isso implica que $P_\pi$ só pode ser a matriz identidade quando $X$ tem posto completo.
+:::
+
+::: {.callout-note icon=false}
+## Síntese: da falta de solução ao número de condição
+
+- □ Se fosse possível calcular o número de condição de $X^TX$ exatamente a partir da razão entre o maior e o menor autovalor de $X^TX$, isso tornaria desnecessário o tipo de experimento de perturbação numérica descrito acima (perturbar `MedHouseVal` e observar a oscilação de $\hat{\mathbf{w}}$) para *detectar* fragilidade — mas o experimento de perturbação continuaria sendo uma forma válida de *demonstrar* o efeito prático dessa fragilidade.
+- □ No caso-limite em que $X$ tem colunas mutuamente ortogonais e todas de norma $1$ (uma base ortonormal do espaço-coluna), o número de condição de $X^TX$ é exatamente $1$ — o melhor condicionamento numérico possível.
+- □ Num pipeline de aprendizado de máquina em que os atributos de entrada são primeiro padronizados (média 0, desvio-padrão 1) antes do ajuste, essa etapa de pré-processamento pode, dependendo dos dados, influenciar o número de condição de $X^TX$ resultante, mesmo sem alterar o posto de $X$.
+- □ Como as Equações Normais fornecem uma fórmula fechada exata para $\hat{\mathbf{w}}$ sempre que $X$ tem posto completo, isso implica que essa fórmula é sempre o método numericamente mais recomendado para calcular $\hat{\mathbf{w}}$ na prática, independentemente do número de condição de $X^TX$.
+:::

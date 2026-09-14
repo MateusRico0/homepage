@@ -754,6 +754,490 @@ em Valores Singulares (SVD), já anunciada no Fechamento desta aula via
 a própria definição de número de condição do Boyd (escrita em termos de
 valores singulares $\sigma$, não autovalores).
 
-## Aulas 5–15
+## Aula 5 — Decomposição em Valores Singulares (SVD) e Aproximações de Baixo Posto (2026-09-12)
+
+Construída numa única sessão, ciclo completo (planejamento → aula →
+gabarito → link da disciplina → `_progresso.md`) sem parar nos
+checkpoints intermediários — autorização explícita do usuário para
+seguir direto até o fim das Aulas 5 e 6. Gancho de abertura: a pendência
+que a própria Aula 4 deixou registrada neste arquivo ("autovalores e
+autovetores reais [...] só existem incondicionalmente para matrizes
+quadradas simétricas [...] a resposta é a Decomposição em Valores
+Singulares, tema da Aula 5") e o TikZ de fechamento da Aula 4
+("$X$ não é quadrada $\to$ Teorema Espectral não se aplica direto
+$\to$ SVD (Aula 5)").
+
+- [x] `_00-planejamento.md` — Estratégia B (Inside-Out com
+      Problema-Fio), 7 blocos, ~100min. 7 fontes citadas, todas do
+      `mathml.pdf` (Cap. 4.5-4.6, SVD e Aproximação de Matrizes),
+      offset **+6** reconfirmado (Teorema 4.22 p.119→125; construção
+      §4.5.2 p.122-125→128-131; Exemplo 4.13 p.125-126→131-132; Def.
+      4.23/Teo. 4.24 p.131→137; Teo. 4.25 Eckart-Young p.131-132→137-138;
+      Exemplos 4.14-4.15, notas de filmes, p.127-128 e 132→133-134 e
+      138). A Decomposição Polar (Bloco 6) não tem lastro em nenhuma das
+      3 fontes da disciplina (buscado explicitamente em `mathml.pdf`,
+      `copt.pdf` e `optml.pdf` — zero ocorrências) — sinalizada como
+      construção própria, derivada diretamente do Teorema 4.22 já
+      demonstrado.
+- [x] `index.qmd` — dual HTML/RevealJS, 7 blocos: (1) Revisão/Introdução
+      retomando a Aula 4 + explicação formal de por que autovalor é
+      **indefinido** (não só "não garantido") para matriz retangular +
+      Problema Motivador (matriz de notas de filmes, MathML Exemplo
+      4.14, traduzida) + Pausa Ativa 1; (2) Intuição geométrica — matriz
+      $2\times2$ não-simétrica de propósito, contrastando vetores
+      singulares (sempre ortogonais) com autovetores (não-ortogonais em
+      geral, $\approx106{,}9°$ no exemplo) + Pausa Ativa 2; (3)
+      Construção formal da SVD a partir do Teorema Espectral — prova
+      própria passo a passo (Premissas → vetores singulares à direita
+      via autovetores de $A^TA$ → vetores singulares à esquerda como
+      imagem normalizada, com prova de ortogonalidade → equação de valor
+      singular → montagem $A=U\Sigma V^T$), Teorema 4.22 formal, exemplo
+      resolvido à mão (MathML Exemplo 4.13, $2\times3$) verificado com
+      `numpy.linalg.svd` + Pausa Ativa 3; (4) SVD do dataset-fio $X$
+      (California Housing) — $\sigma_i^2=\lambda_i(X^TX)$ verificado
+      numericamente idêntico aos autovalores da Aula 4; Proposição
+      própria $\text{cond}(X^TX)=\text{cond}(X)^2$, provada e verificada
+      ($153{,}168^2\approx23\,460{,}5$, batendo exato com a Aula 4) +
+      Pausa Ativa 4; (5) Aproximação de baixo posto — matrizes de posto
+      1 $A_i=\mathbf{u}_i\mathbf{v}_i^T$, SVD truncada, norma espectral
+      (Def. 4.23, Teo. 4.24 com prova própria via quociente de Rayleigh
+      da Aula 4), Teorema de Eckart-Young-Mirsky (Teo. 4.25) com prova
+      completa (tradução/reorganização da prova do MathML, citando o
+      Teorema do Núcleo e da Imagem), aplicado a $X$ ($k=1,2,3$,
+      erro espectral batendo com $\sigma_{k+1}$ até a 6ª casa decimal) e
+      retomando o Problema Motivador (filtragem colaborativa: notas de
+      filmes, rank-1 vs. rank-2, heatmaps) + Pausa Ativa 5; (6)
+      Decomposição Polar — construção própria $A=QS$ a partir dos
+      fatores da SVD, prova de que $Q$ é ortogonal e $S$ é simétrica
+      PSD, aplicada de volta à matriz $2\times2$ do Bloco 2 (estica via
+      $S$, gira via $Q$), ponte para a Aula 14 (Newton-Schulz,
+      Shampoo/Muon); (7) Fechamento retomando as 4 perguntas + ponte
+      para a Aula 6 (gradiente/Jacobiano). 5 Pausas Ativas (Blocos 1-5;
+      Blocos 6-7 sem pausa, mesmo padrão da Aula 4). 8 elementos visuais
+      em `.fig-resize` (2 TikZ: roteiro de abertura, ponte final para a
+      Aula 6; 4 figuras matplotlib com imagem: intuição geométrica
+      $2\times2$, valores singulares de $X$ + validação $\sigma^2=
+      \lambda$, heatmaps de notas de filmes original/posto-1/posto-2,
+      decomposição polar circulo→elipse→elipse-girada; 2 chunks
+      adicionais de só texto/tabela, também envolvidos em
+      `.fig-resize` por consistência de estilo).
+- **Números verificados via script Python (`uv run python3`, kernel
+  `homepage`) antes de escrever, nunca fabricados:**
+  - SVD completa de $X$ (California Housing, $N=16\,640$, 4 atributos):
+    $\sigma=[4\,186{,}996;\ 523{,}441;\ 229{,}491;\ 27{,}336]$;
+    $\sigma^2$ idêntico, número por número, aos autovalores de $X^TX$
+    já calculados na Aula 4.
+    $\text{cond}(X)\approx153{,}168$; $\text{cond}(X)^2\approx23\,460{,}5$
+    — bate exato com $\text{cond}(X^TX)$ da Aula 4.
+  - Eckart-Young-Mirsky verificado exatamente em $X$: para $k=1,2,3$,
+    $\|X-\hat X^{(k)}\|_2=\sigma_{k+1}$ até a 6ª casa decimal; erro
+    relativo de Frobenius caindo de $\approx13{,}5\%$ ($k=1$) a
+    $\approx0{,}6\%$ ($k=3$).
+  - Matriz de notas de filmes (MathML Exemplo 4.14): $\sigma=
+    [9{,}6438;\ 6{,}3639;\ 0{,}7056]$; rank-1/rank-2 recalculados e
+    conferidos contra os valores do próprio livro (rank-2:
+    $[[4{,}78,4{,}24,1{,}02],[5{,}23,4{,}75,-0{,}03],[0{,}25,-0{,}27,
+    4{,}97],[0{,}75,0{,}28,4{,}03]]$ — bate com o MathML, pequenas
+    diferenças de arredondamento de quarta casa decimal). Erro espectral
+    de posto-1/posto-2 batendo exato com $\sigma_2,\sigma_3$.
+  - Adição de um $4^o$ espectador com nota $(5,5,5,5)$ (usado no
+    Exercícios): posto sobe de $3$ para $4$; resíduo fora do
+    espaço-coluna $\approx0{,}577$ (não-nulo); $4^o$ valor singular novo
+    $\approx0{,}362$ — verificado antes de escrever o item.
+  - Decomposição Polar da matriz $2\times2$ do Bloco 2/6: $\det(Q)=1$
+    (rotação pura, $\approx7{,}43°$); autovalores de $S=[0{,}645;\,
+    1{,}675]$ = valores singulares de $A$; $QS=A$ até erro de ponto
+    flutuante.
+  - Gradiente de teste (usado só para preparar a ponte com a Aula 6,
+    não publicado nesta aula): $\nabla_\beta\|X\beta-\mathbf{y}\|^2=
+    2X^T(X\beta-\mathbf{y})$ conferido contra diferença finita central
+    (`eps=1e-5`), diferença relativa $\approx10^{-12}$.
+- [x] `_01-respostas.md` — discussão em prosa + V/F resolvido das 5
+      Pausas Ativas; heurística nomeada + afirmação + resposta +
+      justificativa para os 36 itens de V/F dos Exercícios (9 blocos:
+      existência/formato da SVD; construção via $A^TA$/$AA^T$; valores
+      singulares/norma espectral; aproximação de baixo posto; Eckart-
+      Young-Mirsky; Decomposição Polar; SVD vs. decomposição espectral;
+      SVD aplicada a $X$; filtragem colaborativa); mais 3 questões
+      discursivas, sem solução (trabalho do aluno). **Uma correção real
+      feita durante a escrita do gabarito:** o item (b) do bloco "A SVD
+      aplicada a $X$" (Pausa Ativa 4) tinha sido rascunhado com uma
+      resposta internamente contraditória (marcado ✔ com uma
+      justificativa que na verdade demonstrava ✗) — identificado e
+      corrigido antes de finalizar, com a Proposição
+      $\text{cond}(X^TX)=\text{cond}(X)^2$ usada para justificar a
+      resposta certa (✗, o item afirmava o oposto do que a proposição
+      garante). Também corrigido um item do bloco "Eckart-Young-Mirsky"
+      que, como rascunhado originalmente, testava uma afirmação
+      **verdadeira** (a generalização de Mirsky para norma de Frobenius)
+      rotulada como armadilha de "falsa dicotomia" — reescrito para
+      manter a premissa verdadeira (mesma matriz minimizadora nas duas
+      normas) mas testar uma conclusão indevida (mesmo *valor* mínimo
+      nas duas normas, que é falsa em geral), verificado numericamente
+      antes de fixar a resposta.
+- **Um erro de raciocínio pego e corrigido nesta sessão, antes de
+  publicar:** ao rascunhar o item (c) do bloco "SVD vs. decomposição
+  espectral" dos Exercícios, a primeira tentativa generalizava
+  incorretamente a condição do Remark do MathML (SVD = decomposição
+  espectral só para matrizes **simétricas semidefinidas positivas**,
+  não para qualquer simétrica) — corrigido reescrevendo o item (a) do
+  mesmo bloco para testar exatamente esse limite (falso em geral,
+  verdadeiro só no caso PSD), com o item (b) construindo a mecânica do
+  contraexemplo (autovalor negativo $\Rightarrow$ troca de sinal em
+  $U$ ou $V$) e o item (c) confirmando o caso PSD.
+
+**Validação (itens obrigatórios, todos passados):**
+
+1. Balanceamento de `:::` verificado por script (pilha LIFO): 0 abas
+   abertas remanescentes; 4 ocorrências de fechamento duplicado
+   acidental (bug de cópia do padrão da Aula 4) encontradas e
+   corrigidas antes de renderizar.
+2. `uv run python3 preview-watch.py --incremental` (nunca `quarto
+   render` direto, por instrução do `CLAUDE.md`): `notas.html` e
+   `slides.html` gerados sem erro/traceback.
+3. Glifos: 76 `□` no total (40 das 5 Pausas Ativas × 2 formatos + 36 dos
+   9 blocos de Exercícios), 11 `✔` + 9 `✗` nas 5 Resposta dos slides;
+   zero `<input type="checkbox">` real em ambos os arquivos renderizados
+   (única ocorrência de `type="checkbox"` é a regra CSS genérica do
+   tema).
+4. Exercícios confirmados por contagem programática: 3 discursivas + 9
+   blocos de V/F (36 itens) — densidade um pouco acima da Aula 4 (8
+   blocos), justificada pelos 6 blocos de conteúdo novo desta aula
+   (contra 5 da Aula 4).
+5. YAML confirmado: `output-file: notas.html` (html) e
+   `output-file: slides.html` (revealjs), mesmo bloco `format:`
+   compartilhado das Aulas 1-4.
+6. Inspeção visual das 4 figuras matplotlib (PNG do `_freeze/`) e dos 2
+   diagramas TikZ (SVG convertido via `rsvg-convert`): todas
+   consistentes com a matemática pretendida — círculo/elipse com
+   `aspect("equal", adjustable="box")` em todos os painéis geométricos;
+   TikZ sem sobreposição de caixas, margens generosas.
+
+**Etapa 5 concluída nesta sessão:** link da Aula 5 no `../index.qmd`
+convertido de texto em negrito para link (mesmo formato das Lições
+1-4); dicionário de notações abaixo atualizado.
+
+### Dicionário de notações — símbolos novos desta aula
+
+| Símbolo/termo | Significado | Introduzido em |
+|---|---|---|
+| $A=U\Sigma V^T$ | Decomposição em Valores Singulares (SVD) | Aula 5, Bloco 3 |
+| $\sigma_i$ | valor singular (sempre real, $\ge0$, ordenado $\sigma_1\ge\dots\ge\sigma_r>0$) | Aula 5, Bloco 3 |
+| $\mathbf{u}_i$ (coluna de $U$) | vetor singular à esquerda (autovetor de $AA^T$) | Aula 5, Bloco 3 |
+| $\mathbf{v}_i$ (coluna de $V$) | vetor singular à direita (autovetor de $A^TA$) | Aula 5, Bloco 3 |
+| SVD completa / reduzida / truncada | $U,V$ quadradas completas / $U$ recortada ao posto / soma dos $k$ primeiros termos | Aula 5, Bloco 3-5 |
+| $\hat{A}^{(k)}=\sum_{i=1}^k\sigma_i\mathbf{u}_i\mathbf{v}_i^T$ | aproximação de posto-$k$ (SVD truncada) | Aula 5, Bloco 5 |
+| $\|A\|_2$ | norma espectral ($=\sigma_1$, Teo. 4.24) | Aula 5, Bloco 5 |
+| Teorema de Eckart-Young-Mirsky | $\hat{A}^{(k)}$ é a melhor aproximação de posto $k$ em norma espectral (e de Frobenius, generalização de Mirsky), erro $=\sigma_{k+1}$ | Aula 5, Bloco 5 |
+| $A=QS$ | Decomposição Polar ($Q$ ortogonal, $S$ simétrica semidefinida positiva) | Aula 5, Bloco 6 |
+| $\text{cond}(X)=\sigma_{\max}/\sigma_{\min}$ | número de condição via valores singulares (Boyd, já citado na Aula 4); $\text{cond}(X^TX)=\text{cond}(X)^2$ | Aula 5, Bloco 4 |
+
+**Pendência para a Aula 6:** a SVD decompõe uma matriz estática, mas não
+diz como encontrar os parâmetros que minimizam uma função de perda — as
+Equações Normais (Aula 3) já usaram, implicitamente, a ideia de "a perda
+parar de diminuir" sem nunca formalizar o que isso significa em várias
+variáveis. A Aula 6 abre a Parte 2 do curso (Cálculo da Otimização
+Diferenciável) com exatamente essa ferramenta: gradiente $\nabla f$ e
+Jacobiano $J$.
+
+## Aula 6 — Derivadas Parciais, Jacobiano e o Vetor Gradiente (2026-09-13)
+
+Construída na mesma sessão da Aula 5, ciclo completo (planejamento →
+aula → gabarito → link da disciplina → `_progresso.md`), sem parar nos
+checkpoints intermediários (mesma autorização do usuário que cobriu a
+Aula 5). Abre a **Parte 2** do curso ("Cálculo da Otimização
+Diferenciável") — mudança de eixo reconhecida explicitamente na
+Abertura: as cinco aulas anteriores nunca precisaram definir
+"minimizar uma função", mas as Equações Normais (Aula 3) já usaram essa
+ideia implicitamente, via um argumento geométrico de projeção.
+
+- [x] `_00-planejamento.md` — Estratégia B (Inside-Out com
+      Problema-Fio), 7 blocos, ~100min. 6 fontes originalmente
+      planejadas do `mathml.pdf` (Cap. 5, Vector Calculus: Def. 5.5
+      Derivada Parcial/Gradiente, Remark convenção linha, §5.2.1 regras
+      de derivação, Def. 5.6 Jacobiano, Def. 5.2/§7.1 "subida mais
+      íngreme" sem prova), offset **+6** reconfirmado (Def. 5.5 p.
+      146→152; Def. 5.6 p. 150→156). **Uma 7ª fonte encontrada durante a
+      escrita do Bloco 5** (não antecipada no planejamento original):
+      MathML Exemplo 5.11 ("Gradient of a Least-Squares Loss in a
+      Linear Model", p. 153-154→159-160) resolve **exatamente** o
+      problema desta aula (perda de mínimos quadrados de modelo linear,
+      via regra da cadeia com Jacobiano) — substituiu uma nota de
+      "construção própria" originalmente planejada por uma citação
+      direta e precisa, com tradução/adaptação de notação
+      ($\mathbf{e}=\mathbf{y}-\Phi\boldsymbol{\theta}=-\mathbf{r}$).
+      Derivada direcional (Bloco 4) permanece **construção nossa**
+      — busca confirmou que nenhuma das 3 fontes da disciplina define o
+      termo no material coberto (`optml.pdf`/`copt.pdf` definem, mas
+      estão reservados para aulas de otimização não-suave, mais
+      adiante); a prova de que o gradiente maximiza a derivada
+      direcional (via Cauchy-Schwarz, Aula 1) também é prova nossa — o
+      MathML só afirma o resultado, nunca prova.
+- [x] `index.qmd` — dual HTML/RevealJS, 7 blocos: (1) Revisão/Introdução
+      com reconhecimento explícito do corte Álgebra Linear→Cálculo +
+      Problema Motivador (direção de redução mais rápida de
+      $L(\boldsymbol{\beta})$ sem resolver sistema, cenário de milhões
+      de parâmetros) + Pausa Ativa 1; (2) Derivada parcial (Def. 5.5,
+      metade) aplicada a um exemplo bivariado concreto (amostra de $5$
+      bairros, $2$ atributos), limite numérico vs. fórmula exata + Pausa
+      Ativa 2; (3) Gradiente como vetor-linha (Def. 5.5 completa +
+      Remark de convenção) e regras de derivação (soma/produto/cadeia,
+      §5.2.1), com desenvolvimento *principled* completo do gradiente
+      da perda quadrática ($\nabla_{\boldsymbol{\beta}}\|X\boldsymbol{
+      \beta}-\mathbf{y}\|^2=2(X\boldsymbol{\beta}-\mathbf{y})^TX$),
+      recuperando as Equações Normais como $\nabla L=\mathbf{0}$ + Pausa
+      Ativa 3; (4) Derivada direcional (construção própria) + prova
+      própria (Cauchy-Schwarz, Aula 1) de que o gradiente maximiza a
+      derivada direcional, com verificação numérica/geométrica (contorno
+      + curva de cosseno) + Pausa Ativa 4; (5) Jacobiano (Def. 5.6),
+      aplicado ao resíduo ($J_{\mathbf{r}}(\boldsymbol{\beta})=X$,
+      observação nossa) e à regra da cadeia com Jacobiano (MathML
+      Exemplo 5.11, recuperando o resultado do Bloco 3 por rota
+      diferente) + Pausa Ativa 5; (6) Verificação numérica —
+      compromisso truncamento-vs-arredondamento na escolha de $h$ para
+      diferença finita, caso especial honesto (perda quadrática do
+      problema-fio tem $f'''\equiv0$, erro de truncamento zero, só
+      arredondamento visível), sem pausa ativa (mesmo padrão do bloco
+      de "aplicação no dado real" da Aula 4); (7) Fechamento retomando
+      as 4 perguntas + ponte para a Aula 7 (Hessiana — $\nabla L=
+      \mathbf{0}$ identifica ponto crítico, não garante mínimo). 5
+      Pausas Ativas (Blocos 1-5; Blocos 6-7 sem pausa). 7 elementos
+      visuais em `.fig-resize` (2 TikZ: roteiro de abertura, ponte final
+      para a Aula 7; 2 figuras matplotlib com imagem — contorno +
+      derivada direcional em função do ângulo (Bloco 4), erro da
+      diferença finita em função de $h$ (Bloco 6); 3 chunks adicionais
+      de só texto/verificação numérica, também em `.fig-resize` por
+      consistência de estilo).
+- **Um bug real de visualização encontrado e corrigido durante a
+  verificação visual:** a primeira versão da figura do Bloco 4
+  desenhava a seta do gradiente com uma escala fixa em unidades de
+  dado (`0.08/norma`), que — como os eixos $\beta_1$ (faixa $0,6$) e
+  $\beta_2$ (faixa $0,04$) têm escalas muito diferentes — jogava a
+  ponta da seta muito além dos limites visíveis do eixo $\beta_2$,
+  tornando a seta **invisível** no gráfico renderizado (só o ponto
+  vermelho aparecia). Corrigido escalando o vetor como fração do
+  próprio intervalo visível do eixo dominante, e a prosa ao redor da
+  figura foi ajustada para não alegar ortogonalidade **visual** exata
+  às curvas de nível (só visível com eixos de mesma escala, que aqui
+  distorceria a legibilidade das curvas) — o fato matemático em si
+  (provado via Cauchy-Schwarz) não depende da escolha de desenho, e
+  continua correto e citado em prosa.
+- **Números verificados via script Python (`uv run python3`, kernel
+  `homepage`) antes de escrever, nunca fabricados:**
+  - Gradiente de $L(\boldsymbol{\beta})=\|X\boldsymbol{\beta}-
+    \mathbf{y}\|^2$ em $\boldsymbol{\beta}_0=(0{,}4;\,0{,}02;\,
+    -0{,}15;\,0{,}7)$: $\nabla L=[-5\,846{,}13;\ 71\,951{,}88;\
+    4\,014{,}13;\ 1\,643{,}72]$ (forma coluna $2X^T\mathbf{r}$),
+    conferido contra diferença finita central ($h=10^{-5}$), diferença
+    relativa $\approx10^{-12}$.
+  - Derivada direcional: para $5$ direções testadas em
+    $\boldsymbol{\beta}_0$, $D_{\mathbf{v}}L$ bate exatamente com
+    $\nabla L\cdot\mathbf{v}$ em todos os casos; máximo
+    ($\approx72\,319{,}19=\|\nabla L\|$) na direção do gradiente
+    normalizado, mínimo na direção oposta.
+  - Exemplo bivariado (amostra de $5$ bairros, `MedInc`/`HouseAge`):
+    em $(\beta_1,\beta_2)=(0{,}5;\,0{,}02)$, $\partial L/
+    \partial\beta_1\approx5{,}637$, $\partial L/\partial\beta_2\approx
+    95{,}040$; gradiente ângulo $\approx86{,}6°$, norma
+    $\approx95{,}207$; máximo de $D_{\mathbf{v}}L$ sobre a grade de
+    ângulos confirmado exatamente nesse ângulo.
+  - Jacobiano do resíduo $J_{\mathbf{r}}(\boldsymbol{\beta})=X$
+    confirmado coluna a coluna por diferença finita, erro máximo
+    $\sim10^{-10}$ nas $4$ colunas.
+  - Compromisso de $h$: erro de diferença finita central medido para
+    $h$ de $10^{-2}$ a $10^{-13}$ — confirmado **monotonicamente
+    crescente** conforme $h\to0$ (sem "U"), consistente com
+    $f'''\equiv0$ para a perda quadrática do problema-fio.
+- [x] `_01-respostas.md` — discussão em prosa + V/F resolvido das 5
+      Pausas Ativas; heurística nomeada + afirmação + resposta +
+      justificativa para os 32 itens de V/F dos Exercícios (8 blocos:
+      derivada parcial; convenção linha/coluna do gradiente; regras de
+      derivação e gradiente da perda quadrática; derivada direcional;
+      direção de subida mais íngreme; Jacobiano; regra da cadeia com
+      Jacobiano; verificação numérica); mais 3 questões discursivas,
+      sem solução (trabalho do aluno).
+
+**Validação (itens obrigatórios, todos passados):**
+
+1. Balanceamento de `:::` verificado por script (pilha LIFO) desde a
+   primeira escrita — zero erros (lição aprendida da Aula 5, onde um
+   bug de fechamento duplicado só foi pego depois de escrever; desta
+   vez verificado a cada bloco).
+2. `uv run python3 preview-watch.py --incremental`: `notas.html` e
+   `slides.html` sem erro/traceback, incluindo depois da correção do
+   bug de visualização do Bloco 4.
+3. Glifos: 72 `□` no total (40 das 5 Pausas Ativas × 2 formatos + 32 dos
+   8 blocos de Exercícios), 12 `✔` + 8 `✗` nas 5 Resposta dos slides;
+   zero `<input type="checkbox">` real em ambos os arquivos.
+4. Exercícios confirmados por contagem programática: 3 discursivas + 8
+   blocos de V/F (32 itens) — mesma densidade da Aula 4 (5 blocos de
+   conteúdo novo, Blocos 2-6).
+5. YAML confirmado: `output-file: notas.html` (html) e
+   `output-file: slides.html` (revealjs), mesmo bloco `format:`
+   compartilhado das Aulas 1-5.
+6. Inspeção visual das 2 figuras matplotlib (PNG do `_freeze/`, incluindo
+   re-inspeção depois da correção do bug de escala) e dos 2 diagramas
+   TikZ (SVG convertido via `rsvg-convert`): consistentes com a
+   matemática pretendida; TikZ sem sobreposição, margens generosas.
+
+**Etapa 5 concluída nesta sessão:** link da Aula 6 no `../index.qmd`
+convertido de texto em negrito para link (mesmo formato das Lições
+1-5); dicionário de notações abaixo atualizado.
+
+### Dicionário de notações — símbolos novos desta aula
+
+| Símbolo/termo | Significado | Introduzido em |
+|---|---|---|
+| $\partial f/\partial x_i$ | derivada parcial de $f$ em relação a $x_i$ (demais variáveis fixas) | Aula 6, Bloco 2 |
+| $\nabla f$, $\nabla_{\mathbf{x}}f$, $df/d\mathbf{x}$ | gradiente de $f$ (vetor-**linha**, convenção MathML) | Aula 6, Bloco 3 |
+| $D_{\mathbf{v}}f(\mathbf{x})$ | derivada direcional de $f$ em $\mathbf{x}$, na direção unitária $\mathbf{v}$ | Aula 6, Bloco 4 |
+| $J$, $J_f(\mathbf{x})$ | Jacobiano de $f:\mathbb{R}^n\to\mathbb{R}^m$ (matriz $m\times n$, *numerator layout*; gradiente = caso $m=1$) | Aula 6, Bloco 5 |
+| $\mathbf{r}(\boldsymbol{\beta})=X\boldsymbol{\beta}-\mathbf{y}$ | resíduo como função vetorial de $\boldsymbol{\beta}$; $J_{\mathbf{r}}(\boldsymbol{\beta})=X$ | Aula 6, Bloco 5 |
+| regra da cadeia com Jacobiano | $\nabla_{\boldsymbol{\beta}}(g\circ\mathbf{r})=\nabla_{\mathbf{r}}g\cdot J_{\mathbf{r}}(\boldsymbol{\beta})$ | Aula 6, Bloco 5 |
+| ponto crítico | ponto onde $\nabla f=\mathbf{0}$ — não garante mínimo/máximo sem informação adicional | Aula 6, Fechamento |
+
+**Pendência para a Aula 7:** $\nabla L=\mathbf{0}$ identifica um ponto
+crítico, mas não diz se é mínimo, máximo ou sela — para a perda
+quadrática do problema-fio isso funciona porque $X^TX$ é semidefinida
+positiva (Aula 4), mas essa garantia não vem do gradiente sozinho.
+Tema da Aula 7 (Convexidade e a Hessiana, syllabus): a segunda derivada
+em várias variáveis decide essa questão em geral.
+
+## Migração para `exercicios.qmd`/`soluções.qmd` públicos por aula (2026-09-14)
+
+Retomada de uma migração interrompida por rate limit (agentes paralelos
+anteriores morreram no meio do trabalho). Executada sequencialmente,
+sem sub-agentes, seguindo a convenção descrita em `../CLAUDE.md` (seção
+"Exercícios"): a seção "Exercícios" embutida em cada `aulaNN/index.qmd`
+(HTML + RevealJS) foi removida e substituída por dois arquivos-irmãos
+publicados, `aulaNN/exercicios.qmd` (questões, autocontidas) e
+`aulaNN/soluções.qmd` (gabarito, agora público) — mais um link de
+navegação simples perto do Fechamento (`[Exercícios](exercicios.qmd)
+[Soluções](soluções.qmd)`, nas duas saídas). As Pausas Ativas não foram
+afetadas — continuam embutidas em `index.qmd`, com gabarito oculto em
+`_0N-respostas*.md`.
+
+**Por aula:**
+
+- **Aula 1 — caso especial, exige registro explícito.** Ao contrário do
+  que a tarefa original supunha, `aula01/index.qmd` **nunca teve** uma
+  seção de Exercícios — verificado em todo o histórico do git (`git log
+  --all -p`), a seção nunca existiu em nenhum commit. O arquivo-raiz
+  antigo `exercicios.qmd` (já removido, ver abaixo) também não tinha
+  nenhuma seção "Aula 01"/"Aula 1" — começava direto em "Aula 02". Ou
+  seja: não havia gabarito para recuperar porque **também não havia
+  pergunta** para recuperar. Em vez de só escrever um gabarito para
+  itens inexistentes, foi necessário **autorar do zero** tanto as
+  perguntas quanto o gabarito — 3 questões discursivas e 8 blocos de
+  V/F (32 itens), cobrindo vetores/operações, Hipótese de Suavidade/
+  $k$-NN, subespaços, Hipótese da Variedade, normas, métrica formal,
+  maldição da dimensionalidade e distância do cosseno — seguindo a
+  metodologia de heurísticas (contrafactual/limite/transferência/falsa
+  dicotomia) e a Heurística 3 restrita a outro cenário de ML, como
+  exigido pelo `CLAUDE.md`. Conteúdo original, não uma recuperação;
+  revisar com atenção redobrada na próxima leitura humana.
+- **Aula 2 — já estava pronta** de uma sessão anterior; só confirmada
+  (balanceamento de `:::`, ausência de glifos de checkbox clicável).
+- **Aula 3 — migração direta.** Perguntas extraídas de `index.qmd`,
+  gabarito de `_02-solucoes.md` (12 blocos de V/F, 48 itens — acima da
+  faixa de 6–10 blocos do `CLAUDE.md`, preservado como estava por ser
+  conteúdo já produzido; sinalizar para eventual revisão futura, não
+  cortado nesta sessão). `_02-solucoes.md` apagado.
+- **Aulas 4–6 — convenção antiga (`_01-respostas.md` misto).** Cada
+  arquivo consolidava Pausas Ativas + Exercícios num só lugar; a parte
+  de Exercícios foi extraída para `soluções.qmd`, e `_01-respostas.md`
+  foi *trimado* (não apagado) para conter só a parte de Pausas Ativas,
+  mantendo o mesmo nome de arquivo (convenção antiga desta disciplina,
+  não renomeado para `_0N-respostas-pausas.md`).
+- **Reescrita de autocontenção (todas as aulas migradas).** Vários
+  itens de V/F e questões discursivas, herdados de `index.qmd`,
+  dependiam de referências internas invisíveis fora da aula —
+  `"Bloco N"`, `"Aula N"`, `"nesta aula"`, `"Definição X.Y"`,
+  `"MathML"`, números de página do livro-texto. Cada `exercicios.qmd`
+  ganhou uma caixa **Convenções** no topo, restaurando inline toda
+  notação/definição necessária (equações normais, projeção, subespaço,
+  norma, métrica, autovalor/autovetor, SVD, gradiente/Jacobiano,
+  exemplos numéricos concretos como o dataset California Housing e a
+  matriz de notas de filmes), e cada item problemático foi reescrito
+  para apontar para essa caixa em vez de para a estrutura interna da
+  aula. Os `soluções.qmd` receberam o mesmo tratamento nas
+  justificativas (com menos rigor, já que o requisito formal do
+  `CLAUDE.md` é só sobre `exercicios.qmd`, mas a leitura ficaria confusa
+  sem isso). Depois de cada reescrita, o texto de cada afirmação em
+  `exercicios.qmd` foi comparado programaticamente (script Python) com
+  o campo **Afirmação** correspondente em `soluções.qmd`, byte a byte
+  após normalização de espaço em branco — zero divergência final em
+  todas as aulas migradas nesta sessão (3, 4, 5, 6).
+
+**Limpeza em nível de disciplina:**
+
+- `exercicios.qmd` da raiz (arquivo consolidado antigo, misturando
+  todas as aulas — o gatilho desta migração por estar com conteúdo
+  desatualizado/quebrado em partes) **apagado**.
+- `index.qmd` da disciplina: removida a linha de link
+  `[Exercícios de todas as aulas](./exercicios.qmd)`, que apontava para
+  o arquivo apagado. `styles.css` da raiz não foi tocado (ainda usado
+  por `computing-and-society`, fora do escopo desta migração).
+
+**Validação (todas as 6 aulas, itens obrigatórios):**
+
+1. Balanceamento de `:::` (pilha LIFO) verificado por script em
+   `index.qmd`, `exercicios.qmd` e `soluções.qmd` de cada aula — zero
+   erros.
+2. `grep` por `- [ ]`, `- [x]`, `☐`, `☒` nos três arquivos de cada
+   aula — zero ocorrências em todas.
+3. Contagem de itens `- □` em cada `exercicios.qmd` comparada com a
+   contagem de blocos `**Afirmação:**` no `soluções.qmd`
+   correspondente — igual em todas as 6 aulas (32, 32, 48, 32, 36, 32
+   itens nas Aulas 1–6, respectivamente).
+4. Releitura completa de cada `exercicios.qmd` publicado, confirmando
+   que nenhum item depende de "nesta aula"/"Bloco N"/notação não
+   redefinida na própria caixa de Convenções.
+5. `uv run python3 preview-watch.py --incremental` executado da raiz do
+   projeto — ver seção de render abaixo para o resultado.
+
+**Correção pós-migração (2026-09-14, mesma sessão):** uma varredura
+manual por palavras-chave (`sensor`, `físico`, `sinal`, `satélite`,
+`elétrica`, `epidemiologia`, etc.) encontrou **12 itens de V/F** com
+`Heurística: Transferência` que violavam a regra já estabelecida no
+`CLAUDE.md` ("a heurística 3 deve migrar para outro cenário de
+Aprendizado de Máquina, nunca para um domínio estapafúrdio ou
+decorativo") — a migração automática, ao reescrever itens para
+autocontenção, reintroduziu exemplos de física/engenharia/sinais em
+vez de manter o domínio de ML. Todos os 12 foram reescritos (em
+`exercicios.qmd` **e** `soluções.qmd`, mantendo a mesma resposta e
+mecânica matemática testada):
+
+- **Aula 2:** "imagens de satélite/modelo físico" → reconhecimento
+  facial; "sensor sempre desligado" → atributo binário nunca ativado
+  num dataset.
+- **Aula 3 (6 itens):** previsão de demanda de energia/modelo físico →
+  risco de crédito (German Credit); processamento de sinal de áudio →
+  sistema de recomendação por fatoração de matrizes; compressão de
+  vídeo por frequência → compressão de embeddings via PCA; termômetro/
+  temperatura → anotações redundantes de rotulação por crowdsourcing;
+  reconstrução de sinais → regressão com atributos linearmente
+  dependentes; experimento de física → regressão financeira sobre
+  outro dataset; sensores IoT Celsius/Fahrenheit → mantido (Celsius/
+  Fahrenheit), mas recontextualizado como atributo de um dataset de
+  previsão de demanda de energia (ML), não mais "sensores IoT".
+- **Aula 4 (4 itens):** modelo de epidemiologia → cadeia de Markov em
+  aprendizado por reforço; rede elétrica/matriz de admitância → matriz
+  Laplaciana de grafo em *clustering* espectral; sensores redundantes
+  removidos fisicamente → atributos redundantes removidos de um
+  dataset; sensores industriais Celsius/Pascal → dataset com atributos
+  em escalas heterogêneas (German Credit).
+
+Justificativas correspondentes também revisadas para remover menções
+remanescentes aos domínios antigos (ex.: "epidemiologia, ecologia" e
+"redes elétricas" apareciam nas justificativas mesmo depois da
+Afirmação já ter sido corrigida numa primeira passada). Rerenderizado
+e confirmado nos HTMLs publicados. **Nota para revisão futura:** o
+mesmo tipo de varredura não foi feito ainda nas disciplinas
+`supervised-learning` (2 itens já corrigidos à parte) e
+`unsupervised-learning` (ainda não verificada) além do que já constava
+nos relatórios de verificação de cada uma.
+
+## Aulas 7–15
 
 Não iniciadas.

@@ -1086,3 +1086,100 @@ Inkscape sem problema). Contagem de glifos no `_site/`: `notas.html`
 (`ul.task-list li input[type="checkbox"]`), não um checkbox real.
 Gabarito (`_01-respostas.md`) escrito com 32 entradas, cross-checado
 contra o texto exato dos 32 itens `- □` do `index.qmd`.
+
+---
+
+## Migração para `exercicios.qmd`/`soluções.qmd` por aula (2026-09-14)
+
+Retomada de um esforço de migração interrompido a meio caminho por um
+limite de taxa da API (vários sub-agentes paralelos morreram no meio).
+Concluída sequencialmente, aula por aula, sem sub-agentes (para não
+repetir a mesma tempestade de chamadas concorrentes). Aplicado o novo
+padrão descrito em `../CLAUDE.md` ("Exercícios — obrigatório em toda
+aula"): a seção de Exercícios (discursivas + V/F) saiu do `index.qmd`
+de cada aula e passou a viver em duas páginas-irmãs públicas,
+`aulaNN/exercicios.qmd` (questões, autocontidas) e
+`aulaNN/soluções.qmd` (gabarito, agora público). `index.qmd` perdeu a
+seção de Exercícios embutida (HTML e RevealJS) e ganhou um link de
+navegação perto do Fechamento.
+
+- **aula01–aula04:** `exercicios.qmd`/`soluções.qmd` já existiam de uma
+  passada anterior (boa qualidade, autocontidos). Trabalho desta
+  retomada: remover a seção de Exercícios ainda embutida no
+  `index.qmd` de cada uma (HTML + RevealJS), acrescentar os links de
+  navegação, apagar o `_02-solucoes.md` agora redundante. Observação
+  não corrigida (fora do escopo desta retomada) — **correção 2026-09-14:
+  a contagem inicial estava incompleta.** Contagem exata, conferida por
+  bloco: aula01=12, aula02=12, aula03=12, aula04=12, aula05=12,
+  aula06=8 blocos de V/F — ou seja, **5 das 6 aulas** (todas menos a
+  aula06) excedem a faixa de 6–10 blocos do `CLAUDE.md`, não só
+  aula01/aula02 como uma nota anterior desta retomada registrou.
+  Sinalizado aqui para uma eventual revisão futura (cortar blocos ou
+  redistribuir V/F entre pausas ativas e exercícios); não alterado
+  agora para não mexer em conteúdo já aprovado.
+- **aula03:** só existia `exercicios.qmd`. Criado `soluções.qmd` a
+  partir do gabarito velho em `_02-solucoes.md`, reescrevendo o texto
+  de cada `Afirmação` para casar exatamente com a redação autocontida
+  já usada em `exercicios.qmd` (algumas justificativas citavam "Bloco
+  X desta aula"/números do exemplo antigo de `MedInc` — reescritas
+  para números e cenários autocontidos, ex.: o contraexemplo de Split
+  1 vs. Split 2 do bloco "Por que não usar a taxa de erro bruta" ganhou
+  números concretos $(30,10)$/$(10,30)$ vs. $(20,0)$/$(40,20)$, ambos
+  com erro ponderado $0{,}25$). `index.qmd` limpo, `_02-solucoes.md`
+  apagado.
+- **aula04:** mesmo estado de aula01/02 — arquivos já existiam,
+  faltava só limpar `index.qmd` e apagar `_02-solucoes.md`.
+- **aula05 (do zero):** esta é a "aula de revisão integrada" das
+  Aulas 1–4, cujos exercícios originais citavam abundantemente "Bloco N
+  desta aula" e "Aula N" sem repetir os números/fatos necessários — a
+  reescrita mais trabalhosa das seis. Regra seguida: referências a
+  "Bloco N desta aula" (estrutura interna do `index.qmd`, sem sentido
+  fora dele) foram sempre eliminadas e substituídas por fatos inline
+  (números, fórmulas, definições); já referências a "Aula 1/2/3/4"
+  como comparação temática entre aulas do curso foram mantidas quando
+  o número necessário já vinha junto na frase (ex.: "prioris sintéticas
+  de $95\%/5\%$"), por não exigirem que o leitor tenha lido a aula
+  citada. Blocos de V/F que dependiam de resultados específicos do
+  Bootstrap/CV desta aula (intervalos de confiança, acurácias) ganharam
+  um parágrafo de contexto no início do bloco, com todos os números
+  necessários. `soluções.qmd` criado a partir do `_02-solucoes.md`
+  antigo, com o mesmo tratamento de reescrita.
+- **aula06 (do zero, convenção antiga):** só tinha
+  `_00-planejamento.md` e `_01-respostas.md` (Pausas Ativas +
+  Exercícios misturados num único arquivo). Dividido:
+  `_01-respostas.md` manteve só a seção "Pausas Ativas" (4 pausas, 16
+  itens de V/F) — nome do arquivo preservado, por instrução explícita
+  desta tarefa, mesmo diferindo do nome `_0N-respostas-pausas.md` usado
+  nas outras aulas da disciplina. A seção "Exercícios de V/F" (8
+  blocos, 32 itens) virou a base de `soluções.qmd`. Reescritas
+  principais para autocontenção: a questão discursiva 1 (projeção
+  ortogonal, citando PRML/ESL) ganhou a definição inline de
+  $\varphi_1,\varphi_2$ como as colunas de intercepto e de `MedInc`; o
+  bloco de V/F "Limitações: Heterocedasticidade, Censura e
+  Não-Linearidade" ganhou um parágrafo de contexto explicando a
+  censura de `MedHouseVal` em $5{,}00001$ (antes só citada como fato
+  já conhecido "desta aula"); referências a "Bloco 2/3" nas
+  justificativas foram trocadas por descrições diretas do que estava
+  sendo usado (a fórmula da log-verossimilhança, o teorema central).
+- **Limpeza de disciplina:** apagado
+  `teaching/supervised-learning/exercicios.qmd` (o antigo arquivo
+  consolidado da raiz — estava desatualizado/drifted em relação ao
+  conteúdo real de cada aula, foi o gatilho desta migração). Removido
+  o link `[Exercícios de todas as aulas](./exercicios.qmd)` do
+  `index.qmd` da disciplina. `styles.css` da raiz não foi tocado
+  (ainda em uso por `computing-and-society`).
+- **Verificação em todas as 6 aulas:** balanceamento de `:::` (LIFO,
+  zero unclosed) em `index.qmd`/`exercicios.qmd`/`soluções.qmd`; grep
+  por `- [ ]`, `- [x]`, `☐`, `☒` — zero ocorrências em todas; grep por
+  "desta aula"/"nesta aula"/"na aula"/"Bloco N"/"Seção N" em todos os
+  `exercicios.qmd` — zero ocorrências (a única exceção aceita foi
+  manter "Aula N" como rótulo temático em `aula05`, quando o número
+  necessário já vem na mesma frase); contagem de blocos de V/F em
+  `exercicios.qmd` batendo exatamente com o número de entradas `###`
+  em `soluções.qmd` (4 por bloco) em todas as 6 aulas; títulos de bloco
+  idênticos entre `exercicios.qmd` e `soluções.qmd` conferidos por
+  `diff` em aula05/aula06 (as duas reescritas do zero).
+- **Render:** `uv run python3 preview-watch.py --incremental` a partir
+  da raiz do repositório, sem erros; confirmados
+  `_site/teaching/supervised-learning/aulaNN/{exercicios,soluções}.html`
+  para as 6 aulas.

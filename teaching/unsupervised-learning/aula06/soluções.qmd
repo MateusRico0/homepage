@@ -1,0 +1,128 @@
+---
+title: "Soluções — Aula 6: PCA, PPCA e o Autoencoder Linear"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "today"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all aria-label="Ver aula" title="Ver aula"}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+
+::: {.callout-tip icon=false}
+Gabarito das questões de Verdadeiro/Falso de [`exercicios.qmd`](exercicios.qmd). O glifo (`✔`/`✗`) antes do texto de cada afirmação já indica o veredito; o campo **Resposta** repete por extenso. As questões discursivas não têm gabarito único registrado aqui — são abertas, pensadas para discussão em aula/monitoria.
+:::
+
+::: {.callout-note icon=false}
+## Formulação de máxima variância
+
+- □ Se, em vez de normalizar $\mathbf{u}_1$ à norma unitária, permitíssemos $\|\mathbf{u}_1\|\to\infty$ livremente, o problema de maximizar $\mathbf{u}_1^T\mathbf{S}\mathbf{u}_1$ deixaria de ter uma solução finita.
+- □ No caso-limite em que a matriz de covariância $\mathbf{S}$ tem um autovalor com multiplicidade maior que $1$ (dois autovalores iguais, ambos os maiores), a direção do primeiro componente principal deixa de ser única.
+- □ Como $\mathbf{u}_1^T\mathbf{S}\mathbf{u}_1=\lambda_1$ no ótimo, e $\lambda_1$ é sempre não negativo (pois $\mathbf{S}$ é semidefinida positiva), isso significa que a variância projetada em qualquer direção unitária é sempre igual a $\lambda_1$.
+- □ Ao aplicar PCA a um conjunto de embeddings de palavras (vetores densos de um modelo de linguagem), a direção de maior variância capturada pelo primeiro componente principal identifica a direção que mais separa os pontos entre si nesse espaço, sem usar nenhuma informação sobre o significado das palavras.
+:::
+
+::: {.callout-tip}
+## (Resposta) Formulação de máxima variância
+
+- ✔ Verdadeiro — Sem a restrição $\mathbf{u}_1^T\mathbf{u}_1=1$, escalar $\mathbf{u}_1$ por qualquer $c>0$ multiplica a variância projetada $\mathbf{u}_1^T\mathbf{S}\mathbf{u}_1$ por $c^2$ — para $c\to\infty$ a quantidade cresce sem limite (desde que $\mathbf{S}$ não seja identicamente nula). É exatamente por isso que a maximização de variância precisa de um multiplicador de Lagrange associado à restrição de norma: sem essa restrição, não existe máximo finito a ser encontrado.
+- ✔ Verdadeiro — Se $\lambda_1=\lambda_2$ são os dois maiores autovalores, qualquer combinação linear unitária dos autovetores associados a esse autovalor duplo produz a mesma variância projetada máxima $\lambda_1$ — o subespaço próprio associado tem dimensão $2$, e qualquer direção dentro dele (não só os dois autovetores originais escolhidos por uma decomposição numérica específica) é igualmente um "primeiro componente principal" válido. A unicidade da direção depende de o maior autovalor ser estritamente maior que os demais.
+- ✗ Falso — $\lambda_1$ é o valor da variância projetada só na direção **ótima** $\mathbf{u}_1$ (o autovetor de maior autovalor) — para qualquer outra direção unitária $\mathbf{v}$, $\mathbf{v}^T\mathbf{Sv}$ é, em geral, um valor **menor**, variando entre $\lambda_D$ (mínimo) e $\lambda_1$ (máximo) conforme a direção escolhida. Confundir "o valor máximo atingido no ótimo" com "o valor em qualquer direção" é exatamente o erro estrutural deste item.
+- ✔ Verdadeiro — O resultado de que o primeiro componente principal maximiza a variância projetada não depende da natureza dos dados de entrada — só de $\mathbf{S}$ ser a matriz de covariância amostral de algum conjunto de vetores em $\mathbb{R}^D$. Aplicado a embeddings de palavras, o primeiro componente principal é, por definição, a direção que maximiza a variância projetada dos vetores, isto é, a direção ao longo da qual os embeddings mais se distinguem uns dos outros — um critério puramente geométrico, cego a qualquer noção semântica de "significado".
+:::
+
+::: {.callout-note icon=false}
+## Formulação de erro mínimo e sua equivalência com a máxima variância
+
+- □ Se a medida de distorção $J$ usasse a distância $L_1$ (soma dos valores absolutos das diferenças) em vez da distância euclidiana ao quadrado, a solução ótima ainda seria dada pelos autovetores de $\mathbf{S}$.
+- □ No caso-limite $M=0$ (nenhuma dimensão retida, todo ponto aproximado só pela média $\bar{\mathbf{x}}$), a distorção $J$ é igual à soma de todos os autovalores de $\mathbf{S}$, incluindo o maior.
+- □ Como as duas formulações (máxima variância e mínimo erro) chegam à mesma equação $\mathbf{Su}_i=\lambda_i\mathbf{u}_i$, elas são, na verdade, a mesma derivação matemática reescrita com palavras diferentes, não duas provas logicamente independentes.
+- □ O mesmo objetivo de minimizar o erro quadrático de reconstrução, usado para justificar a formulação de erro mínimo da PCA, é também o objetivo direto de treinamento de um autoencoder.
+:::
+
+::: {.callout-tip}
+## (Resposta) Formulação de erro mínimo e sua equivalência com a máxima variância
+
+- ✗ Falso — A derivação da equivalência entre erro mínimo e autovetores depende, em cada passo, da distorção ser uma **soma de quadrados**: é essa estrutura que permite resolver a projeção ótima por derivada linear igualada a zero, e reescrever $J$ como uma forma quadrática ligada diretamente à matriz de covariância. Trocando por $L_1$ (não diferenciável do mesmo jeito, e sem a identidade de Pitágoras que liga variância retida e erro), a equação de estacionariedade deixa de ser $\mathbf{Su}_i=\lambda_i\mathbf{u}_i$ — a solução ótima de uma distorção $L_1$ é, em geral, uma mediana geométrica multivariada, não a decomposição espectral de $\mathbf{S}$.
+- ✔ Verdadeiro — A fórmula da distorção mínima, $J^\star=\sum_{i=M+1}^D\lambda_i$, com $M=0$ se reduz a $\sum_{i=1}^D\lambda_i=\mathrm{tr}(\mathbf{S})$ — a soma de **todos** os $D$ autovalores, incluindo $\lambda_1$. Faz sentido geometricamente: sem nenhuma direção retida, cada ponto é aproximado só pela média, e toda a variância dos dados (a soma de todos os autovalores) se torna erro de reconstrução.
+- ✗ Falso — As duas provas partem de objetivos e restrições formalmente distintos — uma maximiza $\mathbf{u}^T\mathbf{Su}$ sob $\|\mathbf{u}\|=1$; a outra minimiza o erro de reconstrução $J=\frac1N\sum_n\|\mathbf{x}_n-\tilde{\mathbf{x}}_n\|^2$ sob ortonormalidade de uma base completa — e chegam à mesma equação de autovalores por caminhos de Lagrange independentes. A coincidência é explicada, não eliminada, pelo argumento de Pitágoras: como a variância total $\mathrm{tr}(\mathbf{S})$ é fixa, maximizar a variância retida e minimizar o erro são o mesmo problema — mas essa é uma coincidência **provada** entre dois problemas diferentes, não uma tautologia entre a mesma derivação escrita duas vezes.
+- ✔ Verdadeiro — Um autoencoder é treinado minimizando $E(\mathbf{w})=\frac12\sum_n\|\mathbf{y}(\mathbf{x}_n,\mathbf{w})-\mathbf{x}_n\|^2$ — a menos do fator $\frac12$ e da normalização por $N$, o mesmo erro quadrático de reconstrução $J$ da formulação de erro mínimo da PCA. É essa coincidência de objetivos (não só de resultado) que permite provar que o mínimo global do autoencoder linear compartilha o mesmo subespaço da PCA, por redução direta ao problema já resolvido.
+:::
+
+::: {.callout-note icon=false}
+## PPCA como modelo gerador
+
+- □ Se a distribuição condicional $p(\mathbf{x}\mid\mathbf{z})$ da PPCA não incluísse nenhum termo de ruído (isto é, $\mathbf{x}=\mathbf{Wz}+\boldsymbol\mu$ deterministicamente), a distribuição marginal $p(\mathbf{x})$ deixaria de ser uma Gaussiana de covariância completa $D\times D$, tornando-se uma distribuição degenerada, concentrada num subespaço de dimensão $M$.
+- □ No caso-limite $M=D$ (a variável latente tem a mesma dimensão dos dados observados), a PPCA ainda impõe uma restrição não trivial sobre a forma da covariância marginal $\mathbf{C}$, mesmo permitindo $\mathbf{W}$ arbitrária.
+- □ Como $\mathbf{z}$ na PPCA tem prior Gaussiano $\mathcal{N}(\mathbf{0},\mathbf{I})$, isso significa que a posição de cada paciente no espaço latente $\mathbf{z}$ é sorteada aleatoriamente e não guarda nenhuma relação com seus atributos observados $\mathbf{x}$.
+- □ A mesma estrutura — variável latente com prior simples, dados observados gerados por uma transformação da variável latente mais ruído — é a base conceitual comum tanto da PPCA quanto de um Modelo de Mistura Gaussiana (GMM, em que uma variável latente categórica escolhe qual de $K$ populações gerou cada ponto), diferindo principalmente no tipo da variável latente (contínua vs. categórica) e na forma da transformação (linear vs. seleção entre componentes).
+:::
+
+::: {.callout-tip}
+## (Resposta) PPCA como modelo gerador
+
+- ✔ Verdadeiro — Sem o termo $\boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\sigma^2\mathbf{I})$, $\mathbf{x}$ é uma transformação linear determinística de $\mathbf{z}\in\mathbb{R}^M$; como $\mathbf{z}$ varia livremente em $\mathbb{R}^M$ (dimensão $M<D$), a imagem dessa transformação é, no máximo, um subespaço afim de dimensão $M$ dentro de $\mathbb{R}^D$ — toda a massa de probabilidade de $\mathbf{x}$ fica concentrada nesse subespaço, sem densidade espalhada nas $D-M$ direções restantes. Isso é precisamente o caso-limite $\sigma^2\to0$ levado ao extremo $\sigma^2=0$: a covariância marginal $\mathbf{C}=\mathbf{WW}^T+\sigma^2\mathbf{I}\to\mathbf{WW}^T$, uma matriz de posto no máximo $M<D$, portanto singular — não mais uma Gaussiana de covariância completa e invertível.
+- ✗ Falso — Quando $M=D$, $\mathbf{W}$ é uma matriz $D\times D$ arbitrária, e $\mathbf{WW}^T$ pode ser **qualquer** matriz semidefinida positiva de posto até $D$ (basta $\mathbf{W}$ ser uma raiz quadrada matricial da covariância desejada). Dado qualquer $\mathbf{C}$ definida positiva e um $\sigma^2>0$ menor que o menor autovalor de $\mathbf{C}$, $\mathbf{C}-\sigma^2\mathbf{I}$ ainda é definida positiva e admite uma raiz quadrada $\mathbf{W}$ tal que $\mathbf{WW}^T=\mathbf{C}-\sigma^2\mathbf{I}$ — ou seja, com $M=D$, a forma $\mathbf{WW}^T+\sigma^2\mathbf{I}$ deixa de ser uma restrição real: qualquer covariância definida positiva pode ser aproximada arbitrariamente bem (e recuperada exatamente no limite $\sigma^2\to0$). É exatamente o oposto do que motiva a PPCA no regime $M\ll D$, onde a restrição de posto baixo é o que reduz drasticamente o número de parâmetros livres frente aos $D(D+1)/2$ de uma covariância geral.
+- ✗ Falso — $p(\mathbf{z})=\mathcal{N}(\mathbf{0},\mathbf{I})$ é a distribuição **a priori** (marginal, antes de observar $\mathbf{x}$) — não a distribuição relevante depois que um paciente específico é observado. A **posterior** $p(\mathbf{z}\mid\mathbf{x})$ tem média $\mathbb{E}[\mathbf{z}\mid\mathbf{x}]=\mathbf{M}^{-1}\mathbf{W}_{\mathrm{ML}}^T(\mathbf{x}-\bar{\mathbf{x}})$ — uma função determinística (linear) de $\mathbf{x}$, fortemente informada pelos atributos observados daquele paciente específico. Confundir a distribuição a priori (não condicionada) com a posterior (condicionada aos dados observados) é exatamente o mesmo tipo de erro que já apareceria ao dizer que, num Modelo de Mistura Gaussiana, "a origem $z_n$ de um ponto é só um sorteio do peso de mistura $\pi_k$", ignorando a responsabilidade $\gamma(z_{nk})$ calculada via Bayes a partir do próprio ponto.
+- ✔ Verdadeiro — É exatamente a mesma arquitetura conceitual sob duas escolhas diferentes de variável latente: num GMM, $z_n$ é 1-de-$K$ (categórica) e $\mathbf{x}\mid z_{nk}=1\sim\mathcal{N}(\boldsymbol\mu_k,\boldsymbol\Sigma_k)$ — uma Gaussiana diferente por categoria, selecionada pela variável latente; na PPCA, $\mathbf{z}$ é contínua e $\mathbf{x}\mid\mathbf{z}\sim\mathcal{N}(\mathbf{Wz}+\boldsymbol\mu,\sigma^2\mathbf{I})$ — uma transformação linear de $\mathbf{z}$ mais ruído. A arquitetura conceitual ("gerar o observado a partir de uma variável não observada") é idêntica; o que muda é a natureza da variável latente e o mecanismo de geração condicional.
+:::
+
+::: {.callout-note icon=false}
+## MLE da PPCA e o caso-limite clássico
+
+- □ Se, na solução de máxima verossimilhança $\mathbf{W}_{\mathrm{ML}}=\mathbf{U}_M(\mathbf{L}_M-\sigma^2\mathbf{I})^{1/2} \mathbf{R}$ (onde $\mathbf{U}_M$ são os $M$ autovetores principais de $\mathbf{S}$, $\mathbf{L}_M$ a matriz diagonal dos $M$ maiores autovalores, e $\mathbf{R}$ uma matriz ortogonal $M\times M$ arbitrária), a matriz $\mathbf{R}$ fosse fixada em $\mathbf{R}=I$ em vez de arbitrária, a densidade preditiva $p(\mathbf{x})$ do modelo mudaria.
+- □ No caso-limite em que todos os $D$ autovalores de $\mathbf{S}$ são iguais entre si (dados isotrópicos, sem direção preferencial), $\sigma^2_{\mathrm{ML}}$ (para qualquer $M<D$) é igual a esse autovalor comum.
+- □ Como o caso-limite $\sigma^2\to0$ recupera a projeção ortogonal da PCA clássica, isso significa que a PPCA com $\sigma^2>0$ estimado por máxima verossimilhança é uma versão "pior" ou "menos precisa" da PCA clássica.
+- □ O mesmo fenômeno de invariância rotacional do parâmetro $\mathbf{W}$ (múltiplas soluções ligadas por uma rotação $\mathbf{R}$, produzindo a mesma verossimilhança) também aparece na não-identificabilidade de rótulo de componente (*label switching*) de um Modelo de Mistura Gaussiana (GMM), em que trocar os índices dos componentes não muda a verossimilhança.
+:::
+
+::: {.callout-tip}
+## (Resposta) MLE da PPCA e o caso-limite clássico
+
+- ✗ Falso — $\mathbf{R}$ é uma invariância rotacional da solução: para qualquer matriz ortogonal $\mathbf{R}$ ($\mathbf{RR}^T=\mathbf{I}$), $\widetilde{\mathbf{W}}\widetilde{\mathbf{W}}^T=\mathbf{WRR}^T\mathbf{W}^T=\mathbf{WW}^T$ — a covariância marginal $\mathbf{C}=\mathbf{WW}^T+\sigma^2\mathbf{I}$ (e, portanto, $p(\mathbf{x})=\mathcal{N}(\mathbf{x}\mid\boldsymbol\mu,\mathbf{C})$) é **idêntica** para toda a família de soluções ligadas por rotação. Fixar $\mathbf{R}=I$ é só escolher um representante particular dentro dessa família de soluções equivalentes — não muda $\mathbf{C}$ nem $p(\mathbf{x})$.
+- ✔ Verdadeiro — Se $\lambda_1=\lambda_2=\dots=\lambda_D=\lambda$, então $\sigma^2_{\mathrm{ML}}=\frac{1}{D-M}\sum_{i=M+1}^D\lambda_i=\frac{1}{D-M}\cdot(D-M)\cdot\lambda=\lambda$ — a média de $D-M$ cópias idênticas do mesmo valor é esse valor, para qualquer $M<D$ escolhido.
+- ✗ Falso — É exatamente o oposto: $\sigma^2_{\mathrm{ML}}>0$ é a média dos autovalores **descartados** — uma quantidade real e informativa sobre a variância que de fato existe fora do subespaço retido, não um artefato de imprecisão. A PCA clássica projeta deterministicamente, ignorando essa variância residual; a PPCA a modela explicitamente. "Recuperar a PCA no limite sem ruído" mostra que a PCA é um caso particular (mais simples, sem incerteza residual) da PPCA, não que a PPCA com $\sigma^2>0$ seja uma aproximação inferior dela.
+- ✔ Verdadeiro — Ambos são fenômenos de não identificabilidade por simetria do modelo: num GMM, permutar os $K$ rótulos de componente (trocar qual componente é chamado "1" e qual é chamado "2") produz exatamente a mesma verossimilhança, porque a mistura é invariante à ordem dos seus componentes; na PPCA, rotacionar $\mathbf{W}$ por qualquer $\mathbf{R}$ ortogonal produz a mesma $\mathbf{C}$ e a mesma $p(\mathbf{x})$. A diferença é só a natureza da simetria (uma permutação discreta finita no GMM; uma família contínua de rotações na PPCA) — a estrutura de fundo, múltiplos parâmetros ótimos equivalentes, é a mesma.
+:::
+
+::: {.callout-note icon=false}
+## O autoencoder linear
+
+- □ Se a arquitetura do autoencoder linear tivesse $D$ unidades na camada oculta (isto é, $M=D$, sem gargalo real), a rede poderia aprender a função identidade exatamente, com erro de reconstrução zero.
+- □ No caso-limite em que a rede tem $M=1$ unidade oculta, o autoencoder linear ótimo projeta os dados exatamente sobre a mesma reta que o primeiro componente principal isolado, sem precisar dos demais componentes.
+- □ Como o autoencoder linear e a PCA resolvem exatamente o mesmo problema de otimização, os vetores de peso aprendidos pelo autoencoder devem necessariamente ser ortonormais entre si, assim como os autovetores da PCA.
+- □ A mesma prova por redução (mostrar que duas famílias de funções alcançáveis coincidem, e portanto os mínimos dos respectivos problemas de otimização coincidem) é uma técnica de argumentação que também aparece ao comparar a solução de uma regressão Ridge com $\lambda\to0$ contra a solução de mínimos quadrados ordinários.
+:::
+
+::: {.callout-tip}
+## (Resposta) O autoencoder linear
+
+- ✔ Verdadeiro — Com $M=D$, a matriz $\mathbf{A}$ da composição codificador-decodificador pode ter posto até $D$ — em particular, $\mathbf{A}=\mathbf{I}$ (a identidade) é alcançável por alguma escolha de pesos (basta fatorar $\mathbf{I}=\mathbf{A}_2\mathbf{A}_1$ com $\mathbf{A}_1,\mathbf{A}_2$ de tamanho $D\times D$ apropriado). Com $\mathbf{A}=\mathbf{I}$, $E(\mathbf{w})=\frac12\sum_n\|\mathbf{x}_n-\mathbf{x}_n\|^2=0$ — o mesmo argumento do caso-limite $M=D$ da PCA clássica, em que qualquer base completa reconstrói cada ponto exatamente.
+- ✔ Verdadeiro — O resultado de que o mínimo global do autoencoder linear compartilha o subespaço da PCA vale para qualquer $M<D$, incluindo $M=1$: por redução ao resultado de erro mínimo (que também vale para qualquer $M$, inclusive $M=1$), o subespaço ótimo de dimensão $1$ é gerado exatamente pelo autovetor $\mathbf{u}_1$ de maior autovalor — o mesmo primeiro componente principal, sem nenhuma dependência dos demais componentes descartados.
+- ✗ Falso — O resultado garante que o mínimo global do autoencoder linear corresponde ao mesmo **subespaço** ótimo de dimensão $M$ (mesmo erro mínimo) — não que os pesos aprendidos formem a mesma base ortonormal dos autovetores de $\mathbf{S}$. A projeção ortogonal sobre um subespaço de dimensão $M$ é realizável por infinitas bases desse subespaço, ortonormais ou não; os vetores de peso do autoencoder "não precisam ser ortogonais nem normalizados". A verificação numérica confirma: o erro de reconstrução do autoencoder coincide com o ótimo da PCA a $5$ algarismos significativos, mas os cossenos dos ângulos principais entre os dois subespaços são $\approx0{,}98$/$0{,}93$ — próximos de $1$ (mesmo subespaço), não exatamente $1$ (mesma base).
+- ✔ Verdadeiro — A prova de que o mínimo do autoencoder coincide com o da PCA não compara os algoritmos de treino diretamente — mostra que o **conjunto de funções alcançáveis** por um (matrizes de posto $\le M$) coincide com o conjunto sobre o qual o outro já é o mínimo conhecido, concluindo que os mínimos coincidem. A mesma técnica de argumento (mostrar equivalência ou convergência entre duas famílias de soluções para concluir que dois problemas de otimização, formalmente diferentes, têm o mesmo minimizador) aparece ao mostrar que a solução de Ridge $(\mathbf{X}^T\mathbf{X}+\lambda\mathbf{I})^{-1}\mathbf{X}^T\mathbf{y}$ converge à solução de mínimos quadrados ordinários $(\mathbf{X}^T\mathbf{X})^{-1}\mathbf{X}^T\mathbf{y}$ quando $\lambda\to0$ — dois problemas de otimização diferentes, unificados no limite.
+:::
+
+::: {.callout-note icon=false}
+## Limitação estrutural comum e o papel do ELBO em modelos não lineares
+
+- □ Se os dados verdadeiros estivessem organizados ao longo de uma curva não linear (por exemplo, um arco, não uma reta ou plano), tanto a PCA clássica quanto a PPCA quanto o autoencoder linear encontrariam o mesmo subespaço linear ótimo de dimensão $M$ — mas nenhum dos três representaria bem a estrutura curva real dos dados.
+- □ No caso-limite em que os dados observados já vivem exatamente num subespaço linear de dimensão $M$ (sem nenhum ruído fora dele), a PCA clássica, a PPCA (com $\sigma^2\to0$) e o autoencoder linear recuperam exatamente esse subespaço, e o erro de reconstrução dos três é exatamente zero.
+- □ Como o autoencoder, ao usar uma arquitetura de rede neural, é estritamente mais poderoso que a PCA clássica, ele encontra sempre um subespaço de reconstrução pelo menos tão bom quanto o de qualquer método algébrico, mesmo restrito a ativação linear.
+- □ Trocar a arquitetura linear do autoencoder por camadas adicionais de unidades não lineares (permitindo capturar estruturas curvas) faz a relação entre a variável latente $\mathbf{z}$ e os dados observados $\mathbf{x}$ deixar de ser linear — e, nesse regime, a distribuição posterior $p(\mathbf{z}\mid\mathbf{x})$ tipicamente deixa de ter forma fechada (ao contrário da PPCA, onde essa posterior é Gaussiana exatamente calculável), o que reconecta o problema ao **ELBO** (*Evidence Lower Bound*, $\mathcal{L}(q)=\ln p(\mathbf{x})- \mathrm{KL}(q\|p)$, uma cota inferior da log-verossimilhança marginal usada para ajustar modelos de variável latente quando a posterior exata não está disponível).
+:::
+
+::: {.callout-tip}
+## (Resposta) Limitação estrutural comum e o papel do ELBO em modelos não lineares
+
+- ✔ Verdadeiro — As três ferramentas resolvem, comprovadamente, o mesmo problema linear (maximizar variância projetada / minimizar erro de reconstrução sob restrição de subespaço linear), então concordam entre si mesmo diante de dados curvos — mas a limitação não é de uma técnica isolada, é da classe inteira de soluções lineares: nenhuma delas consegue representar uma variedade curva com um subespaço plano.
+- ✔ Verdadeiro — Se os dados vivem exatamente num subespaço de dimensão $M$, os $D-M$ autovalores associados às direções ortogonais a esse subespaço são todos zero (nenhuma variância fora dele) — logo $J^\star=\sum_{i=M+1}^D\lambda_i=0$ (PCA clássica); $\sigma^2_{\mathrm{ML}}=\frac{1}{D-M}\sum_{i=M+1}^D\lambda_i=0$ (PPCA, o caso-limite $\sigma^2\to0$ atingido exatamente, não só no limite); e o autoencoder linear atinge o mesmo mínimo $J^\star=0$. Os três coincidem porque resolvem o mesmo problema de otimização, e esse problema já tem solução exata (erro zero) nesse caso particular.
+- ✗ Falso — Para a arquitetura rasa com ativação linear vale exatamente o oposto: o autoencoder não é "mais poderoso" que a PCA nesse regime — ele resolve, comprovadamente, o mesmo problema de otimização, com o mesmo mínimo global (mesmo subespaço, mesmo erro mínimo $J^\star$), nunca um resultado melhor. "Estritamente mais poderoso" só passa a valer com arquiteturas não lineares e mais profundas — não com o autoencoder linear raso desta aula, cujo teto de desempenho é, comprovadamente, o mesmo da PCA.
+- ✔ Verdadeiro — Camadas adicionais de unidades não lineares escapam da limitação linear identificada nesta aula; nesse regime, a mesma variável latente contínua $\mathbf{z}$ passa a se relacionar com $\mathbf{x}$ por uma rede neural não linear em vez de uma transformação linear $\mathbf{W}$ — o que faz a posterior $p(\mathbf{z}\mid\mathbf{x})$ deixar de ter forma fechada (ao contrário da PPCA, cuja posterior Gaussiana é exatamente calculável), exigindo de volta o ELBO como critério de ajuste, com $q$ aproximado por uma família tratável em vez de calculado exatamente por Bayes.
+:::

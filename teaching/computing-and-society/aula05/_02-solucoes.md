@@ -1,0 +1,670 @@
+# Soluções — Exercícios de V/F, Aula 5
+
+> Arquivo não publicado (`_02-solucoes.md`) — nunca deve ser incluído no
+> `index.qmd`. As questões ficam sem solução no material do aluno; este
+> arquivo é só para conferência do professor.
+
+---
+
+## O kit de ferramentas qualitativo e seus limites — item (a)
+
+**Heurística:** Contrafactual
+
+**Afirmação:** ✔ Se um usuário tivesse memória perfeita e articulasse com exatidão total cada micro-decisão tomada durante o uso de um sistema, a vantagem específica da investigação contextual sobre a entrevista (revelar processos tácitos) deixaria de existir para esse usuário.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** A vantagem específica da investigação contextual é
+revelar o que o usuário sabe fazer mas não sabe (ou não consegue)
+verbalizar. Se, por hipótese, o usuário conseguisse articular com
+exatidão total cada micro-decisão, não haveria mais nada tácito para a
+observação revelar que a entrevista já não capturasse — a vantagem
+específica desaparece para esse caso hipotético, mesmo que a
+investigação contextual continue tendo outras utilidades em geral.
+
+---
+
+## O kit de ferramentas qualitativo e seus limites — item (b)
+
+**Heurística:** Limite
+
+**Afirmação:** ✗ No limite em que uma equipe de pesquisa tivesse recursos e tempo infinitos para observar cada usuário em seu ambiente real de uso, a entrevista estruturada se tornaria, ainda assim, indispensável para revelar processos tácitos que o próprio usuário não sabe descrever.
+
+**Resposta:** Falso
+
+**Justificativa:** Revelar processos tácitos é exatamente a função da
+investigação contextual, não da entrevista — a entrevista depende do
+relato consciente do próprio usuário, que por definição não cobre o que
+é tácito. Com recursos infinitos para observar todo usuário em seu
+ambiente real, a investigação contextual cobriria sozinha exatamente
+essa necessidade; não há razão para a entrevista se tornar
+"indispensável" para revelar algo que nunca foi seu ponto forte.
+
+---
+
+## O kit de ferramentas qualitativo e seus limites — item (c)
+
+**Heurística:** Transferência
+
+**Afirmação:** ✔ A mesma lógica de "observar revela o tácito que perguntar não revela" se aplicaria a uma equipe de UX que investiga por que motoristas de aplicativo configuram de um jeito específico e não documentado o painel de navegação do próprio veículo.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** É uma aplicação direta do mesmo mecanismo da
+investigação contextual a outro produto digital (um aplicativo de
+transporte): observar o motorista configurando o painel revelaria um
+hábito tácito que uma entrevista, dependente de relato consciente,
+teria mais dificuldade de capturar.
+
+---
+
+## O kit de ferramentas qualitativo e seus limites — item (d)
+
+**Heurística:** Falsa dicotomia
+
+**Afirmação:** ✗ Como nenhuma das três técnicas qualitativas escala para milhões de usuários, conclui-se que elas deveriam ser abandonadas em favor exclusivo de testes A/B sempre que uma equipe tiver recursos para rodar um teste em larga escala.
+
+**Resposta:** Falso
+
+**Justificativa:** Pesquisa qualitativa e teste A/B respondem perguntas
+diferentes: a primeira revela o que confunde ou motiva o usuário e
+por quê; o segundo mede se uma mudança específica melhora uma métrica
+em escala. Ter recursos para um teste A/B não elimina a necessidade de
+entender, qualitativamente, o que testar e por quê — as duas
+abordagens são complementares, não substitutas uma da outra.
+
+---
+
+## Mecânica do teste A/B e aleatorização — item (a)
+
+**Heurística:** Contrafactual
+
+**Afirmação:** ✔ Se a atribuição de usuários aos grupos controle e tratamento não fosse aleatória, mas sim baseada em uma característica prévia dos usuários (ex.: só usuários mais engajados entrando no tratamento), uma diferença de métrica ao final do teste poderia refletir essa característica prévia, não a mudança em si.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** É exatamente o papel da aleatorização: sem ela, uma
+diferença observada entre os grupos pode ser causada por uma
+característica prévia que já diferenciava os grupos desde o início
+(ex.: usuários mais engajados já tendendo a gerar métricas melhores),
+não pela mudança testada — um problema clássico de confundimento
+(*confounding*).
+
+---
+
+## Mecânica do teste A/B e aleatorização — item (b)
+
+**Heurística:** Limite
+
+**Afirmação:** ✔ No limite em que absolutamente todos os usuários elegíveis recebessem a mesma versão (controle ou tratamento, nunca as duas), o conceito de "diferença estatisticamente significativa entre grupos" deixaria de ter qualquer aplicação nesse teste.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** Uma diferença entre grupos exige, por definição,
+dois grupos para comparar. Sem nenhuma divisão entre controle e
+tratamento, não existe um segundo grupo com o qual comparar — logo, o
+próprio conceito de diferença estatisticamente significativa entre
+grupos perde onde se aplicar.
+
+---
+
+## Mecânica do teste A/B e aleatorização — item (c)
+
+**Heurística:** Transferência
+
+**Afirmação:** ✔ A mesma lógica de "sem aleatorização, a diferença observada pode refletir quem foi selecionado, não a mudança em si" se aplicaria a um aplicativo de produtividade que compara o desempenho de usuários que optaram voluntariamente por ativar um novo modo de foco com o de usuários que optaram por não ativá-lo, em vez de atribuir aleatoriamente quem recebe o novo modo.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** É o mesmo problema de autosseleção (viés de seleção):
+usuários que escolhem ativar um recurso novo podem já ser diferentes
+(mais motivados, mais engajados) dos que não escolhem — uma diferença
+de desempenho observada pode refletir essa diferença prévia, não o
+efeito causal do próprio recurso, exatamente como no cenário de
+atribuição não aleatória descrito na aula.
+
+---
+
+## Mecânica do teste A/B e aleatorização — item (d)
+
+**Heurística:** Falsa dicotomia
+
+**Afirmação:** ✗ Como a aleatorização é o que torna um teste A/B um experimento, isso significa que qualquer teste sem aleatorização perfeita é completamente inútil e não revela absolutamente nada sobre o comportamento dos usuários.
+
+**Resposta:** Falso
+
+**Justificativa:** A aleatorização é o que garante uma interpretação
+*causal* limpa do resultado — sem ela, o teste ainda pode revelar
+correlações e padrões de comportamento úteis, só que com menos
+confiança sobre causa e efeito. "Sem aleatorização perfeita" não é o
+mesmo que "não revela absolutamente nada"; é um enfraquecimento da
+força causal da conclusão, não um apagamento total de utilidade.
+
+---
+
+## Tamanho de amostra e poder estatístico — item (a)
+
+**Heurística:** Contrafactual
+
+**Afirmação:** ✔ Se um teste A/B fosse rodado com uma amostra muito maior do que a originalmente planejada, mantendo o mesmo efeito real subjacente, a chance de detectar esse efeito como estatisticamente significativo tenderia a aumentar, não a diminuir.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** É a definição de poder estatístico: para um efeito
+real fixo, quanto maior a amostra, maior a capacidade do teste de
+detectar esse efeito como estatisticamente significativo. Reduzir o
+tamanho de amostra é o que tipicamente reduz o poder, não o contrário.
+
+---
+
+## Tamanho de amostra e poder estatístico — item (b)
+
+**Heurística:** Limite
+
+**Afirmação:** ✗ No limite em que um efeito real de uma mudança fosse exatamente zero (a mudança não tem nenhum impacto real no comportamento do usuário), aumentar o tamanho da amostra do teste passaria a detectar esse efeito como significativo com mais frequência.
+
+**Resposta:** Falso
+
+**Justificativa:** Quando o efeito real é exatamente zero, a taxa de
+"detecção" de significância estatística permanece, em expectativa, no
+próprio nível de falso-positivo do teste (o alfa escolhido, ex.: 5%),
+independentemente do tamanho da amostra — aumentar a amostra não eleva
+essa taxa acima do nível de falso-positivo. Confundir "mais poder para
+detectar um efeito real" com "mais chance de encontrar significância
+quando não há efeito nenhum" é um erro estatístico comum, exatamente o
+que este item testa.
+
+---
+
+## Tamanho de amostra e poder estatístico — item (c)
+
+**Heurística:** Transferência
+
+**Afirmação:** ✔ A mesma lógica de "amostra pequena pode não detectar um efeito real" se aplicaria a um teste A/B de um aplicativo de meditação rodado com poucos usuários, que conclui "sem diferença significativa" na taxa de retenção entre a versão nova e a antiga, mesmo que a versão nova tenha um efeito real moderado.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** É a mesma lógica de poder estatístico insuficiente
+transposta para outro produto digital: com poucos usuários no teste, um
+efeito real e moderado sobre a retenção pode não atingir significância
+estatística — a conclusão "sem diferença" reflete a limitação da
+amostra, não a ausência real de efeito.
+
+---
+
+## Tamanho de amostra e poder estatístico — item (d)
+
+**Heurística:** Falsa dicotomia
+
+**Afirmação:** ✗ Como o caso Kramer et al. detectou um efeito estatisticamente significativo com um tamanho de efeito de apenas d = 0,001, isso prova que qualquer teste A/B com amostra grande o suficiente sempre encontrará um efeito real, não importa a mudança testada.
+
+**Resposta:** Falso
+
+**Justificativa:** Uma amostra grande aumenta o poder de detectar um
+efeito real que exista, por menor que seja — mas não garante que toda
+mudança testada tenha, de fato, algum efeito real diferente de zero
+para ser detectado. O caso Kramer et al. teve um efeito real (ainda que
+minúsculo); isso não implica que qualquer mudança, testada com amostra
+grande, necessariamente produza um efeito real a ser encontrado.
+
+---
+
+## Efeito novidade e *metric gaming* — item (a)
+
+**Heurística:** Contrafactual
+
+**Afirmação:** ✔ Se uma equipe rodasse o mesmo teste A/B por seis meses, em vez de encerrá-lo após a primeira semana, e o ganho de métrica inicial desaparecesse por completo ao longo desse período, isso seria evidência a favor da hipótese de que o ganho inicial era efeito novidade, não valor real.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** O efeito novidade prevê exatamente esse padrão: um
+ganho que se dissipa com o tempo, à medida que a novidade deixa de ser
+novidade. Observar o desaparecimento do ganho ao longo de uma janela
+maior é evidência consistente com essa hipótese (não uma prova
+definitiva, mas evidência a favor dela).
+
+---
+
+## Efeito novidade e *metric gaming* — item (b)
+
+**Heurística:** Limite
+
+**Afirmação:** ✗ No limite em que uma métrica capturasse perfeitamente, sem nenhuma lacuna, o objetivo real que uma equipe quer alcançar, o risco de *metric gaming* (otimizar a métrica às custas do objetivo real) deixaria de existir para essa métrica específica.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** *Metric gaming* depende, por definição, de uma
+lacuna entre a métrica (proxy) e o objetivo real que ela deveria
+representar — é otimizar a métrica *às custas* do objetivo real
+justamente porque os dois podem divergir. No limite hipotético em que
+não existisse nenhuma lacuna entre métrica e objetivo, otimizar a
+métrica seria, por construção, o mesmo que otimizar o objetivo real, e
+o risco específico de *gaming* desapareceria.
+
+---
+
+## Efeito novidade e *metric gaming* — item (c)
+
+**Heurística:** Transferência
+
+**Afirmação:** ✔ A mesma lógica da Lei de Goodhart ("quando uma medida se torna um alvo, ela deixa de ser uma boa medida") se aplicaria a uma plataforma de suporte técnico que passa a avaliar atendentes exclusivamente pelo número de chamados fechados por hora, independentemente de o problema do usuário ter sido de fato resolvido.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** É uma aplicação direta da Lei de Goodhart a outro
+contexto de produto/serviço digital: "chamados fechados por hora" é um
+proxy de produtividade que, ao virar o alvo explícito, incentiva
+fechar chamados rapidamente (mesmo sem resolver o problema real do
+usuário) — a métrica deixa de representar bem o objetivo genuíno
+(resolução efetiva), exatamente o mecanismo discutido no Bloco 3.
+
+---
+
+## Efeito novidade e *metric gaming* — item (d)
+
+**Heurística:** Falsa dicotomia
+
+**Afirmação:** ✗ Como toda métrica é, na melhor das hipóteses, um substituto do objetivo real, conclui-se que nenhuma métrica de produto digital deveria ser usada para decisão nenhuma, já que todas são, por definição, enganosas.
+
+**Resposta:** Falso
+
+**Justificativa:** Métricas serem *proxies* imperfeitos não significa
+que sejam inúteis ou que devam ser abandonadas — significa que precisam
+ser lidas com cuidado metodológico (como o próprio Bloco 3 discute),
+cientes de suas armadilhas. O erro é saltar de "toda métrica é um
+substituto imperfeito" para "nenhuma métrica deveria orientar decisão
+alguma", descartando uma ferramenta útil por não ser perfeita.
+
+---
+
+## Captologia: definição e vantagens de Fogg — item (a)
+
+**Heurística:** Contrafactual
+
+**Afirmação:** ✔ Se um sistema computacional armazenasse e exibisse informações sem qualquer elemento desenhado para mudar a atitude ou o comportamento de quem o usa, esse sistema não se enquadraria na definição de tecnologia persuasiva proposta por Fogg (2003).
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** A definição de Fogg exige, explicitamente, que o
+sistema seja "desenhado para mudar as atitudes ou os comportamentos das
+pessoas" — um sistema puramente de armazenamento/exibição, sem esse
+elemento de intenção persuasiva, não satisfaz a definição por falta do
+seu componente central.
+
+---
+
+## Captologia: definição e vantagens de Fogg — item (b)
+
+**Heurística:** Limite
+
+**Afirmação:** ✔ No limite em que um computador precisasse descansar, comer e dormir como um ser humano, a vantagem específica de "persistência" listada por Fogg entre computadores e persuasores humanos deixaria de existir.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** Fogg atribui a vantagem de persistência exatamente
+ao fato de computadores não se cansarem, não precisarem comer ou
+dormir. Removendo essa premissa (por hipótese, um computador que
+precisasse dessas mesmas pausas biológicas), a vantagem específica de
+persistência sobre um persuasor humano deixaria de existir, por
+definição.
+
+---
+
+## Captologia: definição e vantagens de Fogg — item (c)
+
+**Heurística:** Transferência
+
+**Afirmação:** ✔ A mesma lógica das seis vantagens de Fogg sobre persuasores humanos (persistência, anonimato, volume de dado, modalidades, escala, alcance) se aplicaria a um sistema de recomendação de conteúdo educacional que roda continuamente, sem cansar, para milhões de estudantes ao mesmo tempo.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** É uma aplicação direta das mesmas vantagens
+estruturais a outro domínio de tecnologia persuasiva (educação):
+persistência (rodar sem cansar) e escala (milhões de estudantes
+simultaneamente) são exatamente as vantagens 1 e 5 listadas por Fogg,
+aqui aplicadas a um sistema de recomendação educacional em vez de um
+produto comercial.
+
+---
+
+## Captologia: definição e vantagens de Fogg — item (d)
+
+**Heurística:** Falsa dicotomia
+
+**Afirmação:** ✗ Como Fogg lista seis vantagens que computadores têm sobre persuasores humanos, isso significa que qualquer sistema que use uma dessas seis vantagens está, necessariamente, praticando persuasão antiética.
+
+**Resposta:** Falso
+
+**Justificativa:** Fogg é explícito (Cap. 9): a resposta a "a persuasão
+é antiética?" depende de como ela é usada, não da mera presença de uma
+vantagem estrutural. Usar persistência ou escala para incentivar um
+hábito saudável não é, por si só, antiético — a vantagem estrutural é
+neutra; o veredito ético depende da intenção e do resultado, não da
+ferramenta.
+
+---
+
+## As seis preocupações éticas específicas de Fogg — item (a)
+
+**Heurística:** Contrafactual
+
+**Afirmação:** ✔ Se um sistema computacional fosse capaz de perceber e reagir aos sinais emocionais sutis de quem o usa, com a mesma reciprocidade que um ser humano ofereceria, a preocupação ética específica "afeta emoções sem ser afetado por elas" deixaria de se aplicar a esse sistema.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** A preocupação de Fogg depende, por definição, da
+ausência de reciprocidade emocional (o computador afeta, mas não é
+afetado). Removendo essa assimetria por hipótese — um sistema que
+percebe e reage a sinais emocionais com reciprocidade real —, a
+preocupação específica deixaria de descrever esse sistema.
+
+---
+
+## As seis preocupações éticas específicas de Fogg — item (b)
+
+**Heurística:** Limite
+
+**Afirmação:** ✔ No limite em que a empresa responsável por um sistema persuasivo sempre assumisse publicamente e integralmente a responsabilidade por qualquer dano causado por ele, a preocupação ética "computadores não podem assumir responsabilidade" deixaria de descrever um problema real nesse caso específico.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** A preocupação de Fogg é sobre a lacuna de
+responsabilidade — o computador não pode ser responsabilizado, e às
+vezes ninguém mais assume esse papel. Se a empresa por trás do sistema
+sempre assumisse essa responsabilidade integralmente, a lacuna prática
+que a preocupação descreve estaria fechada para esse caso, mesmo que o
+computador em si continue não sendo um agente moral.
+
+---
+
+## As seis preocupações éticas específicas de Fogg — item (c)
+
+**Heurística:** Transferência
+
+**Afirmação:** ✔ A mesma lógica da preocupação "a novidade da tecnologia pode mascarar sua intenção persuasiva" se aplicaria a um usuário que aceita, sem examinar, um conjunto de permissões pré-marcadas durante o cadastro em um aplicativo totalmente novo para ele, só porque o processo parece complexo demais para escrutinar com calma.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** É exatamente o mecanismo descrito por Fogg: a
+novidade e a complexidade de uma interação nova distraem o usuário,
+reduzindo sua capacidade de escrutinar a intenção persuasiva por trás
+dela (no exemplo de Fogg, o Volvo Ozone Eater; aqui, permissões
+pré-marcadas em um cadastro).
+
+---
+
+## As seis preocupações éticas específicas de Fogg — item (d)
+
+**Heurística:** Falsa dicotomia
+
+**Afirmação:** ✗ Como Fogg afirma que a persuasão tecnológica levanta seis preocupações éticas específicas, isso significa que toda tecnologia persuasiva viola necessariamente todas as seis ao mesmo tempo.
+
+**Resposta:** Falso
+
+**Justificativa:** As seis preocupações são potenciais pontos de atenção
+— um sistema específico pode levantar uma, várias, ou nenhuma delas,
+dependendo do desenho concreto. Fogg as apresenta como um mapa de riscos
+a verificar, não como uma lista de violações automáticas e simultâneas
+que toda tecnologia persuasiva necessariamente comete.
+
+---
+
+## O experimento de Kramer, Guillory & Hancock (2014) — item (a)
+
+**Heurística:** Contrafactual
+
+**Afirmação:** ✔ Se o experimento tivesse manipulado apenas a ordem de exibição dos posts no Feed de Notícias, sem alterar a proporção de conteúdo emocional positivo ou negativo exibido, o desenho especificamente descrito no artigo (comparar grupos com mais ou menos exposição emocional) não teria sido implementado da forma relatada.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** O artigo descreve, literalmente, a manipulação da
+*extensão* em que pessoas foram expostas a conteúdo emocional (omissão
+parcial de posts emocionais), não uma reordenação de posts já
+existentes na mesma proporção. Um desenho baseado só em reordenação
+seria um experimento diferente do efetivamente relatado.
+
+---
+
+## O experimento de Kramer, Guillory & Hancock (2014) — item (b)
+
+**Heurística:** Limite
+
+**Afirmação:** ✔ No limite em que o Facebook tivesse uma base de usuários muito menor, na casa das centenas de pessoas, o tamanho de efeito de d = 0,001 relatado pelos autores teria maior chance de não ser estatisticamente detectável no experimento.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** Consequência direta da lógica de poder estatístico do
+Bloco 3: um efeito tão pequeno (d = 0,001) só foi detectável porque a
+amostra era massiva (N = 689.003). Com uma amostra na casa das
+centenas, o mesmo efeito real teria poder estatístico muito menor para
+ser detectado como significativo.
+
+---
+
+## O experimento de Kramer, Guillory & Hancock (2014) — item (c)
+
+**Heurística:** Transferência
+
+**Afirmação:** ✔ A mesma lógica de "manipular a exposição a conteúdo emocional para medir efeito no comportamento subsequente" se aplicaria a uma plataforma de música que testasse, em grupos aleatórios de usuários, playlists com proporções diferentes de músicas tristes e alegres, medindo o efeito no tempo de escuta subsequente.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** É a mesma estrutura experimental transposta para
+outro domínio de conteúdo digital (música em vez de posts de rede
+social): manipular a proporção de conteúdo emocional exibido/tocado e
+medir o efeito em uma métrica de comportamento subsequente.
+
+---
+
+## O experimento de Kramer, Guillory & Hancock (2014) — item (d)
+
+**Heurística:** Falsa dicotomia
+
+**Afirmação:** ✗ Como o experimento de Kramer et al. mediu contágio emocional via palavras positivas e negativas nos posts subsequentes dos próprios usuários, isso prova que o Facebook manipulou diretamente as emoções internas de cada participante, não apenas o conteúdo textual que eles produziram depois.
+
+**Resposta:** Falso
+
+**Justificativa:** O estudo mediu um *proxy* textual (proporção de
+palavras positivas/negativas, via software LIWC) do comportamento de
+postagem subsequente — não o estado emocional interno de cada pessoa
+diretamente. Tratar essa métrica textual como prova direta de
+manipulação do estado emocional interno confunde o proxy medido com o
+constructo psicológico que ele pretende representar.
+
+---
+
+## Consentimento informado: Termos de Uso vs. norma acadêmica de IRB — item (a)
+
+**Heurística:** Contrafactual
+
+**Afirmação:** ✔ Se o Facebook tivesse enviado, antes do experimento, uma notificação específica informando que o Feed de Notícias de cada participante seria manipulado como parte de um estudo, com opção real de recusar sem perder acesso ao serviço, o argumento de que os Termos de Uso genéricos já bastavam como consentimento deixaria de ser necessário para justificar a pesquisa.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** Notificação específica e opção real de recusa são
+exatamente os dois elementos de um consentimento informado
+padrão-acadêmico que faltam no argumento original dos autores. Se esses
+dois elementos estivessem presentes, o argumento alternativo (Termos de
+Uso genéricos bastam) simplesmente não precisaria ser invocado.
+
+---
+
+## Consentimento informado: Termos de Uso vs. norma acadêmica de IRB — item (b)
+
+**Heurística:** Limite
+
+**Afirmação:** ✔ No limite em que um usuário nunca tivesse lido nem concordado com nenhum Termo de Uso de nenhum serviço digital, o argumento dos autores de que a Política de Uso de Dados constituía consentimento informado para este experimento específico perderia sua própria base factual.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** O argumento dos autores depende, como premissa
+factual, de que o usuário tenha concordado com a Política de Uso de
+Dados. No limite hipotético em que essa concordância nunca tivesse
+ocorrido, a própria base factual sobre a qual o argumento se apoia
+deixa de existir.
+
+---
+
+## Consentimento informado: Termos de Uso vs. norma acadêmica de IRB — item (c)
+
+**Heurística:** Transferência
+
+**Afirmação:** ✔ A mesma lógica de "consentimento genérico não equivale a consentimento específico para um experimento futuro" se aplicaria a um serviço de e-mail que testasse, amparado apenas em seus Termos de Uso gerais, diferentes algoritmos de priorização de mensagens em grupos aleatórios de usuários, sem aviso individual.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** É a mesma estrutura de argumento aplicada a outro
+serviço digital: aceitar um documento genérico de Termos de Uso, anos
+antes, não constitui consentimento específico para um experimento
+futuro e concreto ainda não concebido no momento da aceitação —
+independentemente de o serviço ser uma rede social ou um provedor de
+e-mail.
+
+---
+
+## Consentimento informado: Termos de Uso vs. norma acadêmica de IRB — item (d)
+
+**Heurística:** Falsa dicotomia
+
+**Afirmação:** ✗ Como os usuários do Facebook consentiram com a Política de Uso de Dados ao criar suas contas, isso significa que qualquer pesquisa futura sobre esses mesmos dados, para qualquer finalidade, está automaticamente amparada por esse consentimento original.
+
+**Resposta:** Falso
+
+**Justificativa:** É exatamente a generalização que a aula questiona:
+consentir com o uso de dados para operar um serviço não equivale a
+consentir, de forma aberta e ilimitada, com qualquer pesquisa futura
+imaginável sobre esses dados. Tratar um consentimento genérico como
+cobertura automática e permanente para qualquer finalidade futura é a
+mesma falha lógica discutida no caso Kramer et al.
+
+---
+
+## Entender vs. direcionar: lendo a instrumentação — item (a)
+
+**Heurística:** Contrafactual
+
+**Afirmação:** ✔ Se a métrica de sucesso de uma funcionalidade fosse redefinida de "cliques imediatos" para "tarefa completada com sucesso pelo usuário dias depois", isso tenderia a alinhar melhor a instrumentação ao benefício do usuário do que a métrica de clique isolada.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** Uma métrica de tarefa completada com sucesso, medida
+depois de um intervalo de tempo, captura melhor o resultado que
+importa para o usuário do que uma métrica de ação imediata e facilmente
+confundida com cliques acidentais ou curiosidade — exatamente o ponto
+levantado na Pausa Ativa da Abertura desta aula.
+
+---
+
+## Entender vs. direcionar: lendo a instrumentação — item (b)
+
+**Heurística:** Limite
+
+**Afirmação:** ✔ No limite em que a métrica de negócio de um produto coincidisse perfeitamente, em toda decisão de design possível, com o benefício real do usuário, a distinção entre "entender o usuário" e "direcionar contra ele" perderia sua aplicação prática nesse produto específico.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** A distinção do checklist depende, precisamente, da
+possibilidade de divergência entre métrica de negócio e benefício do
+usuário. No limite hipotético em que essa divergência nunca ocorresse,
+otimizar a métrica de negócio seria, por construção, o mesmo que servir
+ao usuário — a distinção perderia onde se manifestar nesse caso.
+
+---
+
+## Entender vs. direcionar: lendo a instrumentação — item (c)
+
+**Heurística:** Transferência
+
+**Afirmação:** ✔ A mesma lógica do checklist desta aula (que métrica, a favor de quem, o usuário sabe, existe saída simétrica) se aplicaria à avaliação de um sistema de recomendação de notícias, verificando se ele otimiza por tempo de leitura a qualquer custo ou por diversidade/qualidade informacional genuína.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** É uma aplicação direta do checklist de síntese a
+outro sistema digital de recomendação: perguntar que métrica está
+sendo otimizada (tempo de leitura vs. diversidade/qualidade) revela se
+o sistema tende a servir o usuário ou a métrica de engajamento do
+negócio, exatamente a mesma lógica de leitura proposta na aula.
+
+---
+
+## Entender vs. direcionar: lendo a instrumentação — item (d)
+
+**Heurística:** Falsa dicotomia
+
+**Afirmação:** ✗ Como o checklist desta síntese lista perguntas para avaliar se uma instrumentação entende ou direciona o usuário, isso significa que toda empresa que meça engajamento de qualquer forma está, necessariamente, direcionando o usuário contra o próprio interesse.
+
+**Resposta:** Falso
+
+**Justificativa:** Medir engajamento não é, por si só, evidência de
+direcionamento contra o usuário — a aula é explícita em dizer que a
+mesma métrica pode coincidir com o benefício do usuário (um app de
+exercícios que retém por saúde real). O checklist serve para investigar
+caso a caso, não para condenar automaticamente qualquer medição de
+engajamento.
+
+---
+
+## Síntese da aula e a ponte para a Aula 6 — item (a)
+
+**Heurística:** Contrafactual
+
+**Afirmação:** ✔ Se o kit metodológico apresentado nesta aula (pesquisa qualitativa e teste A/B) não existisse, e produtos digitais fossem construídos sem qualquer medição do comportamento do usuário, a bifurcação entre "entender genuinamente" e "direcionar contra o interesse do usuário" discutida hoje perderia grande parte de sua base concreta de aplicação.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** A bifurcação da aula é sobre como o mesmo kit
+concreto de ferramentas é usado — sem nenhum kit de medição/pesquisa
+disponível, não haveria o mecanismo concreto (escolha de métrica,
+desenho de teste) sobre o qual a bifurcação se apoia, mesmo que
+alguma forma mais rudimentar de influência ainda pudesse existir.
+
+---
+
+## Síntese da aula e a ponte para a Aula 6 — item (b)
+
+**Heurística:** Limite
+
+**Afirmação:** ✔ No limite em que toda equipe de produto sempre escolhesse, sem exceção, uma métrica alinhada ao benefício de longo prazo do usuário, o mecanismo de fricção deliberada (*dark patterns*) discutido na Aula 4, Bloco 5, deixaria de ter uma explicação metodológica concreta por trás dele.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** O mecanismo dos *dark patterns*, como visto na Aula
+4, nasce de uma equipe escolher otimizar por uma métrica de negócio
+contra o usuário. Se, por hipótese, toda equipe sempre escolhesse uma
+métrica alinhada ao usuário, sem exceção, a explicação metodológica
+concreta para a fricção deliberada (a escolha de métrica) deixaria de
+existir nesse cenário limite.
+
+---
+
+## Síntese da aula e a ponte para a Aula 6 — item (c)
+
+**Heurística:** Transferência
+
+**Afirmação:** ✔ A tese central desta aula — de que uma escolha de método/métrica, aparentemente técnica, produz consequência real sobre o comportamento do usuário — se estenderia, pela mesma lógica, ao argumento da Aula 6 de que decisões de arquitetura (quantos serviços, onde rodam) têm consequência material e ambiental real, fora do próprio código.
+
+**Resposta:** Verdadeiro
+
+**Justificativa:** É exatamente a ponte que fecha a aula: a mesma lógica
+estrutural — uma escolha que parece "só técnica" ou "só de método" tem
+consequência concreta fora do comportamento do usuário isoladamente —
+se estende do domínio metodológico (Aula 5) para o domínio material e
+ambiental (Aula 6).
+
+---
+
+## Síntese da aula e a ponte para a Aula 6 — item (d)
+
+**Heurística:** Falsa dicotomia
+
+**Afirmação:** ✗ Como esta aula mostrou que o mesmo kit metodológico pode ser usado para entender ou para manipular o usuário, conclui-se que a Aula 4 (dark patterns) e esta aula descrevem, na verdade, o mesmo fenômeno, sem nenhuma diferença de nível de análise entre elas.
+
+**Resposta:** Falso
+
+**Justificativa:** As duas aulas operam em níveis de análise diferentes,
+como o `_00-plano-aula.md` desta aula explicita: a Aula 4 descreve o
+*resultado* (um padrão de interface deliberadamente hostil); esta aula
+descreve o *método de pesquisa e experimentação* que está,
+estruturalmente, por trás de qualquer decisão desse tipo — a favor ou
+contra o usuário. Tratar os dois como "o mesmo fenômeno, sem diferença
+de nível" apaga essa distinção deliberada entre resultado e método.

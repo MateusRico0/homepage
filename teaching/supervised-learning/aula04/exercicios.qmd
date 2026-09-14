@@ -1,0 +1,327 @@
+---
+title: "Exercícios — Seleção de Modelo, Validação Cruzada e Bootstrap"
+subtitle: "Aula 4 — Fundamentos Estatísticos do Aprendizado Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+format:
+  html:
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 2
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+## Convenções usadas nesta lista
+
+- **ESL** refere-se ao livro-texto de referência, Hastie, Tibshirani & Friedman, *The Elements of Statistical Learning*.
+- $\hat{R}(\theta) = \frac{1}{N}\sum_i \mathcal{L}(y_i, f_\theta(x_i))$ denota o **erro empírico** (ou de treino), medido nos mesmos dados usados para ajustar $\theta$; $R(\theta) = \mathbb{E}_{(X,Y)\sim P}[\mathcal{L}(Y, f_\theta(X))]$ denota o **risco esperado**, o erro sobre dados novos vindos da distribuição populacional $P(X,Y)$.
+:::
+
+## Questões discursivas
+
+1. Considere o seguinte experimento: um conjunto de dados de diagnóstico médico (569 pacientes, atributos contínuos medidos a partir de um exame, alvo binário benigno/maligno) é dividido em 70% treino e 30% teste. Treina-se uma árvore de decisão para profundidades máximas de 1 a 15. A acurácia de treino cresce monotonicamente e atinge $100\%$ a partir da profundidade 6 (a árvore passa a ter uma folha distinta para cada paciente de treino); a acurácia de teste sobe até a profundidade 5 ($92{,}98\%$) e depois estabiliza um pouco abaixo disso ($91{,}81\%$). Explique por que $\hat{R}(\theta)$ é um estimador enviesado do risco esperado $R(\theta)$. Por que esse viés tende a crescer com a flexibilidade do modelo (compare a árvore de profundidade 1 com a de profundidade 15 nesse experimento)?
+
+2. Considere o seguinte experimento de vazamento de dados: um conjunto com $N=50$ observações e $p=5\,000$ atributos, todos estatisticamente independentes do rótulo (rótulo é ruído puro, sem relação real com os atributos) — o erro real de qualquer classificador nesse cenário é $50\%$. Um pesquisador seleciona os 100 atributos mais correlacionados com o rótulo usando a amostra **inteira**, antes de particionar em folds; treina um classificador só com esses atributos; e valida por 5-fold CV — obtendo uma estimativa de erro de apenas ${\sim}1{,}5\%$, muito abaixo do valor real. Um colega comete um erro análogo, mas com normalização em vez de seleção de atributos: ele normaliza todos os atributos (subtrai a média, divide pelo desvio-padrão) usando a base de dados inteira, e só depois faz uma validação cruzada de 5 folds. Explique por que isso também é uma forma de vazamento de dados, e descreva como corrigir o procedimento em ambos os casos.
+
+3. Num procedimento de seleção de modelo por 5-fold CV, comparou-se a árvore de custo-complexidade escolhida pela regra de **máxima acurácia média de CV** (4 folhas, acurácia de teste $91{,}8\%$) com a árvore escolhida pela regra de **1 erro-padrão (1-SE)** — que, entre os candidatos cuja acurácia média de CV está a até 1 erro-padrão do melhor valor observado, escolhe o mais simples (2 folhas, acurácia de teste $90{,}1\%$). A árvore 1-SE teve acurácia de teste pior, mas com metade das folhas. Discuta em que cenários essa troca (menos acurácia por mais simplicidade) pode ser a escolha certa, e em quais não seria.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-note icon=false}
+## O Viés do Erro de Treino
+
+- □ No limite em que a profundidade da árvore não é limitada e há um
+  ponto de treino distinto por folha, o erro de treino tende a $0\%$,
+  independentemente de quão complexa seja a fronteira real entre as
+  classes.
+
+- □ Se a árvore de profundidade 15 tem a mesma acurácia de teste
+  que a árvore de profundidade 6, isso prova que a árvore mais
+  profunda é necessariamente pior no teste do que uma menos profunda.
+
+- □ Num modelo de previsão de preços de imóveis ajustado com um
+  polinômio de grau muito alto (que passa exatamente por todos os
+  pontos de treino), o erro de treino seria próximo de zero, mas isso
+  não garante nada sobre o erro em imóveis não vistos.
+
+- □ Como o erro de treino tende a subestimar o erro de
+  generalização, conclui-se que um modelo com erro de treino alto
+  necessariamente generaliza melhor do que um com erro de treino
+  baixo.
+:::
+
+::: {.callout-note icon=false}
+## Train/Validation/Test
+
+- □ No limite em que o conjunto de teste é consultado repetidas
+  vezes durante o ajuste de hiperparâmetros, a estimativa final de
+  desempenho no teste se torna tão otimista quanto medir no próprio
+  conjunto de treino.
+
+- □ Se o conjunto de validação, em vez do de teste, fosse
+  consultado repetidamente para escolher hiperparâmetros, isso não
+  teria custo estatístico algum, pois validação existe exatamente
+  para ser consultada quantas vezes for preciso.
+
+- □ Numa competição de ciência de dados, o "*leaderboard* público"
+  funciona como um conjunto de validação consultável repetidamente;
+  competidores que otimizam demais para ele costumam piorar no
+  *leaderboard* privado (o teste verdadeiro) — o *overfitting ao
+  leaderboard*.
+
+- □ Como o conjunto de treino é usado para ajustar os parâmetros do
+  modelo, conclui-se que o conjunto de validação é usado para ajustar
+  os dados do modelo (limpá-los ou transformá-los), não seus
+  hiperparâmetros.
+:::
+
+::: {.callout-note icon=false}
+## O Procedimento k-fold
+
+- □ No limite em que $k=N$ (LOOCV), cada fold de validação contém
+  exatamente um único ponto.
+
+- □ Se, em vez de treinar $k$ modelos diferentes, k-fold CV usasse
+  um único modelo treinado com todos os dados para avaliar cada fold
+  de validação, a estimativa resultante deixaria de simular uma
+  amostra de teste verdadeiramente independente do ajuste.
+
+- □ Num estudo médico com pacientes de 10 hospitais diferentes, se
+  cada fold de uma 5-fold CV misturar aleatoriamente pacientes de
+  todos os hospitais (em vez de manter hospitais inteiros em folds
+  separados), a CV pode superestimar o desempenho num hospital
+  totalmente novo.
+
+- □ Como cada fold de treino em k-fold usa quase os mesmos dados
+  que o treino completo, o modelo ajustado em cada fold é
+  praticamente idêntico ao ajustado com a amostra inteira, então CV
+  mede essencialmente a mesma coisa que o erro de treino.
+:::
+
+::: {.callout-note icon=false}
+## Estratificação
+
+- □ No limite em que uma das classes representa menos de $1\%$ da
+  amostra, a ausência de estratificação aumenta substancialmente o
+  risco de algum fold não conter nenhum exemplo dessa classe rara.
+
+- □ Se as classes já estivessem perfeitamente balanceadas
+  ($50\%/50\%$) na amostra completa, usar `StratifiedKFold` em vez de
+  `KFold` comum produziria sempre exatamente os mesmos folds, sem
+  nenhuma diferença possível.
+
+- □ Num problema de imagens médicas com 3 classes muito
+  desbalanceadas ($90\%/9\%/1\%$), a estratificação se torna
+  proporcionalmente mais importante do que num problema balanceado de
+  2 classes.
+
+- □ Como a estratificação muda quais pontos específicos caem em
+  cada fold, ela também altera o valor esperado da estimativa de CV,
+  tornando-a enviesada.
+:::
+
+::: {.callout-note icon=false}
+## LOOCV vs. k-fold Pequeno
+
+- □ No limite em que $k\to N$ (o maior valor possível de $k$), cada
+  modelo de LOOCV é treinado com $N-1$ pontos — o máximo de dados de
+  treino possível dentro do esquema de k-fold.
+
+- □ Se repetíssemos o cálculo de LOOCV várias vezes no mesmo
+  conjunto de dados, obteríamos valores diferentes a cada repetição,
+  assim como acontece com 5-fold e 10-fold quando a partição é
+  sorteada de novo.
+
+- □ Num conjunto de apenas 20 pacientes, LOOCV se torna
+  proporcionalmente mais atraente do que 10-fold, porque deixar de
+  fora 2 pacientes (10%) já é uma perda relativamente maior de dados
+  de treino do que deixar de fora 1.
+
+- □ Como o ESL descreve o estimador de LOOCV como aproximadamente
+  não-enviesado, conclui-se que LOOCV é sempre a melhor estimativa
+  possível do erro de generalização, superando 5-fold e 10-fold em
+  qualidade.
+:::
+
+::: {.callout-note icon=false}
+## Custo Computacional e Variância de k
+
+- □ No limite em que $N$ é muito grande (milhões de pontos), o
+  custo de LOOCV ($N$ ajustes completos) se torna proibitivo mesmo
+  com ajustes individuais rápidos, tornando $k=5$ ou $10$ escolhas
+  praticamente necessárias.
+
+- □ A explicação usual para a alta variância do estimador de LOOCV
+  é que os $N$ conjuntos de treino usados (um por rodada) são muito
+  parecidos entre si — cada um difere do anterior por apenas 1 ponto.
+  Se, ao contrário dessa explicação, os $N$ conjuntos de treino do
+  LOOCV fossem bem diferentes entre si, a alta variância do estimador
+  deixaria de ser explicada por esse mecanismo.
+
+- □ Considere um experimento em que, para um certo classificador e
+  conjunto de dados, a validação por 10-fold CV foi repetida 10
+  vezes, cada vez sorteando uma partição aleatória diferente; a média
+  da acurácia entre essas 10 repetições apresentou um desvio-padrão
+  pequeno, mas não nulo. Se outro pesquisador repetir esse mesmo
+  experimento com uma nova semente aleatória para a partição de
+  10-fold, o valor médio obtido provavelmente será diferente do
+  anterior, mas dentro da mesma ordem de grandeza desse
+  desvio-padrão.
+
+- □ Como $k=5$ e $k=10$ são mais baratos computacionalmente que
+  LOOCV, conclui-se que eles também produzem, necessariamente, uma
+  estimativa de erro menos precisa do que LOOCV.
+:::
+
+::: {.callout-note icon=false}
+## Aplicação: Poda por Validação Cruzada
+
+Considere o critério de custo-complexidade $C(T) = \sum_\tau Q_\tau(T) + \lambda|T|$ usado para podar uma árvore de decisão, em que $Q_\tau(T)$ mede o erro da árvore $T$ no nó-folha $\tau$, $|T|$ é o número de folhas, e $\lambda\ge0$ controla a penalidade por complexidade (mais folhas, mais penalidade). Num experimento de poda por 5-fold CV estratificada, a árvore completa (sem poda) tinha 19 folhas e acurácia de teste de $91{,}8\%$; variando $\lambda$ e escolhendo o valor de maior acurácia média de CV, obteve-se uma árvore de 4 folhas — com a **mesma** acurácia de teste, $91{,}8\%$.
+
+- □ No limite em que $\lambda=0$ (sem nenhuma penalidade), a árvore
+  escolhida seria a árvore completa, sem poda — o extremo oposto da
+  árvore de 4 folhas escolhida por CV no experimento acima.
+
+- □ Se a árvore de 4 folhas escolhida por CV tivesse tido uma
+  acurácia de teste muito pior do que a árvore completa (19 folhas),
+  em vez do empate observado no experimento acima, isso enfraqueceria
+  o argumento de preferir a árvore mais simples.
+
+- □ Num sistema de aprovação de crédito auditado por reguladores,
+  uma árvore de 4 folhas escolhida por CV seria mais fácil de
+  justificar do que uma de 19 folhas, mesmo com a mesma acurácia.
+
+- □ Como `cost_complexity_pruning_path` gera os candidatos de
+  $\lambda$ de forma determinística a partir do treino, escolher
+  $\lambda$ por inspeção visual de um único gráfico treino/validação
+  já garante a mesma reprodutibilidade que escolher por CV com
+  múltiplos folds.
+:::
+
+::: {.callout-note icon=false}
+## A Regra de 1 Desvio-Padrão
+
+A regra do **1 erro-padrão (1-SE)** para escolher um hiperparâmetro por validação cruzada consiste em, entre os candidatos cuja acurácia média de CV esteja a até 1 erro-padrão de distância da melhor acurácia média observada, escolher o mais simples (por exemplo, a árvore com menos folhas). No experimento de poda descrito no bloco anterior (árvore de máxima média de CV: 4 folhas, acurácia de teste $91{,}8\%$), aplicar a regra 1-SE levou a uma árvore ainda mais simples, de 2 folhas, com acurácia de teste de $90{,}1\%$ — pior que a de 4 folhas.
+
+- □ No limite em que o desvio-padrão entre folds de CV tende a
+  zero, a regra de 1-SE tende a escolher praticamente o mesmo modelo
+  que a regra de máxima média de CV.
+
+- □ Se a árvore escolhida pela regra de 1-SE tivesse, por
+  coincidência, exatamente a mesma acurácia de teste que a árvore de
+  máxima média de CV, isso provaria que a regra de 1-SE está correta
+  em geral, não só num experimento específico.
+
+- □ Num cenário em que o custo de deploy de um modelo complexo é
+  alto (por exemplo, um dispositivo com pouca memória), a regra de
+  1-SE seria mais atraente do que no experimento descrito acima,
+  mesmo custando um pouco de acurácia.
+
+- □ Como a regra de 1-SE reconhece que a estimativa de CV tem
+  incerteza amostral, conclui-se que ela elimina completamente essa
+  incerteza ao escolher o modelo mais simples dentro da faixa.
+:::
+
+::: {.callout-note icon=false}
+## O Bootstrap
+
+O **Bootstrap** consiste em sortear, com reposição, $B$ amostras (réplicas) do mesmo tamanho $N$ da amostra original $Z$, calcular uma estatística de interesse $S(\cdot)$ em cada réplica $Z^{*b}$, e usar a distribuição empírica dos $B$ valores $S(Z^{*b})$ para estimar a incerteza de $S$.
+
+- □ No limite em que o número de réplicas $B\to\infty$, a
+  distribuição empírica das réplicas se aproxima de uma aproximação
+  estável da verdadeira distribuição amostral, mas o tamanho de CADA
+  réplica continua sendo $N$, não crescendo com $B$.
+
+- □ Se o Bootstrap reamostrasse SEM reposição, cada réplica gerada
+  seria idêntica à amostra original (mesmos pontos), tornando a
+  técnica inútil para medir variabilidade.
+
+- □ Num estudo que mede a mediana (não a média) do tempo de
+  resposta de um sistema, o Bootstrap ainda poderia estimar um
+  intervalo de confiança para essa mediana, mesmo sem fórmula
+  analítica fechada para seu erro-padrão.
+
+- □ Como o Bootstrap e a validação cruzada usam ambos técnicas de
+  reamostragem sobre os mesmos dados, conclui-se que respondem
+  exatamente à mesma pergunta estatística.
+:::
+
+::: {.callout-note icon=false}
+## Duas Aplicações do Bootstrap
+
+Considere um classificador (por exemplo, uma árvore de decisão) cuja acurácia pontual, medida num conjunto de teste de 171 pacientes, foi $91{,}8\%$. **Primeira aplicação do Bootstrap:** reamostra-se, com reposição, os acertos/erros já observados nesse conjunto de teste, $B=2\,000$ vezes, recalculando a acurácia em cada réplica — obtendo um intervalo de confiança de 95% (percentílico) de $[87{,}7\%, 95{,}9\%]$. Essa aplicação mede a incerteza de **medir** a acurácia com um teste de tamanho finito. **Segunda aplicação:** em vez de reamostrar o teste, reamostra-se com reposição o conjunto de **treino**, reajusta-se o modelo em cada réplica, e avalia-se sempre no mesmo conjunto de teste fixo — essa aplicação mede a instabilidade do próprio **procedimento de ajuste**, não a incerteza de medição no teste.
+
+- □ No limite em que o conjunto de teste tivesse um número enorme
+  de pacientes (não só 171), o intervalo de confiança da acurácia
+  tenderia a ficar mais estreito do que o observado no experimento
+  acima.
+
+- □ Se, em vez de reajustar a árvore em cada réplica bootstrap do
+  treino, apenas reavaliássemos a MESMA árvore original em cada
+  réplica, essa variante mediria a mesma coisa que "reamostrar o
+  treino e reajustar".
+
+- □ Numa empresa que quer saber tanto a taxa de erro real do seu
+  modelo de fraude implantado quanto o quanto seu processo de treino
+  é sensível à amostra histórica usada, essas duas perguntas exigiriam
+  as duas aplicações do Bootstrap descritas acima.
+
+- □ Como as duas aplicações do Bootstrap descritas acima usam a
+  mesma técnica de reamostragem com reposição, elas produzem,
+  necessariamente, o mesmo intervalo de confiança.
+:::
+
+::: {.callout-note icon=false}
+## Vazamento de Dados (Data Leakage)
+
+Considere um experimento com $N=50$ observações e $p=5\,000$ atributos, todos estatisticamente independentes do rótulo (rótulo é ruído puro, sem relação real com os atributos) — o erro real de qualquer classificador nesse cenário é $50\%$. Um procedimento (sutilmente errado) seleciona os 100 atributos mais correlacionados com o rótulo usando a amostra **inteira**, antes de particionar em folds; treina um classificador (por exemplo, 1-vizinho-mais-próximo) só com esses atributos; e avalia por 5-fold CV — obtendo uma estimativa de erro de CV de apenas ${\sim}1{,}5\%$. Repetindo a seleção de atributos **dentro** de cada fold (usando só os dados de treino daquele fold), a estimativa de erro de CV se aproxima de ${\sim}48\%$, muito mais próxima do valor real de $50\%$.
+
+- □ No limite em que o número de atributos irrelevantes $p$ cresce
+  (mantendo $N=50$ fixo), o vazamento por seleção antes do split se
+  torna ainda mais grave, pois há mais chances de achar, por acaso,
+  atributos aparentemente correlacionados com o rótulo.
+
+- □ Se a seleção dos 100 atributos mais correlacionados fosse feita
+  usando só os dados de treino de cada fold, o erro estimado por CV
+  se aproximaria do valor real de $50\%$, em vez do ${\sim}1{,}5\%$
+  observado no jeito errado.
+
+- □ Um pipeline que aplica um redutor de dimensionalidade (como
+  PCA) ajustado com a base inteira, antes de particionar em folds,
+  sofre do mesmo tipo de vazamento do experimento descrito acima,
+  mesmo sem nenhuma seleção explícita.
+
+- □ Como o vazamento descrito acima foi causado especificamente por
+  selecionar atributos com base nos RÓTULOS antes do split,
+  conclui-se que qualquer pré-processamento que não use os rótulos
+  está automaticamente livre de vazamento de dados.
+:::
+
+::: {.callout-note icon=false}
+## Reportando Resultados de Validação Cruzada
+
+- □ No limite em que o desvio-padrão entre folds de CV tende a
+  zero, reportar só a média já comunica virtualmente toda a
+  informação relevante sobre a incerteza da estimativa.
+
+- □ Se o ESL não tivesse feito nenhuma recomendação explícita sobre
+  reportar o erro-padrão, ainda assim seria estatisticamente correto
+  reportá-lo, pois a variabilidade entre folds é uma propriedade real
+  da estimativa, independente de qualquer recomendação de livro-texto.
+
+- □ Ao comparar dois modelos num artigo científico, reportar
+  "modelo A: 85% de acurácia, modelo B: 84%" sem nenhuma medida de
+  variabilidade não permite ao leitor avaliar se essa diferença é
+  estatisticamente significativa ou só ruído de amostragem.
+
+- □ Como um desvio-padrão alto entre os folds de CV significa que a
+  métrica varia bastante de fold para fold, conclui-se que um
+  desvio-padrão alto indica uma estimativa mais estável e confiável
+  do desempenho do modelo.
+:::

@@ -207,13 +207,23 @@ def render_lessons(files):
     files = sorted(set(files))
     rel = [os.path.relpath(f, ROOT) for f in files]
     log(f"🔄 renderizando aula(s) — HTML + slides: {', '.join(rel)}")
-    # Sem --to explícito, `quarto render <arquivo>` só gera o formato
-    # padrão (o primeiro listado no front matter, normalmente html) —
-    # cada aula tem DOIS formatos de saída (notas + slides) do mesmo
-    # index.qmd, então sem isso o RevealJS ficava desatualizado toda vez
-    # que uma aula mudava via render incremental.
-    ok = run_render(["quarto", "render"] + files + ["--to", "html"])
-    ok = run_render(["quarto", "render"] + files + ["--to", "revealjs"]) and ok
+    # BUG CORRIGIDO (2026-09-14) — a versão anterior chamava `quarto
+    # render --to html` e depois `--to revealjs` em dois processos
+    # separados, para garantir que os DOIS formatos de saída (notas +
+    # slides) do mesmo index.qmd fossem sempre atualizados. Mas cada
+    # chamada com `--to` explícito LIMPA a pasta de arquivos de suporte
+    # compartilhada (`index_files/`, com as figuras PNG/SVG de ambos os
+    # formatos) antes de escrever a sua própria — confirmado
+    # empiricamente: depois de `--to html`, `index_files/figure-html`
+    # existe mas `figure-revealjs` já sumiu; depois do `--to revealjs`
+    # seguinte, o oposto. Resultado: a ÚLTIMA chamada sempre vencia,
+    # deixando as figuras do OUTRO formato quebradas (imagens 404) toda
+    # vez que uma aula com blocos de código Python/TikZ mudava. Uma
+    # única chamada combinada (sem `--to`) renderiza os dois formatos
+    # no mesmo processo e escreve ambos os conjuntos de figuras na
+    # mesma pasta corretamente — e já resolve o problema original que
+    # motivou a divisão (os dois `.html` de saída são gerados juntos).
+    ok = run_render(["quarto", "render"] + files)
     log("✅ atualizado." if ok else "❌ falhou — rode `quarto render <arquivo>` manualmente pra ver o erro completo.")
     return ok
 

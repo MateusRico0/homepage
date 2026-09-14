@@ -1,0 +1,281 @@
+---
+title: "Exercícios — Aula 4: Modelos de Mistura Gaussiana e o Algoritmo EM"
+subtitle: "Aprendizado Não Supervisionado"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado destas questões está em [`soluções.qmd`](soluções.qmd).
+Encontrou um erro numa questão? Corrija diretamente neste arquivo e
+abra um *pull request*.
+:::
+
+## Contexto e notação
+
+As questões abaixo são autocontidas, mas reaproveitam a notação padrão
+de **Modelos de Mistura Gaussiana** (GMM). Um GMM assume que cada ponto
+observado $\mathbf{x}$ nasceu de uma entre $K$ populações
+("componentes"), cada uma gaussiana, sem que se observe diretamente de
+qual: introduz-se uma variável latente $\mathbf{z}$, um vetor binário
+de tamanho $K$ com **codificação 1-de-$K$** ($z_k=1$ indica "este ponto
+veio da população $k$", as demais coordenadas valem $0$), com
+$p(z_k=1)=\pi_k$ (o **peso de mistura** a priori de cada população,
+$\sum_k\pi_k=1$) e $p(\mathbf{x}\mid z_k=1)=\mathcal{N}(\mathbf{x}\mid
+\mu_k,\Sigma_k)$.
+
+A **responsabilidade** $\gamma(z_{nk})\equiv p(z_k=1\mid\mathbf{x}_n)$
+é a probabilidade a posteriori de o ponto $n$ ter vindo da população
+$k$, dada por Bayes:
+
+$$\gamma(z_{nk}) = \frac{\pi_k\,\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)}{\sum_{j=1}^K \pi_j\,\mathcal{N}(\mathbf{x}_n\mid\mu_j,\Sigma_j)}, \qquad \sum_{k=1}^K\gamma(z_{nk}) = 1 \text{ para todo } n.$$
+
+Maximizar diretamente a log-verossimilhança $\ln p(X\mid\pi,\mu,\Sigma)
+=\sum_n\ln\{\sum_k\pi_k\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)\}$
+não tem solução fechada, então o ajuste é feito pelo algoritmo **EM**
+(*Expectation-Maximization*), iterando dois passos até convergir:
+
+- **Passo E**: calcular $\gamma(z_{nk})$ para todo $n,k$, usando os
+  parâmetros correntes do modelo.
+- **Passo M**: fixar as responsabilidades e reestimar os parâmetros,
+  com $N_k=\sum_{n=1}^N\gamma(z_{nk})$ (o "número efetivo" de pontos
+  atribuídos ao componente $k$):
+
+$$\mu_k = \frac{1}{N_k}\sum_{n=1}^N \gamma(z_{nk})\,\mathbf{x}_n, \qquad \Sigma_k = \frac{1}{N_k}\sum_{n=1}^N \gamma(z_{nk})\,(\mathbf{x}_n-\mu_k)(\mathbf{x}_n-\mu_k)^T, \qquad \pi_k = \frac{N_k}{N}.$$
+
+O **KMeans** é o caso de **atribuição rígida**: em vez da
+responsabilidade fracionária $\gamma(z_{nk})\in[0,1]$, usa-se um
+indicador $r_{nk}\in\{0,1\}$ (com $\sum_k r_{nk}=1$), e minimiza-se a
+medida de distorção $J=\sum_n\sum_k r_{nk}\|\mathbf{x}_n-\mu_k\|^2$
+diretamente (sem variável latente probabilística). Formalmente, o
+KMeans é o **limite** do GMM quando todas as covariâncias são
+esféricas e **idênticas** entre componentes ($\Sigma_k=\epsilon I$
+para todo $k$, com $\epsilon$ tratado como constante fixa) e
+$\epsilon\to 0$: nesse limite, $\gamma(z_{nk})\to r_{nk}$.
+
+Por fim, algumas questões contrastam essa atribuição probabilística
+com a **atribuição rígida por densidade** de um método de clustering
+baseado em conectividade (como o HDBSCAN): esse tipo de método também
+produz uma partição rígida, mas pode ainda **descartar** pontos que
+não têm vizinhança densa o bastante, marcando-os como **ruído** — uma
+terceira categoria além dos clusters, sem grau de pertencimento
+nenhum, nem mesmo binário.
+
+## Questões discursivas
+
+1. Ajustar uma única gaussiana a um conjunto de dados por máxima
+   verossimilhança tem solução fechada — $\hat\mu$ e $\hat\Sigma$ saem
+   diretamente como média e covariância amostrais — porque, nesse
+   caso, a log-verossimilhança $\sum_n\ln\mathcal{N}(\mathbf{x}_n\mid
+   \mu,\Sigma)$ tem, dentro do $\ln$, uma única gaussiana, e o $\ln$
+   cancela limpo contra a exponencial. Já para o GMM, a
+   log-verossimilhança é $\ln p(X\mid\pi,\mu,\Sigma)=\sum_n\ln\{
+   \sum_k\pi_k\mathcal{N}(\mathbf{x}_n\mid\mu_k,\Sigma_k)\}$. Explique,
+   em termos da forma dessas duas expressões, exatamente **onde** a
+   álgebra que funciona no caso de uma única gaussiana deixa de
+   funcionar quando se passa para $K\ge 2$ gaussianas — não basta dizer
+   "porque tem uma soma dentro do log"; explique por que essa soma
+   especificamente impede isolar $\mu_k$ ao derivar e igualar a zero.
+
+2. No Passo M do algoritmo EM, o peso de mistura de cada componente é
+   reestimado como $\pi_k=N_k/N$, onde $N_k=\sum_n\gamma(z_{nk})$ é a
+   soma das responsabilidades de todos os pontos para o componente $k$
+   (ver Contexto acima) — por isso $\pi_k$ é lido como uma
+   "responsabilidade média". Construa um argumento de por que essa
+   forma — ponderar cada ponto pela sua responsabilidade fracionária,
+   em vez de usar uma contagem rígida de quantos pontos "pertencem" ao
+   componente $k$ — é a atualização de máxima verossimilhança
+   **esperada** correta para $\pi_k$, isto é, por que essa ponderação é
+   a escolha coerente com o resto do algoritmo EM, e não uma
+   aproximação arbitrária.
+
+3. Um GMM ajustado a um conjunto de dados médicos reais (dois
+   atributos contínuos de exame, $K=2$) convergiu para dois componentes
+   cujas elipses de covariância (dois desvios-padrão) diferem
+   visivelmente em tamanho e orientação: a elipse de um dos
+   componentes é maior e mais alongada que a do outro, indicando
+   covariâncias $\Sigma_k$ diferentes e não-esféricas entre os dois
+   grupos. O KMeans, em contraste, assume covariâncias esféricas e
+   idênticas entre componentes ($\Sigma_k=\epsilon I$ igual para todo
+   $k$, no limite $\epsilon\to0$) e, por isso, não estima covariância
+   nenhuma — só médias. Discuta um cenário de dados (pode ser
+   diferente do exemplo médico acima) em que essa diferença de forma
+   entre as elipses seria decisiva para separar corretamente dois
+   clusters — e o que o KMeans faria de errado nesse mesmo cenário,
+   especificamente por causa da premissa de covariância esférica e
+   idêntica.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada
+correta se todos os 4 itens forem julgados corretamente (deixar em
+branco tem penalidade de 20% da nota da questão).
+
+::: {.callout-note icon=false}
+## Partição rígida vs. probabilística
+
+- □ Uma partição probabilística (GMM) e uma partição rígida (obtida por
+  um método baseado em densidade ou pelo KMeans) respondem exatamente
+  à mesma pergunta matemática, diferindo apenas na forma de apresentar
+  a resposta final (arredondar ou não a probabilidade).
+- □ Se dois clusters verdadeiros nos dados são separados por um vale de
+  densidade genuíno (densidade exatamente zero em algum ponto do
+  caminho entre eles), o GMM, ao convergir bem, tende a atribuir
+  responsabilidades próximas de $0$ ou $1$ para a maioria dos pontos de
+  cada lado, mesmo sendo, por definição, um método probabilístico.
+- □ A principal vantagem prática do GMM sobre um método de clustering
+  baseado em densidade (que pode descartar pontos como ruído) é que o
+  GMM nunca deixa nenhum ponto sem uma atribuição, mesmo que
+  fracionária, a algum componente.
+- □ Um paciente com responsabilidade $\gamma=(0{,}5,0{,}5)$ para os dois
+  componentes de um GMM é, necessariamente, um erro de convergência do
+  algoritmo — um GMM bem ajustado nunca deveria produzir essa saída.
+:::
+
+::: {.callout-note icon=false}
+## Variável latente e a história geradora do GMM
+
+- □ Na formulação por variável latente, $z_n$ é observado durante o
+  ajuste do modelo aos dados — é justamente essa observação que permite
+  calcular $\gamma(z_{nk})$ diretamente, sem precisar de Bayes.
+- □ A codificação 1-de-$K$ de $\mathbf{z}$ garante que, para qualquer
+  ponto gerado pelo modelo, exatamente uma população é responsável por
+  ele — nunca zero, nunca mais de uma.
+- □ Se $\pi_1=1$ e todos os demais $\pi_k=0$ para $k>1$, a distribuição
+  marginal $p(\mathbf{x})=\sum_k\pi_k\mathcal{N}(\mathbf{x}\mid\mu_k,
+  \Sigma_k)$ se reduz exatamente a uma única gaussiana
+  $\mathcal{N}(\mathbf{x}\mid\mu_1,\Sigma_1)$, sem mistura nenhuma.
+- □ Marginalizar a variável latente $z$ (somar sobre seus $K$ estados
+  possíveis) é o que conecta a formulação generativa por variável
+  latente à fórmula de mistura de gaussianas $p(\mathbf{x})=\sum_k
+  \pi_k\mathcal{N}(\mathbf{x}\mid\mu_k,\Sigma_k)$, que também pode ser
+  escrita diretamente, sem qualquer variável latente.
+:::
+
+::: {.callout-note icon=false}
+## Log-verossimilhança do GMM e a necessidade do EM
+
+- □ A dificuldade de maximizar $\ln p(X\mid\pi,\mu,\Sigma)$ diretamente
+  desaparece se $K=1$ (um único componente), porque nesse caso a soma
+  dentro do logaritmo tem um único termo, recuperando a mesma solução
+  fechada por máxima verossimilhança que já vale para o ajuste de uma
+  única gaussiana.
+- □ Uma singularidade da log-verossimilhança do GMM (um componente
+  colapsando sobre um único ponto de dado) representa, na prática, um
+  bom ajuste generalizável do modelo aos dados, só que num regime
+  numérico extremo.
+- □ Rodar o algoritmo EM a partir de várias inicializações diferentes
+  (`n_init` no `sklearn`) e escolher a de maior log-verossimilhança
+  final é uma forma de mitigar o risco de convergir para um máximo
+  local ruim — não uma forma de evitar singularidades.
+- □ Se a log-verossimilhança do GMM tivesse, de fato, uma solução
+  fechada análoga à de uma única gaussiana, o algoritmo EM ainda assim
+  seria necessário para ajustar o modelo, só que como uma alternativa
+  igualmente rápida.
+:::
+
+::: {.callout-note icon=false}
+## O Passo E: responsabilidades e Bayes
+
+- □ $\gamma(z_{nk})$ é, por construção, a probabilidade a **priori** de
+  o ponto $n$ vir do componente $k$, calculada antes de observar
+  $\mathbf{x}_n$.
+- □ Para um ponto $n$ fixo, a soma $\sum_{k=1}^K\gamma(z_{nk})$ é
+  sempre igual a $1$, independentemente dos valores correntes de
+  $\pi,\mu,\Sigma$.
+- □ Se dois componentes tiverem exatamente os mesmos $\mu_k$ e
+  $\Sigma_k$, mas pesos de mistura diferentes ($\pi_1\ne\pi_2$), a
+  responsabilidade de qualquer ponto para o componente de maior peso
+  será sempre estritamente maior que para o de menor peso.
+- □ Recalcular $\gamma(z_{nk})$ para todos os $N$ pontos após cada
+  atualização do Passo M é necessário porque os parâmetros
+  $\pi,\mu,\Sigma$ usados na fórmula de Bayes do Passo E mudaram.
+:::
+
+::: {.callout-note icon=false}
+## O Passo M: atualizações ponderadas
+
+- □ A atualização $\mu_k=\dfrac{1}{N_k}\sum_n\gamma(z_{nk})\mathbf{x}_n$
+  se reduz à média aritmética simples de todos os $N$ pontos quando
+  $\gamma(z_{nk})=1/K$ para todo ponto e todo componente.
+- □ $N_k$ pode, em princípio, assumir um valor não inteiro, mesmo que o
+  número de pontos $N$ seja inteiro.
+- □ A atualização de $\Sigma_k$ do Passo M usa o $\mu_k$ da **rodada
+  anterior** do Passo M (antes de ser atualizado nesta mesma rodada),
+  em vez do $\mu_k$ recém-calculado, para manter a ordem correta de
+  dependência entre os parâmetros.
+- □ A restrição $\sum_k\pi_k=1$ é o único motivo pelo qual a
+  atualização de $\pi_k$ precisa de um multiplicador de Lagrange — as
+  atualizações de $\mu_k$ e $\Sigma_k$ não têm nenhuma restrição
+  análoga a respeitar.
+:::
+
+::: {.callout-note icon=false}
+## KMeans como caso limite do GMM
+
+- □ A redução do GMM ao KMeans depende de covariâncias esféricas
+  **idênticas entre os componentes** ($\Sigma_k=\epsilon I$ para todo
+  $k$) — covariâncias esféricas, porém diferentes entre componentes
+  (por exemplo, $\Sigma_1=\epsilon_1 I\ne\Sigma_2=\epsilon_2 I$), não
+  bastariam para reproduzir exatamente a atribuição rígida do KMeans
+  no limite.
+- □ O limite $\epsilon\to 0$ produz atribuição rígida porque a
+  exponencial do componente mais próximo domina exponencialmente as
+  demais no denominador de Bayes — não porque os pesos de mistura
+  $\pi_k$ se tornam iguais entre si.
+- □ Um GMM com covariâncias esféricas idênticas, mas $\epsilon$ grande
+  (não pequeno), produziria responsabilidades próximas às do KMeans,
+  porque o formato esférico e idêntico já é, por si só, suficiente
+  para uma atribuição quase rígida.
+- □ O KMeans, ao não estimar covariância nenhuma, é incapaz, por
+  construção, de representar clusters com formas alongadas ou giradas
+  de forma diferente entre si — só bolas do mesmo tamanho.
+:::
+
+::: {.callout-note icon=false}
+## Um resultado real: GMM vs. um método baseado em densidade
+
+Um GMM com $K=2$ foi ajustado a dois atributos de exame ($569$
+pacientes) de um conjunto de dados médico real (diagnóstico
+benigno/maligno, nunca usado no ajuste, só para avaliar depois). O
+componente mais maligno reuniu $189$ pacientes malignos e $8$
+benignos (pureza $\approx95{,}9\%$); a acurácia da atribuição rígida
+(arg max da responsabilidade) contra o diagnóstico real foi
+$94{,}55\%$, com Índice de Rand Ajustado $\mathrm{ARI}=0{,}792$. Para
+comparação, um método de clustering baseado em densidade, aplicado
+antes aos mesmos dois atributos, havia encontrado um cluster de $54$
+pacientes $100\%$ malignos e outro de $347$ pacientes
+$\approx90{,}8\%$ benignos, descartando $168$ pacientes
+($\approx29{,}5\%$) como ruído; o ARI dessa partição foi $0{,}644$,
+calculado excluindo os pacientes de ruído da comparação. Dos $569$
+pacientes, $9$ receberam responsabilidade do GMM próxima de
+$50\%/50\%$ (ambíguos).
+
+- □ O ARI do GMM ($0{,}792$) ser maior que o do método baseado em
+  densidade ($0{,}644$ excluindo ruído) é, sozinho, uma prova de que o
+  GMM é um algoritmo estritamente superior para clustering em geral, e
+  não uma consequência específica de como cada método trata os pontos
+  difíceis deste dataset.
+- □ O fato de o GMM atribuir uma responsabilidade máxima a **todos** os
+  $569$ pacientes (nunca "ruído") é o que permite calcular seu ARI
+  sobre a população inteira, sem precisar excluir nenhum paciente da
+  comparação, ao contrário do que foi feito para calcular o ARI do
+  método baseado em densidade, que excluiu os pacientes de ruído.
+- □ O componente $1$ do GMM (o mais maligno, $189$M/$8$B) é mais puro
+  proporcionalmente do que o cluster $100\%$ maligno de $54$ pacientes
+  encontrado pelo método baseado em densidade.
+- □ Os $9$ pacientes de responsabilidade mais ambígua do GMM estão
+  necessariamente entre os $168$ pacientes que o método baseado em
+  densidade havia marcado como ruído, já que ambos os fenômenos vêm da
+  mesma região de sobreposição entre as duas populações.
+:::

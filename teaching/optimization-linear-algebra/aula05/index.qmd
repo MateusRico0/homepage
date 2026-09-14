@@ -1,0 +1,2078 @@
+---
+title: "Aula 5: Decomposição em Valores Singulares (SVD) e Aproximações de Baixo Posto"
+subtitle: "Álgebra Linear e Otimização para Aprendizado de Máquina"
+author: "Prof. Marcos Medeiros Raimundo"
+date: "2026-09-12"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    fig-width: 8
+    fig-height: 4.5
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    theme: [simple, ../../lesson-theme.scss]
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    fig-width: 8
+    fig-height: 4.5
+jupyter: homepage
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar
+disable_progress_bar()
+from datasets import load_dataset
+
+plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+plt.rcParams.update({"figure.dpi": 120, "font.size": 11})
+
+# Paleta preferencial do IC
+COR_A   = "#0085CA"   # azul — elemento principal
+COR_B   = "#FF5E00"   # laranja — elemento de contraste
+COR_C   = "#E03C31"   # vermelho — alerta / terceiro elemento
+COR_NEU = "#5D6D7E"   # neutro
+
+# --- Problema-fio da aula: mesmo dataset real das Aulas 1-4 ------------
+_housing = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+COLS = ["MedInc", "HouseAge", "AveRooms", "AveBedrms"]
+X = _housing[COLS].to_numpy()
+y = _housing["MedHouseVal"].to_numpy()
+
+# --- Matriz de contraste da Intuição Geométrica (Bloco 2) --------------
+# Não-simétrica de propósito: eixos especiais não-ortogonais no domínio
+# (Aula 4) vs. o que a SVD sempre garante (Bloco 2 desta aula).
+A_intuicao = np.array([[1.4, 0.6], [0.3, 0.9]])
+
+# --- Exemplo resolvido à mão (MathML Exemplo 4.13, Bloco 3) ------------
+A_exemplo53 = np.array([[1.0, 0.0, 1.0], [-2.0, 1.0, 0.0]])
+
+# --- Matriz de notas de filmes (MathML Exemplo 4.14, Problema Motivador,
+#     retomada no Bloco 5 para a interpretação de filtragem colaborativa)
+A_filmes = np.array([
+    [5.0, 4.0, 1.0],
+    [5.0, 5.0, 0.0],
+    [0.0, 0.0, 5.0],
+    [1.0, 0.0, 4.0],
+])
+FILMES = ["Guerra nas Estrelas", "Blade Runner", "Amélie Poulain", "Delicatessen"]
+ESPECTADORES = ["Ali", "Beatrix", "Chandra"]
+```
+
+# Revisão e Introdução
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Revisão Rápida: Onde a Aula 4 Parou
+
+A Aula 4 respondeu, para matrizes **quadradas simétricas**, tudo que
+precisávamos saber sobre autovalores e autovetores. **Primeiro**, provou
+que $A^TA$ é sempre simétrica e semidefinida positiva, para **qualquer**
+matriz $A$ — mesmo quando $A$ não é quadrada. **Segundo**, o Teorema
+Espectral Real garantiu que toda matriz simétrica $A\in\mathbb{R}^{n\times
+n}$ tem $n$ autovalores reais e admite uma base ortonormal de
+autovetores, isto é, $A=Q\Lambda Q^T$ com $Q$ ortogonal e $\Lambda$
+diagonal. **Terceiro**, o sinal dos autovalores caracterizou definitude
+positiva/semidefinida ($A\succ 0\iff\lambda_{\min}(A)>0$), e a razão
+entre o maior e o menor autovalor forneceu o número de condição exato,
+$\text{cond}(A)=\lambda_{\max}(A)/\lambda_{\min}(A)$ — fechando, sem
+perturbar nada, o ciclo que a Aula 3 só tinha *medido* empiricamente
+(perturbando os dados e observando o efeito no peso estimado).
+
+Vale relembrar os números concretos, porque esta aula vai reencontrá-los:
+para os 4 atributos completos do *California Housing* ($X\in
+\mathbb{R}^{16\,640\times 4}$), os autovalores de $X^TX$ eram
+$[747{,}25;\ 52\,666{,}03;\ 273\,990{,}28;\ 1{,}753\times10^7]$, com
+$\text{cond}(X^TX)\approx 23\,460{,}5$; para o par quase-colinear
+`AveRooms`/`AveBedrms`, $\text{cond}\approx 419{,}8$; para o par
+bem-condicionado `MedInc`/`HouseAge`, $\text{cond}\approx 169{,}1$.
+
+## Organizador Prévio: De $X^TX$ Simétrica Para $X$ Retangular
+
+Tudo isso foi construído em cima de $X^TX$ — uma matriz $4\times 4$,
+quadrada e simétrica por construção. Mas o objeto de interesse original
+nunca foi $X^TX$; é o próprio $X$, a matriz de design
+$16\,640\times 4$, retangular. Vale ser preciso aqui, porque é fácil
+confundir dois problemas diferentes: **autovalor e autovetor não são
+"difíceis de garantir" para uma matriz retangular — eles simplesmente
+não estão definidos.** A equação $A\mathbf{x}=\lambda\mathbf{x}$ exige
+que $A\mathbf{x}$ viva no mesmo espaço que $\mathbf{x}$ (para que a
+igualdade com $\lambda\mathbf{x}$ faça sentido); se $A\in
+\mathbb{R}^{m\times n}$ com $m\ne n$, então $A\mathbf{x}\in\mathbb{R}^m$
+enquanto $\mathbf{x}\in\mathbb{R}^n$ — a equação nem sequer tem tipo
+correto, muito menos solução. O polinômio característico
+$\det(A-\lambda I)$ tem o mesmo problema: $A-\lambda I$ exige subtrair
+$A$ de uma matriz identidade multiplicada por escalar, e isso só é
+definido quando $A$ é quadrada.
+
+A ideia central desta aula: em vez de insistir em decompor $X$ da mesma
+forma que decompomos $X^TX$, vamos **reciclar exatamente o que a Aula 4
+já provou** — aplicando-o não a $X$, mas às duas matrizes quadradas
+simétricas que $X$ produz naturalmente, $X^TX\in\mathbb{R}^{4\times 4}$ e
+$XX^T\in\mathbb{R}^{16\,640\times 16\,640}$ — e depois costurar os dois
+resultados de volta em uma decomposição de $X$ propriamente dita. Essa
+costura tem nome: **Decomposição em Valores Singulares (SVD)**.
+
+## Roteiro da Aula
+
+A pergunta que fecha o Organizador Prévio — "como reciclar o Teorema
+Espectral Real, aplicado a $X^TX$ e $XX^T$, para decompor o próprio $X$
+retangular?" — se desdobra em quatro perguntas mais específicas:
+
+1. O que é a **Decomposição em Valores Singulares (SVD)** e por que ela
+   existe para **qualquer** matriz retangular, sem exceção?
+2. Como **construir** a SVD a partir do que já sabemos sobre $X^TX$ e
+   $XX^T$ — isto é, a partir do próprio Teorema Espectral da Aula 4?
+3. Como usar a SVD para **aproximar** uma matriz por outra de posto
+   menor, e por que essa aproximação é a **melhor possível** (Teorema de
+   Eckart-Young-Mirsky)?
+4. O que é a **Decomposição Polar**, e como ela nasce "de graça" a
+   partir dos mesmos três fatores da SVD?
+
+## Problema Motivador
+
+Considere um cenário bem diferente do *California Housing*, mas que vai
+se revelar regido pela mesma matemática. Três espectadores — Ali,
+Beatrix e Chandra — avaliam quatro filmes (Guerra nas Estrelas, Blade
+Runner, Amélie Poulain, Delicatessen) numa escala de 0 (pior) a 5
+(melhor). As notas formam uma matriz $A\in\mathbb{R}^{4\times 3}$, uma
+linha por filme, uma coluna por espectador (tradução livre de um
+exemplo do MathML, §4.5.1):
+
+```{python}
+#| echo: false
+pd.DataFrame(A_filmes, index=FILMES, columns=ESPECTADORES)
+```
+
+Olhando só para esses $12$ números, seria razoável suspeitar de uma
+estrutura escondida: talvez Ali e Beatrix compartilhem um "perfil de
+gosto" (ficção científica), e Chandra tenha um perfil bem diferente
+(cinema de arte francês) — e talvez os próprios filmes se agrupem em
+"temas" correspondentes. Pense por um instante, sem fazer nenhuma conta
+ainda: **existe alguma forma de extrair, direto da matriz de notas, esses
+"perfis" e "temas" escondidos — sem que ninguém tenha rotulado os filmes
+por gênero de antemão?**
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Revisão Rápida
+
+::: {.fragment}
+Aula 4: para $A$ **quadrada simétrica**, $A^TA$ é sempre simétrica PSD
+(qualquer $A$); Teorema Espectral Real $\Rightarrow A=Q\Lambda Q^T$, $Q$
+ortogonal, $\Lambda$ diagonal real.
+:::
+
+::: {.fragment}
+Sinal de $\lambda$ $\Rightarrow$ definitude; razão
+$\lambda_{\max}/\lambda_{\min}$ $\Rightarrow$ número de condição exato —
+$\text{cond}(X^TX)\approx 23\,460{,}5$ (4 atributos completos), $\approx
+419{,}8$ (quase-colinear), $\approx 169{,}1$ (bem-condicionado).
+:::
+
+::: {.fragment}
+Tudo isso construído em cima de $X^TX$ ($4\times 4$, simétrica) — nunca
+diretamente sobre $X$ ($16\,640\times 4$, retangular).
+:::
+
+## De $X^TX$ Simétrica Para $X$ Retangular
+
+::: {.fragment}
+**Autovalor/autovetor não são "difíceis" para matriz retangular — são
+indefinidos.** $A\mathbf{x}=\lambda\mathbf{x}$ exige $A\mathbf{x}$ no
+mesmo espaço que $\mathbf{x}$; se $A\in\mathbb{R}^{m\times n}$, $m\ne n$,
+os dois lados nem têm o mesmo tipo.
+:::
+
+::: {.fragment}
+$\det(A-\lambda I)$: mesmo problema — $A-\lambda I$ só é definido para
+$A$ quadrada.
+:::
+
+::: {.fragment}
+Ideia central: reciclar o Teorema Espectral aplicado a $X^TX$ **e**
+$XX^T$ (ambas quadradas simétricas), e costurar os dois de volta numa
+decomposição de $X$ — a **SVD**.
+:::
+
+## Roteiro da Aula
+
+::: {.fragment}
+**1.** O que é a SVD e por que existe para **qualquer** matriz
+retangular?
+:::
+
+::: {.fragment}
+**2.** Como construí-la a partir do Teorema Espectral (Aula 4)?
+:::
+
+::: {.fragment}
+**3.** Como aproximar uma matriz por outra de posto menor, de forma
+**ótima** (Eckart-Young-Mirsky)?
+:::
+
+::: {.fragment}
+**4.** O que é a Decomposição Polar, e como nasce da SVD?
+:::
+
+## Problema Motivador
+
+::: {.fragment}
+Três espectadores (Ali, Beatrix, Chandra), quatro filmes — notas
+$0$–$5$ numa matriz $A\in\mathbb{R}^{4\times 3}$ (tradução livre, MathML
+§4.5.1):
+:::
+
+```{python}
+#| echo: false
+pd.DataFrame(A_filmes, index=FILMES, columns=ESPECTADORES)
+```
+
+::: {.fragment}
+Suspeita: Ali/Beatrix compartilham um perfil (ficção científica),
+Chandra outro (cinema de arte). **Existe uma forma de extrair esses
+"perfis"/"temas" direto da matriz de notas, sem rótulo de gênero
+algum?**
+:::
+:::
+
+::: {.fig-resize style="width: 78%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  block/.style={rectangle, draw=icblue, fill=icblue!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=3.1cm, minimum height=1.15cm},
+  decision/.style={diamond, draw=icorange, fill=icorange!10, align=center,
+                    font=\small, inner sep=1pt, text width=2.7cm, aspect=2.1},
+  concl/.style={rectangle, draw=icred, fill=icred!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=3.4cm, minimum height=1.15cm}
+]
+  \node (A) [block] at (0,0) {matriz $A$\\qualquer};
+  \node (Q) [decision] at (5.1,0) {quadrada\\e simétrica?};
+  \node (S) [concl] at (11.0,2.3) {Teorema Espectral\\(Aula 4):\\$A=Q\Lambda Q^T$};
+  \node (SVD) [concl] at (11.0,-2.3) {SVD (Aula 5):\\$A=U\Sigma V^T$\\sempre existe,\\qualquer formato};
+
+  \draw [-Stealth, thick, color=gray!70] (A) -- (Q);
+  \draw [-Stealth, thick, color=gray!70] (Q) -- (S);
+  \draw [-Stealth, thick, color=gray!70] (Q) -- node[above, sloped, font=\scriptsize] {não} (SVD);
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## De volta a $X^TX$: o que muda (e o que não muda) para $X$
+
+Dica: pense com cuidado sobre o que está definido para uma matriz
+$m\times n$ com $m\ne n$, e o que continua definido só porque a matriz é
+quadrada simétrica.
+
+- □ Se $X$ fosse quadrada mas **não** simétrica, o Teorema Espectral
+  Real garantiria, mesmo assim, autovalores reais para $X$.
+- □ Se todos os espectadores dessem exatamente a mesma nota a todos os
+  filmes (a matriz de notas $A$ tivesse posto $1$), haveria mais de um
+  "perfil" de espectador (mais de um par não-nulo de vetores singulares)
+  associado a essa matriz.
+- □ Uma camada totalmente conectada de uma rede neural, com matriz de
+  pesos $W\in\mathbb{R}^{m\times n}$ e $m\ne n$ (mais neurônios de saída
+  do que de entrada, por exemplo), não possui autovalores no sentido
+  usual, mas ainda assim admite uma decomposição em valores singulares.
+- □ Como o Teorema Espectral (Aula 4) garante que $X^TX$ sempre tem
+  autovalores reais, isso implica que o próprio $X$ também possui
+  autovalores reais, só que de importância secundária.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## De volta a $X^TX$: o que muda (e o que não muda) para $X$
+
+Dica: o que está definido para $m\times n$, $m\ne n$, e o que só existe
+porque a matriz é quadrada simétrica?
+
+- □ $X$ quadrada mas não simétrica $\Rightarrow$ Teorema Espectral
+  ainda garantiria autovalores reais.
+- □ Matriz de notas de posto $1$ (todos dão a mesma nota a tudo)
+  $\Rightarrow$ mais de um "perfil" (par de vetores singulares) não-nulo.
+- □ Camada de rede neural com $W\in\mathbb{R}^{m\times n}$, $m\ne n$: sem
+  autovalores no sentido usual, mas com SVD.
+- □ $X^TX$ sempre tem autovalores reais (Aula 4) $\Rightarrow$ $X$
+  também tem, só que secundários.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## De volta a $X^TX$ — Resposta
+
+- ✗ Simetria é a hipótese do teorema, não uma consequência de ser
+  quadrada — sem ela, autovalores podem ser complexos (Aula 4, Bloco 3).
+- ✗ Posto $1$ $\Rightarrow$ só **um** valor singular não-nulo — um único
+  "perfil" explica toda a matriz.
+- ✔ Mesma mecânica ($W$ retangular, sem autovalores, com SVD), outro
+  modelo de ML (camada linear de rede neural).
+- ✗ Confunde a entidade: autovalor é propriedade de $X^TX$ (quadrada);
+  $X$ em si, se retangular, simplesmente não tem autovalores — não é
+  "secundário", é indefinido.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** o Teorema Espectral só fala de $X^TX$/$XX^T$
+(sempre quadradas simétricas). Decompor $X$ de verdade exige a SVD — os
+Blocos 2-3 constroem exatamente essa ponte.
+:::
+:::
+
+# Intuição Geométrica da SVD
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Uma Matriz Qualquer Agindo sobre um Círculo
+
+Antes de qualquer fórmula, uma imagem concreta — desta vez com uma
+matriz que **não** é simétrica, de propósito, para deixar claro por que
+o Bloco 2 da Aula 4 não se aplica aqui:
+$$
+A = \begin{bmatrix} 1{,}4 & 0{,}6 \\ 0{,}3 & 0{,}9 \end{bmatrix} ,
+\qquad A \ne A^T .
+$$
+Pense em $A$ como transformação linear agindo sobre o círculo unitário de
+$\mathbb{R}^2$. Como qualquer matriz $2\times 2$ com autovalores reais e
+distintos, $A$ tem duas direções especiais no sentido da Aula 4 —
+autovetores que só esticam, nunca giram, sob $A$. Mas, como $A$ não é
+simétrica, o Teorema Espectral Real **não garante** que essas direções
+sejam ortogonais entre si — e de fato não são.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Uma Matriz Qualquer Agindo sobre um Círculo
+
+::: {.fragment}
+**Matriz não-simétrica, de propósito:**
+$A=\begin{bmatrix}1{,}4&0{,}6\\0{,}3&0{,}9\end{bmatrix}$, $A\ne A^T$.
+:::
+
+::: {.fragment}
+Autovalores reais e distintos (como qualquer $2\times 2$ com esse
+perfil) $\Rightarrow$ duas direções que só esticam, nunca giram — mas
+**sem garantia de ortogonalidade** (Teorema Espectral não se aplica,
+$A$ não é simétrica).
+:::
+
+## O Que a SVD Propõe Fazer Diferente
+
+:::
+
+::: {.fig-resize style="width: 92%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+U_int, S_int, Vt_int = np.linalg.svd(A_intuicao)
+V_int = Vt_int.T
+
+eigvals_int, eigvecs_int = np.linalg.eig(A_intuicao)
+# A_intuicao tem autovalores reais (perfil 2x2, disc>0); np.linalg.eig
+# devolve dtype complexo por padrão mesmo assim — tomamos a parte real
+# (a parte imaginária é numericamente zero neste caso).
+eigvals_int = eigvals_int.real
+eigvecs_int = eigvecs_int.real
+
+theta_grid = np.linspace(0, 2*np.pi, 200)
+circulo = np.stack([np.cos(theta_grid), np.sin(theta_grid)])
+elipse = A_intuicao @ circulo
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 5.2))
+
+# Painel 1: domínio -- circulo unitário, vetores singulares à direita (V)
+# vs. autovetores de A (não-ortogonais), para contraste direto.
+ax1.plot(circulo[0], circulo[1], color=COR_NEU, lw=1.8, ls=":", label="círculo unitário")
+for k, cor in zip(range(2), [COR_A, COR_B]):
+    v = V_int[:, k]
+    ax1.annotate("", xy=v, xytext=(-v[0], -v[1]),
+                 arrowprops=dict(arrowstyle="-", color=cor, lw=2.4))
+    ax1.text(v[0]*1.12, v[1]*1.12, f"$\\mathbf{{v}}_{k+1}$", fontsize=10, color=cor, fontweight="bold")
+for k in range(2):
+    w = eigvecs_int[:, k]
+    ax1.annotate("", xy=0.85*w, xytext=(-0.85*w[0], -0.85*w[1]),
+                 arrowprops=dict(arrowstyle="-", color=COR_NEU, lw=1.6, ls="--", alpha=0.8))
+ax1.set_xlim(-1.6, 1.6); ax1.set_ylim(-1.6, 1.6)
+ax1.set_aspect("equal", adjustable="box")
+ax1.set_title("Domínio: vetores singulares $\\mathbf{v}_1,\\mathbf{v}_2$ (cheio)\nvs. autovetores de $A$ (tracejado, não-ortogonais)", fontsize=9.5, fontweight="bold")
+ax1.set_xlabel("$x_1$"); ax1.set_ylabel("$x_2$")
+ax1.legend(fontsize=8, loc="lower right")
+
+# Painel 2: codomínio -- imagem do circulo (elipse) e eixos sigma_i u_i
+ax2.plot(elipse[0], elipse[1], color=COR_A, lw=2.2, label="imagem $A(\\text{círculo})$")
+for k, cor in zip(range(2), [COR_A, COR_B]):
+    u = U_int[:, k]
+    s = S_int[k]
+    ax2.annotate("", xy=s*u, xytext=(-s*u[0], -s*u[1]),
+                 arrowprops=dict(arrowstyle="->", color=cor, lw=2.4))
+    ax2.text(s*u[0]*1.12, s*u[1]*1.12, f"$\\sigma_{k+1}\\mathbf{{u}}_{k+1}$", fontsize=10, color=cor, fontweight="bold")
+ax2.set_xlim(-2.1, 2.1); ax2.set_ylim(-2.1, 2.1)
+ax2.set_aspect("equal", adjustable="box")
+ax2.legend(fontsize=8, loc="lower right")
+ax2.set_title("Codomínio: eixos da elipse são $\\sigma_1\\mathbf{u}_1,\\sigma_2\\mathbf{u}_2$\n(sempre ortogonais entre si)", fontsize=9.5, fontweight="bold")
+ax2.set_xlabel("$y_1$"); ax2.set_ylabel("$y_2$")
+
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+No painel esquerdo, as setas cheias (azul e laranja) são os **vetores
+singulares à direita**, $\mathbf{v}_1$ e $\mathbf{v}_2$ — colunas da
+matriz $V$ que o Bloco 3 vai construir; as setas tracejadas cinzas são
+os **autovetores** de $A$ no sentido da Aula 4. Numericamente, o ângulo
+entre os autovetores é $\approx 106{,}9°$ (nada perto de $90°$), enquanto
+o ângulo entre $\mathbf{v}_1$ e $\mathbf{v}_2$ é exatamente $90°$ — os
+vetores singulares são, por construção, **sempre** ortogonais entre si,
+autovetores de uma matriz qualquer, em geral, não são. Esse é
+precisamente o ponto: autovetor e vetor singular são conceitos
+relacionados, mas **não são a mesma coisa** — coincidem apenas quando
+$A$ é simétrica (Bloco 3 mostra exatamente por quê).
+
+O painel direito mostra a imagem do círculo unitário sob $A$: uma elipse
+cujos eixos caem sobre $\sigma_1\mathbf{u}_1$ e $\sigma_2\mathbf{u}_2$ —
+os **valores singulares** ($\sigma_1\approx 1{,}675$,
+$\sigma_2\approx 0{,}645$, sempre não-negativos e ordenados por
+convenção, $\sigma_1\ge\sigma_2$) escalando os **vetores singulares à
+esquerda**, $\mathbf{u}_1,\mathbf{u}_2$ — que também são ortogonais
+entre si. A intuição geométrica central da SVD: $A$ pega uma base
+ortonormal do domínio ($\mathbf{v}_1,\mathbf{v}_2$) e a transforma em
+outra base ortogonal do codomínio ($\sigma_1\mathbf{u}_1,
+\sigma_2\mathbf{u}_2$) — nada gira "torto" nem no domínio nem no
+codomínio; só a costura entre os dois lados muda de base.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+Esquerda: **vetores singulares** $\mathbf{v}_1,\mathbf{v}_2$ (cheio,
+sempre a $90°$) vs. **autovetores** de $A$ (tracejado, $\approx 106{,}9°$
+entre si — não-ortogonais). Mesma matriz, dois conceitos diferentes:
+coincidem só quando $A$ é simétrica (Bloco 3).
+:::
+
+::: {.fragment}
+Direita: círculo unitário $\to$ elipse sob $A$. Eixos da elipse
+$=\sigma_1\mathbf{u}_1,\sigma_2\mathbf{u}_2$
+($\sigma_1\approx1{,}675\ge\sigma_2\approx0{,}645$, sempre
+não-negativos, sempre ortogonais).
+:::
+
+::: {.fragment}
+**Intuição central:** $A$ leva uma base ortonormal do domínio
+($\mathbf{v}_i$) em outra base ortogonal do codomínio ($\sigma_i
+\mathbf{u}_i$) — nada "gira torto"; só a base muda.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Autovetor e vetor singular: a mesma seta, dois papéis diferentes?
+
+Dica: pense no que muda (e no que não muda) quando $A$ é simétrica —
+volte, se precisar, ao Teorema Espectral Real da Aula 4.
+
+- □ Se $A$ for simétrica, os vetores singulares de $A$ e os autovetores
+  de $A$ podem ser escolhidos exatamente iguais (a menos de sinal).
+- □ Se todos os autovalores de uma matriz $2\times 2$ forem complexos
+  (não-reais), essa matriz ainda assim possui uma SVD real bem definida.
+- □ Numa camada linear $f(\mathbf{x})=W\mathbf{x}$ de uma rede neural com
+  $W$ quadrada mas não-simétrica, os vetores singulares de $W$ e os
+  autovetores de $W$ apontam, em geral, em direções diferentes.
+- □ Como os vetores singulares são sempre ortogonais entre si, isso
+  implica que a imagem do círculo unitário sob qualquer matriz $A$ é
+  sempre um círculo (nunca uma elipse "achatada").
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Autovetor e vetor singular: a mesma seta, dois papéis diferentes?
+
+Dica: o que muda quando $A$ é simétrica? Volte ao Teorema Espectral
+(Aula 4) se precisar.
+
+- □ $A$ simétrica $\Rightarrow$ vetores singulares e autovetores podem
+  coincidir (a menos de sinal).
+- □ Todos os autovalores complexos $\Rightarrow$ ainda assim existe SVD
+  real bem definida.
+- □ Camada linear $W\mathbf{x}$, $W$ quadrada não-simétrica: vetores
+  singulares e autovetores de $W$ apontam, em geral, em direções
+  diferentes.
+- □ Vetores singulares sempre ortogonais $\Rightarrow$ imagem do círculo
+  unitário sob qualquer $A$ é sempre um círculo.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Autovetor vs. vetor singular — Resposta
+
+- ✔ Bloco 3 prova exatamente isso: se $A=A^T$, a SVD e a decomposição
+  espectral coincidem.
+- ✔ A SVD (Teorema 4.22, MathML) existe para **qualquer** matriz real,
+  autovalores complexos ou não — é o Bloco 3 que constrói isso.
+- ✔ Correto — o painel esquerdo mostrou exatamente esse fenômeno; a
+  mesma mecânica se generaliza para qualquer $W$ não-simétrica.
+- ✗ Confunde ortogonalidade **entre os vetores singulares** com a forma
+  da imagem: os fatores de escala $\sigma_i$ associados a eles é que
+  determinam se a imagem é círculo ($\sigma_1=\sigma_2$) ou elipse
+  ($\sigma_1\ne\sigma_2$, como no painel direito).
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** são conceitos diferentes que só colapsam num
+caso especial (simetria). O Bloco 3 mostra exatamente essa costura,
+construindo a SVD a partir do Teorema Espectral.
+:::
+:::
+
+# Construção Formal da SVD a Partir do Teorema Espectral
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Premissas: O Que Já Temos Disponível
+
+A construção que segue (tradução livre e reorganização nossa de MathML,
+§4.5.2, pp. 122-125) usa só resultados já disponíveis desde a Aula 4 —
+nenhuma ferramenta nova de álgebra linear precisa ser importada. Sejam
+$A\in\mathbb{R}^{m\times n}$ uma matriz qualquer (não necessariamente
+quadrada) e $r=\text{posto}(A)$. As duas premissas:
+
+::: {.callout-note icon=false}
+## Premissas (ambas já provadas na Aula 4)
+
+1. $A^TA\in\mathbb{R}^{n\times n}$ e $AA^T\in\mathbb{R}^{m\times m}$ são
+   **sempre** simétricas e semidefinidas positivas, para **qualquer**
+   $A$ — mesmo retangular (Aula 4, teorema $A^TA$ simétrica e
+   semidefinida positiva).
+2. Pelo **Teorema Espectral Real** (Aula 4), toda matriz simétrica
+   admite uma base ortonormal completa de autovetores associados a
+   autovalores reais e não-negativos (semidefinitude positiva $\iff$
+   $\lambda_i\ge 0$ para todo $i$).
+:::
+
+A ideia da construção: aplicar essas duas premissas a $A^TA$ (para
+construir metade da decomposição) e depois usar a própria ação de $A$
+para construir a outra metade, ligando as duas com um único conjunto de
+fatores de escala.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Premissas: O Que Já Temos Disponível
+
+::: {.fragment}
+Construção (MathML §4.5.2, tradução/reorganização nossa) usa só
+resultados **já provados na Aula 4** — nenhuma ferramenta nova.
+:::
+
+::: {.callout-note icon=false}
+## Premissas (Aula 4)
+
+- $A^TA$, $AA^T$ **sempre** simétricas e semidefinidas positivas,
+  qualquer $A$ (mesmo retangular).
+- Teorema Espectral Real: matriz simétrica $\Rightarrow$ base ortonormal
+  de autovetores, autovalores reais; semidefinitude positiva
+  $\iff\lambda_i\ge 0$.
+:::
+
+::: {.fragment}
+Plano: aplicar as premissas a $A^TA$ para construir metade da
+decomposição, usar a ação de $A$ para a outra metade, ligar as duas com
+um único fator de escala.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Passo 1: Vetores Singulares à Direita, a Partir de $A^TA$
+
+Pela Premissa 1, $A^TA$ é simétrica e semidefinida positiva. Pela
+Premissa 2 (Teorema Espectral Real), existe uma base ortonormal completa
+de autovetores $\mathbf{v}_1,\dots,\mathbf{v}_n\in\mathbb{R}^n$ de
+$A^TA$, com autovalores reais e não-negativos
+$\lambda_1\ge\dots\ge\lambda_n\ge 0$:
+$$
+A^TA = V\Lambda V^T, \qquad V=[\mathbf{v}_1\ \cdots\ \mathbf{v}_n]
+\text{ ortogonal}, \qquad \Lambda=\text{diag}(\lambda_1,\dots,\lambda_n).
+$$
+Como cada $\lambda_i\ge 0$ (semidefinitude positiva), a raiz quadrada
+$\sqrt{\lambda_i}$ está sempre bem definida em $\mathbb{R}$ — **é aqui
+que a Premissa 1 entra de forma essencial**: se $A^TA$ não fosse
+garantidamente semidefinida positiva, não haveria garantia de poder
+tomar essa raiz sem cair em números complexos. Definimos os **valores
+singulares** de $A$ como
+$$
+\sigma_i := \sqrt{\lambda_i} \ge 0, \qquad i=1,\dots,n,
+$$
+e chamamos os $\mathbf{v}_i$ (autovetores de $A^TA$) de **vetores
+singulares à direita** de $A$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Passo 1: Vetores Singulares à Direita
+
+::: {.fragment}
+Premissas 1+2 $\Rightarrow$ $A^TA=V\Lambda V^T$, $V$ ortogonal,
+$\Lambda=\text{diag}(\lambda_1,\dots,\lambda_n)$,
+$\lambda_1\ge\dots\ge\lambda_n\ge 0$.
+:::
+
+::: {.fragment}
+$\lambda_i\ge 0$ (semidefinitude positiva) $\Rightarrow$
+$\sigma_i:=\sqrt{\lambda_i}$ sempre real. **Essencial:** sem a
+Premissa 1 (PSD garantida), essa raiz poderia cair em números
+complexos.
+:::
+
+::: {.fragment}
+$\sigma_i$ = **valor singular**; $\mathbf{v}_i$ (autovetor de $A^TA$) =
+**vetor singular à direita**.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Passo 2: Vetores Singulares à Esquerda, Como Imagem Normalizada
+
+Para os $\sigma_i>0$ (isto é, $i\le r$, já que $\text{posto}(A^TA)=
+\text{posto}(A)=r$), defina
+$$
+\mathbf{u}_i := \frac{1}{\sigma_i}A\mathbf{v}_i \in \mathbb{R}^m .
+$$
+Precisamos verificar que os $\mathbf{u}_i$ assim definidos são
+ortonormais — só assim eles formam de fato uma base ortogonal do
+codomínio. A prova usa exatamente a Premissa 2 aplicada a $A^TA$: como
+$\mathbf{v}_i$ é autovetor de $A^TA$ com autovalor $\lambda_i$,
+$A^TA\mathbf{v}_j=\lambda_j\mathbf{v}_j$, e para $i\ne j$,
+$$
+(A\mathbf{v}_i)^T(A\mathbf{v}_j) = \mathbf{v}_i^T(A^TA)\mathbf{v}_j =
+\mathbf{v}_i^T(\lambda_j\mathbf{v}_j) = \lambda_j(\mathbf{v}_i^T
+\mathbf{v}_j) = 0 ,
+$$
+onde o último passo usa a ortogonalidade de $\mathbf{v}_i$ e
+$\mathbf{v}_j$ ($i\ne j$), já garantida pela base ortonormal do Passo 1.
+Ou seja: **as imagens $A\mathbf{v}_i$ já são ortogonais entre si antes
+mesmo de normalizar** — o Passo 2 só divide cada uma por seu próprio
+comprimento ($\|A\mathbf{v}_i\|=\sigma_i$, uma verificação direta:
+$\|A\mathbf{v}_i\|^2=\mathbf{v}_i^T A^TA\mathbf{v}_i=\lambda_i\|
+\mathbf{v}_i\|^2=\lambda_i$) para obter um conjunto ortonormal
+$\mathbf{u}_1,\dots,\mathbf{u}_r$. Chamamos os $\mathbf{u}_i$ de
+**vetores singulares à esquerda** de $A$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Passo 2: Vetores Singulares à Esquerda
+
+::: {.fragment}
+Para $\sigma_i>0$ ($i\le r=\text{posto}(A)$): $\mathbf{u}_i:=
+\dfrac{1}{\sigma_i}A\mathbf{v}_i$.
+:::
+
+::: {.fragment}
+**Ortogonalidade das imagens** (usa a Premissa 2 de novo): para
+$i\ne j$,
+$$
+(A\mathbf{v}_i)^T(A\mathbf{v}_j)=\mathbf{v}_i^T(A^TA)\mathbf{v}_j=
+\lambda_j\mathbf{v}_i^T\mathbf{v}_j=0
+$$
+(último passo: $\mathbf{v}_i\perp\mathbf{v}_j$, Passo 1).
+:::
+
+::: {.fragment}
+$\|A\mathbf{v}_i\|^2=\mathbf{v}_i^TA^TA\mathbf{v}_i=\lambda_i=
+\sigma_i^2\Rightarrow\|A\mathbf{v}_i\|=\sigma_i$. Normalizar dá
+$\mathbf{u}_1,\dots,\mathbf{u}_r$ ortonormais — **vetores singulares à
+esquerda**.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Passo 3: A Equação de Valor Singular e a Montagem Final
+
+Rearranjando a definição do Passo 2, $\mathbf{u}_i=\dfrac{1}{\sigma_i}
+A\mathbf{v}_i$, obtemos a **equação de valor singular**
+$$
+A\mathbf{v}_i = \sigma_i\mathbf{u}_i, \qquad i=1,\dots,r .
+$$
+Note a semelhança — e a diferença — com a equação de autovalor
+$A\mathbf{x}=\lambda\mathbf{x}$ da Aula 4: aqui os vetores dos dois lados
+($\mathbf{v}_i$ no domínio, $\mathbf{u}_i$ no codomínio) **não precisam
+ser o mesmo vetor**, porque $A$ pode mudar de espaço. Empilhando os
+$\mathbf{v}_i$ como colunas de $V$ e os $\mathbf{u}_i$ como colunas de
+$U$ (completando $U$ e $V$ com bases ortonormais arbitrárias dos
+espaços-nulos de $A^T$ e $A$, se $r<m$ ou $r<n$ — os $\sigma_i=0$
+correspondentes preenchem $\Sigma$ com zeros, sem violar nada), a
+equação de valor singular vira, em forma matricial,
+$$
+AV = U\Sigma ,
+$$
+onde $\Sigma\in\mathbb{R}^{m\times n}$ tem $\Sigma_{ii}=\sigma_i$ e
+$\Sigma_{ij}=0$ para $i\ne j$. Como $V$ é ortogonal, $V^{-1}=V^T$;
+multiplicando ambos os lados à direita por $V^T$:
+$$
+A = U\Sigma V^T .
+$$
+Isso completa a construção. Podemos agora enunciar o resultado de forma
+autocontida:
+
+::: {.callout-note icon=false}
+## Teorema (SVD — MathML, tradução nossa, Teo. 4.22, p. 119)
+
+Seja $A\in\mathbb{R}^{m\times n}$ uma matriz de posto
+$r\in[0,\min(m,n)]$. Então existe uma decomposição
+$$
+A = U\Sigma V^T
+$$
+com $U\in\mathbb{R}^{m\times m}$ ortogonal (colunas
+$\mathbf{u}_1,\dots,\mathbf{u}_m$), $V\in\mathbb{R}^{n\times n}$
+ortogonal (colunas $\mathbf{v}_1,\dots,\mathbf{v}_n$), e
+$\Sigma\in\mathbb{R}^{m\times n}$ com $\Sigma_{ii}=\sigma_i\ge 0$ e
+$\Sigma_{ij}=0$ para $i\ne j$. Os $\sigma_i$, $i=1,\dots,r$, são os
+**valores singulares** (por convenção, ordenados
+$\sigma_1\ge\dots\ge\sigma_r>0$); $\mathbf{u}_i$ são os **vetores
+singulares à esquerda**; $\mathbf{v}_i$ são os **vetores singulares à
+direita**. Essa decomposição existe para **qualquer** $A\in
+\mathbb{R}^{m\times n}$, sem exceção — em particular, sem exigir que $A$
+seja quadrada nem simétrica.
+:::
+
+Vale registrar explicitamente a diferença em relação à decomposição
+espectral da Aula 4: lá, $A=Q\Lambda Q^{-1}$ usa a **mesma** matriz de
+base ($Q$) nos dois lados, porque o domínio e o codomínio de uma
+transformação $A:\mathbb{R}^n\to\mathbb{R}^n$ são o mesmo espaço. A SVD
+usa **duas** bases diferentes ($U$ e $V$) precisamente porque, em geral,
+domínio ($\mathbb{R}^n$) e codomínio ($\mathbb{R}^m$) da transformação
+representada por $A$ são espaços diferentes — e a SVD é o que resta de
+"decomposição em direções especiais" quando essa igualdade de espaços é
+removida.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Passo 3: Equação de Valor Singular e Montagem
+
+::: {.fragment}
+$\mathbf{u}_i=\dfrac{1}{\sigma_i}A\mathbf{v}_i\Rightarrow$ **equação de
+valor singular** $A\mathbf{v}_i=\sigma_i\mathbf{u}_i$. Diferença da
+equação de autovalor: $\mathbf{v}_i$ (domínio) e $\mathbf{u}_i$
+(codomínio) não precisam ser o mesmo vetor.
+:::
+
+::: {.fragment}
+Empilhando: $AV=U\Sigma$; $V$ ortogonal $\Rightarrow V^{-1}=V^T$
+$\Rightarrow A=U\Sigma V^T$.
+:::
+
+::: {.callout-note icon=false}
+## Teorema (SVD — MathML Teo. 4.22, tradução nossa)
+
+$A\in\mathbb{R}^{m\times n}$ posto $r$ $\Rightarrow$ $A=U\Sigma V^T$,
+$U\in\mathbb{R}^{m\times m}$/$V\in\mathbb{R}^{n\times n}$ ortogonais,
+$\Sigma_{ii}=\sigma_i\ge 0$ ($\sigma_1\ge\dots\ge\sigma_r>0$),
+$\Sigma_{ij}=0$. **Existe para qualquer $A$**, quadrada ou não,
+simétrica ou não.
+:::
+
+::: {.fragment}
+Diferença-chave da Aula 4: $A=Q\Lambda Q^{-1}$ usa a **mesma** base nos
+dois lados (domínio = codomínio, $A$ quadrada); SVD usa **duas** bases
+($U,V$) porque domínio ($\mathbb{R}^n$) e codomínio ($\mathbb{R}^m$)
+podem ser espaços diferentes.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Exemplo Resolvido à Mão
+
+Vamos aplicar a construção passo a passo à matriz (MathML, Exemplo 4.13,
+tradução livre)
+$$
+A = \begin{bmatrix} 1 & 0 & 1 \\ -2 & 1 & 0 \end{bmatrix} \in
+\mathbb{R}^{2\times 3} .
+$$
+**Passo 1.** $A^TA=\begin{bmatrix}5&-2&1\\-2&1&0\\1&0&1\end{bmatrix}$
+(simétrica e semidefinida positiva, Premissa 1, verificável por
+substituição direta). Seus autovalores (via o polinômio característico
+$3\times 3$, ou diretamente por `numpy`) são $\lambda=(6,\,1,\,0)$ — só
+dois não-nulos, consistente com $\text{posto}(A)=2$. Logo,
+$\sigma_1=\sqrt{6}\approx 2{,}449$ e $\sigma_2=\sqrt{1}=1$.
+
+**Passo 2.** $\mathbf{u}_1=A\mathbf{v}_1/\sigma_1$ e
+$\mathbf{u}_2=A\mathbf{v}_2/\sigma_2$, calculados a partir dos
+autovetores $\mathbf{v}_1,\mathbf{v}_2$ de $A^TA$.
+
+**Passo 3.** Verificação numérica completa a seguir.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Exemplo Resolvido à Mão
+
+::: {.fragment}
+$A=\begin{bmatrix}1&0&1\\-2&1&0\end{bmatrix}\in\mathbb{R}^{2\times 3}$
+(MathML Exemplo 4.13). $A^TA=\begin{bmatrix}5&-2&1\\-2&1&0\\1&0&1
+\end{bmatrix}$, autovalores $(6,1,0)$ $\Rightarrow\sigma_1=\sqrt6
+\approx2{,}449$, $\sigma_2=1$ — só $2$ não-nulos, $\text{posto}(A)=2$.
+:::
+
+::: {.fragment}
+$\mathbf{u}_i=A\mathbf{v}_i/\sigma_i$; verificação numérica completa a
+seguir.
+:::
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+
+U_ex, S_ex, Vt_ex = np.linalg.svd(A_exemplo53, full_matrices=True)
+V_ex = Vt_ex.T
+r_ex = np.linalg.matrix_rank(A_exemplo53)
+
+Sigma_ex = np.zeros_like(A_exemplo53)
+for i in range(min(A_exemplo53.shape)):
+    Sigma_ex[i, i] = S_ex[i]
+
+reconstrucao = U_ex @ Sigma_ex @ Vt_ex
+
+print("A =\n", A_exemplo53)
+print("\nposto(A) =", r_ex)
+print("\nvalores singulares sigma =", np.round(S_ex, 4))
+print("\nU (vetores singulares à esquerda, colunas) =\n", np.round(U_ex, 4))
+print("\nV (vetores singulares à direita, colunas) =\n", np.round(V_ex, 4))
+print("\nreconstrução U @ Sigma @ V^T =\n", np.round(reconstrucao, 4))
+print("\nreconstrução bate com A? ", np.allclose(reconstrucao, A_exemplo53))
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A reconstrução $U\Sigma V^T$ recupera $A$ exatamente (diferença menor
+que $10^{-10}$, arredondamento de ponto flutuante), confirmando a
+construção passo a passo. Repare que a terceira coluna de $V$ (associada
+a $\sigma_3=0$) é uma base ortonormal do espaço-nulo de $A$ — outra
+consequência direta da construção: a SVD não só decompõe $A$, como
+também produz de graça uma base ortonormal de $\ker(A)$, generalizando
+o que a Aula 2 chamava de núcleo (espaço-solução de $A\mathbf{x}=
+\mathbf{0}$) para o caso retangular.
+
+**Aviso de leitura:** por construção, cada vetor singular é único **a
+menos de sinal** (assim como os autovetores da Aula 4) — trocar
+$(\mathbf{u}_i,\mathbf{v}_i)$ por $(-\mathbf{u}_i,-\mathbf{v}_i)$
+simultaneamente não muda $\sigma_i\mathbf{u}_i\mathbf{v}_i^T$. Por isso
+os sinais que o `numpy` devolve podem diferir dos de uma referência
+impressa em livro sem que a decomposição esteja errada — o que importa
+é o produto $U\Sigma V^T$, não os sinais individuais.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+Reconstrução $U\Sigma V^T$ recupera $A$ exatamente (erro $<10^{-10}$).
+Terceira coluna de $V$ ($\sigma_3=0$) = base do espaço-nulo de $A$ — a
+SVD generaliza o núcleo da Aula 2 para o caso retangular.
+:::
+
+::: {.fragment}
+**Aviso:** vetor singular único só **a menos de sinal** (como autovetor,
+Aula 4) — sinais do `numpy` podem diferir de uma referência impressa
+sem estar errados; o que importa é o produto $U\Sigma V^T$.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se $A^TA$ tivesse um autovalor negativo, a construção quebraria em qual passo exatamente?
+
+Dica: releia a Premissa 1 e aponte, com precisão, onde ela é usada.
+
+- □ A construção quebraria já no Passo 1, porque $\sigma_i:=
+  \sqrt{\lambda_i}$ deixaria de estar bem definido em $\mathbb{R}$ para
+  um $\lambda_i<0$.
+- □ Se $A$ for quadrada e invertível, todos os seus valores singulares
+  são necessariamente iguais aos valores absolutos de seus autovalores.
+- □ Numa matriz de covariância empírica (Aula 4, Bloco 6) — sempre
+  simétrica semidefinida positiva por construção — a mesma garantia de
+  raiz quadrada real dos autovalores se aplica ao construir os
+  "desvios-padrão principais" via SVD/decomposição espectral.
+- □ Como $A^TA$ é sempre semidefinida positiva para qualquer $A$ real
+  (Aula 4), isso implica que $A$ em si também tem só autovalores
+  não-negativos, quando $A$ é quadrada.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Se $A^TA$ tivesse autovalor negativo, a construção quebraria onde?
+
+Dica: releia a Premissa 1 e aponte o passo exato.
+
+- □ Quebraria no Passo 1: $\sigma_i:=\sqrt{\lambda_i}$ deixa de ser real
+  para $\lambda_i<0$.
+- □ $A$ quadrada invertível $\Rightarrow$ valores singulares sempre
+  iguais aos módulos dos autovalores de $A$.
+- □ Matriz de covariância (sempre PSD): mesma garantia de raiz real dos
+  autovalores.
+- □ $A^TA$ sempre PSD (qualquer $A$ real) $\Rightarrow$ $A$ quadrada
+  também só tem autovalores não-negativos.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Onde a construção quebraria — Resposta
+
+- ✔ Exatamente: sem a Premissa 1 (PSD garantida), $\sqrt{\lambda_i}$
+  cairia em números complexos — a construção não teria nem por onde
+  começar.
+- ✗ Falso em geral — só vale quando $A$ é **normal** (comuta com
+  $A^T$); uma matriz invertível qualquer, não-simétrica, tem valores
+  singulares diferentes dos módulos de seus autovalores (o painel
+  esquerdo do Bloco 2 já mostrou autovalor $\approx1{,}642$ vs. valor
+  singular $\approx1{,}675$ — próximos, mas não iguais).
+- ✔ Mesma mecânica (raiz de autovalor PSD), aplicação já vista (Aula 4,
+  Bloco 6 — covariância empírica).
+- ✗ Confunde a entidade: a garantia é sobre $A^TA$ (sempre PSD), não
+  sobre $A$ propriamente dita — uma matriz $A$ quadrada qualquer pode
+  ter autovalores negativos ou complexos mesmo com $A^TA$ PSD.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** a Premissa 1 (PSD de $A^TA$) é a peça que
+sustenta a raiz quadrada real logo no primeiro passo — sem ela, a SVD
+simplesmente não existiria para matrizes reais. É por isso que o
+Teorema 4.22 pode afirmar, sem ressalva, que a SVD existe para
+**qualquer** matriz real.
+:::
+:::
+
+# A SVD do Dataset-Fio: $X$ do *California Housing*
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Voltando ao Problema Original
+
+Chegou a hora de aplicar a construção do Bloco 3 ao objeto que motivou
+toda a aula: a matriz de design $X\in\mathbb{R}^{16\,640\times 4}$ do
+*California Housing* (colunas `MedInc`, `HouseAge`, `AveRooms`,
+`AveBedrms`), a mesma usada desde a Aula 1. Como $X$ tem muito mais
+linhas que colunas ($m=16\,640 \gg n=4$), calcular a SVD completa
+($U\in\mathbb{R}^{16\,640\times 16\,640}$) seria um desperdício: as
+últimas $16\,640-4$ colunas de $U$ só completam uma base ortonormal do
+codomínio sem carregar nenhuma informação nova sobre $X$ (correspondem a
+$\sigma_i=0$). Por isso, na prática, usa-se a **SVD reduzida** (MathML,
+p. 128) — $U\in\mathbb{R}^{16\,640\times 4}$, $\Sigma\in
+\mathbb{R}^{4\times 4}$ diagonal, $V\in\mathbb{R}^{4\times 4}$ —,
+matematicamente equivalente à SVD completa, só descartando as colunas
+que multiplicariam por zero de qualquer forma.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Voltando ao Problema Original
+
+::: {.fragment}
+$X\in\mathbb{R}^{16\,640\times 4}$ (California Housing, mesmas 4
+colunas desde a Aula 1). $m=16\,640\gg n=4$.
+:::
+
+::: {.fragment}
+SVD completa desperdiçaria: $16\,640-4$ colunas de $U$ só completam a
+base do codomínio, todas com $\sigma_i=0$. Usa-se a **SVD reduzida**
+(MathML p. 128): $U\in\mathbb{R}^{16\,640\times4}$,
+$\Sigma,V\in\mathbb{R}^{4\times4}$ — equivalente, sem as colunas nulas.
+:::
+
+## Os Valores Singulares de $X$ e a Ponte com a Aula 4
+
+:::
+
+::: {.fig-resize style="width: 96%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+U_X, S_X, Vt_X = np.linalg.svd(X, full_matrices=False)
+
+# Autovalores de X^TX já calculados na Aula 4 (para comparação direta)
+eigvals_XtX = np.linalg.eigvalsh(X.T @ X)[::-1]  # ordem decrescente
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.5, 4.8))
+
+# Painel 1: valores singulares de X (escala log, pela ordem de grandeza)
+ax1.bar(range(1, 5), S_X, color=COR_A, alpha=0.85)
+ax1.set_yscale("log")
+ax1.set_xticks(range(1, 5))
+ax1.set_xlabel("índice $i$")
+ax1.set_ylabel("$\\sigma_i$ (escala log)")
+ax1.set_title("Valores singulares de $X$", fontsize=10, fontweight="bold")
+for i, s in enumerate(S_X):
+    ax1.text(i+1, s*1.15, f"{s:,.2f}", ha="center", fontsize=8.5)
+
+# Painel 2: sigma_i^2 vs autovalores de X^T X (deve cair sobre y=x)
+ax2.scatter(eigvals_XtX, S_X**2, color=COR_B, s=70, zorder=3)
+lims = [min(eigvals_XtX)*0.5, max(eigvals_XtX)*1.5]
+ax2.plot(lims, lims, color=COR_NEU, ls="--", lw=1.3, label="$y=x$")
+ax2.set_xscale("log"); ax2.set_yscale("log")
+ax2.set_xlabel("$\\lambda_i(X^TX)$ (Aula 4)")
+ax2.set_ylabel("$\\sigma_i(X)^2$ (Aula 5)")
+ax2.set_title("$\\sigma_i^2=\\lambda_i$: mesma informação, duas rotas", fontsize=10, fontweight="bold")
+ax2.legend(fontsize=8.5)
+
+plt.tight_layout()
+plt.show()
+
+cond_X = S_X[0] / S_X[-1]
+cond_XtX = eigvals_XtX[0] / eigvals_XtX[-1]
+print(f"sigma(X)      = {np.round(S_X, 4)}")
+print(f"sigma(X)^2    = {np.round(S_X**2, 4)}")
+print(f"lambda(X^TX)  = {np.round(eigvals_XtX, 4)}")
+print(f"cond(X)       = sigma_max/sigma_min       = {cond_X:.4f}")
+print(f"cond(X^TX)    = lambda_max/lambda_min     = {cond_XtX:.4f}")
+print(f"cond(X)^2     = {cond_X**2:.4f}")
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Os quatro valores singulares de $X$ são $\sigma=[4\,186{,}996;\
+523{,}441;\ 229{,}491;\ 27{,}336]$ (ordem decrescente). Elevando ao
+quadrado: $\sigma^2=[1{,}753\times10^7;\ 273\,990{,}28;\ 52\,666{,}03;\
+747{,}25]$ — **exatamente** os autovalores de $X^TX$ que a Aula 4 já
+tinha calculado, na mesma ordem. Isso não é coincidência nem
+aproximação numérica: é o Passo 1 da construção do Bloco 3, aplicado
+diretamente a $A=X$ — $\sigma_i(X)^2=\lambda_i(X^TX)$ por definição. O
+painel direito da figura confirma isso visualmente: todos os pontos
+caem exatamente sobre a reta $y=x$ (em escala log-log, para acomodar a
+diferença de quatro ordens de grandeza entre o maior e o menor
+autovalor).
+
+Essa identidade fecha, de forma exata, o gancho que a Aula 4 deixou em
+aberto: o Boyd (Apêndice A.5.2, já citado na Aula 4) define o número de
+condição de uma matriz retangular qualquer usando **valores
+singulares**, $\text{cond}(X)=\sigma_{\max}/\sigma_{\min}$, não
+autovalores. Calculando: $\text{cond}(X)\approx 4\,186{,}996/27{,}336
+\approx 153{,}168$. Compare com $\text{cond}(X^TX)\approx 23\,460{,}5$,
+já calculado na Aula 4 — a razão entre os dois não é arbitrária:
+
+::: {.callout-note icon=false}
+## Proposição: $\text{cond}(X^TX)=\text{cond}(X)^2$
+
+Para qualquer $X\in\mathbb{R}^{m\times n}$ de posto completo (todos os
+$\sigma_i>0$), $\text{cond}(X^TX)=\text{cond}(X)^2$.
+
+**Prova (nossa, direta da definição).** Por $\sigma_i(X)^2=
+\lambda_i(X^TX)$ (Passo 1, Bloco 3, aplicado a $A=X$), o maior e o menor
+autovalor de $X^TX$ são $\lambda_{\max}=\sigma_{\max}^2$ e
+$\lambda_{\min}=\sigma_{\min}^2$. Logo,
+$$
+\text{cond}(X^TX) = \frac{\lambda_{\max}}{\lambda_{\min}} =
+\frac{\sigma_{\max}^2}{\sigma_{\min}^2} = \left(\frac{\sigma_{\max}}
+{\sigma_{\min}}\right)^2 = \text{cond}(X)^2 . \qquad\blacksquare
+$$
+:::
+
+Numericamente: $153{,}168^2\approx 23\,460{,}5$ — bate exatamente com o
+valor já calculado na Aula 4 (nenhuma aproximação, a igualdade é exata a
+menos de arredondamento de ponto flutuante). Essa proposição tem uma
+consequência prática que vale registrar como aviso, mesmo sem
+desenvolver agora (a Aula 8 retoma o tema, ao discutir estabilidade de
+algoritmos iterativos): **resolver as Equações Normais
+$X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$ diretamente trabalha, por dentro,
+com o número de condição elevado ao quadrado** — $23\,460{,}5$, contra
+apenas $153{,}168$ se um algoritmo numérico trabalhasse com $X$
+diretamente (via SVD, por exemplo, em vez de formar $X^TX$
+explicitamente). É por isso que bibliotecas numéricas de produção
+(como o `scipy.linalg.lstsq`) evitam formar $X^TX$ explicitamente sempre
+que possível.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+$\sigma(X)=[4\,186{,}996;\ 523{,}441;\ 229{,}491;\ 27{,}336]$;
+$\sigma^2=[1{,}753\times10^7;\ 273\,990{,}28;\ 52\,666{,}03;\ 747{,}25]$
+— **exatamente** os autovalores de $X^TX$ da Aula 4, mesma ordem
+(não é coincidência: $\sigma_i(X)^2=\lambda_i(X^TX)$, Passo 1 do
+Bloco 3).
+:::
+
+::: {.fragment}
+Boyd (Aula 4) define $\text{cond}$ de matriz retangular via $\sigma$:
+$\text{cond}(X)=\sigma_{\max}/\sigma_{\min}\approx153{,}168$. Compare
+com $\text{cond}(X^TX)\approx23\,460{,}5$ (Aula 4).
+:::
+
+::: {.callout-note icon=false}
+## Proposição: $\text{cond}(X^TX)=\text{cond}(X)^2$
+
+$\sigma_i(X)^2=\lambda_i(X^TX)\Rightarrow\lambda_{\max}/\lambda_{\min}=
+(\sigma_{\max}/\sigma_{\min})^2\Rightarrow\text{cond}(X^TX)=
+\text{cond}(X)^2$. Numericamente: $153{,}168^2\approx23\,460{,}5$ —
+exato.
+:::
+
+::: {.fragment}
+**Aviso prático** (Aula 8 retoma): resolver Equações Normais trabalha,
+por dentro, com o número de condição **ao quadrado** — motivo pelo qual
+bibliotecas de produção evitam formar $X^TX$ explicitamente, preferindo
+a SVD de $X$ direto.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se o menor valor singular de $X$ fosse exatamente zero, o que isso significaria sobre `AveRooms`/`AveBedrms`/`MedInc`/`HouseAge`?
+
+Dica: relacione posto, dependência linear (Aula 2) e $\sigma_{\min}=0$.
+
+- □ $\sigma_{\min}(X)=0$ significaria que as 4 colunas de $X$ são
+  linearmente dependentes, no mesmo sentido de dependência linear
+  definido na Aula 2.
+- □ Se todos os 4 valores singulares de $X$ fossem exatamente iguais
+  entre si, o número de condição de $X$ seria $1$, mas isso não diria
+  nada sobre o número de condição de $X^TX$.
+- □ Numa matriz de embeddings de palavras (uma linha por palavra, uma
+  coluna por dimensão latente), um valor singular próximo de zero
+  indicaria uma dimensão latente quase redundante com as demais.
+- □ Como $\sigma_i(X)^2=\lambda_i(X^TX)$ vale para qualquer $X$, isso
+  implica que basta calcular os autovalores de $X^TX$ (Aula 4, já
+  feito) para nunca mais ser necessário calcular a SVD de $X$
+  diretamente, em qualquer aplicação.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## $\sigma_{\min}(X)=0$: o que isso diria sobre as 4 colunas?
+
+Dica: relacione posto, dependência linear (Aula 2) e $\sigma_{\min}=0$.
+
+- □ $\sigma_{\min}(X)=0\Rightarrow$ as 4 colunas de $X$ são linearmente
+  dependentes (Aula 2).
+- □ Todos os $\sigma_i$ iguais $\Rightarrow\text{cond}(X)=1$, mas isso
+  não diria nada sobre $\text{cond}(X^TX)$.
+- □ Matriz de embeddings (palavra $\times$ dimensão latente):
+  $\sigma_i\approx0\Rightarrow$ dimensão quase redundante.
+- □ $\sigma_i(X)^2=\lambda_i(X^TX)$ sempre $\Rightarrow$ nunca mais
+  precisa calcular SVD de $X$ diretamente, em qualquer aplicação.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## $\sigma_{\min}=0$ e dependência linear — Resposta
+
+- ✔ Exato: $\sigma_{\min}=0\Rightarrow\lambda_{\min}(X^TX)=0
+  \Rightarrow X^TX$ singular $\Rightarrow$ posto incompleto de $X$
+  (Aula 2/3) $\Rightarrow$ colunas dependentes.
+- ✗ A Proposição diz exatamente o contrário do que o item afirma: se
+  todos os $\sigma_i$ forem iguais, $\text{cond}(X)=\sigma_{\max}/
+  \sigma_{\min}=1$, e daí $\text{cond}(X^TX)=\text{cond}(X)^2=1$
+  também — longe de "não dizer nada", o valor de $\text{cond}(X^TX)$
+  fica completamente determinado.
+- ✔ Mesma mecânica (valor singular pequeno $\Rightarrow$ direção quase
+  redundante), outro cenário de ML (embeddings).
+- ✗ A identidade poupa *uma* conta ($\sigma$ a partir de $\lambda$ já
+  calculado), mas a SVD carrega informação que $X^TX$ sozinha não tem
+  — os vetores $\mathbf{u}_i$ (codomínio, dimensão $16\,640$), usados
+  nos Blocos 5-6 para aproximação de baixo posto e decomposição polar.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** sim — $\sigma_{\min}=0$ é exatamente a mesma
+condição de posto incompleto já vista na Aula 2/3, só que vista pela
+lente dos valores singulares em vez do determinante ou da eliminação de
+Gauss.
+:::
+:::
+
+# Aproximação de Baixo Posto e o Teorema de Eckart-Young-Mirsky
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Decompondo $A$ em Pedaços de Posto 1
+
+A SVD $A=U\Sigma V^T$ pode ser reescrita numa forma que deixa mais
+explícito o que cada valor singular "carrega". Defina, para
+$i=1,\dots,r$ ($r=\text{posto}(A)$), a matriz de posto $1$
+$$
+A_i := \mathbf{u}_i\mathbf{v}_i^T \in \mathbb{R}^{m\times n}
+$$
+(o produto externo entre a $i$-ésima coluna de $U$ e a $i$-ésima coluna
+de $V$). Então (MathML, §4.6, tradução nossa)
+$$
+A = \sum_{i=1}^r \sigma_i A_i = \sum_{i=1}^r \sigma_i
+\mathbf{u}_i\mathbf{v}_i^T .
+$$
+**Por que essa igualdade vale:** escrevendo $A=U\Sigma V^T$ em forma de
+somatório, $A=\sum_{i,j}\Sigma_{ij}\mathbf{u}_i\mathbf{v}_j^T$; como
+$\Sigma$ é diagonal ($\Sigma_{ij}=0$ para $i\ne j$), só os termos com
+$i=j$ sobrevivem, e cada um deles vale exatamente
+$\sigma_i\mathbf{u}_i\mathbf{v}_i^T$ — a soma acima.
+
+Se, em vez de somar todos os $r$ termos, pararmos numa posição
+intermediária $k<r$, obtemos a **aproximação de posto-$k$** (MathML,
+Def. informal, §4.6):
+$$
+\hat{A}^{(k)} := \sum_{i=1}^k \sigma_i\mathbf{u}_i\mathbf{v}_i^T ,
+\qquad \text{com } \text{posto}(\hat{A}^{(k)})=k .
+$$
+Isso é chamado de **SVD truncada** (MathML, p. 129). Intuitivamente:
+como os $\sigma_i$ vêm ordenados de forma decrescente, cada termo
+adicional contribui cada vez menos para $A$ — descartar os últimos
+$r-k$ termos descarta as direções que menos importam, na medida exata
+de $\sigma_i$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Decompondo $A$ em Pedaços de Posto 1
+
+::: {.fragment}
+$A_i:=\mathbf{u}_i\mathbf{v}_i^T$ (posto $1$). Escrevendo $A=U\Sigma
+V^T=\sum_{i,j}\Sigma_{ij}\mathbf{u}_i\mathbf{v}_j^T$: $\Sigma$ diagonal
+$\Rightarrow$ só $i=j$ sobrevive $\Rightarrow A=\sum_{i=1}^r
+\sigma_i\mathbf{u}_i\mathbf{v}_i^T$.
+:::
+
+::: {.fragment}
+**Aproximação de posto-$k$** ($k<r$): $\hat{A}^{(k)}:=
+\sum_{i=1}^k\sigma_i\mathbf{u}_i\mathbf{v}_i^T$ — a **SVD truncada**.
+$\sigma_i$ decrescente $\Rightarrow$ termos descartados são os que
+menos importam.
+:::
+
+## Medindo o Erro: Norma Espectral
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Medindo o Erro da Aproximação: Norma Espectral
+
+Para dizer, com precisão, "o quanto $\hat{A}^{(k)}$ erra em relação a
+$A$", precisamos de uma noção de tamanho para matrizes — uma norma
+matricial, análoga às normas vetoriais da Aula 1.
+
+::: {.callout-note icon=false}
+## Definição (Norma Espectral — MathML, tradução nossa, Def. 4.23, p. 131)
+
+Para $A\in\mathbb{R}^{m\times n}$, a **norma espectral** de $A$ é
+$$
+\|A\|_2 := \max_{\mathbf{x}\ne\mathbf{0}} \frac{\|A\mathbf{x}\|_2}
+{\|\mathbf{x}\|_2} .
+$$
+:::
+
+Ou seja: $\|A\|_2$ mede o maior fator de esticamento que $A$ pode impor
+sobre **qualquer** vetor. Isso tem uma resposta exata em termos da SVD:
+
+::: {.callout-note icon=false}
+## Teorema (MathML, tradução nossa, Teo. 4.24, p. 131)
+
+A norma espectral de $A$ é seu maior valor singular: $\|A\|_2=
+\sigma_1$. *(O MathML deixa a prova como exercício — a demonstração
+abaixo é nossa, reciclando o quociente de Rayleigh da Aula 4.)*
+:::
+
+**Prova.** Para $\mathbf{x}\ne\mathbf{0}$, $\|A\mathbf{x}\|_2^2=
+\mathbf{x}^T(A^TA)\mathbf{x}$. Como $A^TA$ é simétrica semidefinida
+positiva (Premissa 1, Bloco 3), o **quociente de Rayleigh** da Aula 4
+garante
+$$
+\frac{\mathbf{x}^T(A^TA)\mathbf{x}}{\mathbf{x}^T\mathbf{x}} \le
+\lambda_{\max}(A^TA) = \sigma_1^2 ,
+$$
+com igualdade quando $\mathbf{x}=\mathbf{v}_1$ (autovetor de $A^TA$
+associado a $\lambda_{\max}$, isto é, o primeiro vetor singular à
+direita). Logo,
+$$
+\frac{\|A\mathbf{x}\|_2^2}{\|\mathbf{x}\|_2^2} \le \sigma_1^2 \quad
+\text{para todo } \mathbf{x}\ne\mathbf{0}, \quad\text{com igualdade em }
+\mathbf{x}=\mathbf{v}_1 ,
+$$
+e tomando a raiz quadrada de ambos os lados (ambos não-negativos),
+$\|A\mathbf{x}\|_2/\|\mathbf{x}\|_2\le\sigma_1$, com igualdade atingida.
+Logo $\max_{\mathbf{x}\ne\mathbf{0}}\|A\mathbf{x}\|_2/\|\mathbf{x}\|_2=
+\sigma_1$. $\blacksquare$
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Medindo o Erro: Norma Espectral
+
+::: {.callout-note icon=false}
+## Definição (Norma Espectral — MathML Def. 4.23)
+
+$\|A\|_2:=\max_{\mathbf{x}\ne\mathbf{0}}\|A\mathbf{x}\|_2/
+\|\mathbf{x}\|_2$ — maior fator de esticamento sobre qualquer vetor.
+:::
+
+::: {.callout-note icon=false}
+## Teorema (MathML Teo. 4.24)
+
+$\|A\|_2=\sigma_1$. *(Prova deixada como exercício no MathML — abaixo,
+prova nossa via quociente de Rayleigh, Aula 4.)*
+:::
+
+::: {.fragment}
+**Prova.** $\|A\mathbf{x}\|_2^2=\mathbf{x}^T(A^TA)\mathbf{x}$; $A^TA$
+simétrica PSD $\Rightarrow$ quociente de Rayleigh (Aula 4):
+$\mathbf{x}^T(A^TA)\mathbf{x}/\mathbf{x}^T\mathbf{x}\le
+\lambda_{\max}(A^TA)=\sigma_1^2$, igualdade em $\mathbf{x}=
+\mathbf{v}_1$.
+:::
+
+::: {.fragment}
+Raiz quadrada: $\|A\mathbf{x}\|_2/\|\mathbf{x}\|_2\le\sigma_1$,
+igualdade atingida $\Rightarrow\|A\|_2=\sigma_1$. $\blacksquare$
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Teorema de Eckart-Young-Mirsky
+
+Agora podemos enunciar, com precisão, o que significa $\hat{A}^{(k)}$
+ser a "melhor" aproximação de posto $k$:
+
+::: {.callout-note icon=false}
+## Teorema (Eckart-Young-Mirsky — MathML, tradução nossa, Teo. 4.25, p. 131)
+
+Considere $A\in\mathbb{R}^{m\times n}$ de posto $r$, e seja
+$B\in\mathbb{R}^{m\times n}$ uma matriz qualquer de posto $k$. Para
+qualquer $k\le r$, com $\hat{A}^{(k)}=\sum_{i=1}^k\sigma_i
+\mathbf{u}_i\mathbf{v}_i^T$, vale
+$$
+\hat{A}^{(k)} = \operatorname*{argmin}_{\text{posto}(B)=k}\|A-B\|_2 ,
+\qquad \|A-\hat{A}^{(k)}\|_2 = \sigma_{k+1} .
+$$
+:::
+
+Ou seja: **entre todas** as matrizes de posto no máximo $k$ (não só
+entre as que vêm de truncar a SVD), a aproximação $\hat{A}^{(k)}$
+construída pela SVD é a que fica mais próxima de $A$ — e o erro dessa
+melhor aproximação possível é, exatamente, o primeiro valor singular
+descartado, $\sigma_{k+1}$. Isso responde, de forma completa, à
+pergunta "quanto se perde ao aproximar por um posto menor": a resposta
+não depende de qual método de aproximação foi usado, é uma propriedade
+intrínseca de $A$.
+
+**Prova (tradução e reorganização nossa da prova do MathML, mesma
+seção).** A parte $\hat{A}^{(k)}=\operatorname{argmin}$ tem duas
+metades: (i) mostrar que $\|A-\hat{A}^{(k)}\|_2=\sigma_{k+1}$, e (ii)
+mostrar que nenhuma outra matriz de posto $k$ faz melhor.
+
+**(i)** Por construção, $A-\hat{A}^{(k)}=\sum_{i=k+1}^r
+\sigma_i\mathbf{u}_i\mathbf{v}_i^T$ — a soma dos termos restantes, que é
+ela mesma a SVD (truncada) dessa matriz-diferença, com maior valor
+singular $\sigma_{k+1}$. Pelo Teorema 4.24 (norma espectral $=$ maior
+valor singular), $\|A-\hat{A}^{(k)}\|_2=\sigma_{k+1}$.
+
+**(ii)** Suponha, por contradição, que existisse $B$ com
+$\text{posto}(B)\le k$ e $\|A-B\|_2<\sigma_{k+1}$. Como
+$\text{posto}(B)\le k$, o núcleo de $B$ tem dimensão pelo menos $n-k$
+(pelo **Teorema do Núcleo e da Imagem**, citado aqui sem prova — resultado
+padrão de álgebra linear que relaciona $\dim(\ker B)+\text{posto}(B)=n$
+para $B:\mathbb{R}^n\to\mathbb{R}^m$). Seja $Z\subseteq\mathbb{R}^n$
+esse núcleo, com $\dim(Z)\ge n-k$. Para $\mathbf{x}\in Z$,
+$B\mathbf{x}=\mathbf{0}$, logo $A\mathbf{x}=(A-B)\mathbf{x}$, e pela
+definição de norma espectral,
+$$
+\|A\mathbf{x}\|_2 = \|(A-B)\mathbf{x}\|_2 \le \|A-B\|_2\,
+\|\mathbf{x}\|_2 < \sigma_{k+1}\|\mathbf{x}\|_2 \qquad
+\text{para todo } \mathbf{x}\in Z .
+$$
+Por outro lado, existe um subespaço $W:=\text{span}(\mathbf{v}_1,
+\dots,\mathbf{v}_{k+1})$, de dimensão $k+1$, sobre o qual
+$\|A\mathbf{x}\|_2\ge\sigma_{k+1}\|\mathbf{x}\|_2$ para todo
+$\mathbf{x}\in W$ (uma verificação direta a partir da SVD de $A$
+restrita às $k+1$ primeiras direções singulares). Como
+$\dim(Z)+\dim(W)\ge(n-k)+(k+1)=n+1>n=\dim(\mathbb{R}^n)$, os dois
+subespaços têm intersecção não-trivial — existe $\mathbf{x}\ne
+\mathbf{0}$ em $Z\cap W$ satisfazendo, ao mesmo tempo,
+$\|A\mathbf{x}\|_2<\sigma_{k+1}\|\mathbf{x}\|_2$ (de $Z$) e
+$\|A\mathbf{x}\|_2\ge\sigma_{k+1}\|\mathbf{x}\|_2$ (de $W$) — uma
+contradição direta. Logo nenhum $B$ de posto $k$ pode fazer melhor que
+$\hat{A}^{(k)}$. $\blacksquare$
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Teorema de Eckart-Young-Mirsky
+
+::: {.callout-note icon=false}
+## Teorema (Eckart-Young-Mirsky — MathML Teo. 4.25)
+
+$A$ posto $r$; $B$ posto $k\le r$ qualquer. $\hat{A}^{(k)}=
+\sum_{i=1}^k\sigma_i\mathbf{u}_i\mathbf{v}_i^T\Rightarrow\hat{A}^{(k)}=
+\operatorname*{argmin}_{\text{posto}(B)=k}\|A-B\|_2$, e
+$\|A-\hat{A}^{(k)}\|_2=\sigma_{k+1}$.
+:::
+
+::: {.fragment}
+**Entre todas** as matrizes de posto $\le k$ (não só truncamentos da
+SVD), $\hat{A}^{(k)}$ é a mais próxima de $A$ — e o erro é
+**exatamente** $\sigma_{k+1}$: propriedade intrínseca de $A$, não do
+método de aproximação.
+:::
+
+::: {.fragment}
+**Prova, parte (i):** $A-\hat{A}^{(k)}=\sum_{i=k+1}^r\sigma_i
+\mathbf{u}_i\mathbf{v}_i^T$ (SVD truncada da diferença, maior valor
+singular $\sigma_{k+1}$) $\Rightarrow$ Teo. 4.24 $\Rightarrow
+\|A-\hat{A}^{(k)}\|_2=\sigma_{k+1}$.
+:::
+
+::: {.fragment}
+**Parte (ii), por contradição:** $B$ posto $\le k$ com
+$\|A-B\|_2<\sigma_{k+1}$. Núcleo de $B$: $\dim\ge n-k$ (Teorema do
+Núcleo e da Imagem). Subespaço $W=\text{span}(\mathbf{v}_1,\dots,
+\mathbf{v}_{k+1})$: $\dim=k+1$, $\|Ax\|_2\ge\sigma_{k+1}\|x\|_2$ em
+$W$.
+:::
+
+::: {.fragment}
+$\dim(\ker B)+\dim(W)\ge(n-k)+(k+1)=n+1>n\Rightarrow$ interseção
+não-trivial $\Rightarrow$ mesmo $\mathbf{x}$ satisfaz
+$\|A\mathbf{x}\|_2<\sigma_{k+1}\|\mathbf{x}\|_2$ **e**
+$\|A\mathbf{x}\|_2\ge\sigma_{k+1}\|\mathbf{x}\|_2$ — contradição.
+$\blacksquare$
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Aplicando a $X$: Quanto Se Perde ao Truncar
+
+Vamos verificar a garantia do Teorema de Eckart-Young-Mirsky
+numericamente, aplicando a aproximação de posto-$k$ à matriz de design
+$X$ do *California Housing* para $k=1,2,3$ (lembrando: $\text{posto}(X)
+=4$, então $k=4$ recupera $X$ exatamente).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Aplicando a $X$: Quanto Se Perde ao Truncar
+
+::: {.fragment}
+Verificação numérica de Eckart-Young-Mirsky em $X$ (California Housing),
+$k=1,2,3$ (posto completo $=4$).
+:::
+:::
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{python}
+#| echo: false
+
+print(f"{'k':>3} {'||X - X_k||_2':>16} {'sigma_{k+1}':>14} {'erro relativo (Frobenius)':>28}")
+for k in [1, 2, 3]:
+    Xk = (U_X[:, :k] * S_X[:k]) @ Vt_X[:k, :]
+    diff = X - Xk
+    spec = np.linalg.norm(diff, ord=2)
+    fro_rel = np.linalg.norm(diff, "fro") / np.linalg.norm(X, "fro")
+    print(f"{k:>3} {spec:>16.6f} {S_X[k]:>14.6f} {fro_rel:>28.4%}")
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para $k=1,2,3$, o erro $\|X-\hat{X}^{(k)}\|_2$ bate, até a sexta casa
+decimal, com $\sigma_{k+1}$ — confirmação numérica direta do Teorema
+4.25. O erro relativo em norma de Frobenius (uma medida "de energia
+total", diferente da norma espectral, mas relacionada) cai de
+$\approx 13{,}5\%$ ($k=1$) para $\approx 0{,}6\%$ ($k=3$) — mesmo
+descartando $3$ de $4$ direções na primeira aproximação, mais de $86\%$
+da "energia" de $X$ já está capturada, porque o primeiro valor singular
+($\approx 4\,187$) domina amplamente os demais.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+Erro $\|X-\hat{X}^{(k)}\|_2$ bate com $\sigma_{k+1}$ até a $6^a$ casa
+decimal — confirma Teorema 4.25 na prática. Erro relativo Frobenius:
+$\approx13{,}5\%$ ($k=1$) $\to\approx0{,}6\%$ ($k=3$) — $1^o$ valor
+singular ($\approx4\,187$) domina.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Retomando o Problema Motivador: Filtragem Colaborativa
+
+Voltando à matriz de notas de filmes do Problema Motivador — a
+aplicação de baixo posto revela exatamente a estrutura que suspeitávamos
+existir (tradução livre de MathML, Exemplo 4.15, retomando o Exemplo
+4.14). A interpretação (MathML, §4.5.1): os vetores singulares à
+esquerda $\mathbf{u}_i$ podem ser lidos como **"filmes
+estereotípicos"** (perfis de tema), e os vetores singulares à direita
+$\mathbf{v}_i$ como **"espectadores estereotípicos"** (perfis de gosto)
+— sob a suposição de que cada espectador avalia filmes como combinação
+linear desses perfis, e cada filme pertence a uma combinação linear
+desses temas.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando o Problema: Filtragem Colaborativa
+
+::: {.fragment}
+MathML Exemplo 4.15 (retomando 4.14): $\mathbf{u}_i=$ "filme
+estereotípico" (perfil de tema); $\mathbf{v}_i=$ "espectador
+estereotípico" (perfil de gosto). Suposição: notas = combinação linear
+desses perfis.
+:::
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+U_f, S_f, Vt_f = np.linalg.svd(A_filmes, full_matrices=False)
+
+k1 = (U_f[:, :1] * S_f[:1]) @ Vt_f[:1, :]
+k2 = (U_f[:, :2] * S_f[:2]) @ Vt_f[:2, :]
+
+matrizes = [A_filmes, k1, k2]
+titulos = ["Original $A$", "Posto 1: $\\hat{A}^{(1)}$\n(perfil ficção científica)",
+           "Posto 2: $\\hat{A}^{(2)}$\n(+ perfil cinema de arte)"]
+
+fig, axes = plt.subplots(1, 3, figsize=(13, 4.6))
+vmin, vmax = A_filmes.min(), A_filmes.max()
+for ax, M, titulo in zip(axes, matrizes, titulos):
+    im = ax.imshow(M, cmap="Blues", vmin=vmin, vmax=vmax, aspect="auto")
+    ax.set_xticks(range(3)); ax.set_xticklabels(ESPECTADORES, fontsize=8.5, rotation=20)
+    ax.set_yticks(range(4)); ax.set_yticklabels(FILMES, fontsize=8.5)
+    for i in range(4):
+        for j in range(3):
+            ax.text(j, i, f"{M[i,j]:.1f}", ha="center", va="center", fontsize=8.5,
+                     color="white" if M[i, j] > (vmin+vmax)/2 else "black")
+    ax.set_title(titulo, fontsize=9.5, fontweight="bold")
+
+plt.tight_layout()
+plt.show()
+
+print(f"valores singulares: sigma = {np.round(S_f, 4)}")
+print(f"erro espectral k=1: {np.linalg.norm(A_filmes - k1, ord=2):.4f} (sigma_2 = {S_f[1]:.4f})")
+print(f"erro espectral k=2: {np.linalg.norm(A_filmes - k2, ord=2):.4f} (sigma_3 = {S_f[2]:.4f})")
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A aproximação de posto $1$ (usando só $\sigma_1\mathbf{u}_1
+\mathbf{v}_1^T$) captura bem as notas de Ali e Beatrix para os filmes
+de ficção científica (valores $>4$, próximos do original), mas erra
+feio nas notas de Chandra para Amélie Poulain e Delicatessen
+(previstos $\approx 0{,}16$–$0{,}26$, contra as notas reais $4$ e $5$) —
+o primeiro perfil, sozinho, só "entende" espectadores de ficção
+científica. A aproximação de posto $2$ (somando o segundo termo,
+$\sigma_2\mathbf{u}_2\mathbf{v}_2^T$) já recupera a matriz quase
+inteira, incluindo o perfil de Chandra. Isso é exatamente o que o
+Teorema de Eckart-Young-Mirsky quantifica: o erro em norma espectral
+cai de $\sigma_2\approx 6{,}364$ (posto 1) para $\sigma_3\approx
+0{,}706$ (posto 2) — e, como $\text{posto}(A)=3$, a aproximação de
+posto $3$ recuperaria $A$ exatamente.
+
+Essa é, em essência, a matemática por trás de **sistemas de recomendação
+por filtragem colaborativa**: em vez de uma matriz completa de
+$3\times 4$ notas (aqui, artificialmente pequena e sem valores
+faltantes), sistemas reais lidam com matrizes de milhões de usuários por
+milhões de itens, majoritariamente **vazias** (a maioria dos usuários
+nunca avaliou a maioria dos itens) — mas a mesma ideia de aproximação de
+baixo posto (adaptada para lidar com entradas faltantes, o que foge do
+escopo desta aula) é a base de métodos clássicos de **completamento de
+matrizes** para prever as notas que faltam a partir da estrutura de
+baixo posto capturada pelos poucos perfis latentes mais importantes.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+Posto $1$: acerta Ali/Beatrix (ficção científica, $>4$), erra feio
+Chandra em Amélie/Delicatessen ($\approx0{,}2$ vs. $4$/$5$ reais) — só
+"entende" um perfil.
+:::
+
+::: {.fragment}
+Posto $2$: recupera quase tudo, incluindo Chandra. Erro espectral:
+$\sigma_2\approx6{,}364\to\sigma_3\approx0{,}706$ — exatamente o que
+Eckart-Young-Mirsky prevê. $\text{posto}(A)=3\Rightarrow$ posto $3$
+recupera $A$ exato.
+:::
+
+::: {.fragment}
+**Filtragem colaborativa real:** matrizes de milhões de usuários $\times$
+itens, majoritariamente vazias — mesma ideia de baixo posto (adaptada
+para entradas faltantes, fora do escopo) sustenta o **completamento de
+matrizes** em sistemas de recomendação.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se $A$ tivesse posto $3$ mas só déssemos ao sistema de recomendação os dois primeiros perfis latentes, o que aconteceria com um quarto espectador de um perfil totalmente novo?
+
+Dica: pense no que $\hat{A}^{(2)}$ pode e não pode representar, dada sua
+própria definição.
+
+- □ Um quarto espectador com um perfil de gosto genuinamente novo (não
+  combinação linear dos dois perfis já capturados) teria suas notas mal
+  previstas por $\hat{A}^{(2)}$, mesmo que o sistema tivesse dados
+  históricos abundantes desse espectador.
+- □ Aumentar $k$ de $2$ para $3$ (o posto completo de $A$) sempre reduz
+  o erro de aproximação em norma espectral, mas nunca pode aumentá-lo.
+- □ Numa matriz de embeddings de documentos de texto (linhas =
+  documentos, colunas = termos), a mesma lógica de perfis latentes se
+  aplicaria: um documento sobre um assunto totalmente não-representado
+  nos primeiros $k$ tópicos latentes teria sua representação de
+  baixo-posto empobrecida.
+- □ Como a aproximação de posto-$k$ é a **melhor possível** entre
+  todas as matrizes de posto $k$ (Eckart-Young-Mirsky), isso implica
+  que o erro de aproximação $\sigma_{k+1}$ pode ser reduzido escolhendo
+  um método de aproximação diferente da SVD, para o mesmo $k$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Um perfil de gosto totalmente novo, fora dos $k$ perfis capturados
+
+Dica: o que $\hat{A}^{(2)}$ pode e não pode representar, pela própria
+definição?
+
+- □ Espectador com perfil genuinamente novo (fora do espaço gerado
+  pelos $2$ perfis) $\Rightarrow$ notas mal previstas por
+  $\hat{A}^{(2)}$, mesmo com dados históricos abundantes.
+- □ $k=2\to k=3$ (posto completo) sempre reduz o erro espectral, nunca
+  aumenta.
+- □ Embeddings de documentos: mesma lógica — assunto fora dos $k$
+  tópicos latentes tem representação empobrecida.
+- □ Aproximação de posto-$k$ é a melhor possível (Eckart-Young)
+  $\Rightarrow$ $\sigma_{k+1}$ pode ser reduzido trocando de método,
+  para o mesmo $k$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Perfil novo fora do posto-$k$ — Resposta
+
+- ✔ Exatamente a limitação estrutural: $\hat{A}^{(k)}$ só representa
+  combinações lineares dos $k$ perfis já presentes nos dados usados
+  para computá-la — um perfil ortogonal a todos eles fica fora do
+  alcance, dados históricos ou não.
+- ✔ $\sigma_i\ge 0$ sempre, e $\hat{A}^{(k+1)}=\hat{A}^{(k)}+
+  \sigma_{k+1}\mathbf{u}_{k+1}\mathbf{v}_{k+1}^T$ só adiciona
+  informação — o erro é monótono não-crescente em $k$.
+- ✔ Mesma mecânica (perfis/tópicos latentes truncados), outro cenário
+  de ML (embeddings de texto/tópicos latentes).
+- ✗ O Teorema de Eckart-Young-Mirsky é exatamente a garantia contrária:
+  $\hat{A}^{(k)}$ **já é** o mínimo global entre **todas** as matrizes
+  de posto $k$ — nenhum método alternativo pode fazer melhor para o
+  mesmo $k$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** a aproximação de baixo posto é ótima **dentro**
+do que os dados de treino permitem capturar — ela não inventa
+informação sobre um perfil nunca visto. É a mesma cautela que qualquer
+modelo estatístico exige em relação a dados fora da distribuição de
+treino.
+:::
+:::
+
+# Decomposição Polar
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Rearranjando os Três Fatores da SVD
+
+Nenhuma das três fontes desta disciplina traz uma seção dedicada à
+Decomposição Polar — o que segue é uma construção **nossa**, a partir
+do Teorema 4.22 já demonstrado no Bloco 3 (não uma tradução de trecho
+algum). Diferente da SVD, que existe para matriz retangular qualquer, a
+Decomposição Polar como construída aqui exige $A$ **quadrada**
+($A\in\mathbb{R}^{n\times n}$) — é essa restrição de dimensão que
+permite multiplicar os dois fatores finais na ordem certa, como o
+argumento abaixo deixa explícito.
+
+Seja $A\in\mathbb{R}^{n\times n}$ com SVD completa $A=U\Sigma V^T$
+($U,V\in\mathbb{R}^{n\times n}$ ambas ortogonais, $\Sigma\in
+\mathbb{R}^{n\times n}$ diagonal com entradas $\ge 0$). Insira a matriz
+identidade $I=V^TV$ entre $U$ e $\Sigma$:
+$$
+A = U\Sigma V^T = (UV^T)(V\Sigma V^T) =: QS ,
+$$
+definindo
+$$
+Q := UV^T \in\mathbb{R}^{n\times n}, \qquad
+S := V\Sigma V^T \in\mathbb{R}^{n\times n} .
+$$
+
+::: {.callout-note icon=false}
+## Proposição (Decomposição Polar — construção nossa a partir do Teorema 4.22)
+
+Para $A\in\mathbb{R}^{n\times n}$, com $Q:=UV^T$ e $S:=V\Sigma V^T$
+definidos a partir da SVD $A=U\Sigma V^T$: $Q$ é ortogonal, $S$ é
+simétrica semidefinida positiva, e $A=QS$.
+:::
+
+**Prova de que $Q$ é ortogonal.** $Q^TQ=(UV^T)^T(UV^T)=VU^TUV^T$; como
+$U$ é ortogonal, $U^TU=I$, logo $Q^TQ=VIV^T=VV^T=I$ (usando, de novo,
+que $V$ é ortogonal). Como $Q^TQ=I$ com $Q$ quadrada, $Q$ é ortogonal.
+
+**Prova de que $S$ é simétrica semidefinida positiva.** $S^T=(V\Sigma
+V^T)^T=V\Sigma^TV^T=V\Sigma V^T=S$ (usando que $\Sigma$, sendo diagonal,
+satisfaz $\Sigma^T=\Sigma$) — logo $S$ é simétrica. Para qualquer
+$\mathbf{x}\ne\mathbf{0}$, definindo $\mathbf{z}:=V^T\mathbf{x}$ (não-nulo,
+já que $V$ é invertível),
+$$
+\mathbf{x}^TS\mathbf{x} = \mathbf{x}^TV\Sigma V^T\mathbf{x} =
+\mathbf{z}^T\Sigma\mathbf{z} = \sum_{i=1}^n \sigma_i z_i^2 \ge 0 ,
+$$
+já que cada $\sigma_i\ge 0$. Logo $S$ é semidefinida positiva. $\blacksquare$
+
+Repare que a prova identifica, de graça, os autovalores e autovetores de
+$S$: como $S=V\Sigma V^T$ com $V$ ortogonal e $\Sigma$ diagonal, essa
+**é** a decomposição espectral de $S$ (Aula 4) — os autovalores de $S$
+são exatamente os valores singulares de $A$, e os autovetores de $S$ são
+exatamente os vetores singulares à direita de $A$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Rearranjando os Três Fatores da SVD
+
+::: {.fragment}
+**Construção nossa** (nenhuma das 3 fontes cobre Decomposição Polar),
+a partir do Teorema 4.22 (Bloco 3). Exige $A$ **quadrada**.
+:::
+
+::: {.fragment}
+$A=U\Sigma V^T=(UV^T)(V\Sigma V^T)=:QS$, com $Q:=UV^T$,
+$S:=V\Sigma V^T$.
+:::
+
+::: {.callout-note icon=false}
+## Proposição (Decomposição Polar)
+
+$Q$ ortogonal, $S$ simétrica semidefinida positiva, $A=QS$.
+:::
+
+::: {.fragment}
+**$Q$ ortogonal:** $Q^TQ=VU^TUV^T=VIV^T=VV^T=I$ (usa $U^TU=I$ e
+$VV^T=I$).
+:::
+
+::: {.fragment}
+**$S$ simétrica PSD:** $S^T=V\Sigma^TV^T=V\Sigma V^T=S$
+($\Sigma$ diagonal); $\mathbf{x}^TS\mathbf{x}=\sum_i\sigma_iz_i^2\ge0$
+com $\mathbf{z}=V^T\mathbf{x}$. $\blacksquare$
+:::
+
+::: {.fragment}
+$S=V\Sigma V^T$ **é** a decomposição espectral de $S$ (Aula 4):
+autovalores de $S$ = valores singulares de $A$; autovetores de $S$ =
+vetores singulares à direita de $A$.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Generalização do Módulo e da Fase
+
+A Decomposição Polar leva esse nome por uma analogia direta: assim como
+todo número complexo $z\ne 0$ se escreve como $z=re^{i\theta}$ — um
+módulo $r\ge 0$ (quanto "esticar") vezes uma fase $e^{i\theta}$ (quanto
+"girar", sem esticar nem encolher) —, toda matriz quadrada $A$ se
+escreve como $A=QS$: uma parte $S$ que só estica/encolhe ao longo de
+direções ortogonais (nunca gira — $S$ é simétrica, autovetores
+ortogonais, exatamente o Teorema Espectral da Aula 4), seguida de uma
+parte $Q$ que só gira/reflete, sem esticar nada ($Q$ ortogonal —
+preserva norma e ângulo, Aula 1).
+
+Reaproveitando a matriz do Bloco 2, $A=\begin{bmatrix}1{,}4&0{,}6\\
+0{,}3&0{,}9\end{bmatrix}$, o cálculo numérico abaixo mostra os dois
+fatores explicitamente e a leitura geométrica: primeiro $S$ estica o
+círculo unitário ao longo de suas próprias direções principais
+($\mathbf{v}_1,\mathbf{v}_2$ — as mesmas retas cheias do painel esquerdo
+do Bloco 2), produzindo uma elipse ainda alinhada com essas direções;
+depois $Q$ gira essa elipse inteira como corpo rígido, sem distorcer seu
+formato, até a posição final — que é exatamente a mesma elipse do painel
+direito do Bloco 2, a imagem de $A$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Módulo e Fase, Generalizados
+
+::: {.fragment}
+Analogia: $z=re^{i\theta}$ (número complexo) $\leftrightarrow A=QS$
+(matriz). $S$ = "módulo" (estica/encolhe ao longo de direções
+ortogonais, nunca gira — simétrica, Teorema Espectral). $Q$ = "fase"
+(só gira/reflete, preserva norma — ortogonal, Aula 1).
+:::
+
+## Verificação Geométrica: Estica, Depois Gira
+
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+U_p, S_p, Vt_p = np.linalg.svd(A_intuicao)
+V_p = Vt_p.T
+Sigma_p = np.diag(S_p)
+Q_p = U_p @ Vt_p
+S_polar = V_p @ Sigma_p @ Vt_p
+
+circulo3 = np.stack([np.cos(theta_grid := np.linspace(0, 2*np.pi, 200)),
+                      np.sin(theta_grid)])
+elipse_S = S_polar @ circulo3       # depois de esticar (S)
+elipse_final = Q_p @ elipse_S       # depois de girar (Q) -- == A @ circulo
+
+fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(13.5, 4.8))
+
+ax1.plot(circulo3[0], circulo3[1], color=COR_NEU, lw=1.8, ls=":")
+ax1.set_title("Círculo unitário\n(ponto de partida)", fontsize=9.5, fontweight="bold")
+
+ax2.plot(circulo3[0], circulo3[1], color=COR_NEU, lw=1.3, ls=":", alpha=0.5)
+ax2.plot(elipse_S[0], elipse_S[1], color=COR_B, lw=2.2)
+for k, cor in zip(range(2), [COR_A, COR_B]):
+    v = V_p[:, k]
+    ax2.annotate("", xy=S_p[k]*v, xytext=(-S_p[k]*v[0], -S_p[k]*v[1]),
+                 arrowprops=dict(arrowstyle="-", color=cor, lw=2.0, ls="--"))
+ax2.set_title("Depois de $S$: estica ao longo\nde $\\mathbf{v}_1,\\mathbf{v}_2$ (sem girar)", fontsize=9.5, fontweight="bold")
+
+ax3.plot(elipse_S[0], elipse_S[1], color=COR_B, lw=1.3, ls=":", alpha=0.5)
+ax3.plot(elipse_final[0], elipse_final[1], color=COR_A, lw=2.2, label="$A(\\text{círculo})=Q(S(\\text{círculo}))$")
+ax3.set_title(f"Depois de $Q$: gira {abs(np.degrees(np.arctan2(Q_p[1,0], Q_p[0,0]))):.1f}°\n(sem distorcer o formato)", fontsize=9.5, fontweight="bold")
+ax3.legend(fontsize=8, loc="lower right")
+
+for ax in (ax1, ax2, ax3):
+    ax.set_xlim(-2.1, 2.1); ax.set_ylim(-2.1, 2.1)
+    ax.set_aspect("equal", adjustable="box")
+
+plt.tight_layout()
+plt.show()
+
+print("Q =\n", np.round(Q_p, 4))
+print("det(Q) =", np.round(np.linalg.det(Q_p), 4), "(1 = rotação pura, -1 = reflexão)")
+print("S =\n", np.round(S_polar, 4))
+print("autovalores de S (= valores singulares de A):", np.round(np.linalg.eigvalsh(S_polar), 4))
+print("Q @ S == A?", np.allclose(Q_p @ S_polar, A_intuicao))
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Os números confirmam a proposição: $\det(Q)\approx 1$ (rotação pura,
+sem reflexão) por um ângulo de $\approx 7{,}4°$; os autovalores de $S$
+são $[0{,}645;\ 1{,}675]$ — exatamente os valores singulares de $A$ já
+calculados no Bloco 2 ($\sigma_1\approx 1{,}675$, $\sigma_2\approx
+0{,}645$); e $QS=A$ até erro de ponto flutuante. O painel do meio mostra
+$S$ agindo sozinha — uma elipse já com o formato final, mas **ainda
+alinhada** com $\mathbf{v}_1,\mathbf{v}_2$ (não com os eixos do
+codomínio); o painel da direita mostra $Q$ girando essa elipse, como um
+corpo rígido, até a posição final — idêntica à elipse do Bloco 2.
+
+**Ponte, sem desenvolver:** a Decomposição Polar reaparece, mais adiante
+neste curso (Aula 14, Preconditioning Estruturado — Shampoo e Muon),
+como o objetivo de um algoritmo iterativo (a **iteração de
+Newton-Schulz**) usado para *ortogonalizar* matrizes de atualização de
+pesos de redes neurais em tempo real, sem calcular a SVD completa (cara
+demais para ser recalculada a cada passo de treino) — extraindo,
+efetivamente, só o fator $Q$ da Decomposição Polar de cada matriz de
+atualização.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+$\det(Q)\approx1$ (rotação pura, $\approx7{,}4°$); autovalores de
+$S=[0{,}645;\,1{,}675]=$ valores singulares de $A$ (Bloco 2); $QS=A$
+(erro de ponto flutuante).
+:::
+
+::: {.fragment}
+Painel do meio: $S$ sozinha — formato final, mas ainda alinhada a
+$\mathbf{v}_1,\mathbf{v}_2$. Painel direito: $Q$ gira como corpo rígido
+até a posição final (idêntica ao Bloco 2).
+:::
+
+::: {.fragment}
+**Ponte (sem desenvolver):** Aula 14 (Shampoo/Muon) usa a iteração de
+Newton-Schulz para extrair só o fator $Q$ de matrizes de atualização de
+pesos, sem calcular a SVD completa a cada passo de treino.
+:::
+:::
+
+# Fechamento e Ponte para a Aula 6
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### Retomando as perguntas de abertura {.unnumbered}
+
+1. **O que é a SVD e por que existe para qualquer matriz retangular?**
+   $A=U\Sigma V^T$, com $U,V$ ortogonais e $\Sigma$ diagonal com
+   entradas não-negativas; existe sempre porque $A^TA$ é sempre
+   simétrica semidefinida positiva (Aula 4), o que garante autovalores
+   reais não-negativos e, portanto, raízes quadradas reais bem
+   definidas para os valores singulares.
+2. **Como construir a SVD a partir do Teorema Espectral?** Os
+   autovetores de $A^TA$ são os vetores singulares à direita ($V$); suas
+   imagens sob $A$, normalizadas pelo próprio comprimento (que é a raiz
+   do autovalor correspondente), são os vetores singulares à esquerda
+   ($U$) — a ortogonalidade de ambos os conjuntos vem diretamente da
+   relação de autovalor de $A^TA$.
+3. **Como aproximar por posto menor de forma ótima?** Truncando a soma
+   $A=\sum\sigma_i\mathbf{u}_i\mathbf{v}_i^T$ nos $k$ primeiros termos;
+   o Teorema de Eckart-Young-Mirsky garante que essa é a melhor
+   aproximação possível entre **todas** as matrizes de posto $k$, com
+   erro exato $\sigma_{k+1}$.
+4. **O que é a Decomposição Polar?** Rearranjar os três fatores da SVD
+   ($A=U\Sigma V^T=(UV^T)(V\Sigma V^T)=QS$) separa $A$ (quadrada) em uma
+   parte que só gira/reflete ($Q$, ortogonal) e uma parte que só
+   estica/encolhe ao longo de direções ortogonais ($S$, simétrica
+   semidefinida positiva) — a generalização matricial do módulo e da
+   fase de um número complexo.
+
+### O Que Fica em Aberto {.unnumbered}
+
+A SVD decompõe uma matriz **estática** — ela não diz nada sobre como
+encontrar os parâmetros de um modelo de aprendizado de máquina que
+minimizam uma função de perda. E, de fato, olhando para trás: a própria
+derivação das Equações Normais na Aula 3
+($X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$) já usou implicitamente a ideia de
+"encontrar o ponto onde a perda para de diminuir" — mas em nenhum
+momento este curso definiu formalmente o que significa "a perda parar de
+diminuir" para uma função de várias variáveis. Esse é exatamente o
+objeto que abre a Parte 2 do curso, "Cálculo da Otimização
+Diferenciável": a **derivada em várias variáveis** — o gradiente e o
+Jacobiano —, tema da Aula 6.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as Perguntas de Abertura
+
+::: {.fragment}
+**1.** SVD: $A=U\Sigma V^T$ ($U,V$ ortogonais, $\Sigma$ diagonal
+$\ge0$); existe sempre porque $A^TA$ é sempre PSD (Aula 4)
+$\Rightarrow$ raízes quadradas reais garantidas.
+:::
+
+::: {.fragment}
+**2.** Construção: autovetores de $A^TA$ = $V$; imagens normalizadas
+sob $A$ = $U$; ortogonalidade de ambos vem da relação de autovalor de
+$A^TA$.
+:::
+
+::: {.fragment}
+**3.** Aproximação ótima: truncar
+$A=\sum\sigma_i\mathbf{u}_i\mathbf{v}_i^T$ em $k$ termos —
+Eckart-Young-Mirsky garante mínimo global, erro $=\sigma_{k+1}$.
+:::
+
+::: {.fragment}
+**4.** Decomposição Polar: $A=QS$ ($Q$ ortogonal, $S$ simétrica PSD) —
+generalização matricial de módulo $\times$ fase.
+:::
+
+## Ponte para a Aula 6
+
+::: {.fragment}
+SVD decompõe uma matriz **estática** — não diz como achar parâmetros
+que minimizam uma perda. E as Equações Normais (Aula 3) já usaram, sem
+nunca definir, a ideia de "perda parar de diminuir".
+:::
+
+::: {.fragment}
+Falta um objeto formal para isso: a **derivada em várias variáveis** —
+gradiente e Jacobiano. Abre a **Parte 2** do curso: Cálculo da
+Otimização Diferenciável, Aula 6.
+:::
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
+
+::: {.fig-resize style="width: 78%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  block/.style={rectangle, draw=icblue, fill=icblue!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=3.0cm, minimum height=1.15cm},
+  concl/.style={rectangle, draw=icred, fill=icred!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=3.6cm, minimum height=1.15cm}
+]
+  \node (A) [block] at (0,0) {SVD:\\$A=U\Sigma V^T$\\(Aula 5, estática)};
+  \node (B) [block] at (4.6,0) {Eq. Normais (Aula 3):\\$X^TX\hat{\mathbf{w}}=X^T\mathbf{y}$\\"perda para de diminuir"};
+  \node (C) [concl] at (9.7,0) {o que é, formalmente,\\"parar de diminuir"?\\$\to$ gradiente/Jacobiano\\(Aula 6)};
+
+  \draw [-Stealth, thick, color=gray!70] (A) -- (B);
+  \draw [-Stealth, thick, color=gray!70] (B) -- (C);
+\end{tikzpicture}
+```
+:::

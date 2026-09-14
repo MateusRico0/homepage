@@ -521,6 +521,234 @@ Fontes 1–7 desta aula; sinalizado como tal.
 ambos os HTMLs renderizados; contagem de `Exercícios` confirmada
 intacta.
 
-## Aulas 5–16
+## Aula 5: Understanding and Steering Users — Qualitative Research, A/B Testing, and Persuasive Technology (2026-09-13)
+
+Construída de ponta a ponta numa única sessão (autorização explícita do
+usuário: "não precisa me perguntar passo a passo, cria inteiro"), sem
+checkpoints intermediários.
+
+- **Etapa 1 (identificação):** tema, objetivos, competências e leitura
+  recomendada já vinham aprovados no `index.qmd` (Lesson 5, texto
+  fornecido pelo usuário antes desta sessão) — tratados como contrato de
+  escopo, não reescritos. Pré-requisito de conteúdo: Aula 4, Bloco 2
+  (mapa de papéis, "Stakeholder de negócio") e Bloco 5 (*dark
+  patterns*, taxonomia de Gray et al. e caso Amazon/FTC) — **esta aula
+  não repete essa taxonomia nem esse caso**, só cruza-referencia por
+  uma frase, como pedido explicitamente. O terreno novo desta aula: (a)
+  o kit metodológico de pesquisa de usuário em si (qualitativo:
+  entrevistas, *contextual inquiry*, *think-aloud*; quantitativo:
+  teste A/B, funil/engajamento, com armadilhas reais de validade —
+  poder estatístico, efeito novidade, *metric gaming*); (b) a
+  bifurcação ética no nível do *método* (não do padrão de interface,
+  que é território da Aula 4), ancorada em B.J. Fogg (*Persuasive
+  Technology*, 2003, captologia) e em Kramer, Guillory & Hancock
+  (2014), o experimento de contágio emocional em massa do Facebook.
+- **Fontes — achado importante, diferente do padrão da Aula 4:** as
+  duas fontes centrais desta aula (Fogg 2003 e Kramer et al. 2014) já
+  existiam, com acesso legítimo e completo, na biblioteca pessoal do
+  usuário (`/home/marcos/Documents/Library/Computação e
+  Sociedade/IHC/`), acessível ao projeto via o symlink de diretório
+  `_fontes/Computação e Sociedade/` (criado antes desta sessão,
+  substituindo os symlinks individuais antigos — `CSV1–3.pdf`,
+  `EthEng.pdf`, `EthTech.pdf`, `conway1968.pdf`, `datafeminism_cap2.pdf`
+  aparecem como `D` no `git status`, mas continuam acessíveis pelo novo
+  caminho de diretório). Ambas as fontes foram **lidas por completo e
+  citadas literalmente** — nenhuma ressalva de paywall/acesso foi
+  necessária nesta aula (diferente de Sommerville e Gray et al. na
+  Aula 4). O artigo de Kramer et al. inclusive se autodeclara "Freely
+  available online through the PNAS open access option" na própria
+  primeira página. Detalhe notado na leitura: o PDF do artigo carrega,
+  na capa, os avisos "SEE CORRECTION" e "SEE EDITORIAL EXPRESSION OF
+  CONCERN" — usado no Bloco 5 como evidência de que a própria PNAS
+  reconheceu, depois da publicação, a controvérsia de consentimento.
+  Harry Brignull (*Deceptive Patterns*), terceira leitura recomendada
+  na ementa, **não foi usado como fonte de citação** — decisão
+  editorial documentada em `_00-plano-aula.md` e `_01-fontes.md`: sua
+  taxonomia duplicaria a Aula 4, Bloco 5 (que já usa Gray et al. 2018
+  com o mesmo vocabulário). Detalhes completos em `aula05/_01-fontes.md`.
+- **`index.qmd`:** escrito por completo (2100+ linhas), 7 blocos
+  (Abertura; Kit Qualitativo; Teste A/B e armadilhas de validade;
+  Captologia/Fogg; Caso Kramer et al.; Síntese "entender ou
+  direcionar?"; Fechamento), todos os 9 trechos citados de Fogg/Kramer
+  traduzidos para português ("tradução livre"). **2 diagramas TikZ**
+  (fluxo de um teste A/B; o "garfo" do duplo uso do kit metodológico),
+  cada um com versão de notas e versão condensada de slides, seguindo a
+  convenção desta disciplina (cores do IC, sem `positioning`, sem
+  `>=Stealth`). **7 pausas ativas** (uma por bloco, incluindo Abertura
+  e Fechamento), cada uma com Pergunta Motivadora + V/F de 4 itens
+  (`□`), resposta nos slides com `✔`/`✗`. Passada de revisão
+  anti-picotamento feita após o rascunho: 2 slides que traziam só um
+  diagrama TikZ sem nenhum comentário no mesmo slide ("O Fluxo de um
+  Teste A/B" e "O Garfo do Duplo Uso") foram corrigidos adicionando um
+  fragmento `.callout-tip` de legenda/comentário no mesmo slide do
+  diagrama, em vez de deixar a leitura do gráfico solta.
+- **Exercícios:** exatamente 3 discursivas + **10 blocos de V/F** (40
+  itens) — dentro da faixa "6 a 10 blocos" do `../CLAUDE.md` (a Aula 4
+  tinha usado 12 blocos, acima dessa faixa; esta aula foi calibrada de
+  volta ao teto de 10). Todo item construído a partir de uma das 4
+  heurísticas (contrafactual/limite/transferência/falsa dicotomia);
+  todos os itens de "transferência de domínio" mantidos dentro do
+  território computação/tecnologia-e-sociedade desta disciplina (outros
+  apps, outras plataformas digitais, nunca ensaios clínicos ou
+  avaliação acadêmica de professores — dois exemplos fora do domínio
+  foram identificados e substituídos por equivalentes dentro da
+  computação durante a revisão desta sessão, antes de finalizar o
+  gabarito). Justificativa dos 40 itens em `aula05/_02-solucoes.md`
+  (novo); discussão das 7 perguntas motivadoras + resolução dos 28
+  itens de pausa ativa em `aula05/_03-respostas-pausas.md` (novo).
+- **Validado nesta sessão:** balanço de `:::` conferido por script
+  Python (LIFO), zero divs não fechados; `grep` de `- \[ \]`, `- \[x\]`,
+  `☐`, `☒` limpo; contagem de glifos conferida (68 `□` = 28 das 7
+  pausas + 40 dos Exercícios; 18 `✔` + 10 `✗` = 28, resolução das 7
+  pausas); ícone de lápis (`bi-pencil-square`) presente na seção de
+  Exercícios; `output-file: notas.html`/`slides.html` conferido no
+  YAML. **Pendente confirmar nesta mesma sessão:** render completo via
+  `quarto render`/`preview-watch.py` (ver seção de verificação abaixo,
+  a ser preenchida após a rodada de render).
+- **Etapa 5 concluída:** link da Lesson 5 no `../index.qmd` convertido
+  de texto simples para link, mesmo padrão das Lessons 1–4: `*
+  [**Lesson 5: Understanding and Steering Users — ...**](./aula05/index.qmd)`.
+  Texto de Objectives/Expected Competencies/Recommended Reading da
+  Lesson 5 **não foi alterado** (já aprovado antes desta sessão).
+- **Achado, fora do escopo desta aula, sinalizado para sessão futura:**
+  o fechamento de `aula04/index.qmd` (notas e slides) ainda diz "A Aula
+  5 abre a Parte 2 do curso... mostrando que decisões de arquitetura
+  (...) têm também um custo ambiental e energético real" — essa
+  ponte estava correta na época em que foi escrita (renumeração de
+  2026-08-30, quando a Aula 5 ainda era a aula de arquitetura/energia),
+  mas ficou **desatualizada** depois que o conteúdo da Lesson 5 foi
+  definido como esta aula de UX/A-B-testing (a aula de
+  arquitetura/energia agora é a **Lesson 6**). Não corrigido nesta
+  sessão (fora do escopo — a tarefa desta sessão não incluía editar
+  `aula04/`); a ponte de fechamento desta Aula 5 já aponta
+  corretamente para a Aula 6. Vale um ajuste pontual em `aula04/`
+  (trocar "Aula 5" por "Aula 6" nas duas passagens de fechamento) numa
+  sessão futura.
+
+## Aula 6: Architecture, Energy, and the Material Cost of Digital Infrastructure (2026-09-14)
+
+Construída de ponta a ponta numa única sessão (autorização explícita
+do usuário: "não precisa me perguntar passo a passo, cria inteiro"),
+sem checkpoints intermediários.
+
+- **Eixo narrativo desta aula, diferente de todas as anteriores:** um
+  artigo de pesquisa real e ainda não publicado — Nascimento, B. C. &
+  Raimundo, M. M. (2026), "Digital Sovereignty in the Polycrisis:
+  Technological Dependency, Invisible Infrastructure, and AI Sacrifice
+  Zones in Latin America" — foi usado como **centro narrativo da aula
+  inteira**, não como mais uma citação de rodapé, a pedido explícito do
+  usuário ("usa isso como parte da história"). A primeira autora,
+  Beatriz Cardoso Nascimento, é aluna de graduação deste próprio
+  Instituto de Computação, orientada pelo professor desta disciplina —
+  a aula nomeia essa autoria explicitamente (Bloco 3), tratando-a como
+  parte do que torna o caso central autêntico, não como algo a
+  esconder. **Verificação de veículo de publicação** (pedido explícito
+  do usuário antes de assumir "não publicado"): o PDF não traz, em
+  nenhuma página, nome de periódico, anais, DOI ou qualquer marca de
+  *venue* — tratado como manuscrito/*working paper*, citado sem
+  atribuir veículo.
+- **Caso central: Scala AI City, Eldorado do Sul (RS).** Reserva de 5
+  GW de energia apesar da instabilidade elétrica regional e das
+  enchentes catastróficas de 2024, marginalizando a comunidade
+  Mbyá-Guarani da Tekoa Pekuruty — usado como problema motivador
+  concreto (Estratégia A, *Outside-In*, rótulo formal reintroduzido
+  nesta aula, diferente da Aula 4/5 que não usaram o rótulo) antes do
+  arcabouço teórico. **Casos de contraste/amplitude** (mesmo artigo):
+  Querétaro, México (aumento de 151% nos apagões, 2014–2023) e "Módulo
+  Penco", Chile (extração de terras raras, rejeitada por 99% da
+  população em consulta pública) — e o caso de *greenwashing* da
+  Coalizão LEAF no Pará (acordo de R$ 1 bilhão de créditos de carbono
+  sem consulta às comunidades indígenas/quilombolas, violando o CLPI da
+  Convenção 169 da OIT).
+- **Arcabouço teórico do artigo, nomeado formalmente:** soberania
+  digital (quatro dimensões — infraestrutural, de dados, regulatória,
+  epistêmica); policrise global (crises causalmente entrelaçadas);
+  zonas de sacrifício digital, contrastadas explicitamente com
+  redlining digital (inclusão predatória vs. exclusão); colonialismo
+  verde/*greenwashing*; e, na síntese, ética territorial (território
+  como entidade multidimensional, não jurisdição legal passiva).
+- **Leituras-base já aprovadas da ementa, conectadas ao caso:** Van de
+  Poel & Royakkers (2011) — definição de Brundtland, justiça
+  intergeracional/intrageracional, princípio do poluidor-pagador,
+  análise de ciclo de vida (produção → uso → descarte); Maciel &
+  Viterbo (2020, Vol. 2) — TI Verde, Tabela 14.1 de diretivas
+  ambientais (água/energia/material/reciclabilidade de hardware),
+  distinção Verde Por Software/Verde No Software. Usadas no Bloco 6
+  para mostrar o vocabulário técnico de projeto que responderia ao
+  padrão dos casos — e para fechar reforçando que esse vocabulário,
+  sozinho, não resolve o problema central (que é de quem decide e quem
+  é consultado, não de eficiência técnica).
+- **Achado de correção de ementa, sinalizado mas NÃO aplicado ao
+  `../index.qmd` nesta sessão** (mesmo padrão de citação quebrada já
+  documentado nesta disciplina — ver "Achado importante: citação
+  quebrada", acima): as duas leituras já aprovadas da Lesson 6 citavam
+  capítulos com numeração errada. Confirmado por leitura direta do
+  sumário de cada livro: Van de Poel & Royakkers, "Chapter 9" citado na
+  ementa é, na verdade, o Capítulo 10 (o Capítulo 9 real, "The
+  Distribution of Responsibility in Engineering", não trata de
+  sustentabilidade); Maciel & Viterbo Vol. 2, "Capítulo 8" citado é, na
+  verdade, o Capítulo 14. **Diferente das correções já aplicadas nas
+  Lições 1, 2 e 3**, estas duas **não foram corrigidas no
+  `../index.qmd`** — a instrução desta sessão restringiu as edições
+  permitidas nesse arquivo a exatamente duas (link do título da Lesson
+  6 + adição da terceira leitura), mantendo o texto das duas leituras
+  originais intacto. Fica sinalizado aqui para decisão em sessão
+  futura, mesmo padrão já usado para a citação pendente da Aula 7
+  (Steen). A citação usada dentro de `aula06/_01-fontes.md` e
+  `aula06/index.qmd` já emprega os capítulos corretos (10 e 14).
+- **`index.qmd` da aula:** escrito por completo, 8 blocos (Abertura;
+  Materialidade Escondida; Caso Central Scala AI City; Arcabouço
+  Teórico; Ampliando o Olhar — Querétaro/Módulo Penco/LEAF; Da Crítica
+  ao Projeto — Ciclo de Vida/TI Verde; Síntese — Ética Territorial;
+  Fechamento), todos os 20 trechos citados (12 de Nascimento &
+  Raimundo, 3 de Van de Poel & Royakkers, 5 de Maciel & Viterbo)
+  traduzidos para português ("tradução livre") no `index.qmd`, nunca
+  deixados em inglês. **3 diagramas TikZ**, cada um com versão de notas
+  e versão condensada de slides (convenção desta disciplina: cores do
+  IC, sem `positioning`, sem `>=Stealth`, sem estilo nomeado `step`):
+  (a) cadeia de decisão de arquitetura → reserva de energia/resfriamento
+  → custo territorial (Bloco 3); (b) o garfo redlining digital vs. zona
+  de sacrifício digital (Bloco 4); (c) análise de ciclo de vida
+  (extração → produção → uso → descarte, com seta tracejada de volta
+  para reciclagem) (Bloco 6). **8 pausas ativas** (uma por bloco,
+  incluindo Abertura e Fechamento), cada uma com Pergunta Motivadora +
+  V/F de 4 itens (`□`), resposta nos slides com `✔`/`✗`. Passada de
+  revisão anti-picotamento feita após o rascunho: nenhum slide isolado
+  de diagrama sem comentário no mesmo slide (lição já registrada nas
+  Aulas 3–5, aplicada preventivamente aqui).
+- **Exercícios:** exatamente 3 discursivas + **9 blocos de V/F** (36
+  itens) — dentro da faixa "6 a 10 blocos" do `../CLAUDE.md`. Todo item
+  construído a partir de uma das 4 heurísticas
+  (contrafactual/limite/transferência/falsa dicotomia); todos os itens
+  de "transferência de domínio" mantidos dentro do território
+  computação/infraestrutura tecnológica desta disciplina (outros casos
+  reais de infraestrutura digital — cabo submarino, polo industrial,
+  fabricante de veículos elétricos —, nunca agropecuária ou mineração
+  não digital). Justificativa dos 36 itens em `aula06/_02-solucoes.md`
+  (novo, com uma correção de gabarito feita durante a revisão desta
+  sessão: um item "limite" do bloco Querétaro/Módulo Penco estava
+  originalmente marcado ✗ com justificativa confusa — corrigido para
+  ✔ com justificativa direta, antes de finalizar o arquivo); discussão
+  das 8 perguntas motivadoras + resolução dos 32 itens de pausa ativa
+  em `aula06/_03-respostas-pausas.md` (novo).
+- **Validado nesta sessão:** balanço de `:::` conferido por script
+  Python (LIFO), zero divs não fechados; `grep` de `- \[ \]`, `- \[x\]`,
+  `☐`, `☒` limpo; contagem de glifos conferida (32 `□` das 8 pausas + 36
+  dos Exercícios = 68 `□`; 22 `✔` + 10 `✗` = 32, resolução das 8
+  pausas); ícone de lápis (`bi-pencil-square`) presente na seção de
+  Exercícios; `output-file: notas.html`/`slides.html` conferido no
+  YAML; render via `preview-watch.py --incremental`,
+  `notas.html`/`slides.html` gerados em
+  `_site/teaching/computing-and-society/aula06/` sem erro.
+- **Etapa 5 concluída:** link da Lesson 6 no `../index.qmd` convertido
+  de texto simples para link, mesmo padrão das Lessons 1–5; terceira
+  leitura (Nascimento & Raimundo, 2026) adicionada à lista de leitura
+  recomendada, mantendo as duas leituras originais intactas (só essas
+  duas edições feitas nesse arquivo, por instrução explícita desta
+  sessão). `exercicios.qmd` atualizado com a seção "Aula 06" (questões)
+  e a entrada correspondente na seção "Gabarito" ao final da página,
+  mesmo padrão das Aulas 1–5.
+
+## Aulas 7–16
 
 Não iniciadas.

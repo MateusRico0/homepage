@@ -6,6 +6,44 @@ Fontes em `fontes/`: `prml.pdf`, `dlfc.pdf`, `esl.pdf` (mesmos links de
 `supervised`), mais `exemplos-estilo/exemplo.qmd` (symlink para
 `aula01/02-aula.qmd`).
 
+## Dicionário de Notações
+
+> Criado nesta sessão (2026-09-12/13), na Aula 5 — não existia antes,
+> apesar de já ser exigido pelo `CLAUDE.md` desde a Aula 2. Backfill
+> resumido das Aulas 1–4, seguido pelas adições de cada aula nova a
+> partir daqui.
+
+| Símbolo/termo | Significado | Introduzido em |
+|---|---|---|
+| $\hat{\boldsymbol\mu}$, $\hat\Sigma$ | Média e covariância amostrais (estimadores de máxima verossimilhança) | Aula 1 |
+| $D_M(\mathbf{x})^2$ | Distância de Mahalanobis ao quadrado, $(\mathbf{x}-\hat{\boldsymbol\mu})^T\hat\Sigma^{-1}(\mathbf{x}-\hat{\boldsymbol\mu})$ | Aula 1 |
+| $\chi^2_d$ | Distribuição de $D_M(\mathbf{x})^2$ sob o modelo ajustado; base do $p$-valor de anomalia | Aula 1 |
+| $d_K(\mathbf{x})$ | Distância ao $K$-ésimo vizinho mais próximo | Aula 2 |
+| $p(\mathbf{x})=K/(NV)$ | Estimador geral de densidade (fixa $K$ e acha $V$, ou vice-versa) — dá origem a $k$-NN e KDE | Aula 2 |
+| $h$ | Parâmetro de suavização (largura de banda) do KDE | Aula 2 |
+| $L_\lambda=\{\mathbf{x}:p(\mathbf{x})\ge\lambda\}$ | Conjunto de nível de densidade; cluster = componente conexa de $L_\lambda$ | Aula 3 |
+| $d_{\mathrm{mreach}}(a,b)$ | Distância de alcançabilidade mútua, $\max(\mathrm{core}_K(a),\mathrm{core}_K(b),d(a,b))$ | Aula 3 |
+| MST, persistência | Árvore Geradora Mínima; critério de robustez de um cluster na árvore condensada (HDBSCAN) | Aula 3 |
+| $z_n$, $\pi_k$ | Variável latente categórica 1-de-$K$ (origem do ponto $n$); prior de mistura, $\sum_k\pi_k=1$ | Aula 4 |
+| $\gamma(z_{nk})$ | Responsabilidade — $p(z_{nk}=1\mid\mathbf{x}_n,\theta)$, posterior via Bayes | Aula 4 |
+| Passo E / Passo M | As duas etapas alternadas do Algoritmo EM | Aula 4 |
+| $p(\mathcal{D}\mid\mathcal{M})$, $p(\mathcal{D})$ | Evidência do modelo (verossimilhança marginal), $\int p(\mathcal{D}\mid\theta)p(\theta)\,\mathrm{d}\theta$ | Aula 5 |
+| $\theta_{\mathrm{MAP}}$, $A$ | Ponto de máximo a posteriori; Hessiana de $-\ln[p(\mathcal{D}\mid\theta)p(\theta)]$ nesse ponto, usada na aproximação de Laplace | Aula 5 |
+| Fator de Occam | $\tfrac{M}{2}\ln(2\pi)-\tfrac12\ln|A|$ — termo que penaliza ajustes frágeis na evidência aproximada | Aula 5 |
+| BIC | $\ln p(\mathcal{D}\mid\theta_{\mathrm{ML}})-\tfrac12 M\ln N$ (convenção PRML, a **maximizar**); atenção: `scikit-learn` usa $-2\ln p+M\ln N$, a minimizar | Aula 5 |
+| $M(K,d)$ | Número de parâmetros livres de um GMM: $Kd+Kd(d+1)/2+(K-1)$ | Aula 5 |
+| $\mathrm{KL}(q\|p)$ | Divergência de Kullback-Leibler, $-\int q\ln\{p/q\}$; $\ge0$, não simétrica | Aula 5 |
+| $q(\mathbf{Z})$ | Distribuição variacional — aproximação livre (ou de família restrita) à posterior sobre variáveis não observadas | Aula 5 |
+| $\mathcal{L}(q)$, $\mathcal{L}(q,\theta)$ | ELBO (*Evidence Lower Bound*) — cota inferior de $\ln p(\mathbf{X})$ (ou $\ln p(\mathbf{X}\mid\theta)$), igual à evidência sse $q$ = posterior exata | Aula 5 |
+| Decomposição $\ln p(\mathbf{X})=\mathcal{L}(q)+\mathrm{KL}(q\|p)$ | Identidade central da Aula 5 — Passo E do EM = minimizar o KL (maximizar $\mathcal{L}$) sobre $q$; Passo M = maximizar $\mathcal{L}$ sobre $\theta$ | Aula 5 |
+| $\mathbf{S}$ | Matriz de covariância amostral, $\frac1N\sum_n(\mathbf{x}_n-\bar{\mathbf{x}})(\mathbf{x}_n-\bar{\mathbf{x}})^T$ — simétrica e semidefinida positiva | Aula 6 |
+| $\mathbf{u}_i$, subespaço principal | Autovetores de $\mathbf{S}$ associados aos $M$ maiores autovalores; direções/base da PCA | Aula 6 |
+| $J$ | Distorção média de reconstrução da PCA, $\frac1N\sum_n\|\mathbf{x}_n-\tilde{\mathbf{x}}_n\|^2$ (mesma letra do $J$ de distorção do KMeans, Aula 4 — família de significado análoga, não coincidência de símbolo) | Aula 6 |
+| $\mathbf{z}\in\mathbb{R}^M$ | **Atenção — reuso de símbolo:** variável latente **contínua** da PPCA (Gaussiana, $\mathcal{N}(\mathbf{0},\mathbf{I})$); não confundir com $z_n$/$z_{nk}$ da Aula 4, que é a variável latente **categórica** (1-de-$K$) do GMM | Aula 6 |
+| $\mathbf{W}$, $\sigma^2$ | Parâmetros da PPCA: matriz de carregamento ($D\times M$) e variância do ruído isotrópico | Aula 6 |
+| $\mathbf{C}=\mathbf{WW}^T+\sigma^2\mathbf{I}$ | Covariância marginal de $\mathbf{x}$ no modelo PPCA | Aula 6 |
+| $M$ (dimensão latente/subespaço) | **Atenção — reuso de símbolo:** aqui é a dimensão do subespaço/variável latente contínua; na Aula 5, $M(K,d)$ denotava o número de parâmetros livres do GMM — contextos diferentes, mesma letra | Aula 6 |
+
 ## Aula 1 — Data Space, Parametric Generative Models, and Anomalies
 
 Construída do zero em sessão anterior — não havia nada além do `index.md`.
@@ -835,9 +873,12 @@ simples para link: `*   [**Lesson 3: Density Topography and Graphs:
 Hierarchical Clustering and HDBSCAN**](./aula03/index.qmd)`. Aula 3
 encerrada.
 
-## Aulas 4–12
+## Aulas 7–12
 
-Não iniciadas.
+Não iniciadas. (Aula 6 foi concluída na mesma sessão que fechou a Aula
+5 — ver seção "Aula 6" ao final deste arquivo; esta nota de status foi
+corrigida depois que a máquina rodando a sessão foi desligada no meio
+da Etapa 5 da Aula 6, deixando temporariamente essa linha desatualizada.)
 
 ## Aula 4 — Modelos de Mistura Gaussiana e o Algoritmo EM
 
@@ -899,3 +940,314 @@ created", sem erros. Contagem de glifos no `_site/`: `notas.html` — 48
 (pausas pré-resolução), 20 `✔`/`✗` (14 verdadeiros + 6 falsos). Único
 `type="checkbox"` em cada HTML é a regra CSS genérica do tema, não um
 checkbox real.
+
+## Aula 5 — Seleção de Modelos e Introdução à Inferência Variacional
+
+Construída sem aprovação por etapa (autorização explícita do usuário
+para esta rodada, junto com a Aula 6). Estratégia A (*Outside-In*): o
+"modelo mental catchy" errado — escolher $K$ maximizando a
+log-verossimilhança de treino — é desmontado antes da teoria formal
+(BIC, depois KL/ELBO).
+
+**Fontes** (todas com offset PDF confirmado nesta sessão, comparando o
+cabeçalho impresso de cada página; PRML símlink em `_fontes/prml.pdf`,
+offset **+20**):
+
+- PRML §4.4.1 "Model comparison and BIC", pp. 216–217 (PDF 236–237) —
+  aproximação de Laplace da evidência e BIC (eq. 4.135–4.139).
+- PRML §1.6.1 "Relative entropy and mutual information", pp. 55–56
+  (PDF 75–76) — definição da KL (eq. 1.113) e prova de não-negatividade
+  via Jensen (eq. 1.118).
+- PRML §9.4 "The EM Algorithm in General", pp. 450–452 (PDF 470–472) —
+  decomposição $\ln p(\mathbf{X}\mid\theta)=\mathcal{L}(q,\theta)+
+  \mathrm{KL}(q\|p)$ com $\theta$ como parâmetro; releitura do Passo
+  E/M da Aula 4 como subida de coordenadas (eq. 9.69–9.74).
+- PRML §10.1 "Variational Inference", pp. 462–463 (PDF 482–483) —
+  versão totalmente Bayesiana da mesma decomposição, com $\theta$
+  absorvido em $\mathbf{Z}$ (eq. 10.2–10.4), usada primeiro (antes da
+  especialização do §9.4).
+
+**Dataset:** Breast Cancer Wisconsin
+(`scikit-learn/breast-cancer-wisconsin`), mesmos dois atributos
+(`radius_worst`, `concave points_worst`) das Aulas 3–4 — GMM ajustado
+para $K=1,\dots,10$, múltiplos reinícios por $K$, guardando o melhor.
+
+**Conteúdo:** Revisão/Introdução (recapitulação formal do GMM/EM da
+Aula 4, retomando literalmente o gancho de fechamento — "$K=10$ vs.
+$K=2$") → Intuição (prévia de duas curvas: log-verossimilhança sempre
+sobe, BIC pico em $K=2$) → Por Que a Verossimilhança Pura Falha
+(Proposição de monotonicidade fraca, demonstrada; segunda perna:
+divergência/singularidade) → A Evidência do Modelo e o BIC (Definição
+formal, aproximação de Laplace passo a passo, Teorema do BIC, aplicação
+ao GMM com contagem de parâmetros $M(K,d)=Kd+Kd(d+1)/2+(K-1)$) → KL e a
+Decomposição Geral (Definição formal da KL, Teorema de Gibbs
+demonstrado via Jensen, decomposição $\ln p(\mathbf{X})=\mathcal{L}(q)+
+\mathrm{KL}(q\|p)$ demonstrada, ELBO como cota inferior, verificação
+numérica reaproveitando o GMM $K=2$ da Aula 4) → O EM da Aula 4 é
+Subida de Coordenadas no ELBO (especialização com $\theta$ como
+parâmetro; Passo E = maximizar $\mathcal{L}$ sobre $q$; Passo M =
+maximizar $\mathcal{L}$ sobre $\theta$; Teorema "o EM nunca piora",
+demonstrado — resultado que a Aula 4 só tinha *afirmado*) → Síntese,
+Fechamento e Ponte para a Aula 6.
+
+**Números centrais, verificados por script Python independente antes
+de escrever a aula** (`verify_bic.py`, `verify_elbo.py`, reproduzidos
+depois no próprio código do `.qmd`, mesma metodologia — 5 reinícios por
+$K$, guardando o melhor): log-verossimilhança de treino estritamente
+não-decrescente em $K=1,\dots,10$ ($-1339{,}45\to-1169{,}66$); BIC
+(convenção PRML, maximizar) com pico em $K=2$ ($-1238{,}98$), caindo
+monotonicamente depois, mesmo com a log-verossimilhança ainda subindo.
+Exemplo do ELBO: com $q=$ responsabilidade verdadeira,
+$\mathcal{L}(q)=\ln p(\mathbf{X}\mid\theta)=-1204{,}09$ exatamente
+(diferença $2{,}3\times10^{-13}$, ponto flutuante); com $q$ uniforme,
+*gap* $=1270{,}58$ nats, batendo exatamente com $\mathrm{KL}$ calculado
+à parte; com $q$ de $\theta$ "errado", *gap* $=2440{,}45$ nats, de novo
+batendo exatamente.
+
+**Pausas ativas:** 5 (verossimilhança de treino e complexidade;
+restringir a covariância eliminaria a divergência?; premissas do BIC e
+casos-limite; se KL pudesse ser negativa; o Passo E sempre fecha o KL —
+garante o máximo global?).
+
+**Exercícios:** 3 discursivas + 7 blocos de V/F de 4 itens (28 itens),
+cobrindo: verossimilhança de treino e complexidade; evidência e
+aproximação de Laplace; BIC aplicado a modelos de mistura; divergência
+KL (definição e propriedades); a decomposição $\mathcal{L}+\mathrm{KL}$;
+o EM como subida de coordenadas; síntese/limitações e ponte para a
+Aula 6. Densidade de V/F um pouco menor que a Aula 4 (28 vs. 28 —
+mesma, na verdade, mas menos blocos numérico-aplicados e mais teoria
+unificadora), calibrada conforme a orientação do `CLAUDE.md` de não
+esticar por cota.
+
+**Dois diagramas TikZ**: decomposição da evidência (barra única
+dividida em $\mathcal{L}(q)$/$\mathrm{KL}(q\|p)$, coordenadas
+absolutas); Passo E fechando o KL (dois painéis lado a lado, antes/depois,
+mesma convenção). Ambos com margens generosas, sem rótulo tocando borda
+— confirmado por inspeção visual do SVG renderizado.
+
+**Validação.** Checador de balanceamento de `:::` (regra LIFO): zero
+unclosed antes do render. `uv run python3 preview-watch.py
+--incremental`: render incremental concluído pelo serviço, sem erro.
+Contagem de glifos no `_site/`: `notas.html` — 5 `<img>` (3 figuras
+matplotlib + 2 diagramas TikZ), 48 `□` (28 exercícios + 20 pausas), 0
+`✔`/`✗`; único `type="checkbox"` é a regra CSS genérica do tema
+(confirmado, não é um `<input>` real). `slides.html` — 20 `□`
+(pausas pré-resolução) + 20 `✔`/`✗` (resolvidas). Inspeção visual (via
+`rsvg-convert` dos SVGs renderizados) de todas as 5 figuras: 3 gráficos
+matplotlib conferidos número a número contra o script de verificação
+independente (sem `\mathbb`/`\le`/`\ge` em título/eixo, só texto
+plano/unicode); 2 diagramas TikZ sem sobreposição de texto, margens
+generosas.
+
+**Pendência para a Aula 6:** nenhuma pendência de conteúdo desta aula
+fica em aberto para a Aula 6 além da mudança de eixo já anunciada na
+Ponte (variável latente categórica → contínua). O ELBO volta a aparecer
+centralmente só na Aula 7 (VAE).
+
+## Aula 6 — O Mundo Linear: PCA, PPCA e Autoencoders Lineares
+
+Construída sem aprovação por etapa (mesma autorização explícita do
+usuário desta rodada, junto com a Aula 5). Estratégia B (*Inside-Out
+com Problema-Fio*): a pergunta "que posição, em dimensão $M\ll D$,
+resume este paciente sem perder o que importa?" atravessa as quatro
+perspectivas do bloco central (geométrica, algébrica, probabilística,
+neural) antes da síntese/limitação final.
+
+**Fontes** (offsets PDF conferidos nesta sessão, comparando o cabeçalho
+impresso de cada página; PRML símlink em `_fontes/prml.pdf`, offset
+**+20**, já confirmado na Aula 5; DLFC símlink em `_fontes/dlfc.pdf`,
+offset **+11**, conferido agora pela primeira vez — printed p. 565,
+§19.1.1, bate com PDF p. 576, cabeçalho "19.1. Deterministic
+Autoencoders"):
+
+- PRML §12.1.1 "Maximum variance formulation", pp. 561–562 (PDF
+  581–582) — dedução da PCA por máxima variância, restrição de Lagrange,
+  Teorema Espectral.
+- PRML §12.1.2 "Minimum-error formulation", pp. 563–565 (PDF 583–585) —
+  dedução por erro mínimo de reconstrução, argumento de Pitágoras
+  ligando as duas formulações.
+- PRML §12.2 "Probabilistic PCA", pp. 570–577 (PDF 590–597), eq.
+  12.31–12.50 — definição do modelo gerador da PPCA, solução de MLE
+  (Tipping & Bishop, 1999), invariância rotacional, limite
+  $\sigma^2\to0$.
+- DLFC §19.1.1 "Autoencoders", p. 565 (PDF 576) — definição do
+  autoencoder e o resultado (sem demonstração no livro) de que a
+  ativação linear recupera o subespaço de PCA (Bourlard & Kamp, 1988;
+  Baldi & Hornik, 1989); demonstração completa é original desta aula,
+  por redução ao Teorema de erro mínimo (Bloco 4) — sinalizado
+  explicitamente no texto como inferência própria, não do livro.
+
+**Dataset:** Breast Cancer Wisconsin (`scikit-learn/breast-cancer-wisconsin`),
+agora usando os **30 atributos completos** (não só o par 2D das Aulas
+3–5) para o fio condutor probabilístico/algébrico; o par 2D
+(`radius_worst`, `concave points_worst`) reaparece só para a ilustração
+geométrica inicial do Bloco 2. Rótulo `diagnosis` nunca entra no
+ajuste — só para avaliação posterior (acurácia de $92,1\%$ com um
+único limiar no primeiro componente).
+
+**Conteúdo:** Revisão/Introdução (fecha a Aula 5, troca variável
+latente categórica → contínua) → Problema-Fio em 2D (duas direções
+candidatas, variância como critério) → Mecanismo I: PCA por máxima
+variância (Lagrange, equação de autovalores, Teorema + prova por
+indução) → Mecanismo II: PCA por erro mínimo (distorção $J$,
+mesma equação de autovalores por outro caminho, argumento de Pitágoras
+provando a equivalência das duas formulações) → Diagnóstico Teórico:
+PPCA (Definição do modelo gerador linear-Gaussiano, Teorema de MLE de
+Tipping & Bishop, invariância rotacional, limite $\sigma^2\to0$
+recuperando a PCA clássica) → Autoencoder Linear (Definição, Teorema de
+Bourlard&Kamp/Baldi&Hornik, demonstração original por redução ao Bloco
+4, verificação numérica) → Síntese (quatro ângulos do mesmo subespaço),
+Fechamento e Ponte para a Aula 7 (Deep Autoencoder e VAE, ELBO da Aula
+5 volta a ser necessário porque a posterior deixa de ter forma
+fechada).
+
+**Números centrais, verificados no próprio código do `.qmd`** (Breast
+Cancer Wisconsin, $D=30$, `np.linalg.eigh` com reordenação explícita
+para ordem descendente): $\lambda_1=13{,}2816$ ($44{,}27\%$ da
+variância), $\lambda_2=5{,}6914$ ($18{,}97\%$) — $63{,}24\%$ acumulado
+em $M=2$. Um único limiar no primeiro componente separa
+benigno/maligno com $92{,}1\%$ de acurácia, sem nunca usar o rótulo no
+ajuste. PPCA: $\sigma^2_{\mathrm{ML}}=0{,}39382$, confirmado igual à
+média dos $28$ autovalores descartados; projeção da covariância
+marginal $\mathbf{C}$ bate exatamente com $\lambda_1$ (direção retida) e
+com $\sigma^2_{\mathrm{ML}}$ (direção descartada), como a eq. 12.36
+prevê. Autoencoder linear (`MLPRegressor(activation="identity")`,
+treinado por gradiente, nunca vendo a decomposição espectral): erro de
+reconstrução $0{,}367575$ contra o ótimo teórico da PCA $0{,}367568$ —
+coincidência a $5$ algarismos significativos; cossenos dos ângulos
+principais entre os subespaços $\approx0{,}98$/$\approx0{,}93$ (próximo
+de $1$, não exato — consistente com o Teorema, que não exige base
+ortonormal alinhada, e explicado como efeito da convergência finita do
+otimizador, não falha teórica).
+
+**Pausas ativas:** 5 (mudança de variável latente categórica→contínua
+muda o tipo de problema?; significado do multiplicador de Lagrange
+$\lambda_1$; a acurácia de $92,1\%$ prova vazamento de rótulo?;
+covariância geral em vez de isotrópica ainda recuperaria a PCA no
+limite?; ativação não linear muda o subespaço do autoencoder raso?).
+
+**Exercícios:** 3 discursivas + 6 blocos de V/F de 4 itens (24 itens),
+cobrindo: formulação de máxima variância; formulação de erro mínimo e
+equivalência; PPCA como modelo gerador; MLE da PPCA e o caso-limite
+clássico; o autoencoder linear; síntese/limitações e ponte para a Aula
+7. Densidade de V/F um pouco menor que a Aula 5 (24 vs. 28), calibrada
+pela orientação do `CLAUDE.md` de não esticar por cota — a Aula 6 tem um
+bloco central a menos (quatro mecanismos compactos em vez de cinco
+blocos de conteúdo independentes).
+
+**Dois diagramas TikZ**: modelo gerador da PPCA (variável latente
+$\mathbf{z}_n$ contínua $\to$ observação $\mathbf{x}_n$, mesma
+convenção de placa $N$ das Aulas 1 e 4, coordenadas absolutas); a
+arquitetura do autoencoder ($D$-$M$-$D$, codificador/decodificador).
+Ambos com margens generosas, sem rótulo tocando borda — confirmado por
+inspeção visual do SVG renderizado.
+
+**Validação.** Checador de balanceamento de `:::` (regra LIFO): zero
+unclosed. `uv run python3 preview-watch.py --incremental`: render
+incremental concluído, sem erro. Contagem de glifos no `_site/`:
+`notas.html` — 6 `<img>` (3 figuras matplotlib + 2 diagramas TikZ + 1
+figura de barras do autoencoder), 44 `□` (24 exercícios + 20 pausas), 0
+`✔`/`✗`; único `type="checkbox"` é a regra CSS genérica do tema
+(confirmado via `grep`, não é um `<input>` real). `slides.html` — 20
+`□` (pausas pré-resolução) + 20 `✔`/`✗` (resolvidas). Contagens
+conferem exatamente com o esperado (5 pausas × 4 itens = 20; 6 blocos
+de exercícios × 4 itens = 24).
+
+**Pendência para a Aula 7:** a Ponte já anuncia explicitamente as duas
+direções que a Aula 7 precisa amarrar — (1) o Deep Autoencoder, que
+finalmente escapa da limitação linear identificada no Fechamento desta
+aula ao adicionar camadas de unidades não lineares (a ressalva do DLFC,
+Bloco 6, já deixou claro que trocar só a ativação numa arquitetura rasa
+não basta); e (2) o Variational Autoencoder (VAE), que generaliza a
+PPCA desta aula ao caso em que $\mathbf{x}\mid\mathbf{z}$ deixa de ser
+linear-Gaussiano — a posterior $p(\mathbf{z}\mid\mathbf{x})$ perde a
+forma fechada que a PPCA teve (Bloco 5), obrigando a Aula 7 a reativar o
+ELBO e a decomposição $\mathcal{L}(q)=\ln p(\mathbf{x})-\mathrm{KL}(q\|p)$
+construídos na Aula 5, agora com $q$ aproximado por uma rede neural (o
+*reparameterization trick*) em vez de calculado em forma fechada.
+
+## Migração para exercicios.qmd/soluções.qmd públicos por aula (2026-09-14)
+
+Concluída a migração desta disciplina para a convenção descrita em
+`../CLAUDE.md` ("Exercícios (obrigatório em toda aula)"): a seção
+Exercícios embutida no `index.qmd` de cada aula (HTML e RevealJS) saiu
+de lá e passou a viver em dois arquivos-irmãos públicos por aula,
+`aulaNN/exercicios.qmd` (questões, autocontidas — sem depender de
+"nesta aula" ou de notação/exemplo só definido na aula) e
+`aulaNN/soluções.qmd` (gabarito, agora público). O `index.qmd` de cada
+aula perdeu a seção Exercícios e ganhou, perto do Fechamento (notas e
+slides), um link `[Exercícios](exercicios.qmd){.see-all}
+[Soluções](soluções.qmd){.see-all}`. Trabalho retomado nesta sessão
+após uma tentativa anterior interrompida por um rate limit de API
+(vários sub-agentes paralelos morreram no meio) — desta vez feito
+sequencialmente, aula por aula, sem sub-agentes.
+
+**Estado por aula, ao final desta sessão:**
+- **Aula 1:** `exercicios.qmd`/`soluções.qmd` já existiam (10 blocos de
+  V/F, 3 discursivas) e já corrigiam o problema original relatado por um
+  aluno (o bloco "Os pontos B e C: geometria da crista" não fazia
+  sentido fora da aula) — verificado e confirmado autocontido nesta
+  sessão. Faltava só remover a seção Exercícios ainda embutida no
+  `index.qmd` e adicionar o link de navegação; `_02-solucoes.md` (agora
+  redundante) removido.
+- **Aula 2:** migração completa do zero. `exercicios.qmd` novo (3
+  discursivas + 12 blocos de V/F — acima da faixa de 6–10 do
+  `CLAUDE.md`, mas preservando o conteúdo original já aprovado antes da
+  migração, sem cortar questões) e `soluções.qmd` novo, a partir do
+  gabarito de `_02-solucoes.md` (removido); reescrita para
+  autocontenção removeu referências a "Bloco N"/"Aula N" (ex.: "o Bloco
+  6 mostrou..." virou uma descrição direta do cenário, com o dataset
+  Breast Cancer Wisconsin e a variável `radius_mean` glosados no
+  preâmbulo). `index.qmd` da aula limpo, link adicionado.
+- **Aula 3:** só faltava `soluções.qmd` (o `exercicios.qmd`, com 10
+  blocos, já estava pronto e autocontido). Criado a partir do gabarito
+  de `_02-solucoes.md` (removido), com a mesma limpeza de referências a
+  "Bloco N"/"Aula N" nas justificativas. `index.qmd` limpo (a seção
+  Exercícios embutida saía logo depois de um bloco de Pausa Ativa
+  intercalado — cuidado extra para não remover a Pausa Ativa junto).
+  `_04-explicacao-dmreach.md` preservado, sem relação com esta migração.
+- **Aula 4:** `exercicios.qmd`/`soluções.qmd` e a limpeza do `index.qmd`
+  já estavam prontos de uma sessão anterior. Verificado que
+  `soluções.qmd` (7 blocos) supersede fielmente a Parte 2 (gabarito) de
+  `_01-respostas.md` — mesmos números, mesma lógica, só sem as
+  referências a "Bloco N"/"Aula N" — antes de remover essa parte;
+  `_01-respostas.md` reduzido só à Parte 1 (Pausas Ativas).
+- **Aula 5:** mesmo padrão da Aula 4: `soluções.qmd` (7 blocos, também
+  já existente) verificado fiel antes de trimar `_01-respostas.md` para
+  só Pausas Ativas. Corrigido, nesta sessão, um desvio de formatação
+  encontrado em `soluções.qmd`: os títulos "Tema — item (x)" estavam em
+  `##` (nível 2) em vez de `###` (nível 3, o padrão de
+  `../CLAUDE.md`/das demais aulas) — corrigido para `###` em todos os 28
+  itens. `index.qmd` da aula ainda tinha a seção Exercícios embutida
+  (incluindo um parágrafo de metodologia solto antes de "Questões
+  Discursivas") — removida, link de navegação adicionado em ambos os
+  blocos HTML/RevealJS do Fechamento.
+- **Aula 6:** migração completa do zero, convenção mais antiga (só
+  `_00-planejamento.md`/`_01-respostas.md` misturando Pausas Ativas e
+  gabarito de Exercícios). `exercicios.qmd` novo (3 discursivas + 6
+  blocos de V/F, dentro da faixa 6–10) e `soluções.qmd` novo, extraídos
+  da Parte 2 de `_01-respostas.md`; reescrita removeu referências a
+  "Bloco N"/"Aula N" (ex.: comparações com o GMM passaram a nomear o
+  método por extenso — "Modelo de Mistura Gaussiana (GMM)" — em vez de
+  "o GMM da Aula 4"; o item de ponte para a Aula 7 ganhou a definição
+  inline do ELBO para não depender de ter lido a Aula 5). `index.qmd`
+  limpo, `_01-respostas.md` reduzido só à Parte 1 (Pausas Ativas).
+
+**Limpeza em nível de disciplina:** removido `exercicios.qmd` da raiz da
+disciplina — a página consolidada antiga (um só arquivo com as
+Exercícios de todas as aulas, incluindo o próprio bloco "pontos B e C"
+que motivou o relato original do aluno) que esta migração substitui;
+removido o link `[Exercícios de todas as aulas]` do `index.qmd` da
+disciplina.
+
+**Verificação aplicada a toda aula tocada:** balanceamento de `:::`
+(contagem LIFO, checado via script Python, zero não fechados em todos os
+`index.qmd`/`exercicios.qmd`/`soluções.qmd`); grep por `- [ ]`, `- [x]`,
+`☐`, `☒` (zero ocorrências em todos); comparação item a item entre o
+texto de cada afirmação em `exercicios.qmd` e o campo **Afirmação** do
+`soluções.qmd` correspondente (correspondência exata, a menos de
+diferenças triviais de quebra de linha/espaçamento em LaTeX que não
+afetam a renderização). Render via
+`uv run python3 preview-watch.py --incremental` confirmado sem erros,
+com `exercicios.html`/`soluções.html` publicados sob
+`_site/teaching/unsupervised-learning/aulaNN/` para as 6 aulas.

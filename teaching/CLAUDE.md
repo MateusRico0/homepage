@@ -23,9 +23,12 @@ teaching/
 │   ├── _fontes/                 # PDFs de referência (normalmente links simbólicos)
 │   ├── _progresso.md            # registro de estado + dicionário de notações
 │   ├── aula01/
-│   │   ├── index.qmd            # a aula em si (saída HTML + RevealJS)
-│   │   ├── _00-planejamento.md  # plano de aula + fontes citadas, não publicado
-│   │   └── _01-respostas.md     # gabaritos de V/F + pausas ativas, não publicado
+│   │   ├── index.qmd            # a aula em si (saída HTML + RevealJS) — SEM exercícios embutidos
+│   │   ├── exercicios.qmd       # publicado — questões da aula (discursivas + V/F), autocontido
+│   │   ├── soluções.qmd         # publicado — gabarito de exercicios.qmd
+│   │   ├── _00-plano-aula.md    # plano de aula, não publicado
+│   │   ├── _01-fontes.md        # trechos citados literalmente, não publicado
+│   │   └── _02-respostas-pausas.md  # gabarito das Pausas Ativas (não do Exercícios), não publicado
 │   ├── aula02/
 │   └── ...
 └── ...
@@ -33,7 +36,9 @@ teaching/
 
 Cada disciplina é autocontida na sua subpasta. Cada aula é uma subpasta própria dentro da disciplina, nomeada `aulaNN` (`aula01`, `aula02`, ...). Algumas disciplinas (ex.: `optimization-linear-algebra`) também têm uma pasta `src/` com módulo Python compartilhado entre aulas — não é obrigatório, use se houver código repetido o bastante entre aulas para justificar.
 
-**Por que os nomes com `_` na frente:** o Quarto ignora por convenção qualquer arquivo ou pasta cujo nome comece com `_` — nunca é renderizado nem copiado para o site publicado. `_fontes/`, `_progresso.md`, `_00-planejamento.md` e `_01-respostas.md` usam esse prefixo de propósito: são material de apoio/planejamento (e, no caso de `_fontes/`, PDFs de livros com direitos autorais) que nunca deve aparecer no site ao vivo — só o `index.qmd` de cada aula (e o `index.qmd` da disciplina) é público.
+**Por que os nomes com `_` na frente:** o Quarto ignora por convenção qualquer arquivo ou pasta cujo nome comece com `_` — nunca é renderizado nem copiado para o site publicado, e um link para um arquivo assim sempre dá 404 no site ao vivo (não é uma questão de configuração, é assim que o build do Quarto funciona). `_fontes/`, `_progresso.md`, `_00-plano-aula.md` e `_01-fontes.md` usam esse prefixo de propósito: são material de apoio/planejamento (e, no caso de `_fontes/`, PDFs de livros com direitos autorais) que nunca deve aparecer no site ao vivo. **Exceções deliberadas, sem `_`, que são páginas públicas de verdade:** o `index.qmd` de cada aula e da disciplina, e (desde 2026-09-14, ver "Exercícios" abaixo) `aulaNN/exercicios.qmd` e `aulaNN/soluções.qmd` — o gabarito por aula é público nesta convenção, uma mudança deliberada de política em relação à versão anterior deste documento (que só previa um gabarito público consolidado por disciplina, não por aula).
+
+**Migração em andamento (2026-09-14):** a convenção acima (`exercicios.qmd`/`soluções.qmd` públicos por aula, substituindo a seção "Exercícios" embutida no `index.qmd` e o antigo arquivo oculto de gabarito) já foi aplicada em `supervised-learning`, `unsupervised-learning` e `optimization-linear-algebra`. **`computing-and-society` ainda não foi migrada** — continua no padrão anterior (`_02-solucoes.md`/`_03-respostas-pausas.md` ocultos por aula, mais uma página `exercicios.qmd` consolidada na raiz da disciplina reunindo todas as aulas). Ao trabalhar em `computing-and-society`, siga o padrão que já existe lá até que alguém peça a migração explicitamente; não migre por conta própria.
 
 **Fontes como link simbólico.** Os arquivos em `_fontes/` podem ser links simbólicos apontando para os PDFs/slides originais em outro lugar do disco (ex.: `ln -s ../../../livros/prml.pdf _fontes/prml.pdf`) — leia-os normalmente pelo caminho dentro de `_fontes/`, sem tratamento especial. Prefira links relativos, para o projeto continuar funcionando se a pasta for movida. **Nunca copie o PDF de verdade para dentro do projeto** — o prefixo `_` só garante que o Quarto ignore a pasta; um link simbólico garante também que o arquivo de direitos autorais nunca é versionado como blob do git.
 
@@ -132,7 +137,7 @@ Ambas as abordagens devem manter os **3 movimentos fundamentais** (Abertura com 
   - ✗ Afirmação 2 (falsa) — breve razão.
   :::
 
-  **Nas notas de aula, a resposta NÃO fica no `index.qmd` publicado.** Ela vai para o arquivo consolidado `aulaNN/_01-respostas.md` (mesmo prefixo `_` dos demais arquivos de apoio — nunca deve aparecer no site), discutindo cada pergunta motivadora e dando a solução dos V/F com os mesmos glifos `✔`/`✗`. O `index.qmd` das notas só contém a pergunta em si (mesmo bloco `::: {.callout-tip}` usado no slide de Pergunta, sem duplicar), nunca a resolução.
+  **Nas notas de aula, a resposta da Pausa Ativa NÃO fica no `index.qmd` publicado.** Ela vai para `aulaNN/_02-respostas-pausas.md` (oculto, prefixo `_` — nunca deve aparecer no site), discutindo cada pergunta motivadora e dando a solução dos V/F com os mesmos glifos `✔`/`✗`. O `index.qmd` das notas só contém a pergunta em si (mesmo bloco `::: {.callout-tip}` usado no slide de Pergunta, sem duplicar), nunca a resolução. **Isso é diferente do gabarito da seção Exercícios** (ver "Exercícios" abaixo), que é público desde 2026-09-14 — a Pausa Ativa continua oculta porque é uma provocação pontual para reflexão em aula, não um banco de questões para os alunos consultarem depois.
 
 ### Técnicas de nível micro
 
@@ -242,9 +247,9 @@ Ao montar o bloco, se o conteúdo tiver estrutura sequencial, uma árvore de dec
 
 ## Exercícios (obrigatório em toda aula)
 
-Toda aula precisa de exercícios — em dois formatos distintos, um por saída, que não devem ser confundidos entre si:
+Toda aula precisa de exercícios de fechamento. **Desde 2026-09-14, em `supervised-learning`, `unsupervised-learning` e `optimization-linear-algebra`, esses exercícios NÃO ficam dentro do `index.qmd` da aula** — vivem em dois arquivos-irmãos, ambos publicados (páginas reais do site, sem prefixo `_`):
 
-- **Notas (HTML):** terminar o arquivo com uma seção de **Exercícios** (dentro do bloco `content-visible` exclusivo de HTML), com **2 a 3 questões discursivas/conceituais** e **entre 6 e 10 questões de V/F** (não itens — **blocos de 4 itens cada**, ou seja, 24 a 40 itens ao todo, cada bloco num tema diferente da aula, cobrindo o conteúdo da aula de ponta a ponta) — o número exato dentro dessas faixas ajusta conforme a densidade da aula: uma aula com menos blocos de conteúdo não deve ser esticada até 10 questões de V/F só para bater uma cota, nem uma aula densa deve ser espremida em 6. Pode reaproveitar questões de fim de capítulo das próprias fontes bibliográficas (citando de onde vieram, como já se faz com trechos citados) ou propor questões originais — nesse caso, sinalizar que são originais, não da fonte. Ficam sem solução no arquivo (é trabalho para o aluno resolver por conta, fora da aula). Cada questão de V/F tem 4 itens do mesmo tema, e só é considerada correta se todos os 4 forem acertados (na avaliação, o aluno pode deixar a questão em branco com punição de 20% da nota da questão). Use esse formato:
+- **`aulaNN/exercicios.qmd`** — as questões em si, sem solução: **2 a 3 questões discursivas/conceituais** e **entre 6 e 10 questões de V/F** (não itens — **blocos de 4 itens cada**, ou seja, 24 a 40 itens ao todo, cada bloco num tema diferente da aula, cobrindo o conteúdo da aula de ponta a ponta) — o número exato dentro dessas faixas ajusta conforme a densidade da aula: uma aula com menos blocos de conteúdo não deve ser esticada até 10 questões de V/F só para bater uma cota, nem uma aula densa deve ser espremida em 6. Pode reaproveitar questões de fim de capítulo das próprias fontes bibliográficas (citando de onde vieram, como já se faz com trechos citados) ou propor questões originais — nesse caso, sinalizar que são originais, não da fonte. Cada questão de V/F tem 4 itens do mesmo tema, e só é considerada correta se todos os 4 forem acertados (na avaliação, o aluno pode deixar a questão em branco com punição de 20% da nota da questão). Use esse formato:
 
   ::: {.callout-note icon=false}
   ## Tema das questões
@@ -257,7 +262,13 @@ Toda aula precisa de exercícios — em dois formatos distintos, um por saída, 
 
   **Mesma regra do glifo não-clicável da Pausa Ativa se aplica aqui**: nunca usar a sintaxe de lista de tarefas do Markdown (`- [ ]`), nem os glifos `☐`/`☒` (ambos especiais para a extensão `task_lists` do Pandoc, viram `<input type="checkbox">` clicável mesmo fora dos colchetes) — usar sempre `□` (U+25A1) como texto simples.
 
-- **Slides (RevealJS):** exercícios devem ser intercalados ao longo da aula, sem passar mais de 15 minutos de conteúdo sem um.
+  **Autocontido é obrigatório.** Como `exercicios.qmd` pode ser usado diretamente como banco de questões de prova (feedback explícito do usuário/monitor, depois de um monitor encontrar blocos que só faziam sentido lendo a aula inteira), nenhum item pode depender de contexto que só existe no `index.qmd` da aula — nunca escrever algo como "os pontos B e C desta aula" ou usar uma notação/exemplo introduzido só na aula sem redefini-lo ali mesmo. Se o item precisa de um exemplo ou de notação da aula para fazer sentido, inclua esse contexto (reescrito, resumido) diretamente no enunciado do item ou num preâmbulo curto do bloco — o item deve poder ser lido, entendido e resolvido por alguém que nunca assistiu àquela aula.
+
+  **`aulaNN/soluções.qmd`** — o gabarito de `exercicios.qmd`, também publicado (ver "Registro da justificativa" abaixo para o formato).
+
+- **`index.qmd` da aula:** não tem seção de Exercícios própria — no lugar dela (tipicamente perto do Fechamento, tanto nas notas quanto nos slides), um link simples para as duas páginas-irmãs, no mesmo padrão dos links `[Slides](slides.html)`/`[Lista de aulas](../index.qmd)` já usados no topo de cada aula, por exemplo: `[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}`. **As classes `.exercicios-link`/`.solucoes-link` são obrigatórias** (desde 2026-09-14) — é o que dá a cada link seu ícone (lápis para Exercícios, `bi-check2-square` para Soluções; CSS em `styles.css`, regras `a.see-all.exercicios-link::before`/`a.see-all.solucoes-link::before`); sem a classe, o link aparece sem ícone. `exercicios.qmd` e `soluções.qmd` também usam essas classes nos links de navegação de topo que apontam um para o outro (`[Aula](index.qmd){.see-all}`, sem classe extra, não precisa de ícone próprio).
+
+- **Slides (RevealJS):** as Pausas Ativas continuam intercaladas ao longo da aula (sem passar mais de 15 minutos de conteúdo sem uma) — isso não muda; é a seção final de Exercícios que saiu do `index.qmd`.
 
 ### Metodologia de criação de cada item de V/F (notas e slides)
 
@@ -278,32 +289,57 @@ Toda aula precisa de exercícios — em dois formatos distintos, um por saída, 
 - Afirmações cuja falsidade dependa só de trocar uma palavra (ex: "sempre" por "nunca", "positivo" por "negativo") sem alterar a mecânica do conceito por trás.
 - Cenário de aplicação fora de Aprendizado de Máquina na heurística de Transferência de domínio (ver parágrafo acima).
 
-**Registro da justificativa — só para as notas, no arquivo consolidado de respostas.** As notas continuam saindo **sem solução no `index.qmd` publicado** (é trabalho do aluno resolver por conta — isso não muda). Mas a justificativa de cada item — por que é V ou F, apontando exatamente qual falha conceitual o aluno cometeria ao errar — deve ser escrita em `aulaNN/_01-respostas.md` (mesmo prefixo `_` dos demais arquivos de apoio, pelo mesmo motivo: nunca deve aparecer no site), junto com as soluções das pausas ativas. Formato, por item de V/F:
+**Registro da justificativa — em `aulaNN/soluções.qmd`, público.** A justificativa de cada item — por que é V ou F, apontando exatamente qual falha conceitual o aluno cometeria ao errar — vai em `aulaNN/soluções.qmd` (ver acima; **não** no arquivo oculto de Pausas Ativas, que é outro arquivo, `_02-respostas-pausas.md`). A heurística usada (Contrafactual/Limite/Transferência/Falsa dicotomia) é só uma ferramenta de construção do item (ver "Metodologia" acima) e não aparece registrada no arquivo.
+
+**Desde 2026-09-14, cada bloco (questão discursiva ou bloco de V/F) vira um par de caixas `callout`: a pergunta repetida (idêntica a `exercicios.qmd`, inclusive qualquer preâmbulo/contexto do bloco) numa caixa `callout-note`, seguida imediatamente da resposta numa caixa `callout-tip` intitulada "(Resposta) — [mesmo título]".** Formato, por bloco de V/F:
 
 ```markdown
-### [Tema do bloco] — item (a)
+::: {.callout-note icon=false}
+## [Tema do bloco]
 
-**Heurística:** Contrafactual | Limite | Transferência | Falsa dicotomia
+- □ [texto exato da afirmação, idêntico a exercicios.qmd, com o glifo □].
+- □ [outra afirmação do mesmo bloco].
+- □ [...]
+- □ [...]
+:::
 
-**Afirmação:** ✔ (o texto exato do item, como aparece no `index.qmd` — ✔ se Verdadeiro, ✗ se Falso)
+::: {.callout-tip}
+## (Resposta) [Tema do bloco]
 
-**Resposta:** Verdadeiro / Falso
-
-**Justificativa:** [explicação analítica e direta de por que é V/F — sem meio-termo, apontando o erro conceitual específico que o aluno cometeria ao marcar a resposta errada]
+- ✔ Verdadeiro — [justificativa: explicação analítica e direta de por que é V/F — sem meio-termo, apontando o erro conceitual específico que o aluno cometeria ao marcar a resposta errada].
+- ✗ Falso — [justificativa].
+- [...]
+:::
 ```
 
-O glifo (`✔`/`✗`) antes do texto da afirmação já comunica visualmente o veredito, além do campo **Resposta** por extenso (redundância proposital — o glifo para leitura rápida, o campo por extenso para busca em texto). **Não use `☑`/`☒` aqui** — `☒` é um dos glifos especiais do Pandoc (vira checkbox clicável mesmo em arquivos que não são renderizados, por hábito/cópia-e-cola para um `index.qmd`).
+E, por questão discursiva:
 
-Nos **slides**, a lógica de criação dos itens é a mesma (mesmas quatro heurísticas, mesmas proibições), mas **sem justificativa** — a resposta de cada V/F continua no slide imediatamente seguinte, só com o julgamento (V/F) de cada item marcado pelo glifo `✔`/`✗` (ver "Resposta" na seção da Pausa Ativa, acima); não é necessário nenhum arquivo extra para os slides.
+```markdown
+::: {.callout-note icon=false}
+## Questão N
+
+[o enunciado da questão N, idêntico a exercicios.qmd]
+:::
+
+::: {.callout-tip}
+## (Resposta) Questão N
+
+[a resposta]
+:::
+```
+
+Note que a caixa da pergunta usa `callout-note icon=false` (sem ícone) e a caixa da resposta usa `callout-tip` puro (com o ícone padrão do tip) — a diferença de ícone já ajuda a distinguir pergunta de resposta visualmente, além da cor. Quando o arquivo já tem um título maior agrupando várias questões (ex.: `## Questões de Verdadeiro/Falso` ou `## Questões discursivas`), o título dentro de cada par de caixas desce um nível, para `### Tema` / `### Questão N` / `### (Resposta) ...`, mantendo as caixas do mesmo jeito.
+
+**Desde 2026-09-14, os slides (RevealJS) não repetem mais a seção de Exercícios.** Antes, o bloco de Exercícios era duplicado dentro do `index.qmd` (notas em prosa + os mesmos itens de novo em slides, com resposta revelada no slide seguinte) — essa duplicação é exatamente o tipo de "múltiplas cópias que podem dessincronizar" que motivou tirar os Exercícios do `index.qmd`. Os slides terminam no Fechamento e no link para `exercicios.qmd`/`soluções.qmd` (ver acima); o conteúdo de Exercícios em si — pergunta e (agora publicamente) resposta — existe uma única vez, nesses dois arquivos. Isso vale só para a seção de Exercícios final: as **Pausas Ativas continuam exatamente como antes**, intercaladas nos slides com a resposta revelada no slide seguinte (ver "Pausa Ativa" acima) — não são afetadas por esta mudança.
 
 ---
 
 ## Para cada aula (repetir o ciclo)
 
 ### 1. Identificar a aula e o contexto
-Consultar `index.qmd` da disciplina e confirmar com o usuário o tema, objetivos e carga horária da aula NN. Ler `_progresso.md` (dicionário de notações + estado) e o resumo do `_00-planejamento.md` da aula N-1, como descrito em "Continuidade entre aulas" acima. Não seguir sem confirmação.
+Consultar `index.qmd` da disciplina e confirmar com o usuário o tema, objetivos e carga horária da aula NN. Ler `_progresso.md` (dicionário de notações + estado) e o resumo do `_00-plano-aula.md` da aula N-1, como descrito em "Continuidade entre aulas" acima. Não seguir sem confirmação.
 
-### 2. Gerar o arquivo de apoio `_00-planejamento.md`
+### 2. Gerar o arquivo de apoio `_00-plano-aula.md`
 Um único arquivo consolidando plano de aula e fontes:
 
 - **Resumo** (5-10 linhas): o que a aula cobre, objetivos de aprendizagem, pré-requisitos (conferindo com o dicionário de notações e o resumo da aula anterior).
@@ -348,10 +384,16 @@ Formato:
 **PARAR** e esperar aprovação/edição do usuário.
 
 ### 3. Montar a aula completa
-Gerar `aulaNN/index.qmd`: arquivo único com saída dupla HTML/RevealJS, código Python embutido, seguindo o estilo descrito acima e o tom das aulas já publicadas em outras disciplinas (comece a partir de uma delas como referência de formato), e a estrutura de blocos definida em `_00-planejamento.md`. Incluir diagramas TikZ onde fizer sentido (ver seção acima), os exercícios obrigatórios (seção "Exercícios" acima), e — depois de montar cada bloco de slides — a passada de revisão anti-picotamento descrita em "Formato do arquivo de aula". **PARAR.**
+Gerar `aulaNN/index.qmd`: arquivo único com saída dupla HTML/RevealJS, código Python embutido, seguindo o estilo descrito acima e o tom das aulas já publicadas em outras disciplinas (comece a partir de uma delas como referência de formato), e a estrutura de blocos definida em `_00-plano-aula.md`. Incluir diagramas TikZ onde fizer sentido (ver seção acima), as Pausas Ativas intercaladas — mas **não** a seção de Exercícios, que vai em `exercicios.qmd` (Etapa 4) — e, depois de montar cada bloco de slides, a passada de revisão anti-picotamento descrita em "Formato do arquivo de aula". **PARAR.**
 
-### 4. Gerar o gabarito `_01-respostas.md`
-Justificativa analítica de cada item de V/F dos exercícios finais (formato acima) e a solução de cada pausa ativa da aula. **PARAR.**
+### 4. Gerar `aulaNN/exercicios.qmd`, `aulaNN/soluções.qmd` e o gabarito das Pausas Ativas
+Três arquivos, não um só:
+
+- `aulaNN/exercicios.qmd` — as questões (ver "Exercícios" acima: autocontido, sem depender do `index.qmd`), com o link de volta para a aula no topo (mesmo padrão `[Aula](index.qmd){.see-all}` dos demais links de navegação).
+- `aulaNN/soluções.qmd` — o gabarito de `exercicios.qmd` (formato "Registro da justificativa" acima), com o mesmo link de volta.
+- `aulaNN/_02-respostas-pausas.md` — a solução de cada Pausa Ativa da aula (oculto, prefixo `_`, nunca publicado).
+
+**PARAR.**
 
 ### 5. Atualizar o `index.qmd` da disciplina e `_progresso.md`
 Após o usuário aprovar `index.qmd` da aula (fim da Etapa 3):

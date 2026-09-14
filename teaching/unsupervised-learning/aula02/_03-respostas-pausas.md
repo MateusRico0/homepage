@@ -8,9 +8,9 @@
 > separadas"). O `index.qmd` agora só contém a pergunta em cada pausa
 > ativa, nunca a resolução.
 >
-> (Os 12 blocos de V/F da seção Exercícios do `index.qmd` **não** são
-> discutidos aqui — ficam para o aluno resolver por conta, com
-> justificativa disponível só ao professor em `_02-solucoes.md`.)
+> (Os 12 blocos de V/F da seção Exercícios **não** são discutidos aqui —
+> vivem em `exercicios.qmd`/`soluções.qmd`, páginas públicas e
+> separadas desta aula.)
 
 ## O que quebra quando $d$ cresce
 

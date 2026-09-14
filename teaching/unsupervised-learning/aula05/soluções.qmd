@@ -1,0 +1,148 @@
+---
+title: "Soluções — Aula 5: Seleção de Modelos e Introdução à Inferência Variacional"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+format:
+  html:
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 2
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all aria-label="Ver aula" title="Ver aula"}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+
+::: {.callout-tip icon=false}
+Gabarito das $7$ questões de Verdadeiro/Falso de
+[`exercicios.qmd`](exercicios.qmd), com justificativa por item. As $3$
+questões discursivas não têm gabarito único registrado aqui — são
+abertas, pensadas para discussão em aula/monitoria.
+:::
+
+::: {.callout-note icon=false}
+## Verossimilhança de treino e complexidade do modelo
+
+- □ Um GMM com $K=15$ componentes ajustado a um conjunto fixo de dados de treino necessariamente atinge uma log-verossimilhança de treino pelo menos tão alta quanto a de um GMM com $K=10$ componentes ajustado ao mesmo conjunto de dados.
+- □ Se um GMM com $K$ componentes já atingiu, na prática, o máximo global da sua log-verossimilhança, um GMM com $K+1$ componentes ajustado por EM a partir de uma inicialização aleatória tem a garantia matemática de convergir a uma log-verossimilhança estritamente maior.
+- □ Ao ajustar um GMM de covariância diagonal (não completa) a um conjunto de dados com $N$ pontos, é impossível que a log-verossimilhança de treino divirja para $+\infty$, mesmo aumentando $K$ indefinidamente.
+- □ Uma rede neural totalmente conectada, sem nenhuma forma de regularização e com neurônios suficientes na camada oculta, pode reduzir o erro de treino a zero da mesma forma que um GMM pode levar sua log-verossimilhança de treino ao infinito — em ambos os casos, o problema é a ausência de qualquer penalidade por complexidade.
+:::
+
+::: {.callout-tip}
+## (Resposta) Verossimilhança de treino e complexidade do modelo
+
+- ✔ Verdadeiro — É consequência direta da Proposição de monotonicidade fraca: o espaço de misturas de $15$ componentes contém, via a construção de replicar um GMM ótimo de $K$ componentes com um componente extra de peso $\pi\to0$, toda solução de $10$ componentes como caso particular. Isso vale para qualquer par $K<K'$, não só para valores específicos.
+- ✗ Falso — A Proposição garante que o **máximo possível** com $K+1$ componentes não é menor — mas o EM, rodado a partir de uma inicialização aleatória, converge a um máximo **local**, não necessariamente ao máximo global do espaço de $K+1$ parâmetros. Não há garantia matemática de que essa convergência específica produza um valor estritamente maior; na prática, pode até estagnar num valor igual ao de $K$ (ex.: o componente extra convergindo a peso quase nulo).
+- ✗ Falso — Covariância diagonal ainda tem $d$ graus de liberdade individuais (as variâncias por atributo), qualquer um dos quais pode ir a zero se um componente colapsar sobre um único ponto de treino ao longo daquela direção específica — a divergência sobrevive, só com menos "formas" de acontecer que na covariância completa.
+- ✔ Verdadeiro — É o mesmo fenômeno estrutural (capacidade suficiente + ausência de penalidade $\Rightarrow$ ajuste arbitrariamente bom ao treino, sem relação necessária com desempenho em dados novos), só manifestado em duas famílias de modelo diferentes — exatamente o motivo de existirem ferramentas como o BIC (aqui) e a regularização/early stopping (redes neurais).
+:::
+
+::: {.callout-note icon=false}
+## Evidência do modelo e aproximação de Laplace
+
+- □ A evidência do modelo $p(\mathcal{D}\mid\mathcal{M})$ integra a verossimilhança ponderada pelo prior sobre **todo** o espaço de parâmetros, e por isso, ao contrário da verossimilhança no ponto de máximo, penaliza automaticamente um modelo cujo bom desempenho depende de um ajuste muito específico e frágil de $\theta$.
+- □ Se a posterior $p(\theta\mid\mathcal{D})$ tivesse dois modos bem separados e de alturas comparáveis (claramente bimodal), a aproximação de Laplace em torno de apenas um desses modos ainda capturaria toda a massa de probabilidade relevante da posterior.
+- □ Quanto maior a curvatura da log-verossimilhança em torno de $\theta_{\mathrm{MAP}}$ (autovalores da Hessiana $A$ grandes), maior o fator de Occam, e portanto maior a evidência aproximada do modelo.
+- □ Num modelo de regressão linear Bayesiana com prior Gaussiano sobre os coeficientes, a mesma lógica da aproximação de Laplace da evidência se aplicaria para comparar um modelo com poucos atributos contra um com muitos atributos, mesmo sem nenhuma variável latente envolvida.
+:::
+
+::: {.callout-tip}
+## (Resposta) Evidência do modelo e aproximação de Laplace
+
+- ✔ Verdadeiro — Se só uma região minúscula do espaço de $\theta$ explica bem os dados, a integral (que soma sobre **todo** o espaço, ponderado pelo prior) fica pequena mesmo que o ponto ótimo isolado tenha verossimilhança alta — é exatamente essa penalização automática, tornada explícita pelo fator de Occam na aproximação de Laplace, que falta na verossimilhança pontual.
+- ✗ Falso — A aproximação de Laplace exige explicitamente um modo único e bem definido — sob bimodalidade comparável, aproximar em torno de um só modo ignora completamente a massa de probabilidade do outro, violando a premissa que torna a aproximação válida.
+- ✗ Falso — O fator de Occam é $\tfrac{M}{2}\ln(2\pi)-\tfrac12\ln|A|$ — quanto maior $|A|$ (mais curvatura, pico mais "afiado"), **menor** esse fator (o termo $-\tfrac12\ln|A|$ fica mais negativo), não maior. A afirmação usa o jargão certo mas inverte a direção do efeito: mais curvatura penaliza mais, não menos.
+- ✔ Verdadeiro — A derivação da aproximação de Laplace da evidência não usa nada específico de variáveis latentes — só um modelo com parâmetros $\theta$, uma verossimilhança e um prior; aplica-se igualmente à comparação de modelos de regressão com diferentes conjuntos de atributos.
+:::
+
+::: {.callout-note icon=false}
+## BIC aplicado a modelos de mistura
+
+- □ Um GMM com $K=4$ componentes e covariância diagonal (não completa) em $d=2$ dimensões tem menos parâmetros livres, $M$, que um GMM com $K=4$ componentes e covariância completa nas mesmas $d=2$ dimensões.
+- □ Se dois datasets tivessem exatamente o mesmo $N$ (número de pontos) e o mesmo $K$, mas um deles usasse covariância diagonal e o outro covariância completa, o BIC (convenção PRML) do modelo de covariância diagonal seria sempre igual ou maior, pois ele tem menos parâmetros para penalizar.
+- □ Substituir a log-verossimilhança de treino pelo BIC como critério de seleção de $K$ garante, matematicamente, que o $K$ escolhido é o que generaliza melhor para dados nunca vistos.
+- □ Comparar o BIC de um GMM com $K=3$ componentes contra o de um modelo de $K$-means com $3$ clusters (que não tem log-verossimilhança bem definida da mesma forma) exigiria adaptar a própria definição do critério, não apenas recalcular $M$ e $N$.
+:::
+
+::: {.callout-tip}
+## (Resposta) BIC aplicado a modelos de mistura
+
+- ✔ Verdadeiro — Covariância diagonal contribui $Kd$ parâmetros de covariância (só as variâncias por atributo), contra $Kd(d+1)/2$ da covariância completa — para $K=4$, $d=2$: $8$ contra $12$ parâmetros de covariância, com médias e pesos iguais nos dois casos.
+- ✗ Falso — O BIC é ajuste **menos** penalidade — covariância diagonal reduz a penalidade, mas também restringe a flexibilidade do modelo, o que tipicamente **piora** o termo de ajuste ($\ln p(\mathcal{D}\mid\theta_{\mathrm{ML}})$ menor). O resultado líquido depende de qual efeito domina; não há garantia geral de que a penalidade menor sempre compense (ou supere) a perda de ajuste.
+- ✗ Falso — O BIC é uma aproximação assintótica da evidência do modelo, derivada sob premissas específicas (aproximação de Laplace) — não uma garantia de generalização ótima. É uma ferramenta muito melhor que a verossimilhança pura para esse fim, mas "melhor" não é "garantida matematicamente ótima"; datasets pequenos, ou premissas de Laplace violadas, podem levar o BIC a escolher um $K$ subótimo para generalização.
+- ✔ Verdadeiro — O BIC depende diretamente de $\ln p(\mathcal{D}\mid\theta_{\mathrm{ML}})$ — o $K$-means não tem, por si só, um modelo probabilístico gerador com verossimilhança associada (é o caso-limite de um GMM quando as covariâncias tendem a esféricas, idênticas e $\epsilon\to0$); comparar os dois via BIC exigiria antes reconectar o $K$-means à sua verossimilhança gaussiana subjacente, não só trocar $M$ e $N$ na fórmula.
+:::
+
+::: {.callout-note icon=false}
+## Divergência KL: definição e propriedades
+
+- □ Se $q(\mathbf{Z})$ e $p(\mathbf{Z})$ forem exatamente a mesma distribuição, $\mathrm{KL}(q\|p)=\mathrm{KL}(p\|q)=0$; para quaisquer outras duas distribuições diferentes, não há garantia de que $\mathrm{KL}(q\|p)=\mathrm{KL}(p\|q)$.
+- □ No caso-limite em que $q(\mathbf{Z})$ atribui probabilidade estritamente positiva a um valor de $\mathbf{Z}$ ao qual $p(\mathbf{Z})$ atribui probabilidade zero, $\mathrm{KL}(q\|p)$ permanece finita, desde que $q$ e $p$ sejam ambas distribuições de probabilidade válidas.
+- □ Como a divergência KL é sempre não negativa, qualquer função que meça dissimilaridade entre duas distribuições de probabilidade e seja sempre não negativa automaticamente satisfaz a desigualdade triangular de uma métrica.
+- □ O mesmo Teorema de não-negatividade da KL (via desigualdade de Jensen, usando a convexidade de $-\ln$) é o resultado usado para justificar, em Teoria da Informação, por que a entropia cruzada entre duas distribuições nunca é menor que a entropia da distribuição verdadeira.
+:::
+
+::: {.callout-tip}
+## (Resposta) Divergência KL: definição e propriedades
+
+- ✔ Verdadeiro — Quando $q=p$, ambas as divergências são $0$ trivialmente (condição de igualdade do Teorema de Gibbs, nos dois sentidos). Quando $q\ne p$, a própria definição da KL não é simétrica na troca de $p$ e $q$ — não existe teorema geral que force os dois valores a coincidir.
+- ✗ Falso — Nesse ponto, $\ln\{p(\mathbf{Z})/q(\mathbf{Z})\}= \ln(0/\text{positivo})=-\infty$, e como esse termo entra multiplicado por $q(\mathbf{Z})>0$ na integral/soma que define $\mathrm{KL}(q\|p)= -\int q\ln\{p/q\}$, o resultado diverge a $+\infty$ — descasamento de suporte (um valor possível sob $q$ mas impossível sob $p$) é justamente o caso em que a KL deixa de ser finita, não o contrário.
+- ✗ Falso — Não-negatividade é só uma das propriedades que uma métrica exigiria (junto de simetria e desigualdade triangular) — a própria KL é um contraexemplo direto: já não é simétrica em geral, e é um resultado conhecido (fora do escopo desta aula) que ela também não satisfaz a desigualdade triangular. Não-negatividade isolada não implica as outras propriedades de uma métrica.
+- ✔ Verdadeiro — A entropia cruzada se decompõe como $H(p,q)=H(p)+\mathrm{KL}(p\|q)$; como $\mathrm{KL}(p\|q)\ge0$ (o mesmo Teorema de Gibbs), segue imediatamente que $H(p,q)\ge H(p)$ — a mesma desigualdade que justifica a entropia cruzada como função de perda em classificação (sempre $\ge$ a entropia irredutível da distribuição verdadeira).
+:::
+
+::: {.callout-note icon=false}
+## A decomposição $\mathcal{L}(q)+\mathrm{KL}(q\|p)$
+
+- □ Se, para uma escolha específica de $q$, se observasse $\mathcal{L}(q) = \ln p(\mathbf{X})$ exatamente, isso implicaria, sem necessidade de calcular $\mathrm{KL}(q\|p)$ diretamente, que $q(\mathbf{Z})=p(\mathbf{Z}\mid\mathbf{X})$.
+- □ No caso-limite em que $\mathbf{Z}$ é uma variável com um único valor possível (nenhuma incerteza real), $q(\mathbf{Z})$ só pode ser igual a $p(\mathbf{Z}\mid\mathbf{X})$, e portanto $\mathrm{KL}(q\|p)=0$ trivialmente, para qualquer modelo.
+- □ Como $\mathcal{L}(q)$ é sempre uma cota inferior de $\ln p(\mathbf{X})$, qualquer procedimento de otimização que aumente $\mathcal{L}(q)$ ao longo de iterações necessariamente está aumentando, na mesma proporção, o valor verdadeiro de $\ln p(\mathbf{X})$.
+- □ A mesma decomposição usada para um GMM se aplica, sem nenhuma alteração na derivação, a um modelo de tópicos como o Latent Dirichlet Allocation (LDA), em que $\mathbf{Z}$ representa a atribuição de tópico latente de cada palavra de um documento.
+:::
+
+::: {.callout-tip}
+## (Resposta) A decomposição $\mathcal{L}(q)+\mathrm{KL}(q\|p)$
+
+- ✔ Verdadeiro — Pela decomposição, $\mathcal{L}(q)=\ln p(\mathbf{X})$ força $\mathrm{KL}(q\|p)=0$; pela condição de igualdade do Teorema de Gibbs, $\mathrm{KL}=0$ ocorre se, e somente se, $q=p(\mathbf{Z}\mid\mathbf{X})$ — a conclusão segue dos dois teoremas já estabelecidos, sem precisar computar a integral do KL de novo.
+- ✔ Verdadeiro — Se $\mathbf{Z}$ só pode assumir um valor, toda distribuição de probabilidade válida sobre $\mathbf{Z}$ é obrigada a atribuir probabilidade $1$ a esse valor — não há espaço para $q$ diferir da posterior verdadeira, então $\mathrm{KL}(q\|p)=0$ por ausência de alternativa, não por otimização.
+- ✗ Falso — Quando só $q$ varia (o modelo/$\mathbf{X}$ ficam fixos), $\ln p(\mathbf{X})$ **não muda em absoluto** — é uma constante em relação a $q$. Aumentar $\mathcal{L}(q)$ nesse regime só **aperta a cota** (reduz o KL, aproximando $\mathcal{L}(q)$ do valor fixo $\ln p(\mathbf{X})$); não altera $\ln p(\mathbf{X})$ "na mesma proporção" nem em proporção nenhuma — confundir "cota ficando mais apertada" com "valor verdadeiro aumentando" é exatamente o erro conceitual aqui.
+- ✔ Verdadeiro — A derivação da decomposição usa só a regra do produto e a normalização de $q$ — nada específico sobre a natureza de $\mathbf{Z}$ (categórica de mistura, ou atribuição de tópico por palavra, como no LDA). A decomposição vale identicamente para qualquer modelo de variável latente.
+:::
+
+::: {.callout-note icon=false}
+## O EM como subida de coordenadas no ELBO
+
+- □ Trocar, no Passo E, a maximização exata de $\mathcal{L}(q,\theta)$ sobre $q$ por uma aproximação de $q$ que não atinge $\mathrm{KL}=0$ ainda produz uma cota $\mathcal{L}(q,\theta)$ válida (isto é, $\le\ln p(\mathbf{X}\mid\theta)$), só que mais frouxa que a do Passo E exato.
+- □ No caso-limite de um único componente ($K=1$) num GMM, o Passo E não tem nada a calcular de fato (a responsabilidade de todo ponto para o único componente é sempre $1$), e o algoritmo EM se reduz a maximizar diretamente a log-verossimilhança em relação a $\mu_1,\Sigma_1$.
+- □ Como o Teorema de que uma iteração completa do EM nunca piora a log-verossimilhança (ver Convenções acima) garante não-decréscimo a cada iteração, dois pontos de inicialização diferentes para o mesmo GMM sempre convergem ao mesmo valor final de log-verossimilhança.
+- □ O mesmo argumento de subida de coordenadas no ELBO (alternar entre otimizar uma distribuição sobre variáveis ocultas e otimizar parâmetros do modelo) é a base do algoritmo de Inferência Variacional de campo médio para GMMs Bayesianos, só que otimizando sobre uma família restrita de $q$ em vez da posterior exata.
+:::
+
+::: {.callout-tip}
+## (Resposta) O EM como subida de coordenadas no ELBO
+
+- ✔ Verdadeiro — A decomposição $\ln p(\mathbf{X}\mid\theta)= \mathcal{L}(q,\theta)+\mathrm{KL}(q\|p)$ vale para **qualquer** $q$ normalizada, não só para a posterior exata — trocar o Passo E exato por uma aproximação ainda deixa $\mathcal{L}(q,\theta)\le \ln p(\mathbf{X}\mid\theta)$ (KL$\ge0$ sempre), só com um KL residual maior que zero, tornando a cota mais frouxa. É exatamente o princípio por trás da Inferência Variacional (item (d) deste bloco).
+- ✔ Verdadeiro — Com $K=1$, não há ambiguidade de origem — $\gamma(z_{n1})=1$ para todo $n$, trivialmente, sem precisar de Bayes. O Passo M se reduz então à máxima verossimilhança gaussiana padrão (sem ponderação nenhuma), recuperando o ajuste de uma única Gaussiana.
+- ✗ Falso — O Teorema garante só **não-decréscimo monotônico** dentro de uma mesma trajetória de otimização, nunca convergência a um único valor global — inicializações diferentes podem convergir a máximos locais diferentes, com valores finais de log-verossimilhança distintos (é exatamente por isso que se recomenda usar múltiplos reinícios, mantendo o melhor resultado).
+- ✔ Verdadeiro — É a generalização natural do argumento de subida de coordenadas: quando a posterior exata não é tratável (caso do GMM plenamente Bayesiano, com prior sobre $\mu_k,\Sigma_k,\pi_k$), a mesma alternância de otimização (uma etapa sobre a distribuição das variáveis ocultas, outra sobre os parâmetros/distribuições variacionais) continua válida, restrita a uma família de $q$ tratável — a Inferência Variacional de campo médio.
+:::
+
+::: {.callout-note icon=false}
+## Síntese e limitações do ELBO
+
+- □ Se, num modelo mais complexo que o GMM, a posterior exata $p(\mathbf{Z}\mid\mathbf{X},\theta)$ deixasse de ter forma fechada, o Passo E "exato" (igualar $q$ à posterior) deixaria de estar disponível, mas a decomposição $\ln p(\mathbf{X}\mid\theta)=\mathcal{L}(q,\theta)+\mathrm{KL}(q\|p)$ continuaria válida para qualquer $q$ escolhido, mesmo aproximado.
+- □ No caso-limite em que a família de distribuições disponível para $q$ é rica o bastante para conter a posterior exata (mesmo em modelos mais complexos que o GMM), maximizar $\mathcal{L}(q,\theta)$ sobre essa família recupera o EM exato como caso particular.
+- □ Como o BIC e o ELBO resolvem o mesmo tipo de problema (avaliar um modelo com variáveis não observadas), eles produzem sempre exatamente o mesmo valor numérico quando aplicados ao mesmo GMM com o mesmo $K$.
+- □ Substituir a variável latente categórica de um GMM (indicando a qual dos $K$ componentes cada ponto pertence) por uma variável latente contínua, como a que aparece na Análise de Componentes Principais Probabilística (PPCA, um modelo de variável latente linear-Gaussiana usado para redução de dimensionalidade), exige repensar a forma de $\mathbf{Z}$, mas não invalida a decomposição $\mathcal{L}(q)+\mathrm{KL}(q\|p)$ (ver Convenções acima), que não assume nenhuma forma específica para $\mathbf{Z}$.
+:::
+
+::: {.callout-tip}
+## (Resposta) Síntese e limitações do ELBO
+
+- ✔ Verdadeiro — A decomposição não depende de a posterior ter forma fechada — vale identicamente para qualquer $q$ normalizada. O que deixa de existir é só a possibilidade de fechar o KL exatamente a zero por meio de Bayes direto; a cota $\mathcal{L}(q,\theta)$ continua bem definida e calculável para qualquer $q$ tratável escolhido.
+- ✔ Verdadeiro — Se a família de $q$ contém a posterior verdadeira, o máximo restrito coincide com o máximo irrestrito (a posterior exata está disponível como uma das opções), recuperando exatamente o comportamento do Passo E exato — a Inferência Variacional generaliza o EM, sem contradizê-lo nesse caso-limite.
+- ✗ Falso — Os dois nascem da mesma pergunta, mas são objetos matemáticos diferentes: o BIC é uma aproximação pontual e assintótica específica (log-verossimilhança no ótimo, menos $\tfrac12 M\ln N$), enquanto o ELBO é uma cota que depende da escolha de $q$ — coincidem conceitualmente em propósito, não numericamente em valor.
+- ✔ Verdadeiro — A derivação da decomposição não assume nada sobre $\mathbf{Z}$ ser discreta ou contínua — só que $q(\mathbf{Z})$ seja uma distribuição normalizada. Trocar a variável latente categórica por uma contínua muda a forma de $q$ e de $p(\mathbf{Z}\mid\mathbf{X})$, mas não exige reconstruir a decomposição do zero.
+:::

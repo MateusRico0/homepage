@@ -1,0 +1,1996 @@
+---
+title: "Aula 6: Derivadas Parciais, Jacobiano e o Vetor Gradiente"
+subtitle: "Álgebra Linear e Otimização para Aprendizado de Máquina"
+author: "Prof. Marcos Medeiros Raimundo"
+date: "2026-09-13"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    fig-width: 8
+    fig-height: 4.5
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    theme: [simple, ../../lesson-theme.scss]
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    fig-width: 8
+    fig-height: 4.5
+jupyter: homepage
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar
+disable_progress_bar()
+from datasets import load_dataset
+
+plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+plt.rcParams.update({"figure.dpi": 120, "font.size": 11})
+
+# Paleta preferencial do IC
+COR_A   = "#0085CA"   # azul — elemento principal
+COR_B   = "#FF5E00"   # laranja — elemento de contraste
+COR_C   = "#E03C31"   # vermelho — alerta / terceiro elemento
+COR_NEU = "#5D6D7E"   # neutro
+
+# --- Problema-fio da aula: mesmo dataset real das Aulas 1-5 ------------
+_housing = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+COLS = ["MedInc", "HouseAge", "AveRooms", "AveBedrms"]
+X = _housing[COLS].to_numpy()
+y = _housing["MedHouseVal"].to_numpy()
+
+def perda(beta):
+    """L(beta) = ||X beta - y||^2, a perda quadrática do problema-fio."""
+    r = X @ beta - y
+    return r @ r
+
+def gradiente_analitico(beta):
+    """Gradiente (forma coluna) de L(beta) = ||X beta - y||^2."""
+    r = X @ beta - y
+    return 2 * X.T @ r
+
+# --- Amostra pequena de 5 bairros, 2 atributos, para o Bloco 2 ---------
+_amostra = _housing.sample(n=5, random_state=7)
+X_amostra = _amostra[["MedInc", "HouseAge"]].to_numpy()
+y_amostra = _amostra["MedHouseVal"].to_numpy()
+
+def perda_amostra(b1, b2):
+    r = b1 * X_amostra[:, 0] + b2 * X_amostra[:, 1] - y_amostra
+    return np.sum(r**2)
+
+# --- Ponto de referência usado nos Blocos 3-6 --------------------------
+beta0 = np.array([0.4, 0.02, -0.15, 0.7])
+```
+
+# Revisão e Introdução
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Revisão Rápida: Onde a Aula 5 Parou
+
+A Aula 5 respondeu como decompor **qualquer** matriz retangular: a
+Decomposição em Valores Singulares, $X=U\Sigma V^T$, construída
+diretamente a partir do Teorema Espectral (Aula 4) aplicado a $X^TX$ e
+$XX^T$. A partir dela, o Teorema de Eckart-Young-Mirsky garantiu que
+truncar essa soma nos $k$ primeiros termos produz a melhor aproximação
+possível de posto $k$ (em norma espectral, e também de Frobenius, pela
+generalização de Mirsky); e a Decomposição Polar reorganizou os mesmos
+três fatores em $X=QS$, uma parte que só gira ($Q$) e uma parte que só
+estica ao longo de direções ortogonais ($S$).
+
+## Um Corte Real: da Álgebra Linear ao Cálculo
+
+Vale marcar essa transição com todas as letras, porque ela é genuína,
+não só uma mudança de assunto dentro do mesmo tipo de ferramenta: as
+cinco aulas anteriores construíram uma **linguagem para representar e
+decompor dados estáticos** — espaços vetoriais, sistemas lineares,
+projeções, autovalores, SVD. Em nenhum momento, até aqui, o curso
+precisou perguntar "como *ajustar* alguma coisa para reduzir um erro" —
+as Equações Normais (Aula 3) deram a resposta **de uma vez só**, via
+uma fórmula fechada, $\hat{\mathbf{w}}=(X^TX)^{-1}X^T\mathbf{y}$, sem
+nenhum processo iterativo de tentativa e ajuste.
+
+Mas olhe com atenção para *como* a Aula 3 chegou a essa fórmula: o
+argumento geométrico foi "a projeção ortogonal $\hat{\mathbf{y}}$
+minimiza a distância $\|\mathbf{y}-X\mathbf{w}\|^2$ sobre todos os
+$\mathbf{w}$" — ou seja, encontrar o **mínimo** de uma função
+(a perda $L(\mathbf{w})=\|\mathbf{y}-X\mathbf{w}\|^2$) sobre o vetor de
+parâmetros $\mathbf{w}$. Minimizar uma função de várias variáveis é,
+por definição, um problema de Cálculo: precisa de uma noção precisa do
+que significa "a função parar de diminuir" quando há mais de uma
+variável envolvida. A Aula 3 **usou** essa ideia (implicitamente, via
+um argumento geométrico de projeção) sem nunca **defini-la**
+formalmente. É exatamente essa lacuna que a Parte 2 do curso —
+"Cálculo da Otimização Diferenciável" — começa a fechar hoje.
+
+## Roteiro da Aula
+
+A pergunta que fecha essa lacuna — "o que significa, formalmente, uma
+função de várias variáveis 'parar de diminuir', e como calcular isso na
+prática?" — se desdobra em quatro perguntas mais específicas:
+
+1. O que é uma **derivada parcial**, e por que ela sozinha não basta
+   para descrever como uma função muda em **qualquer** direção?
+2. Como generalizar a derivada para um **vetor-gradiente**, e como
+   calculá-lo por extenso para uma perda quadrática real?
+3. O que é a **derivada direcional**, e por que o gradiente aponta,
+   comprovadamente, na direção de subida mais íngreme?
+4. Como generalizar o gradiente para uma função que devolve **vários**
+   números ao mesmo tempo — o **Jacobiano**?
+
+## Problema Motivador
+
+Volte ao problema-fio desta disciplina: prever `MedHouseVal` a partir
+de 4 atributos do *California Housing*, através de
+$L(\boldsymbol{\beta})=\|X\boldsymbol{\beta}-\mathbf{y}\|^2$. A Aula 3
+resolveu isso de uma vez, via $X^TX\hat{\boldsymbol{\beta}}=
+X^T\mathbf{y}$. Mas imagine um cenário ligeiramente diferente: um
+modelo com **milhões** de parâmetros (não $4$) — o caso típico de uma
+rede neural — onde resolver um sistema linear do tamanho de
+$\boldsymbol{\beta}$ está fora de cogitação computacionalmente.
+Pense por um instante, sem fórmula nenhuma ainda: dado um
+$\boldsymbol{\beta}$ qualquer (não necessariamente o ótimo), **em que
+direção especificamente eu deveria mover $\boldsymbol{\beta}$ para
+reduzir $L(\boldsymbol{\beta})$ o mais rápido possível**, usando só
+informação local (sem resolver sistema nenhum)?
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Revisão Rápida
+
+::: {.fragment}
+Aula 5: SVD $X=U\Sigma V^T$ (qualquer matriz, via Teorema Espectral
+aplicado a $X^TX,XX^T$); Eckart-Young-Mirsky (melhor aproximação de
+posto $k$); Decomposição Polar $X=QS$.
+:::
+
+## Um Corte Real: da Álgebra Linear ao Cálculo
+
+::: {.fragment}
+5 aulas construíram uma **linguagem para dados estáticos** — nunca
+precisaram perguntar "como ajustar algo para reduzir um erro".
+:::
+
+::: {.fragment}
+Mas as Equações Normais (Aula 3) vieram de "a projeção minimiza
+$\|\mathbf{y}-X\mathbf{w}\|^2$" — **minimizar uma função** é, por
+definição, Cálculo. A Aula 3 **usou** essa ideia (via geometria) sem
+**defini-la**.
+:::
+
+::: {.fragment}
+Parte 2 do curso ("Cálculo da Otimização Diferenciável") fecha essa
+lacuna, a partir de hoje.
+:::
+
+## Roteiro da Aula
+
+::: {.fragment}
+**1.** O que é derivada parcial, e por que sozinha não basta para
+qualquer direção?
+:::
+
+::: {.fragment}
+**2.** Como generalizar para o vetor-gradiente, calculado por extenso
+numa perda quadrática real?
+:::
+
+::: {.fragment}
+**3.** O que é derivada direcional, e por que o gradiente é a direção
+de subida mais íngreme?
+:::
+
+::: {.fragment}
+**4.** Como generalizar para uma função vetorial — o Jacobiano?
+:::
+
+## Problema Motivador
+
+::: {.fragment}
+$L(\boldsymbol{\beta})=\|X\boldsymbol{\beta}-\mathbf{y}\|^2$
+(California Housing). Aula 3 resolveu de uma vez
+($X^TX\hat{\boldsymbol{\beta}}=X^T\mathbf{y}$) — mas imagine milhões de
+parâmetros (rede neural): resolver o sistema está fora de cogitação.
+:::
+
+::: {.fragment}
+Dado $\boldsymbol{\beta}$ qualquer: **em que direção mover
+$\boldsymbol{\beta}$ para reduzir $L$ mais rápido, usando só
+informação local?**
+:::
+:::
+
+::: {.fig-resize style="width: 82%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  block/.style={rectangle, draw=icblue, fill=icblue!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=3.1cm, minimum height=1.15cm},
+  concl/.style={rectangle, draw=icred, fill=icred!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=3.5cm, minimum height=1.15cm}
+]
+  \node (A) [block] at (0,0) {Aulas 1-5:\\Álgebra Linear\\(dados estáticos)};
+  \node (B) [block] at (4.9,0) {Aula 3:\\Eq. Normais via\\"minimizar" (geometria)};
+  \node (C) [concl] at (10.1,0) {o que é "minimizar",\\formalmente?\\$\to$ gradiente/Jacobiano\\(Aula 6, Parte 2)};
+
+  \draw [-Stealth, thick, color=gray!70] (A) -- (B);
+  \draw [-Stealth, thick, color=gray!70] (B) -- (C);
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se $L(\boldsymbol{\beta})$ tivesse só um parâmetro escalar, o que já saberíamos fazer que ainda não sabemos fazer com 4 parâmetros?
+
+Dica: pense no que o Cálculo de uma variável (ensino médio/cálculo 1)
+já ensina sobre encontrar mínimos, e o que muda quando há mais de uma
+variável.
+
+- □ Com um único parâmetro, encontrar o mínimo de uma função suave se
+  resume a igualar sua derivada a zero — mas "a derivada" de uma função
+  de 4 variáveis não é um único número, o que já indica que o objeto
+  matemático certo precisa ser diferente.
+- □ Se $L(\boldsymbol{\beta})$ dependesse de exatamente 2 parâmetros em
+  vez de 4, o problema de encontrar a direção de maior redução deixaria
+  de fazer sentido, porque só existiria uma única direção possível de
+  se mover (aumentar ou diminuir).
+- □ Numa rede neural com milhões de pesos, a mesma pergunta — "que
+  direção reduz a perda mais rápido, usando só informação local?" — é
+  exatamente o problema que o algoritmo de treinamento precisa resolver
+  a cada passo.
+- □ Como resolver as Equações Normais é sempre possível em qualquer
+  escala de parâmetros (bastaria formar $X^TX$ maior), isso implica que
+  não há motivo prático para se preocupar com "direção de redução mais
+  rápida" fora de exemplos de brinquedo.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Com 1 parâmetro já sabemos achar o mínimo. Com 4, o quê muda?
+
+Dica: o que o Cálculo 1 ensina sobre mínimos, e o que precisa mudar com
+mais de uma variável?
+
+- □ Com 1 parâmetro, mínimo $\iff$ derivada $=0$ — mas "a derivada" de
+  uma função de 4 variáveis não é um único número.
+- □ Com exatamente 2 parâmetros (em vez de 4), a pergunta "que direção
+  reduz mais rápido" deixaria de fazer sentido — só haveria uma direção
+  possível.
+- □ Rede neural com milhões de pesos: a mesma pergunta é exatamente o
+  que o treinamento resolve a cada passo.
+- □ Equações Normais sempre resolvíveis (bastaria $X^TX$ maior)
+  $\Rightarrow$ "direção de redução mais rápida" só importa em
+  brinquedos.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## O que muda de 1 para 4 parâmetros — Resposta
+
+- ✔ Exatamente o problema que abre a aula: precisamos de um objeto
+  matemático novo (o gradiente, um vetor) para substituir "a derivada"
+  quando há várias variáveis.
+- ✗ Com 2 (ou qualquer número $\ge2$) parâmetros já existem
+  infinitas direções possíveis no plano (ou espaço) de parâmetros — a
+  pergunta faz sentido a partir de 2 variáveis, não só com muitas.
+- ✔ Mesma mecânica, outro modelo de ML (rede neural, treinamento via
+  gradiente).
+- ✗ O tamanho de $X^TX$ cresce com o **quadrado** do número de
+  parâmetros, e invertê-la custa **cubo** do tamanho — para milhões de
+  parâmetros isso é computacionalmente inviável, não uma questão de
+  "brinquedo".
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** o objeto que falta é o **gradiente** — um
+vetor, não um número — construído a partir de **derivadas parciais**,
+tema do Bloco 2.
+:::
+:::
+
+# Derivada Parcial
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Variando uma Variável de Cada Vez
+
+A ideia central da derivada parcial é simples de enunciar antes de
+qualquer fórmula: para entender como uma função de várias variáveis
+$f(x_1,\dots,x_n)$ muda, **fixe todas as variáveis exceto uma, e
+aplique a derivada de uma variável só** (a mesma do Cálculo 1) àquela
+variável isolada. Formalmente (tradução livre, MathML, Def. 5.5, p.
+146):
+
+::: {.callout-note icon=false}
+## Definição (Derivada Parcial — MathML, tradução nossa, Def. 5.5, p. 146)
+
+Para uma função $f:\mathbb{R}^n\to\mathbb{R}$, $\mathbf{x}\mapsto
+f(\mathbf{x})$, de $n$ variáveis $x_1,\dots,x_n$, definimos as
+**derivadas parciais** como
+$$
+\frac{\partial f}{\partial x_1} = \lim_{h\to 0}\frac{f(x_1+h,x_2,
+\dots,x_n)-f(\mathbf{x})}{h}, \quad \dots, \quad
+\frac{\partial f}{\partial x_n} = \lim_{h\to 0}\frac{f(x_1,\dots,
+x_{n-1},x_n+h)-f(\mathbf{x})}{h} .
+$$
+:::
+
+Note que cada derivada parcial $\partial f/\partial x_i$ é, ela mesma,
+exatamente a derivada de uma variável (Cálculo 1) da função que se
+obtém "congelando" todas as outras variáveis em seus valores atuais —
+nenhuma ferramenta nova é necessária para calcular **uma** derivada
+parcial isoladamente, só disciplina de tratar as demais variáveis como
+constantes durante o cálculo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Variando uma Variável de Cada Vez
+
+::: {.fragment}
+Ideia central: para entender como $f(x_1,\dots,x_n)$ muda, **fixe
+todas as variáveis exceto uma**, e aplique a derivada de uma variável
+(Cálculo 1) só àquela.
+:::
+
+::: {.callout-note icon=false}
+## Definição (Derivada Parcial — MathML Def. 5.5)
+
+$\dfrac{\partial f}{\partial x_i} = \lim_{h\to 0}
+\dfrac{f(x_1,\dots,x_i+h,\dots,x_n)-f(\mathbf{x})}{h}$ — as demais
+variáveis ficam fixas.
+:::
+
+::: {.fragment}
+Cada $\partial f/\partial x_i$ **é** a derivada de uma variável do
+Cálculo 1, aplicada à função com as demais variáveis "congeladas" —
+nenhuma ferramenta nova para calcular uma parcial isolada.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Aplicando à Perda Quadrática: um Exemplo Concreto
+
+Vamos aplicar essa definição diretamente ao problema-fio, numa versão
+simplificada com só $2$ parâmetros para deixar a conta manejável à mão.
+Tome uma amostra pequena de $5$ bairros do *California Housing* e só $2$
+atributos (`MedInc`, `HouseAge`):
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Aplicando à Perda Quadrática
+
+::: {.fragment}
+Versão simplificada com $2$ parâmetros, $5$ bairros, $2$ atributos
+(`MedInc`, `HouseAge`), para a conta caber à mão.
+:::
+:::
+
+```{python}
+#| echo: false
+pd.DataFrame({
+    "MedInc": X_amostra[:, 0],
+    "HouseAge": X_amostra[:, 1],
+    "MedHouseVal": y_amostra,
+})
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A perda para essa amostra, com $2$ parâmetros
+$\boldsymbol{\beta}=(\beta_1,\beta_2)$, é
+$$
+L(\beta_1,\beta_2) = \sum_{i=1}^5\big(\beta_1\,\texttt{MedInc}_i+
+\beta_2\,\texttt{HouseAge}_i - \texttt{MedHouseVal}_i\big)^2 .
+$$
+Escolhendo o ponto $(\beta_1,\beta_2)=(0{,}5;\ 0{,}02)$, a Definição 5.5
+diz que $\partial L/\partial\beta_1$ é o limite de
+$[L(\beta_1+h,\beta_2)-L(\beta_1,\beta_2)]/h$ quando $h\to 0$ — vamos
+calcular esse limite **numericamente**, aproximando-o com um $h$ bem
+pequeno, e comparar com a derivada exata obtida expandindo o quadrado à
+mão.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+$L(\beta_1,\beta_2)=\sum_i(\beta_1\texttt{MedInc}_i+
+\beta_2\texttt{HouseAge}_i-\texttt{MedHouseVal}_i)^2$. Em
+$(\beta_1,\beta_2)=(0{,}5;\,0{,}02)$: aproximar $\partial L/
+\partial\beta_1$ pelo limite (Def. 5.5) com $h$ pequeno, comparar com
+a derivada exata.
+:::
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+
+b1_0, b2_0 = 0.5, 0.02
+h = 1e-4
+
+dL_db1_numerico = (perda_amostra(b1_0 + h, b2_0) - perda_amostra(b1_0, b2_0)) / h
+dL_db2_numerico = (perda_amostra(b1_0, b2_0 + h) - perda_amostra(b1_0, b2_0)) / h
+
+# Derivada exata: expandindo o quadrado, dL/db1 = 2 * sum(r_i * MedInc_i)
+r0 = b1_0 * X_amostra[:, 0] + b2_0 * X_amostra[:, 1] - y_amostra
+dL_db1_exato = 2 * np.sum(r0 * X_amostra[:, 0])
+dL_db2_exato = 2 * np.sum(r0 * X_amostra[:, 1])
+
+print(f"L(0.5, 0.02) = {perda_amostra(b1_0, b2_0):.6f}")
+print(f"dL/db1: limite numérico (h={h}) = {dL_db1_numerico:.6f} | fórmula exata 2*sum(r*MedInc) = {dL_db1_exato:.6f}")
+print(f"dL/db2: limite numérico (h={h}) = {dL_db2_numerico:.6f} | fórmula exata 2*sum(r*HouseAge) = {dL_db2_exato:.6f}")
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Os dois valores praticamente coincidem (diferença na quinta casa
+decimal, puro efeito do $h$ finito usado para aproximar o limite) —
+confirmando que a Definição 5.5, aplicada literalmente, concorda com a
+derivada obtida por manipulação algébrica direta (expandir o quadrado e
+usar a regra da cadeia de uma variável, Cálculo 1): para $r_i:=
+\beta_1\texttt{MedInc}_i+\beta_2\texttt{HouseAge}_i-
+\texttt{MedHouseVal}_i$,
+$$
+\frac{\partial L}{\partial\beta_1} = 2\sum_{i=1}^5 r_i\,
+\texttt{MedInc}_i, \qquad \frac{\partial L}{\partial\beta_2} =
+2\sum_{i=1}^5 r_i\,\texttt{HouseAge}_i .
+$$
+Note a estrutura: cada derivada parcial "isola" o efeito de **um**
+atributo, multiplicando o resíduo pela coluna correspondente — é
+exatamente essa estrutura, generalizada para $n$ variáveis e escrita em
+notação matricial, que o Bloco 3 vai formalizar como o **gradiente**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+Praticamente idênticos (diferença de $h$ finito) — Def. 5.5 concorda
+com a derivada por manipulação algébrica direta:
+$\partial L/\partial\beta_1=2\sum_i r_i\texttt{MedInc}_i$,
+$\partial L/\partial\beta_2=2\sum_i r_i\texttt{HouseAge}_i$
+($r_i=\beta_1\texttt{MedInc}_i+\beta_2\texttt{HouseAge}_i-
+\texttt{MedHouseVal}_i$).
+:::
+
+::: {.fragment}
+Cada parcial isola o efeito de **um** atributo (resíduo $\times$ coluna
+correspondente) — generalizado e organizado em notação matricial no
+Bloco 3: o **gradiente**.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se a perda dependesse só de $\beta_1$ (imagine `HouseAge` removido do modelo), o que aconteceria com $\partial L/\partial\beta_2$?
+
+Dica: pense em qual das duas variáveis literalmente deixaria de
+existir na função.
+
+- □ Se a perda dependesse só de $\beta_1$, a derivada parcial
+  $\partial L/\partial\beta_2$ deixaria de fazer sentido, porque
+  $\beta_2$ nem apareceria mais na expressão de $L$.
+- □ Se, no ponto $(\beta_1,\beta_2)=(0,0)$, o resíduo $r_i$ fosse
+  identicamente igual a `MedHouseVal`$_i$ (com sinal trocado) para
+  todos os $5$ bairros, isso não impediria calcular
+  $\partial L/\partial\beta_1$ nesse ponto normalmente.
+- □ Numa perda de regressão logística (classificação binária) com $2$
+  parâmetros, o mesmo procedimento — fixar um parâmetro e derivar
+  isoladamente o outro — se aplicaria sem nenhuma alteração conceitual.
+- □ Como a derivada parcial usa a mesma fórmula da derivada de uma
+  variável do Cálculo 1, isso implica que o valor de
+  $\partial L/\partial\beta_1$ nunca depende do valor de $\beta_2$ no
+  ponto onde é calculada.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Se a perda dependesse só de $\beta_1$, o que ocorre com $\partial L/\partial\beta_2$?
+
+Dica: qual das duas variáveis deixaria de existir na função?
+
+- □ $L$ dependendo só de $\beta_1$ $\Rightarrow\partial L/
+  \partial\beta_2$ deixa de fazer sentido ($\beta_2$ nem aparece mais).
+- □ Se $r_i=$`MedHouseVal`$_i$ (sinal trocado) para todos os $5$
+  bairros em $(\beta_1,\beta_2)=(0,0)$, isso impediria calcular
+  $\partial L/\partial\beta_1$ nesse ponto.
+- □ Regressão logística com $2$ parâmetros: mesmo procedimento (fixar
+  um, derivar o outro) se aplica sem alteração conceitual.
+- □ Fórmula de derivada de 1 variável $\Rightarrow\partial L/
+  \partial\beta_1$ nunca depende do valor de $\beta_2$ no ponto.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Derivada parcial: o que muda e o que não muda — Resposta
+
+- ✔ Sem $\beta_2$ na expressão, não há "o que variar" — a derivada
+  parcial em relação a uma variável ausente é indefinida, não zero.
+- ✗ $\partial L/\partial\beta_1=2\sum_ir_i\texttt{MedInc}_i$ é uma soma
+  perfeitamente calculável mesmo que $r_i$ tenha esse valor específico
+  — nada na definição exige um valor particular de $r_i$.
+- ✔ Mesma mecânica (derivar mantendo as demais variáveis fixas), outro
+  modelo de ML (regressão logística).
+- ✗ Justamente o oposto: $r_i=\beta_1\texttt{MedInc}_i+
+  \beta_2\texttt{HouseAge}_i-\texttt{MedHouseVal}_i$ depende de
+  $\beta_2$, e $r_i$ entra na fórmula de $\partial L/\partial\beta_1$ —
+  o valor da parcial em $\beta_1$ muda conforme o valor de $\beta_2$
+  no ponto avaliado (as variáveis não interagem na **definição**, mas
+  interagem no **valor calculado**, através da função em si).
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** "fixar as demais variáveis" é uma operação na
+**definição** (qual variável varia), não uma afirmação de que as
+demais variáveis não influenciam o **valor numérico** da derivada — elas
+influenciam, através do ponto onde a derivada é avaliada. O Bloco 3
+generaliza isso para todas as $4$ variáveis de uma vez.
+:::
+:::
+
+# O Gradiente como Vetor e as Regras de Derivação
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Coletando as Derivadas Parciais num Vetor
+
+A Definição 5.5, por completo (não só a parte usada no Bloco 2), não
+para nas derivadas parciais isoladas — ela as **coleta** num único
+objeto:
+
+::: {.callout-note icon=false}
+## Definição (Gradiente — MathML, tradução nossa, Def. 5.5, p. 146, completa)
+
+Para $f:\mathbb{R}^n\to\mathbb{R}$, $\mathbf{x}=(x_1,\dots,x_n)$,
+coletamos as derivadas parciais no vetor-linha
+$$
+\nabla_{\mathbf{x}}f = \frac{df}{d\mathbf{x}} = \left[\frac{\partial
+f(\mathbf{x})}{\partial x_1} \ \ \frac{\partial f(\mathbf{x})}
+{\partial x_2} \ \ \cdots \ \ \frac{\partial f(\mathbf{x})}
+{\partial x_n}\right] \in \mathbb{R}^{1\times n} ,
+$$
+chamado **gradiente** de $f$ (ou **Jacobiano**, no caso escalar — Bloco
+5 generaliza o termo).
+:::
+
+**Aviso de convenção, explícito:** o MathML define o gradiente como
+vetor-**linha**, não vetor-coluna — uma escolha deliberada, não
+universal (outros textos usam coluna). A justificativa (tradução livre,
+MathML, Remark, p. 147):
+
+::: {.callout-note icon=false}
+## Observação (convenção linha — MathML, tradução nossa, p. 147)
+
+"Não é incomum, na literatura, definir o vetor gradiente como
+vetor-coluna, seguindo a convenção de que vetores são geralmente
+vetores-coluna. A razão para definirmos o vetor gradiente como
+vetor-linha é dupla: primeiro, conseguimos generalizar
+consistentemente o gradiente para funções vetoriais
+$f:\mathbb{R}^n\to\mathbb{R}^m$ (o gradiente vira uma matriz, o
+Jacobiano); segundo, conseguimos aplicar a regra da cadeia
+multivariada imediatamente, sem prestar atenção à dimensão do
+gradiente."
+:::
+
+Vale registrar, para não causar confusão mais adiante: em vários
+lugares da literatura de aprendizado de máquina (e em parte da notação
+usada em cursos de otimização), o gradiente aparece como vetor-**coluna**
+— a Aula 8 (Gradiente Descendente) vai usar essa forma na atualização
+$\mathbf{w}_{t+1}=\mathbf{w}_t-\gamma\nabla L(\mathbf{w}_t)$ (subtração
+de vetor-coluna de vetor-coluna). As duas convenções carregam
+exatamente a mesma informação (uma é a transposta da outra) — o que
+importa é nunca misturar as duas dentro do mesmo cálculo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Coletando as Derivadas Parciais num Vetor
+
+::: {.callout-note icon=false}
+## Definição (Gradiente — MathML Def. 5.5, completa)
+
+$\nabla_{\mathbf{x}}f=\dfrac{df}{d\mathbf{x}}=\left[\dfrac{\partial f}
+{\partial x_1}\ \cdots\ \dfrac{\partial f}{\partial x_n}\right]\in
+\mathbb{R}^{1\times n}$ — **vetor-linha**, chamado gradiente
+(= Jacobiano, caso escalar).
+:::
+
+::: {.callout-note icon=false}
+## Observação (convenção linha — MathML, p. 147)
+
+Vetor-linha, não coluna (escolha deliberada): generaliza direto para
+funções vetoriais (gradiente $\to$ matriz, o Jacobiano); aplica a regra
+da cadeia multivariada sem se preocupar com dimensão.
+:::
+
+::: {.fragment}
+**Aviso:** parte da literatura de ML usa gradiente como vetor-**coluna**
+(Aula 8, Gradiente Descendente, vai usar essa forma) — mesma
+informação, transposta uma da outra; nunca misturar as duas no mesmo
+cálculo.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## As Regras Básicas de Derivação
+
+Para derivar o gradiente da perda quadrática por extenso, precisamos
+de três regras — as mesmas do Cálculo 1, generalizadas para derivadas
+parciais (tradução livre, MathML, §5.2.1, p. 147-148):
+
+::: {.callout-note icon=false}
+## Regras de derivação (MathML, tradução nossa, §5.2.1)
+
+Para $f,g:\mathbb{R}^n\to\mathbb{R}$ diferenciáveis:
+
+- **Regra da soma:** $\dfrac{\partial}{\partial x}\big(f(x)+g(x)\big) =
+  \dfrac{\partial f}{\partial x}+\dfrac{\partial g}{\partial x}$.
+- **Regra do produto:** $\dfrac{\partial}{\partial x}\big(f(x)g(x)
+  \big) = \dfrac{\partial f}{\partial x}g(x)+f(x)\dfrac{\partial g}
+  {\partial x}$.
+- **Regra da cadeia:** $\dfrac{\partial}{\partial x}(g\circ f)(x) =
+  \dfrac{\partial}{\partial x}g(f(x)) = \dfrac{\partial g}{\partial f}
+  \dfrac{\partial f}{\partial x}$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## As Regras Básicas de Derivação
+
+::: {.callout-note icon=false}
+## Regras de derivação (MathML §5.2.1)
+
+- **Soma:** $\partial(f+g)/\partial x=\partial f/\partial x+\partial
+  g/\partial x$.
+- **Produto:** $\partial(fg)/\partial x=(\partial f/\partial x)g+f
+  (\partial g/\partial x)$.
+- **Cadeia:** $\partial(g\circ f)/\partial x=(\partial g/\partial f)
+  (\partial f/\partial x)$.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Desenvolvimento *Principled*: o Gradiente da Perda Quadrática
+
+Vamos agora derivar o gradiente completo de
+$L(\boldsymbol{\beta})=\|X\boldsymbol{\beta}-\mathbf{y}\|^2$, para os
+$4$ parâmetros do problema-fio, deixando **cada passo lógico visível**
+— sem pular direto para a fórmula final.
+
+**Premissa.** Defina o vetor resíduo $\mathbf{r}(\boldsymbol{\beta}):=
+X\boldsymbol{\beta}-\mathbf{y}\in\mathbb{R}^N$ (função vetorial de
+$\boldsymbol{\beta}$, com $N=16\,640$), de modo que $L(\boldsymbol{
+\beta})=\mathbf{r}(\boldsymbol{\beta})^T\mathbf{r}(\boldsymbol{\beta})=
+\sum_{i=1}^N r_i(\boldsymbol{\beta})^2$, onde
+$r_i(\boldsymbol{\beta})=\sum_{k=1}^4 X_{ik}\beta_k-y_i$ (a $i$-ésima
+componente do resíduo, uma função **afim** de $\boldsymbol{\beta}$).
+
+**Passo 1 (regra da soma + regra da cadeia, aplicadas termo a termo).**
+Para cada componente $\beta_j$ do vetor de parâmetros, a regra da soma
+permite derivar $L=\sum_ir_i^2$ termo a termo:
+$$
+\frac{\partial L}{\partial\beta_j} = \sum_{i=1}^N
+\frac{\partial}{\partial\beta_j}\big(r_i(\boldsymbol{\beta})^2\big) .
+$$
+Cada termo $r_i(\boldsymbol{\beta})^2$ é a composição
+$h(r_i(\boldsymbol{\beta}))$ com $h(t)=t^2$ — a regra da cadeia (agora
+aplicada com $h'(t)=2t$, Cálculo 1) dá
+$$
+\frac{\partial}{\partial\beta_j}\big(r_i(\boldsymbol{\beta})^2\big) =
+2\,r_i(\boldsymbol{\beta})\cdot\frac{\partial r_i(\boldsymbol{\beta})}
+{\partial\beta_j} .
+$$
+
+**Passo 2 (derivando a parte afim).** Como
+$r_i(\boldsymbol{\beta})=\sum_{k=1}^4X_{ik}\beta_k-y_i$ é afim em
+$\boldsymbol{\beta}$, $\partial r_i/\partial\beta_j=X_{ij}$
+diretamente (o único termo da soma que depende de $\beta_j$ é
+$X_{ij}\beta_j$, com derivada $X_{ij}$; $y_i$ é constante em relação a
+$\boldsymbol{\beta}$).
+
+**Passo 3 (montando o gradiente).** Substituindo o Passo 2 no Passo 1,
+$$
+\frac{\partial L}{\partial\beta_j} = \sum_{i=1}^N 2\,r_i
+(\boldsymbol{\beta})\,X_{ij} = 2\sum_{i=1}^N X_{ij}\,r_i(\boldsymbol{
+\beta}) = 2\,(X^T\mathbf{r}(\boldsymbol{\beta}))_j ,
+$$
+reconhecendo a soma $\sum_iX_{ij}r_i$ como a $j$-ésima componente do
+produto $X^T\mathbf{r}(\boldsymbol{\beta})$. Coletando as $4$
+componentes no vetor-linha da Definição 5.5,
+$$
+\nabla_{\boldsymbol{\beta}}L = \big[2(X^T\mathbf{r})_1\ \ \cdots\ \
+2(X^T\mathbf{r})_4\big] = 2\,(X^T\mathbf{r}(\boldsymbol{\beta}))^T =
+2\,\mathbf{r}(\boldsymbol{\beta})^TX = 2(X\boldsymbol{\beta}-
+\mathbf{y})^TX \in \mathbb{R}^{1\times 4} .
+$$
+
+::: {.callout-note icon=false}
+## Resultado: gradiente da perda quadrática
+
+$$
+\nabla_{\boldsymbol{\beta}}\|X\boldsymbol{\beta}-\mathbf{y}\|^2 = 2
+(X\boldsymbol{\beta}-\mathbf{y})^TX .
+$$
+:::
+
+**A ponte com a Aula 3.** Igualar o gradiente a zero,
+$\nabla_{\boldsymbol{\beta}}L=\mathbf{0}$, dá
+$2(X\boldsymbol{\beta}-\mathbf{y})^TX=\mathbf{0}$; transpondo (um
+vetor-linha nulo transposto é um vetor-coluna nulo) e dividindo por
+$2$, $X^T(X\boldsymbol{\beta}-\mathbf{y})=\mathbf{0}\iff
+X^TX\boldsymbol{\beta}=X^T\mathbf{y}$ — **exatamente** as Equações
+Normais da Aula 3. A condição geométrica "resíduo ortogonal ao
+espaço-coluna" (Aula 3) e a condição analítica "gradiente da perda
+zero" (esta aula) são, agora, comprovadamente **a mesma condição**,
+vistas por duas portas diferentes.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Desenvolvimento: o Gradiente da Perda Quadrática
+
+::: {.fragment}
+**Premissa:** $\mathbf{r}(\boldsymbol{\beta}):=X\boldsymbol{\beta}-
+\mathbf{y}$, $L=\mathbf{r}^T\mathbf{r}=\sum_ir_i^2$,
+$r_i=\sum_kX_{ik}\beta_k-y_i$ (afim em $\boldsymbol{\beta}$).
+:::
+
+::: {.fragment}
+**Passo 1** (soma + cadeia): $\partial L/\partial\beta_j=\sum_i
+\partial(r_i^2)/\partial\beta_j=\sum_i2r_i\cdot\partial r_i/
+\partial\beta_j$.
+:::
+
+::: {.fragment}
+**Passo 2** (parte afim): $\partial r_i/\partial\beta_j=X_{ij}$
+diretamente.
+:::
+
+::: {.fragment}
+**Passo 3** (montagem): $\partial L/\partial\beta_j=2\sum_iX_{ij}r_i=
+2(X^T\mathbf{r})_j\Rightarrow\nabla_{\boldsymbol{\beta}}L=
+2\mathbf{r}^TX=2(X\boldsymbol{\beta}-\mathbf{y})^TX$.
+:::
+
+::: {.callout-note icon=false}
+## Resultado
+
+$\nabla_{\boldsymbol{\beta}}\|X\boldsymbol{\beta}-\mathbf{y}\|^2=
+2(X\boldsymbol{\beta}-\mathbf{y})^TX$.
+:::
+
+::: {.fragment}
+**Ponte com a Aula 3:** $\nabla L=\mathbf{0}\iff X^T(X\boldsymbol{
+\beta}-\mathbf{y})=\mathbf{0}\iff X^TX\boldsymbol{\beta}=X^T\mathbf{y}$
+— **exatamente** as Equações Normais. "Resíduo ortogonal" (Aula 3) e
+"gradiente zero" (hoje) são a mesma condição, duas portas diferentes.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Verificação Numérica no Problema-Fio
+
+Vamos conferir a fórmula $\nabla_{\boldsymbol{\beta}}L=2(X\boldsymbol{
+\beta}-\mathbf{y})^TX$ calculando-a em
+$\boldsymbol{\beta}_0=(0{,}4;\ 0{,}02;\ -0{,}15;\ 0{,}7)$ — um ponto
+qualquer, **não** o ótimo — e comparando com a derivada parcial por
+diferença finita central em cada uma das $4$ coordenadas.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Verificação Numérica no Problema-Fio
+
+::: {.fragment}
+Conferir $\nabla_{\boldsymbol{\beta}}L$ em $\boldsymbol{\beta}_0=
+(0{,}4;\,0{,}02;\,-0{,}15;\,0{,}7)$ (ponto qualquer, não o ótimo)
+contra diferença finita central.
+:::
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+
+grad_formula = gradiente_analitico(beta0)   # forma coluna: 2 X^T r
+
+h = 1e-5
+grad_diferenca_finita = np.zeros(4)
+for j in range(4):
+    e_j = np.zeros(4); e_j[j] = h
+    grad_diferenca_finita[j] = (perda(beta0 + e_j) - perda(beta0 - e_j)) / (2*h)
+
+print("beta0 =", beta0)
+print("L(beta0) =", perda(beta0))
+print("\ngradiente (fórmula 2 X^T r, forma coluna):", np.round(grad_formula, 4))
+print("gradiente (diferença finita central):      ", np.round(grad_diferenca_finita, 4))
+print("\ndiferença máxima absoluta:", np.max(np.abs(grad_formula - grad_diferenca_finita)))
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+As duas colunas de números coincidem até a quarta casa decimal — a
+diferença residual ($<10^{-6}$ em valor absoluto) é só o erro de
+truncamento da diferença finita, não um erro na fórmula analítica. Note
+que a fórmula foi calculada na forma vetor-**coluna** ($2X^T\mathbf{r}$)
+neste chunk — a mesma informação do vetor-linha $2\mathbf{r}^TX$
+derivado acima, só transposta, já antecipando a convenção que a Aula 8
+vai usar.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+Coincidem até a $4^a$ casa decimal (diferença $<10^{-6}$, erro de
+truncamento da diferença finita). Calculado em forma **coluna**
+($2X^T\mathbf{r}$) — mesma informação do vetor-linha derivado acima,
+transposta.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se a perda usasse a norma $L_1$ do resíduo em vez do quadrado ($\sum_i|r_i|$), a mesma derivação do Bloco 3 se aplicaria sem alteração?
+
+Dica: releia o Passo 1 e aponte, com precisão, qual regra deixa de
+valer.
+
+- □ Trocar $\sum_ir_i^2$ por $\sum_i|r_i|$ quebraria o Passo 1
+  especificamente no ponto em que se usa a regra da cadeia com
+  $h(t)=t^2$, $h'(t)=2t$ — porque $h(t)=|t|$ não é diferenciável em
+  $t=0$.
+- □ Se, em vez de $4$ parâmetros, o modelo tivesse $1000$ parâmetros,
+  a mesma derivação dos Passos 1-3 se aplicaria, produzindo
+  $\nabla_{\boldsymbol{\beta}}L=2(X\boldsymbol{\beta}-\mathbf{y})^TX$
+  com $X\in\mathbb{R}^{N\times1000}$.
+- □ Numa camada de regressão com regularização Ridge (perda
+  $\|X\boldsymbol{\beta}-\mathbf{y}\|^2+\lambda\|\boldsymbol{\beta}\|^2$),
+  a mesma regra da soma do Passo 1 permite derivar o termo de
+  regularização separadamente e somar ao gradiente já calculado.
+- □ Como o Passo 2 usa que $r_i(\boldsymbol{\beta})$ é afim em
+  $\boldsymbol{\beta}$, isso implica que a fórmula
+  $\nabla_{\boldsymbol{\beta}}L=2\mathbf{r}^TX$ só vale porque $X$ é a
+  matriz de design do *California Housing* especificamente, não para
+  qualquer matriz $X$ de mesmo formato.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Trocar o quadrado por $L_1$ ($\sum_i|r_i|$): a derivação continua igual?
+
+Dica: releia o Passo 1 — qual regra deixa de valer, exatamente?
+
+- □ Quebraria no Passo 1: $h(t)=|t|$ não é diferenciável em $t=0$,
+  diferente de $h(t)=t^2$.
+- □ Com $1000$ parâmetros em vez de $4$, os Passos 1-3 continuam
+  valendo, dando $\nabla_{\boldsymbol{\beta}}L=2(X\boldsymbol{\beta}-
+  \mathbf{y})^TX$, $X\in\mathbb{R}^{N\times1000}$.
+- □ Regressão Ridge: regra da soma do Passo 1 deriva o termo de
+  regularização separadamente, soma ao gradiente já calculado.
+- □ Passo 2 usa "$r_i$ afim" $\Rightarrow$ fórmula só vale para o $X$
+  específico do California Housing, não para qualquer $X$ de mesmo
+  formato.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Trocar quadrado por $L_1$ — Resposta
+
+- ✔ Exatamente o ponto de ruptura: a regra da cadeia do Passo 1
+  precisa de $h$ diferenciável — $|t|$ falha só em $t=0$, mas isso já
+  basta para invalidar a derivação por extenso (o resíduo pode passar
+  por $0$).
+- ✔ Nada no argumento usa $n=4$ especificamente — a derivação vale para
+  qualquer número de colunas de $X$.
+- ✔ A regra da soma (MathML §5.2.1) permite derivar cada termo aditivo
+  da perda separadamente — o gradiente da soma é a soma dos gradientes.
+- ✗ O Passo 2 usa que $r_i$ é **afim** (qualquer $X$, qualquer
+  formato), não uma propriedade específica dos dados do California
+  Housing — a fórmula vale para qualquer matriz de design real.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não, a substituição por $L_1$ quebra
+precisamente a regra da cadeia do Passo 1 — $|t|$ tem um "bico" em
+$t=0$, sem derivada aí. Otimizar perdas assim (não-suaves) exige uma
+ferramenta diferente (subgradientes), fora do escopo desta aula —
+reservado para a Aula 15.
+:::
+:::
+
+# Derivada Direcional e a Direção de Subida Mais Íngreme
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Que o Gradiente Ainda Não Responde
+
+Cada derivada parcial $\partial L/\partial\beta_j$ mede a taxa de
+variação de $L$ ao longo de **um eixo coordenado** — o que acontece se
+$\beta_1$ variar sozinho, mantendo os demais fixos. Mas nada obriga um
+ajuste de parâmetros a se mover só ao longo de um eixo: um passo de
+treinamento pode (e, em geral, vai) mudar **todos** os parâmetros ao
+mesmo tempo, numa direção arbitrária $\mathbf{v}\in\mathbb{R}^4$. A
+pergunta do Problema Motivador — "em que direção mover
+$\boldsymbol{\beta}$ para reduzir $L$ mais rápido?" — não é uma
+pergunta sobre eixos coordenados; é uma pergunta sobre **todas** as
+direções possíveis simultaneamente. Isso pede um objeto novo: a
+**derivada direcional**.
+
+**Aviso de fonte:** nenhuma das três fontes bibliográficas desta
+disciplina define formalmente derivada direcional no material já
+coberto por este curso — o termo não aparece no MathML; aparece em
+`optml.pdf` (Wright & Recht, §8.2), mas esse livro está reservado para
+Lições de otimização não-suave, mais adiante. A definição e a prova
+abaixo são, portanto, **construção nossa**, usando só ferramentas já
+disponíveis (regra da cadeia, Bloco 3; desigualdade de Cauchy-Schwarz,
+Aula 1).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que o Gradiente Ainda Não Responde
+
+::: {.fragment}
+Cada $\partial L/\partial\beta_j$ mede a taxa de variação ao longo de
+**um eixo**. Um passo de treinamento move **todos** os parâmetros ao
+mesmo tempo, numa direção arbitrária $\mathbf{v}$ — a pergunta do
+Problema Motivador não é sobre eixos, é sobre **todas** as direções.
+:::
+
+::: {.fragment}
+**Construção nossa:** nenhuma das 3 fontes define derivada direcional
+no material coberto (MathML não usa o termo; `optml.pdf` define, mas
+está reservado para aulas posteriores). Usamos só regra da cadeia
+(Bloco 3) + Cauchy-Schwarz (Aula 1).
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Definindo a Derivada Direcional
+
+::: {.callout-note icon=false}
+## Definição (Derivada Direcional — construção nossa)
+
+Para $f:\mathbb{R}^n\to\mathbb{R}$ diferenciável, $\mathbf{x}\in
+\mathbb{R}^n$, e $\mathbf{v}\in\mathbb{R}^n$ com $\|\mathbf{v}\|=1$, a
+**derivada direcional** de $f$ em $\mathbf{x}$, na direção
+$\mathbf{v}$, é
+$$
+D_{\mathbf{v}}f(\mathbf{x}) := \lim_{h\to 0} \frac{f(\mathbf{x}+
+h\mathbf{v})-f(\mathbf{x})}{h} .
+$$
+:::
+
+Note que essa definição **generaliza** a derivada parcial: tomando
+$\mathbf{v}=\mathbf{e}_j$ (o $j$-ésimo vetor da base canônica, norma
+$1$), $D_{\mathbf{e}_j}f(\mathbf{x})=\partial f/\partial x_j$
+exatamente — a derivada parcial é a derivada direcional numa direção
+particular (ao longo de um eixo).
+
+**Premissas.** Para calcular $D_{\mathbf{v}}f(\mathbf{x})$ em termos do
+gradiente, defina a função auxiliar de uma variável real
+$g(h):=f(\mathbf{x}+h\mathbf{v})$ — note que
+$D_{\mathbf{v}}f(\mathbf{x})=g'(0)$ diretamente pela definição acima
+(a mesma razão incremental).
+
+**Passo 1 (regra da cadeia).** Escrevendo $x_i(h):=x_i+hv_i$ (cada
+coordenada de $\mathbf{x}+h\mathbf{v}$, afim em $h$), a regra da cadeia
+multivariada (a mesma lógica do Passo 1 do Bloco 3, agora com $h$ no
+lugar de $\beta_j$) dá
+$$
+g'(h) = \sum_{i=1}^n \frac{\partial f}{\partial x_i}\Big(\mathbf{x}+
+h\mathbf{v}\Big)\cdot\frac{dx_i(h)}{dh} = \sum_{i=1}^n\frac{\partial
+f}{\partial x_i}\Big(\mathbf{x}+h\mathbf{v}\Big)\cdot v_i ,
+$$
+usando $dx_i(h)/dh=v_i$ (derivada de uma função afim em $h$).
+
+**Passo 2 (avaliando em $h=0$).** Em $h=0$,
+$$
+D_{\mathbf{v}}f(\mathbf{x}) = g'(0) = \sum_{i=1}^n\frac{\partial f}
+{\partial x_i}(\mathbf{x})\,v_i = \nabla f(\mathbf{x})\,\mathbf{v} ,
+$$
+reconhecendo a soma como o produto do vetor-linha $\nabla f(\mathbf{x})$
+(Bloco 3) pelo vetor-coluna $\mathbf{v}$ — ou, equivalentemente, o
+produto interno entre $\nabla f(\mathbf{x})^T$ e $\mathbf{v}$ (Aula 1).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Definindo a Derivada Direcional
+
+::: {.callout-note icon=false}
+## Definição (Derivada Direcional — construção nossa)
+
+$D_{\mathbf{v}}f(\mathbf{x}):=\lim_{h\to0}\dfrac{f(\mathbf{x}+
+h\mathbf{v})-f(\mathbf{x})}{h}$, $\|\mathbf{v}\|=1$.
+:::
+
+::: {.fragment}
+Generaliza a parcial: $\mathbf{v}=\mathbf{e}_j\Rightarrow
+D_{\mathbf{e}_j}f(\mathbf{x})=\partial f/\partial x_j$.
+:::
+
+::: {.fragment}
+**Premissa:** $g(h):=f(\mathbf{x}+h\mathbf{v})\Rightarrow
+D_{\mathbf{v}}f(\mathbf{x})=g'(0)$.
+:::
+
+::: {.fragment}
+**Passo 1** (cadeia, $x_i(h)=x_i+hv_i$): $g'(h)=\sum_i\dfrac{\partial
+f}{\partial x_i}(\mathbf{x}+h\mathbf{v})\,v_i$.
+:::
+
+::: {.fragment}
+**Passo 2** ($h=0$): $D_{\mathbf{v}}f(\mathbf{x})=\sum_i\dfrac{\partial
+f}{\partial x_i}(\mathbf{x})v_i=\nabla f(\mathbf{x})\,\mathbf{v}$
+(vetor-linha $\times$ vetor-coluna = produto interno).
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Direção de Subida Mais Íngreme
+
+Agora a pergunta central: entre **todas** as direções unitárias
+$\mathbf{v}$, qual maximiza $D_{\mathbf{v}}f(\mathbf{x})$ — isto é, dá
+a maior taxa de aumento de $f$? O MathML afirma a resposta sem provar
+("a derivada de $f$ aponta na direção de subida mais íngreme de $f$",
+Def. 5.2, p. 141; reafirmado no Cap. 7, p. 227-228, sem demonstração em
+nenhum dos dois lugares). Provamos abaixo, usando a desigualdade de
+Cauchy-Schwarz (Aula 1).
+
+::: {.callout-note icon=false}
+## Proposição (direção de subida mais íngreme — prova nossa)
+
+Seja $f:\mathbb{R}^n\to\mathbb{R}$ diferenciável em $\mathbf{x}$, com
+$\nabla f(\mathbf{x})\ne\mathbf{0}$. Entre todos os vetores unitários
+$\mathbf{v}\in\mathbb{R}^n$ ($\|\mathbf{v}\|=1$), a derivada direcional
+$D_{\mathbf{v}}f(\mathbf{x})$ é maximizada exatamente em
+$$
+\mathbf{v}^\star = \frac{\nabla f(\mathbf{x})^T}{\|\nabla
+f(\mathbf{x})\|} ,
+$$
+com valor máximo $D_{\mathbf{v}^\star}f(\mathbf{x})=\|\nabla
+f(\mathbf{x})\|$.
+:::
+
+**Prova.** Pelo Bloco anterior, $D_{\mathbf{v}}f(\mathbf{x})=\nabla
+f(\mathbf{x})\mathbf{v}=\langle\nabla f(\mathbf{x})^T,\mathbf{v}
+\rangle$ (produto interno padrão, identificando o vetor-linha
+$\nabla f(\mathbf{x})$ com sua transposta vetor-coluna). Pela
+desigualdade de Cauchy-Schwarz (Aula 1),
+$$
+\big|\langle\nabla f(\mathbf{x})^T,\mathbf{v}\rangle\big| \le \|\nabla
+f(\mathbf{x})^T\|\,\|\mathbf{v}\| = \|\nabla f(\mathbf{x})\|\cdot 1 =
+\|\nabla f(\mathbf{x})\| ,
+$$
+com igualdade se, e somente se, $\mathbf{v}$ e $\nabla f(\mathbf{x})^T$
+forem paralelos (mesma direção, já que buscamos o **máximo**, não o
+mínimo, da derivada direcional — a direção oposta dá o mínimo). Como
+$\|\mathbf{v}\|=1$, o único vetor unitário paralelo a
+$\nabla f(\mathbf{x})^T$ e de mesmo sentido é
+$\mathbf{v}^\star=\nabla f(\mathbf{x})^T/\|\nabla f(\mathbf{x})\|$.
+Substituindo,
+$$
+D_{\mathbf{v}^\star}f(\mathbf{x}) = \Big\langle\nabla f(\mathbf{x})^T,
+\frac{\nabla f(\mathbf{x})^T}{\|\nabla f(\mathbf{x})\|}\Big\rangle =
+\frac{\|\nabla f(\mathbf{x})\|^2}{\|\nabla f(\mathbf{x})\|} = \|\nabla
+f(\mathbf{x})\| ,
+$$
+que bate exatamente com a cota superior de Cauchy-Schwarz — logo
+$\mathbf{v}^\star$ atinge o máximo, e o valor máximo é
+$\|\nabla f(\mathbf{x})\|$. $\blacksquare$
+
+Ou seja: o gradiente (transposto para vetor-coluna) **é**, a menos de
+normalização, a direção de subida mais íngreme — e sua norma **é** a
+taxa de aumento nessa direção ótima. A direção oposta,
+$-\nabla f(\mathbf{x})^T/\|\nabla f(\mathbf{x})\|$, é, pela mesma conta,
+a direção de **descida** mais íngreme — exatamente o que a Aula 8
+(Gradiente Descendente) vai usar para dar passos que **diminuem** a
+perda o mais rápido possível.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Direção de Subida Mais Íngreme
+
+::: {.fragment}
+MathML **afirma sem provar** ("a derivada aponta na direção de subida
+mais íngreme", p. 141 e 227-228). Provamos via Cauchy-Schwarz (Aula 1).
+:::
+
+::: {.callout-note icon=false}
+## Proposição (prova nossa)
+
+$\nabla f(\mathbf{x})\ne\mathbf{0}$: entre todo $\mathbf{v}$ unitário,
+$D_{\mathbf{v}}f(\mathbf{x})$ é máxima em $\mathbf{v}^\star=\nabla
+f(\mathbf{x})^T/\|\nabla f(\mathbf{x})\|$, valor máximo $\|\nabla
+f(\mathbf{x})\|$.
+:::
+
+::: {.fragment}
+**Prova:** $D_{\mathbf{v}}f=\langle\nabla f(\mathbf{x})^T,\mathbf{v}
+\rangle$. Cauchy-Schwarz: $|\langle\nabla f^T,\mathbf{v}\rangle|\le
+\|\nabla f\|\cdot1$, igualdade sse $\mathbf{v}\parallel\nabla f^T$
+(mesmo sentido, para o máximo).
+:::
+
+::: {.fragment}
+$\mathbf{v}^\star=\nabla f^T/\|\nabla f\|\Rightarrow
+D_{\mathbf{v}^\star}f=\|\nabla f\|^2/\|\nabla f\|=\|\nabla f\|$ — bate
+com a cota, logo é o máximo. $\blacksquare$
+:::
+
+::: {.fragment}
+Gradiente (transposto) = direção de subida mais íngreme, normalizado;
+sua norma = taxa de aumento ótima. $-\nabla f^T/\|\nabla f\|$ = descida
+mais íngreme (Aula 8, Gradiente Descendente).
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Verificação Numérica e Geométrica
+
+Para visualizar, volte ao exemplo bivariado do Bloco 2 (amostra de $5$
+bairros, $2$ parâmetros), no ponto $(\beta_1,\beta_2)=(0{,}5;\ 0{,}02)$.
+O gradiente ali é $\nabla L\approx[5{,}637\ \ 95{,}040]$ (norma
+$\approx 95{,}207$). Vamos calcular $D_{\mathbf{v}}L$ para vetores
+unitários $\mathbf{v}$ ao longo de todos os ângulos possíveis, e
+confirmar que o máximo ocorre exatamente na direção do gradiente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Verificação Numérica e Geométrica
+
+::: {.fragment}
+Exemplo do Bloco 2, em $(\beta_1,\beta_2)=(0{,}5;\,0{,}02)$: $\nabla L
+\approx[5{,}637\ \ 95{,}040]$ (norma $\approx95{,}207$). Calcular
+$D_{\mathbf{v}}L$ para todos os ângulos, confirmar máximo na direção do
+gradiente.
+:::
+:::
+
+::: {.fig-resize style="width: 96%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+b0_2d = np.array([0.5, 0.02])
+grad_2d = 2 * X_amostra.T @ (X_amostra @ b0_2d - y_amostra)
+norma_grad_2d = np.linalg.norm(grad_2d)
+angulo_grad = np.arctan2(grad_2d[1], grad_2d[0])
+
+# Painel 1: contorno da perda ao redor de b0_2d, com o gradiente
+b1_grid = np.linspace(b0_2d[0]-0.3, b0_2d[0]+0.3, 120)
+b2_grid = np.linspace(b0_2d[1]-0.02, b0_2d[1]+0.02, 120)
+B1, B2 = np.meshgrid(b1_grid, b2_grid)
+Lgrid = np.zeros_like(B1)
+for i in range(B1.shape[0]):
+    for j in range(B1.shape[1]):
+        Lgrid[i, j] = perda_amostra(B1[i, j], B2[i, j])
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5.2))
+
+ax1.contour(B1, B2, Lgrid, levels=15, colors=COR_NEU, linewidths=0.8)
+# Escala do vetor escolhida para caber nos limites dos eixos (que têm
+# faixas muito diferentes em beta_1 e beta_2 -- não são eixos de mesma
+# escala, então o desenho não pretende mostrar ortogonalidade visual
+# exata às curvas de nível, só a direção e o sentido do gradiente).
+escala = 0.6 * (b2_grid[-1] - b0_2d[1]) / abs(grad_2d[1])
+ax1.annotate("", xy=b0_2d + escala*grad_2d, xytext=b0_2d,
+             arrowprops=dict(arrowstyle="->", color=COR_A, lw=2.4))
+ax1.plot(*b0_2d, "o", color=COR_C, ms=7, zorder=5)
+ax1.set_xlabel("$\\beta_1$"); ax1.set_ylabel("$\\beta_2$")
+ax1.set_title("Curvas de nível de $L$ e a direção do gradiente\n(escala do vetor ampliada; eixos em escalas diferentes)", fontsize=9.5, fontweight="bold")
+
+# Painel 2: D_v(theta) para todos os angulos, comparado com ||grad||cos(theta - angulo_grad)
+thetas = np.linspace(0, 2*np.pi, 200)
+Dv = np.array([grad_2d @ [np.cos(t), np.sin(t)] for t in thetas])
+ax2.plot(np.degrees(thetas), Dv, color=COR_A, lw=2.2)
+ax2.axhline(norma_grad_2d, color=COR_NEU, ls="--", lw=1.2, label="$\\|\\nabla L\\|$")
+ax2.axvline(np.degrees(angulo_grad), color=COR_B, ls=":", lw=1.6, label="direção do gradiente")
+ax2.set_xlabel("ângulo $\\theta$ de $\\mathbf{v}$ (graus)")
+ax2.set_ylabel("$D_{\\mathbf{v}}L$")
+ax2.set_title("Derivada direcional em função do ângulo:\nmáximo exatamente na direção do gradiente", fontsize=9.5, fontweight="bold")
+ax2.legend(fontsize=8.5)
+
+plt.tight_layout()
+plt.show()
+
+print(f"gradiente 2D em b0: {np.round(grad_2d, 4)}, norma = {norma_grad_2d:.4f}")
+print(f"ângulo do gradiente: {np.degrees(angulo_grad):.2f} graus")
+print(f"max(D_v) sobre a grade de ângulos: {Dv.max():.4f} (em theta = {np.degrees(thetas[np.argmax(Dv)]):.2f} graus)")
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O painel direito confirma a Proposição numericamente: $D_{\mathbf{v}}L$
+varia como um cosseno em função do ângulo de $\mathbf{v}$, atingindo seu
+valor máximo — igual a $\|\nabla L\|\approx 95{,}207$ — exatamente no
+ângulo do gradiente ($\approx 86{,}6°$), e seu valor mínimo (mesma
+magnitude, sinal trocado) na direção oposta; essa conta não depende de
+nenhuma escolha de escala de desenho, é o cálculo exato de
+$\nabla L\cdot\mathbf{v}$ para cada ângulo. O painel esquerdo situa essa
+direção no mapa de curvas de nível: o gradiente (seta azul, com
+comprimento ampliado para ficar visível) aponta para fora, no sentido de
+crescimento de $L$, a partir do ponto $(\beta_1,\beta_2)=(0{,}5;
+\,0{,}02)$ (ponto vermelho). **Aviso de leitura:** como os eixos
+$\beta_1$ e $\beta_2$ têm faixas bem diferentes neste gráfico (para
+manter as curvas de nível legíveis), a seta **não** aparece
+visualmente perpendicular às curvas neste desenho especificamente —
+essa ortogonalidade (citada no Cap. 7 do MathML, "o gradiente aponta
+numa direção ortogonal às curvas de nível") só fica visualmente exata
+com eixos de mesma escala; o fato matemático em si (provado na
+Proposição, via Cauchy-Schwarz) não depende de nenhuma escolha de
+desenho.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+Painel direito: $D_{\mathbf{v}}L$ varia como cosseno, máximo
+$=\|\nabla L\|\approx95{,}207$ exatamente no ângulo do gradiente
+($\approx86{,}6°$); mínimo (mesma magnitude, sinal oposto) na direção
+oposta.
+:::
+
+::: {.fragment}
+Painel esquerdo: gradiente (seta ampliada) aponta para fora, sentido de
+crescimento. Eixos em escalas diferentes $\Rightarrow$ ortogonalidade
+às curvas não fica visualmente exata aqui (é exata em eixos de mesma
+escala — o fato matemático não depende do desenho).
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se $\nabla f(\mathbf{x})=\mathbf{0}$ num ponto, o que a Proposição desta seção diz sobre a direção de subida mais íngreme ali?
+
+Dica: releia a hipótese exata da Proposição, com atenção ao que ela
+exige sobre $\nabla f(\mathbf{x})$.
+
+- □ Se $\nabla f(\mathbf{x})=\mathbf{0}$, a Proposição simplesmente não
+  se aplica (sua hipótese exige $\nabla f(\mathbf{x})\ne\mathbf{0}$) —
+  não há nenhuma direção que aumente $f$ a uma taxa positiva de
+  primeira ordem nesse ponto.
+- □ Se $D_{\mathbf{v}}f(\mathbf{x})$ fosse a mesma para duas direções
+  unitárias distintas $\mathbf{v}_1\ne\mathbf{v}_2$, isso implicaria
+  necessariamente que $\nabla f(\mathbf{x})=\mathbf{0}$.
+- □ Numa superfície de perda de uma rede neural com múltiplos mínimos
+  locais, a mesma proposição garante que, em qualquer ponto com
+  gradiente não-nulo, existe uma única direção de subida mais íngreme,
+  independente de quantos mínimos locais existam na superfície inteira.
+- □ Como a derivada direcional generaliza a derivada parcial
+  ($\mathbf{v}=\mathbf{e}_j$), isso implica que o valor máximo de
+  $D_{\mathbf{v}}f(\mathbf{x})$ sobre todas as direções é sempre igual
+  a alguma das derivadas parciais $\partial f/\partial x_j$
+  individuais.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## $\nabla f(\mathbf{x})=\mathbf{0}$: o que a Proposição diz sobre a direção de subida?
+
+Dica: releia a hipótese exata da Proposição.
+
+- □ $\nabla f(\mathbf{x})=\mathbf{0}\Rightarrow$ Proposição não se
+  aplica (hipótese exige $\nabla f\ne\mathbf{0}$) — nenhuma direção
+  aumenta $f$ a taxa positiva de primeira ordem.
+- □ $D_{\mathbf{v}_1}f=D_{\mathbf{v}_2}f$ para $\mathbf{v}_1\ne
+  \mathbf{v}_2$ unitários $\Rightarrow\nabla f(\mathbf{x})=\mathbf{0}$
+  necessariamente.
+- □ Rede neural com múltiplos mínimos locais: em qualquer ponto de
+  gradiente não-nulo, existe direção de subida mais íngreme única,
+  independente do número de mínimos locais na superfície inteira.
+- □ Derivada direcional generaliza a parcial $\Rightarrow$ o máximo de
+  $D_{\mathbf{v}}f$ é sempre igual a alguma parcial individual.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Gradiente nulo e direção de subida — Resposta
+
+- ✔ Exatamente a hipótese que a prova usa (na divisão por
+  $\|\nabla f(\mathbf{x})\|$) — sem ela, a proposição não garante nada,
+  e de fato $\nabla f=\mathbf{0}$ é o critério de ponto crítico
+  (tema da Aula 7).
+- ✗ Contraexemplo direto: se $\nabla f(\mathbf{x})=\mathbf{0}$,
+  $D_{\mathbf{v}}f(\mathbf{x})=\mathbf{0}$ para **toda** direção $
+  \mathbf{v}$ (inclusive direções distintas) — a igualdade entre
+  direções não força gradiente nulo em geral, só quando **todas** as
+  direções empatam.
+- ✔ A proposição é local (depende só do gradiente naquele ponto) — o
+  número de mínimos locais da superfície inteira é irrelevante para a
+  direção de subida mais íngreme **naquele** ponto específico.
+- ✗ O valor máximo é $\|\nabla f(\mathbf{x})\|$ (a norma do vetor
+  inteiro), quase sempre **maior** que qualquer componente individual
+  $|\partial f/\partial x_j|$ isolada (pela própria definição de norma
+  euclidiana somando quadrados de todas as componentes).
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** num ponto de gradiente nulo, a Proposição
+simplesmente não se aplica — não existe direção de subida garantida de
+primeira ordem. Esse é, precisamente, o critério de **ponto crítico**
+que abre a Aula 7 (convexidade e a Hessiana).
+:::
+:::
+
+# O Jacobiano: Generalizando para Funções Vetoriais
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Quando a Função Devolve Vários Números de Uma Vez
+
+O gradiente (Bloco 3) foi construído para funções $f:\mathbb{R}^n\to
+\mathbb{R}$ — um número de entrada vetorial, um número de saída
+escalar. Mas nem toda função relevante desta disciplina é assim: o
+próprio resíduo, $\mathbf{r}(\boldsymbol{\beta}):=X\boldsymbol{\beta}-
+\mathbf{y}$, usado como peça intermediária no Bloco 3, é uma função
+$\mathbb{R}^4\to\mathbb{R}^{16\,640}$ — devolve **um número por
+observação**, não um único escalar. Precisamos generalizar o gradiente
+para dar conta desse caso.
+
+::: {.callout-note icon=false}
+## Definição (Jacobiano — MathML, tradução nossa, Def. 5.6, p. 150)
+
+Para $f:\mathbb{R}^n\to\mathbb{R}^m$, $\mathbf{x}\mapsto f(\mathbf{x})=
+(f_1(\mathbf{x}),\dots,f_m(\mathbf{x}))$, a coleção de todas as
+derivadas parciais de primeira ordem é chamada **Jacobiano**. O
+Jacobiano $J$ é a matriz $m\times n$
+$$
+J = \nabla_{\mathbf{x}}f = \frac{df(\mathbf{x})}{d\mathbf{x}} =
+\begin{bmatrix}
+\dfrac{\partial f_1(\mathbf{x})}{\partial x_1} & \cdots & \dfrac{
+\partial f_1(\mathbf{x})}{\partial x_n} \\
+\vdots & & \vdots \\
+\dfrac{\partial f_m(\mathbf{x})}{\partial x_1} & \cdots & \dfrac{
+\partial f_m(\mathbf{x})}{\partial x_n}
+\end{bmatrix}, \qquad J(i,j) = \frac{\partial f_i}{\partial x_j} .
+$$
+Como caso particular, uma função $f:\mathbb{R}^n\to\mathbb{R}^1$ (o
+caso do Bloco 3) tem Jacobiano igual a um vetor-**linha** ($1\times n$)
+— exatamente o gradiente já definido. O gradiente é, portanto, um caso
+particular do Jacobiano, não um conceito à parte.
+:::
+
+**Convenção de disposição (MathML, tradução nossa, Remark, p. 150-151):**
+"Neste livro, usamos a disposição *numerator layout* da derivada, isto
+é, a derivada $df/d\mathbf{x}$ de $f\in\mathbb{R}^m$ em relação a
+$\mathbf{x}\in\mathbb{R}^n$ é uma matriz $m\times n$, em que os
+elementos de $f$ definem as linhas e os elementos de $\mathbf{x}$
+definem as colunas [...] Existe também a disposição *denominator
+layout*, que é a transposta da disposição *numerator layout*." — a
+mesma cautela de convenção do Bloco 3 (linha vs. coluna) reaparece aqui,
+agora para matrizes.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Quando a Função Devolve Vários Números de Uma Vez
+
+::: {.fragment}
+Gradiente (Bloco 3): $f:\mathbb{R}^n\to\mathbb{R}$. Mas
+$\mathbf{r}(\boldsymbol{\beta}):=X\boldsymbol{\beta}-\mathbf{y}$
+(Bloco 3) é $\mathbb{R}^4\to\mathbb{R}^{16\,640}$ — um número **por
+observação**.
+:::
+
+::: {.callout-note icon=false}
+## Definição (Jacobiano — MathML Def. 5.6)
+
+$f:\mathbb{R}^n\to\mathbb{R}^m\Rightarrow J=\nabla_{\mathbf{x}}f\in
+\mathbb{R}^{m\times n}$, $J(i,j)=\partial f_i/\partial x_j$. Caso
+$m=1$: $J$ = vetor-linha = o gradiente já definido (o gradiente é caso
+particular do Jacobiano).
+:::
+
+::: {.fragment}
+**Convenção** (*numerator layout*, MathML p. 150-151): linhas = $f$,
+colunas = $\mathbf{x}$. Existe a *denominator layout* (transposta) —
+mesma cautela do Bloco 3, agora para matrizes.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Jacobiano do Resíduo: $J_{\mathbf{r}}(\boldsymbol{\beta})=X$
+
+Aplicando a Definição 5.6 diretamente a
+$\mathbf{r}(\boldsymbol{\beta})=X\boldsymbol{\beta}-\mathbf{y}$
+($n=4$ parâmetros, $m=16\,640$ observações): a $i$-ésima componente é
+$r_i(\boldsymbol{\beta})=\sum_{k=1}^4X_{ik}\beta_k-y_i$ (a mesma função
+afim do Passo 2 do Bloco 3), logo
+$$
+J_{\mathbf{r}}(i,j) = \frac{\partial r_i}{\partial\beta_j} = X_{ij}
+\qquad\Longrightarrow\qquad J_{\mathbf{r}}(\boldsymbol{\beta}) = X .
+$$
+**O Jacobiano do resíduo é, literalmente, a matriz de design $X$** — a
+mesma matriz usada desde a Aula 1 para representar o dataset. Isso não
+é coincidência: para qualquer função **afim**
+$\mathbf{r}(\boldsymbol{\beta})=A\boldsymbol{\beta}+\mathbf{c}$, o
+Jacobiano é sempre a própria matriz $A$, constante — o mesmo fato, dito
+de outro jeito, do Passo 2 do Bloco 3 ($\partial r_i/\partial\beta_j=
+X_{ij}$, sem depender de $\boldsymbol{\beta}$).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Jacobiano do Resíduo: $J_{\mathbf{r}}(\boldsymbol{\beta})=X$
+
+::: {.fragment}
+$r_i(\boldsymbol{\beta})=\sum_kX_{ik}\beta_k-y_i\Rightarrow
+J_{\mathbf{r}}(i,j)=\partial r_i/\partial\beta_j=X_{ij}\Rightarrow
+J_{\mathbf{r}}(\boldsymbol{\beta})=X$.
+:::
+
+::: {.fragment}
+**O Jacobiano do resíduo é a própria matriz de design** — não
+coincidência: função **afim** $\mathbf{r}=A\boldsymbol{\beta}+
+\mathbf{c}\Rightarrow J_{\mathbf{r}}=A$ (constante), mesmo fato do
+Passo 2 do Bloco 3.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Regra da Cadeia com Jacobiano Recupera o Bloco 3
+
+O MathML resolve exatamente este problema — perda de mínimos quadrados
+de um modelo linear — como exemplo do uso da regra da cadeia com
+Jacobiano (tradução livre e adaptação de notação, MathML, Exemplo 5.11,
+pp. 153-154; usam $\mathbf{e}(\boldsymbol{\theta})=\mathbf{y}-\Phi
+\boldsymbol{\theta}$ e $L(\mathbf{e})=\|\mathbf{e}\|^2$, com sinal
+oposto ao nosso $\mathbf{r}=X\boldsymbol{\beta}-\mathbf{y}=
+-\mathbf{e}$):
+
+::: {.callout-note icon=false}
+## Regra da cadeia com Jacobiano (MathML, tradução nossa, Exemplo 5.11)
+
+Para $L(\boldsymbol{\beta})=g(\mathbf{r}(\boldsymbol{\beta}))$, com
+$g(\mathbf{r})=\mathbf{r}^T\mathbf{r}$ e
+$\mathbf{r}(\boldsymbol{\beta})=X\boldsymbol{\beta}-\mathbf{y}$,
+$$
+\nabla_{\boldsymbol{\beta}}L = \frac{\partial L}{\partial\mathbf{r}}\,
+\frac{\partial\mathbf{r}}{\partial\boldsymbol{\beta}} = \nabla_{
+\mathbf{r}}g(\mathbf{r})\cdot J_{\mathbf{r}}(\boldsymbol{\beta}) .
+$$
+:::
+
+Precisamos de $\nabla_{\mathbf{r}}g(\mathbf{r})$: derivando
+$g(\mathbf{r})=\sum_ir_i^2$ em relação a cada $r_i$ (a mesma regra da
+cadeia com $h(t)=t^2$ do Passo 1, Bloco 3, agora aplicada diretamente
+às coordenadas de $\mathbf{r}$, sem compô-las com $\boldsymbol{\beta}$
+ainda), $\partial g/\partial r_i=2r_i$, logo
+$\nabla_{\mathbf{r}}g(\mathbf{r})=2\mathbf{r}^T\in\mathbb{R}^{1\times
+16\,640}$. Já sabemos, do Bloco 5, que
+$J_{\mathbf{r}}(\boldsymbol{\beta})=X$. Substituindo na regra da
+cadeia,
+$$
+\nabla_{\boldsymbol{\beta}}L = (2\mathbf{r}^T)(X) = 2\mathbf{r}^TX = 2
+(X\boldsymbol{\beta}-\mathbf{y})^TX ,
+$$
+**exatamente** o resultado do Bloco 3 — agora obtido por uma rota
+diferente (compor gradiente-em-relação-ao-resíduo com o Jacobiano do
+resíduo), sem repetir a soma termo a termo do Passo 1-3. Essa é a
+vantagem prática da regra da cadeia com Jacobiano, citada pelo próprio
+MathML: "abordagens diretas [expandir tudo e derivar termo a termo]
+continuam práticas para funções simples [...] mas se tornam
+impraticáveis para composições profundas de funções" (tradução livre,
+mesma seção) — o caso exato de uma rede neural com várias camadas
+compostas, tema da Aula 10 (Diferenciação Automática).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Regra da Cadeia com Jacobiano Recupera o Bloco 3
+
+::: {.fragment}
+MathML resolve **exatamente este problema** (mínimos quadrados de
+modelo linear) como exemplo de regra da cadeia com Jacobiano (Exemplo
+5.11, tradução/adaptação nossa; usam $\mathbf{e}=\mathbf{y}-\Phi
+\boldsymbol{\theta}=-\mathbf{r}$).
+:::
+
+::: {.callout-note icon=false}
+## Regra da cadeia com Jacobiano (MathML Exemplo 5.11)
+
+$L(\boldsymbol{\beta})=g(\mathbf{r}(\boldsymbol{\beta}))$,
+$g(\mathbf{r})=\mathbf{r}^T\mathbf{r}\Rightarrow\nabla_{\boldsymbol{
+\beta}}L=\nabla_{\mathbf{r}}g\cdot J_{\mathbf{r}}(\boldsymbol{\beta})$.
+:::
+
+::: {.fragment}
+$\nabla_{\mathbf{r}}g(\mathbf{r})=2\mathbf{r}^T$ (mesma regra do Passo 1,
+Bloco 3); $J_{\mathbf{r}}(\boldsymbol{\beta})=X$ (Bloco 5).
+:::
+
+::: {.fragment}
+$\nabla_{\boldsymbol{\beta}}L=(2\mathbf{r}^T)(X)=2(X\boldsymbol{\beta}-
+\mathbf{y})^TX$ — **idêntico** ao Bloco 3, por rota diferente (sem
+repetir a soma termo a termo).
+:::
+
+::: {.fragment}
+Vantagem citada pelo MathML: a rota direta (expandir tudo) "continua
+prática para funções simples, mas fica impraticável para composições
+profundas" — o caso de redes neurais com várias camadas (Aula 10,
+Diferenciação Automática).
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Verificando o Jacobiano do Resíduo Numericamente
+
+Vamos confirmar $J_{\mathbf{r}}(\boldsymbol{\beta})=X$ verificando uma
+coluna do Jacobiano por diferença finita — a $j$-ésima coluna de
+$J_{\mathbf{r}}$ é a derivada de **todo** o vetor $\mathbf{r}$ em
+relação a $\beta_j$ sozinho, que deve coincidir com a $j$-ésima coluna
+de $X$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Verificando o Jacobiano do Resíduo Numericamente
+
+::: {.fragment}
+Confirmar $J_{\mathbf{r}}(\boldsymbol{\beta})=X$: a $j$-ésima coluna de
+$J_{\mathbf{r}}$ (diferença finita) deve coincidir com a $j$-ésima
+coluna de $X$.
+:::
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+
+def residuo(beta):
+    return X @ beta - y
+
+h = 1e-5
+erros_max = []
+for j in range(4):
+    e_j = np.zeros(4); e_j[j] = h
+    coluna_j_numerica = (residuo(beta0 + e_j) - residuo(beta0 - e_j)) / (2*h)
+    erro_max_coluna = np.max(np.abs(coluna_j_numerica - X[:, j]))
+    erros_max.append(erro_max_coluna)
+    print(f"coluna {j} ({COLS[j]}): erro máximo |J_numerico - X[:,{j}]| = {erro_max_coluna:.2e}")
+
+print(f"\nerro máximo entre as 4 colunas: {max(erros_max):.2e}")
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O erro máximo, em todas as $4$ colunas, é da ordem de $10^{-10}$ ou
+menor — puro erro de truncamento numérico da diferença finita, não uma
+discrepância real. A verificação confirma, na prática, que
+$J_{\mathbf{r}}(\boldsymbol{\beta})=X$ **exatamente**, para qualquer
+$\boldsymbol{\beta}$ (o Jacobiano de uma função afim não depende do
+ponto onde é avaliado — outra forma de dizer que a segunda derivada de
+uma função afim é sempre zero).
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+Erro máximo $\sim10^{-10}$ (puro truncamento) nas $4$ colunas — confirma
+$J_{\mathbf{r}}(\boldsymbol{\beta})=X$ exatamente, para **qualquer**
+$\boldsymbol{\beta}$ (Jacobiano de função afim não depende do ponto).
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Se o modelo previsse 2 saídas simultaneamente (por exemplo, `MedHouseVal` e um segundo alvo), como mudaria a forma do Jacobiano do novo resíduo?
+
+Dica: pense em quantas linhas e colunas um Jacobiano $m\times n$ tem, e
+o que muda quando $m$ aumenta.
+
+- □ Se o resíduo passasse a ter $2$ saídas por observação (em vez de
+  $1$), o Jacobiano do novo resíduo, para as mesmas $4$ colunas de
+  atributos e as mesmas $16\,640$ observações, teria o dobro de linhas
+  do Jacobiano atual.
+- □ Se $X$ tivesse $1000$ atributos em vez de $4$ (mantendo $1$ única
+  saída), o Jacobiano do resíduo $J_{\mathbf{r}}(\boldsymbol{\beta})$
+  continuaria sendo uma matriz, agora com $1000$ colunas em vez de $4$.
+- □ Numa rede neural com uma camada de saída de $10$ neurônios (ex.:
+  classificação em $10$ classes), o Jacobiano dessa camada em relação
+  aos parâmetros de entrada teria, na convenção *numerator layout*, uma
+  linha para cada um dos $10$ neurônios de saída.
+- □ Como o gradiente é um caso particular do Jacobiano (quando $m=1$),
+  isso implica que a fórmula de regra da cadeia $\nabla_{\boldsymbol{
+  \beta}}L=\nabla_{\mathbf{r}}g\cdot J_{\mathbf{r}}(\boldsymbol{\beta})$
+  só vale porque $L$ é uma perda quadrática especificamente, não para
+  qualquer $g$ diferenciável.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Modelo com 2 saídas: como muda a forma do Jacobiano do resíduo?
+
+Dica: quantas linhas/colunas tem um Jacobiano $m\times n$, e o que
+muda quando $m$ aumenta?
+
+- □ Resíduo com $2$ saídas por observação $\Rightarrow$ Jacobiano com o
+  **dobro** de linhas do atual (mesmas $4$ colunas, mesmas $16\,640$
+  observações).
+- □ $X$ com $1000$ atributos (1 saída): $J_{\mathbf{r}}$ continua
+  matriz, agora com $1000$ colunas.
+- □ Rede neural, camada de saída com $10$ neurônios: Jacobiano
+  (*numerator layout*) tem $10$ linhas.
+- □ Gradiente = caso particular do Jacobiano ($m=1$)
+  $\Rightarrow\nabla_{\boldsymbol{\beta}}L=\nabla_{\mathbf{r}}g\cdot
+  J_{\mathbf{r}}$ só vale para perda quadrática especificamente.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Jacobiano com múltiplas saídas — Resposta
+
+- ✔ Cada saída adicional por observação vira uma **linha** adicional no
+  Jacobiano (numerator layout: linhas = $f$) — $2$ saídas por
+  observação, $16\,640$ observações, dobra as linhas.
+- ✔ O número de colunas do Jacobiano é sempre o número de parâmetros
+  (aqui, atributos) — $1000$ atributos $\Rightarrow$ $1000$ colunas,
+  independente do número de saídas.
+- ✔ Numerator layout: linhas = elementos de $f$ (aqui, os $10$
+  neurônios de saída) — exatamente a Definição 5.6.
+- ✗ A regra da cadeia com Jacobiano (MathML Exemplo 5.11, adaptado)
+  vale para **qualquer** composição $L=g(\mathbf{r}(\boldsymbol{
+  \beta}))$ com $g$ e $\mathbf{r}$ diferenciáveis — a perda quadrática
+  é só o caso usado nesta aula, não uma exigência da regra.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** o Jacobiano generaliza exatamente nessa
+direção — mais saídas, mais linhas; mais parâmetros, mais colunas — sem
+exigir nenhuma mudança na definição, só na contagem de $m$ e $n$.
+:::
+:::
+
+# Verificação Numérica
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Por Que Verificar Gradientes Numericamente é Prática Padrão
+
+Todos os blocos anteriores já usaram diferença finita central,
+$\big[f(\mathbf{x}+h\mathbf{e}_j)-f(\mathbf{x}-h\mathbf{e}_j)\big]/(2h)$,
+para conferir uma fórmula analítica — sem nunca discutir **como
+escolher $h$**. Isso importa na prática: implementações de gradientes
+por extenso (Bloco 3) ou via regra da cadeia com Jacobiano (Bloco 5)
+são código, e código tem bugs — a competência esperada desta aula
+inclui verificar numericamente um gradiente/Jacobiano calculado à mão,
+não só calculá-lo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Por Que Verificar Gradientes Numericamente é Prática Padrão
+
+::: {.fragment}
+Blocos anteriores já usaram diferença finita central sem discutir
+**como escolher $h$**. Implementações de gradiente/Jacobiano são
+código — têm bugs. Competência desta aula: verificar numericamente, não
+só calcular.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Compromisso na Escolha de $h$
+
+Um $h$ mal escolhido produz um "erro de verificação" que não é erro
+nenhum na fórmula analítica — só uma consequência de dois efeitos que
+competem entre si:
+
+- **$h$ grande demais:** a diferença finita central tem erro de
+  **truncamento** da ordem $O(h^2f'''(x))$ (expansão de Taylor de $f$
+  em torno de $x$, um resultado padrão de Cálculo Numérico, citado sem
+  prova aqui) — quanto maior $h$, pior essa aproximação.
+- **$h$ pequeno demais:** subtrair dois números de ponto flutuante
+  muito próximos ($f(x+h)$ e $f(x-h)$, ambos quase iguais a $f(x)$)
+  amplifica o erro de arredondamento da própria representação de ponto
+  flutuante — esse erro cresce como $O(\epsilon_{\text{máquina}}/h)$,
+  quanto **menor** $h$, pior.
+
+A prática usual (minimizando a soma desses dois efeitos) recomenda
+$h\sim\epsilon_{\text{máquina}}^{1/3}\approx 10^{-5}$–$10^{-6}$ para
+diferença finita central em ponto flutuante de precisão dupla — a
+mesma faixa já usada, sem justificar, em todos os chunks anteriores
+desta aula ($h=10^{-4}$ ou $10^{-5}$).
+
+**Um caso especial que vale registrar, honestamente, em vez de simular
+um exemplo genérico:** a perda $L(\boldsymbol{\beta})=\|X\boldsymbol{
+\beta}-\mathbf{y}\|^2$ do problema-fio é **exatamente quadrática** em
+$\boldsymbol{\beta}$ — logo $f'''(\boldsymbol{\beta})=0$ (a terceira
+derivada de um polinômio de grau $2$ é identicamente zero) — e o erro
+de **truncamento** da diferença finita central é, para essa perda
+específica, exatamente zero, não apenas pequeno. O experimento abaixo
+mede o erro de verificação para vários valores de $h$, e o resultado
+confirma exatamente essa previsão: só o efeito de arredondamento
+aparece, crescendo continuamente conforme $h\to 0$, sem o formato de
+"U" que apareceria para uma função não-quadrática (onde os dois efeitos
+competem e há um ponto ótimo de $h$ no meio).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Compromisso na Escolha de $h$
+
+::: {.fragment}
+$h$ **grande**: erro de **truncamento** $O(h^2f''')$ (Taylor, padrão de
+Cálculo Numérico). $h$ **pequeno**: erro de **arredondamento**
+$O(\epsilon_{\text{máquina}}/h)$ (subtração de números quase iguais).
+:::
+
+::: {.fragment}
+Prática usual: $h\sim\epsilon_{\text{máquina}}^{1/3}\approx
+10^{-5}$–$10^{-6}$ (faixa já usada, sem justificar, nos chunks
+anteriores).
+:::
+
+::: {.fragment}
+**Caso especial honesto:** $L(\boldsymbol{\beta})$ é **exatamente
+quadrática** $\Rightarrow f'''=0\Rightarrow$ erro de truncamento **zero**
+para esta perda — só arredondamento aparece, sem o "U" clássico.
+:::
+:::
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+hs = np.logspace(-2, -13, 24)
+e1 = np.array([1.0, 0, 0, 0])
+grad_analitico_j0 = gradiente_analitico(beta0)[0]
+
+erros = []
+for h in hs:
+    num = (perda(beta0 + h*e1) - perda(beta0 - h*e1)) / (2*h)
+    erros.append(abs(num - grad_analitico_j0))
+erros = np.array(erros)
+
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.loglog(hs, erros, "o-", color=COR_A, lw=1.8, ms=4)
+ax.set_xlabel("$h$ (escala log)")
+ax.set_ylabel("erro absoluto vs. gradiente analítico (escala log)")
+ax.set_title("Erro da diferença finita central em função de $h$\n(perda quadrática: sem termo de truncamento, só arredondamento)", fontsize=10, fontweight="bold")
+ax.invert_xaxis()
+ax.axvspan(1e-6, 1e-4, color=COR_B, alpha=0.15, label="faixa usada nos Blocos 2-5")
+ax.legend(fontsize=8.5)
+
+plt.tight_layout()
+plt.show()
+
+print("h maior -> erro menor (só arredondamento, cresce conforme h diminui):")
+for h, e in zip(hs[::4], erros[::4]):
+    print(f"  h={h:.2e}   erro={e:.3e}")
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O gráfico confirma a previsão: o erro **cresce monotonicamente**
+conforme $h$ diminui (eixo invertido, $h$ maior à esquerda) — sem
+nenhum ponto de mínimo no meio, porque não há termo de truncamento
+competindo. Isso não significa "use o maior $h$ possível" em geral: para
+uma função com terceira derivada não-nula (a imensa maioria das
+funções de perda de redes neurais, por exemplo), haveria também um
+custo em aumentar $h$ demais — o formato de "U" reaparece. A faixa
+$h\in[10^{-6},10^{-4}]$ usada nos Blocos 2-5 (região sombreada) fica
+numa zona seguramente pequena o bastante para não introduzir erro de
+arredondamento visível, mas grande o bastante para funcionar mesmo em
+funções não-quadráticas — a escolha prática recomendada quando não se
+sabe, de antemão, se a função é exatamente quadrática ou não.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+Erro **cresce monotonicamente** conforme $h\to0$ (sem "U", sem
+truncamento). Para função com $f'''\ne0$ (a maioria das perdas de
+redes neurais), o "U" reaparece — $h$ grande demais também tem custo.
+:::
+
+::: {.fragment}
+Faixa $h\in[10^{-6},10^{-4}]$ (Blocos 2-5, sombreada): pequena o
+bastante para não expor arredondamento, grande o bastante para
+funcionar mesmo em funções não-quadráticas — escolha prática segura por
+padrão.
+:::
+:::
+
+# Fechamento e Ponte para a Aula 7
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### Retomando as perguntas de abertura {.unnumbered}
+
+1. **O que é uma derivada parcial, e por que ela sozinha não basta?**
+   $\partial f/\partial x_j$ mede a taxa de variação de $f$ mantendo as
+   demais variáveis fixas — é a derivada de uma variável do Cálculo 1
+   aplicada a uma "fatia" da função. Sozinha, ela só descreve o
+   comportamento ao longo de **um eixo**; um deslocamento em qualquer
+   outra direção pede a derivada direcional (pergunta 3).
+2. **Como generalizar para o vetor-gradiente, calculado por extenso?**
+   Coletando as $n$ derivadas parciais no vetor-linha $\nabla f=
+   [\partial f/\partial x_1\ \cdots\ \partial f/\partial x_n]$
+   (Definição 5.5). Para $L(\boldsymbol{\beta})=\|X\boldsymbol{\beta}-
+   \mathbf{y}\|^2$, a derivação por extenso (regra da soma + regra da
+   cadeia, termo a termo) deu $\nabla_{\boldsymbol{\beta}}L=2
+   (X\boldsymbol{\beta}-\mathbf{y})^TX$ — cuja condição de anulamento
+   **é**, exatamente, as Equações Normais da Aula 3.
+3. **O que é a derivada direcional, e por que o gradiente é a subida
+   mais íngreme?** $D_{\mathbf{v}}f(\mathbf{x})=\nabla f(\mathbf{x})
+   \mathbf{v}$ (regra da cadeia aplicada a $g(h)=f(\mathbf{x}+
+   h\mathbf{v})$); a desigualdade de Cauchy-Schwarz (Aula 1) prova que
+   essa quantidade é maximizada exatamente quando $\mathbf{v}$ aponta
+   na direção do gradiente (normalizado), com valor máximo
+   $\|\nabla f(\mathbf{x})\|$.
+4. **Como generalizar o gradiente para uma função vetorial?** O
+   Jacobiano (Definição 5.6) coleta todas as derivadas parciais de
+   $f:\mathbb{R}^n\to\mathbb{R}^m$ numa matriz $m\times n$; o gradiente
+   é o caso particular $m=1$. O Jacobiano do resíduo,
+   $J_{\mathbf{r}}(\boldsymbol{\beta})=X$, permitiu recuperar o mesmo
+   gradiente do Bloco 3 por uma rota diferente (regra da cadeia com
+   Jacobiano), a rota que escala para composições profundas de funções
+   (redes neurais, Aula 10).
+
+### O Que Fica em Aberto {.unnumbered}
+
+Toda a aula girou em torno de encontrar onde $\nabla L=\mathbf{0}$ — a
+condição que recupera as Equações Normais. Mas vale ser preciso sobre o
+que essa condição garante e o que **não** garante: $\nabla L(\mathbf{x})
+=\mathbf{0}$ identifica um **ponto crítico** — um ponto onde nenhuma
+direção de primeira ordem aumenta ou diminui $f$ (a própria Proposição
+do Bloco 4 deixou de se aplicar exatamente nesse caso, quando
+$\|\nabla f(\mathbf{x})\|=0$). Mas nada nesta aula garante que esse
+ponto crítico seja um **mínimo** — poderia ser um máximo, ou (em
+dimensão $\ge 2$) um ponto de sela, onde a função cresce em algumas
+direções e diminui em outras. Para a perda quadrática do problema-fio, o
+ponto crítico único **é** o mínimo global — mas essa garantia vem de uma
+propriedade adicional de $X^TX$ (ser semidefinida positiva, Aula 4), não
+do gradiente sozinho. A ferramenta que decide, em geral, se um ponto
+crítico é mínimo, máximo ou sela — a segunda derivada em várias
+variáveis, a **Hessiana** — é o tema da Aula 7 (Convexidade e a
+Hessiana).
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as Perguntas de Abertura
+
+::: {.fragment}
+**1.** $\partial f/\partial x_j$: taxa de variação num eixo só —
+sozinha não cobre outras direções (derivada direcional, pergunta 3).
+:::
+
+::: {.fragment}
+**2.** Gradiente = vetor-linha das parciais (Def. 5.5). Para
+$L=\|X\boldsymbol{\beta}-\mathbf{y}\|^2$: $\nabla_{\boldsymbol{\beta}}L
+=2(X\boldsymbol{\beta}-\mathbf{y})^TX$ — anulamento = Equações Normais.
+:::
+
+::: {.fragment}
+**3.** $D_{\mathbf{v}}f=\nabla f\cdot\mathbf{v}$; Cauchy-Schwarz (Aula
+1) prova máximo em $\mathbf{v}=$ gradiente normalizado, valor
+$\|\nabla f\|$.
+:::
+
+::: {.fragment}
+**4.** Jacobiano (Def. 5.6): matriz $m\times n$, gradiente = caso
+$m=1$. $J_{\mathbf{r}}(\boldsymbol{\beta})=X$ recupera o Bloco 3 via
+regra da cadeia — rota que escala para redes neurais (Aula 10).
+:::
+
+## Ponte para a Aula 7
+
+::: {.fragment}
+$\nabla L=\mathbf{0}$ identifica **ponto crítico** — nenhuma direção de
+primeira ordem aumenta/diminui $f$ ali (a Proposição do Bloco 4 deixa
+de se aplicar exatamente nesse caso).
+:::
+
+::: {.fragment}
+Mas ponto crítico não é, automaticamente, **mínimo** — pode ser máximo
+ou sela. Para $L(\boldsymbol{\beta})=\|X\boldsymbol{\beta}-
+\mathbf{y}\|^2$, funciona porque $X^TX$ é PSD (Aula 4) — garantia
+extra, não do gradiente sozinho.
+:::
+
+::: {.fragment}
+O que decide mínimo/máximo/sela, em geral: a segunda derivada em várias
+variáveis, a **Hessiana** — Aula 7 (Convexidade e a Hessiana).
+:::
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\begin{tikzpicture}[
+  block/.style={rectangle, draw=icblue, fill=icblue!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=3.0cm, minimum height=1.15cm},
+  decision/.style={diamond, draw=icorange, fill=icorange!10, align=center,
+                    font=\small, inner sep=1pt, text width=2.6cm, aspect=2.1},
+  concl/.style={rectangle, draw=icred, fill=icred!8, rounded corners=3pt,
+                align=center, font=\small, inner sep=6pt,
+                text width=3.4cm, minimum height=1.15cm}
+]
+  \node (A) [block] at (0,0) {$\nabla L(\boldsymbol{\beta})=\mathbf{0}$\\(Aula 6)};
+  \node (Q) [decision] at (5.0,0) {mínimo,\\máximo ou\\sela?};
+  \node (S) [concl] at (10.6,2.3) {precisa da\\Hessiana\\(Aula 7)};
+  \node (N) [concl] at (10.6,-2.3) {para $X^TX$ PSD\\(Aula 4): único\\crítico = mínimo\\global, caso especial};
+
+  \draw [-Stealth, thick, color=gray!70] (A) -- (Q);
+  \draw [-Stealth, thick, color=gray!70] (Q) -- (S);
+  \draw [-Stealth, thick, color=gray!70] (Q) -- (N);
+\end{tikzpicture}
+```
+:::

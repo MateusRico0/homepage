@@ -1,0 +1,405 @@
+---
+title: "Exercícios — Árvores de Decisão"
+subtitle: "Aula 3 — Particionamento Guloso"
+lang: pt-BR
+format:
+  html:
+    theme: [flatly, ../../../custom.scss]
+    toc: true
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all}
+[Soluções](soluções.qmd){.see-all .solucoes-link}
+
+## Questões discursivas
+
+1. Explique, com suas próprias palavras, por que dizer "a árvore
+   escolhe o corte que reduz mais a impureza" é equivalente a dizer "a
+   árvore escolhe o corte que maximiza a log-verossimilhança dos dados
+   na folha". Sua explicação deve mencionar tanto o caso de regressão
+   quanto o de classificação.
+
+2. Construa (ou descreva) um par de splits de um nó de classificação
+   binária com a mesma taxa de erro de classificação ponderada, mas
+   com Gini ou entropia diferentes entre si. Explique por que isso
+   acontece.
+
+3. Um colega propõe usar apenas a taxa de erro de classificação (não
+   Gini nem entropia) tanto para crescer quanto para podar uma árvore.
+   Argumente por que essa escolha é razoável para podar, mas
+   problemática para crescer.
+
+## Questões de Verdadeiro/Falso
+
+Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada
+correta se todos os 4 itens forem julgados corretamente (deixar em
+branco tem penalidade de 20% da nota da questão).
+
+Nas questões desta seção, considere árvores de decisão ajustadas por
+particionamento guloso do espaço de atributos $\mathbf{x}$: a cada
+passo, escolhe-se o corte (uma variável e um limiar) que mais reduz
+uma medida de custo/impureza $Q$, somada nas duas folhas geradas por
+aquele corte; ao final do ajuste, cada folha estima diretamente
+$P(\mathcal{C}_k\mid\mathbf{x})$ (em classificação) ou
+$\mathbb{E}[t\mid\mathbf{x}]$ (em regressão) a partir dos pontos de
+treino que caem nela — nunca a densidade dos atributos $p(\mathbf{x})$,
+nem a conjunta completa $p(\mathbf{x},y)$.
+
+::: {.callout-note icon=false}
+## Árvores como estimação não-paramétrica
+
+- □ Se, em vez de cortes alinhados aos eixos, uma árvore pudesse
+  usar cortes ao longo de qualquer direção linear (hiperplanos
+  oblíquos), mantendo a mesma lógica gulosa de escolher o corte que
+  mais reduz $Q$, ela deixaria de ser um modelo não-paramétrico.
+
+- □ Se o número mínimo de pontos por folha for reduzido a $1$ e a
+  profundidade máxima não for limitada, o número de parâmetros
+  efetivos de uma árvore pode crescer até se igualar ao número de
+  pontos de treino $N$.
+
+- □ Suponha que se queira usar uma árvore para modelar a
+  distribuição conjunta completa $p(\mathbf{x}, y)$, não só a
+  fronteira de decisão. Isso é possível diretamente com o mesmo
+  procedimento guloso descrito acima, sem nenhuma modificação.
+
+- □ Numa árvore com uma única folha (nenhum corte realizado), a
+  estimativa em classificação se reduz à proporção empírica de cada
+  classe $k$ na amostra de treino inteira (a priori marginal
+  $\hat\pi_k$), ignorando completamente $\mathbf{x}$.
+:::
+
+Considere uma folha $\tau$ de uma árvore de regressão, contendo
+$N_\tau$ pontos de treino com alvos $t_1,\dots,t_{N_\tau}$. Sob o
+modelo padrão de verossimilhança gaussiana com variância comum, o
+valor predito ótimo nessa folha, $y_\tau$, é a média amostral dos
+alvos, e o custo (soma dos quadrados dos resíduos) é
+$Q_\tau=\sum_{n=1}^{N_\tau}(t_n-y_\tau)^2$.
+
+::: {.callout-note icon=false}
+## O estimador ótimo numa folha de regressão
+
+- □ Se, em vez de uma verossimilhança gaussiana, assumíssemos uma
+  verossimilhança de Laplace (dupla exponencial) para os alvos de uma
+  folha, o estimador de máxima verossimilhança de $y_\tau$ deixaria
+  de ser a média amostral e passaria a ser a mediana amostral.
+
+- □ Se todos os $N_\tau$ alvos de uma folha forem idênticos entre
+  si (variância zero), o valor mínimo de $Q_\tau$ é zero, e a
+  log-verossimilhança gaussiana correspondente, no limite
+  $\sigma^2\to 0$, tende a $+\infty$.
+
+- □ Uma folha com $N_\tau=1$ ainda define um $Q_\tau$ mínimo bem
+  definido e igual a zero, mas a variância amostral desse único ponto
+  não pode ser estimada de forma não-enviesada (o denominador $N_\tau
+  - 1$ seria zero).
+
+- □ Como $Q_\tau$ e a variância amostral $\hat\sigma^2_\tau =
+  Q_\tau/N_\tau$ diferem apenas por uma constante multiplicativa,
+  qualquer corte que minimize $Q_\tau$ nas duas folhas geradas também
+  minimiza, necessariamente, a variância combinada dessas folhas.
+:::
+
+Numa árvore ajustada por busca gulosa, cada corte candidato (variável
+e limiar) é avaliado pela redução que produziria na medida de
+custo/impureza $Q$, somada nas duas folhas resultantes; a cada
+rodada, o algoritmo escolhe o corte de maior redução de $Q$ entre
+todas as folhas abertas naquele momento.
+
+::: {.callout-note icon=false}
+## Crescimento guloso e sua miopia
+
+- □ Se o critério fosse "sempre aprofundar a folha mais numerosa"
+  em vez de "maior redução de $Q$", o resultado seria idêntico ao
+  crescimento guloso descrito acima, já que a folha mais numerosa
+  tende a ter o maior $Q$.
+
+- □ No limite em que o número mínimo de pontos por folha tende a
+  zero, a busca exaustiva de limiares dentro de uma folha com
+  $N_\tau$ pontos distintos passa a testar até $N_\tau - 1$ limiares
+  candidatos.
+
+- □ Se, em vez de um único alvo, tivéssemos alvos multivariados
+  $\mathbf{t}\in\mathbb{R}^p$ e definíssemos $Q_\tau$ como a soma das
+  somas de quadrados de cada componente, o mesmo algoritmo de busca
+  exaustiva continuaria bem definido, sem alteração na lógica do
+  passo de escolha de corte.
+
+- □ Como a busca escolhe sempre o corte de menor $Q$ entre as duas
+  folhas geradas, a árvore final construída por esse processo guloso
+  é, necessariamente, a de menor $Q$ total entre todas as árvores com
+  o mesmo número de folhas.
+:::
+
+Para uma variável aleatória discreta $X$ com $K$ valores possíveis e
+probabilidades $p_1,\dots,p_K$, a entropia é $H(X)=-\sum_k p_k\ln
+p_k$ (em nats, logaritmo natural). Para duas variáveis discretas
+$X,Y$, a informação mútua é $I(X;Y)=H(X)-H(X\mid Y)$, sempre
+não-negativa, e vale exatamente zero se, e somente se, $X$ e $Y$
+forem independentes.
+
+::: {.callout-note icon=false}
+## Entropia e informação mútua
+
+- □ Se uma variável $X$ tem $K$ resultados possíveis e é uniforme
+  entre eles, sua entropia tende a $\ln K$ nats — e, no limite em que
+  $K\to\infty$ mantendo a uniformidade, $H(X)\to\infty$.
+
+- □ Se $Y$ fosse uma função determinística e invertível de $X$
+  (conhecer $Y$ permite recuperar $X$ exatamente, e vice-versa),
+  então $I(X;Y) = H(X) = H(Y)$.
+
+- □ Considere duas moedas honestas lançadas de forma totalmente
+  independente, sem qualquer relação causal entre elas. Mesmo assim,
+  numa amostra finita de $N$ lançamentos, a informação mútua empírica
+  calculada a partir das frequências observadas dificilmente será
+  exatamente zero, mesmo que a informação mútua populacional
+  verdadeira seja zero.
+
+- □ Como $I(X;Y)$ é sempre não-negativa e vale zero exatamente na
+  independência, uma informação mútua alta necessariamente implica
+  que $X$ causa $Y$ (ou vice-versa).
+:::
+
+Considere um nó $\tau$ de uma árvore de classificação, com
+distribuição empírica de classes $\hat p_\tau$ e entropia
+$H(\hat p_\tau)$. Um corte candidato $s$ separa os pontos desse nó em
+dois filhos, esquerdo e direito. O ganho de informação desse corte é
+$IG(\tau,s) = H(\hat p_\tau) - \left[\frac{N_{\text{esq}}}{N_\tau}
+H(\hat p_{\text{esq}}) + \frac{N_{\text{dir}}}{N_\tau}
+H(\hat p_{\text{dir}})\right]$ — a entropia do nó menos a média
+ponderada (pelo tamanho de cada filho) das entropias dos filhos.
+Esse ganho de informação é igual à informação mútua $I(S;\mathcal{C})$
+entre a variável indicadora de corte $S$ (esquerda ou direita) e a
+classe $\mathcal{C}$.
+
+::: {.callout-note icon=false}
+## Ganho de informação e a conexão MLE categórico–entropia
+
+- □ Se, em vez de comparar $H(\hat p_\tau)$ com a **média
+  ponderada** das entropias dos filhos, comparássemos com a MAIOR das
+  duas entropias, o valor resultante ainda seria igual à informação
+  mútua $I(S;\mathcal{C})$.
+
+- □ No caso extremo em que um corte separa perfeitamente as duas
+  classes (ambas as folhas filhas ficam com $H=0$), o ganho de
+  informação desse corte é exatamente igual a $H(\hat p_\tau)$ — o
+  maior valor possível para aquele nó.
+
+- □ Numa folha com 3 classes, em contagens $(10,10,10)$, o MLE
+  categórico dessa folha ainda seria a proporção empírica
+  $(1/3,1/3,1/3)$, com entropia dada pela mesma fórmula, agora
+  somando sobre 3 termos.
+
+- □ Como maximizar a log-verossimilhança categórica equivale a
+  minimizar a entropia da folha, um corte que reduz a entropia de
+  AMBAS as folhas filhas em relação à do pai necessariamente maximiza
+  o ganho de informação entre todos os cortes candidatos disponíveis
+  naquele nó.
+:::
+
+Num nó de classificação com proporções de classe
+$p=(p_1,\dots,p_K)$ sobre $K$ classes, a entropia é
+$H(p)=-\sum_k p_k\ln p_k$ (nats) e o índice de Gini é
+$G(p)=1-\sum_k p_k^2$.
+
+::: {.callout-note icon=false}
+## Entropia e Gini: forma e interpretação
+
+- □ À medida que o número de classes $K$ numa folha cresce, sempre
+  mantendo a distribuição uniforme entre elas, tanto a entropia
+  máxima $H=\ln K$ quanto o valor máximo do índice de Gini,
+  $G=1-1/K$, crescem sem limite.
+
+- □ Se, em vez do índice de Gini, usássemos $G'(p)=\max_k p_k$ (a
+  proporção da classe majoritária) como critério de impureza, um
+  corte que produz duas folhas com $\max_k p_k$ idêntico teria
+  impureza ponderada igual, mesmo que as distribuições internas das
+  duas folhas fossem completamente diferentes fora da classe
+  majoritária.
+
+- □ Num problema de detecção de fraude com 99% de transações
+  legítimas e 1% fraudulentas, uma folha que reproduz exatamente essa
+  proporção tem entropia próxima do mínimo possível, mesmo antes de
+  qualquer corte ser feito.
+
+- □ Como entropia e Gini se anulam numa folha pura e atingem o
+  máximo em $p=0{,}5$ (caso binário), as duas medidas sempre
+  concordam sobre qual, entre dois cortes candidatos, produz a maior
+  redução de impureza.
+:::
+
+Num nó de classificação com proporções de classe
+$p=(p_1,\dots,p_K)$, a taxa de erro do classificador que sempre
+prevê, para qualquer ponto daquele nó, a classe majoritária é
+$1-\max_k p_k$. Considere também a poda por custo-complexidade de uma
+árvore, que escolhe o tamanho final penalizando o número de folhas
+por um fator $\lambda$ (quanto maior $\lambda$, mais a árvore acaba
+podada).
+
+::: {.callout-note icon=false}
+## Por que não usar a taxa de erro bruta para crescer a árvore
+
+- □ Num nó com duas classes empatadas em número de pontos
+  (proporção $50/50$), a taxa de erro do classificador majoritário é
+  $0{,}5$ — o valor máximo possível dessa métrica, coincidindo com o
+  ponto de máxima entropia e máximo Gini.
+
+- □ Se a taxa de erro bruta fosse o único critério de crescimento,
+  e dois cortes candidatos produzissem a mesma taxa de erro
+  ponderada, o algoritmo não teria como preferir um corte ao outro,
+  nem mesmo quando um deles produz uma folha perfeitamente pura.
+
+- □ Considere um nó com 3 classes e contagens $(50,49,1)$. O
+  classificador que sempre prevê a classe majoritária nesse nó erra
+  em $50\%$ dos casos, mesmo a folha estando longe de ser
+  uniformemente distribuída entre as 3 classes.
+
+- □ Como a validação, na escolha de $\lambda$, usa a acurácia
+  (equivalente à taxa de erro), conclui-se que entropia e Gini
+  deixam de ter qualquer papel na fase de poda por custo-complexidade.
+:::
+
+Para uma árvore $T$ com folhas $\tau$ e custo $Q_\tau(T)$ em cada
+folha, o critério de custo-complexidade é $C(T) = \sum_\tau Q_\tau(T)
++ \lambda|T|$, em que $|T|$ é o número de folhas de $T$ e
+$\lambda\ge 0$ é o parâmetro de penalização — a árvore podada
+escolhida é a que minimiza $C(T)$ entre um conjunto de subárvores
+candidatas.
+
+::: {.callout-note icon=false}
+## Custo vs. complexidade e a poda
+
+- □ No limite em que $\lambda\to\infty$, o critério $C(T) =
+  \sum_\tau Q_\tau(T) + \lambda|T|$ é minimizado por uma árvore com
+  uma única folha.
+
+- □ Se a penalidade de complexidade fosse proporcional à
+  profundidade da árvore em vez de ao número de folhas, duas árvores
+  com o mesmo número de folhas mas formatos diferentes (uma bem
+  desbalanceada, outra balanceada) poderiam receber penalidades
+  diferentes sob esse critério alternativo, ao contrário do critério
+  $C(T)$ acima.
+
+- □ Numa tarefa de regressão em que os alvos $t$ passam a ser
+  medidos numa escala muito maior (ex.: milhões em vez de milhares de
+  dólares), o mesmo valor de $\lambda$ usado na escala original não
+  produz, em geral, a mesma árvore podada na nova escala.
+
+- □ Como $\sum_\tau Q_\tau(T)$ só pode diminuir (ou manter-se)
+  conforme se adicionam folhas, e $\lambda|T|$ só pode aumentar,
+  conclui-se que $C(T)$ é uma função estritamente convexa do número
+  de folhas, com um único mínimo global bem definido.
+:::
+
+Ao ajustar uma árvore, é comum dividir os dados disponíveis em um
+conjunto de treino (usado para escolher os cortes) e um conjunto de
+validação, separado, usado só para escolher o parâmetro de poda
+$\lambda$ (ou outro hiperparâmetro) comparando a acurácia obtida em
+cada valor candidato.
+
+::: {.callout-note icon=false}
+## Treino vs. validação: por que separar os dados
+
+- □ Se o conjunto de validação tivesse exatamente $0\%$ dos dados
+  (todo o conjunto fosse usado como treino), a acurácia medida no que
+  sobrasse para "validação" seria, no limite, idêntica à acurácia de
+  treino.
+
+- □ Se a escolha do melhor $\lambda$ fosse feita usando a acurácia
+  de TREINO em vez da de validação, o $\lambda$ escolhido tenderia a
+  ser sistematicamente menor (menos poda) do que o escolhido por
+  validação.
+
+- □ Num cenário com apenas 40 pontos de treino disponíveis,
+  reservar $40\%$ deles só para validação tem um custo prático mais
+  sério do que reservar a mesma proporção de um conjunto de 40.000
+  pontos.
+
+- □ Como o conjunto de validação nunca é usado para ajustar os
+  cortes da árvore, o desempenho medido nele é uma estimativa
+  não-enviesada do erro de generalização, mesmo que o próprio valor
+  de $\lambda$ tenha sido escolhido observando exatamente esse mesmo
+  conjunto.
+:::
+
+::: {.callout-note icon=false}
+## Splits alinhados aos eixos
+
+- □ No limite em que a profundidade tende a infinito, o erro de
+  aproximação de uma fronteira diagonal por cortes alinhados aos
+  eixos tende a zero, mas o número de folhas necessário para um erro
+  menor que $\epsilon$ cresce sem limite à medida que $\epsilon\to0$.
+
+- □ Se a fronteira de decisão ótima entre duas classes fosse
+  alinhada a um dos eixos originais (dependendo só de $x_1$, por
+  exemplo), uma árvore poderia representá-la exatamente com um único
+  corte, ao contrário do caso diagonal.
+
+- □ Considere um problema em que a fronteira ótima é um círculo
+  centrado na origem. Uma árvore com cortes alinhados aos eixos pode
+  aproximar essa fronteira com uma sequência de retângulos, mas nunca
+  a representa exatamente com um número finito de cortes.
+
+- □ Como uma árvore com profundidade suficiente aproxima
+  arbitrariamente bem qualquer fronteira, o número de folhas
+  necessário para uma boa aproximação não depende da complexidade
+  geométrica da fronteira verdadeira, só da profundidade escolhida.
+:::
+
+::: {.callout-note icon=false}
+## Instabilidade estrutural
+
+- □ Se, em vez de escolher deterministicamente o corte de maior
+  redução de impureza (maior ganho de informação, ou menor custo
+  $Q$), o algoritmo escolhesse aleatoriamente entre os $k$ melhores
+  cortes candidatos a cada rodada, a instabilidade da estrutura de
+  uma árvore individual a pequenas mudanças no treino tenderia a
+  diminuir.
+
+- □ No limite em que o conjunto de treino tem um número muito
+  grande de pontos amostrados da mesma distribuição geradora, o corte
+  escolhido na raiz se aproxima de um valor estável, e pequenas
+  remoções de pontos deixam de mudar esse corte de forma perceptível.
+
+- □ Num conjunto de dados em que várias variáveis são fortemente
+  correlacionadas entre si (quase redundantes para prever a classe),
+  a instabilidade estrutural de uma árvore tende a ser maior do que
+  em variáveis pouco correlacionadas.
+
+- □ Como a estrutura de uma árvore pode mudar substancialmente com
+  a remoção de poucos pontos de treino, as previsões dessa árvore
+  para a maioria dos pontos de teste também mudam substancialmente
+  sempre que a estrutura muda.
+:::
+
+::: {.callout-note icon=false}
+## Partição rígida e descontinuidades
+
+- □ À medida que o número de folhas de uma árvore de regressão
+  cresce sem limite, o tamanho de cada descontinuidade entre folhas
+  vizinhas tende a diminuir, mas a partição continua sendo, em
+  qualquer profundidade finita, uma função em degraus.
+
+- □ Se, em vez de prever a média constante em cada folha, a árvore
+  previsse uma reta local ajustada por mínimos quadrados dentro de
+  cada folha, as descontinuidades entre folhas vizinhas
+  desapareceriam automaticamente, sem qualquer restrição adicional.
+
+- □ Considere uma árvore de regressão para prever o preço de
+  imóveis, usando entre outras variáveis `MedInc` (a renda mediana da
+  região onde o imóvel se localiza, em dezenas de milhares de
+  dólares). Suponha que um corte da árvore separa `MedInc` $\le 2{,}72$
+  (folha com previsão de preço $1{,}26$, na mesma unidade dos alvos)
+  de `MedInc` $> 2{,}72$ (folha com previsão de preço $1{,}90$). Dois
+  imóveis com `MedInc` igual a, digamos, $2{,}71$ e $2{,}73$ —
+  praticamente idênticos nesse atributo, e supostamente parecidos nos
+  demais — caem em folhas opostas e recebem previsões de preço
+  bastante diferentes.
+
+- □ Como a rigidez da partição é a mesma característica que
+  permite à árvore modelar interações não-lineares sem exigir que
+  sejam especificadas de antemão, conclui-se que a rigidez da
+  partição não tem nenhuma desvantagem prática relevante.
+:::
