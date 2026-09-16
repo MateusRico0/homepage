@@ -27,22 +27,23 @@ Fontes em `fontes/`: `prml.pdf`, `dlfc.pdf`, `esl.pdf` (mesmos links de
 | $z_n$, $\pi_k$ | Variável latente categórica 1-de-$K$ (origem do ponto $n$); prior de mistura, $\sum_k\pi_k=1$ | Aula 4 |
 | $\gamma(z_{nk})$ | Responsabilidade — $p(z_{nk}=1\mid\mathbf{x}_n,\theta)$, posterior via Bayes | Aula 4 |
 | Passo E / Passo M | As duas etapas alternadas do Algoritmo EM | Aula 4 |
-| $p(\mathcal{D}\mid\mathcal{M})$, $p(\mathcal{D})$ | Evidência do modelo (verossimilhança marginal), $\int p(\mathcal{D}\mid\theta)p(\theta)\,\mathrm{d}\theta$ | Aula 5 |
-| $\theta_{\mathrm{MAP}}$, $A$ | Ponto de máximo a posteriori; Hessiana de $-\ln[p(\mathcal{D}\mid\theta)p(\theta)]$ nesse ponto, usada na aproximação de Laplace | Aula 5 |
-| Fator de Occam | $\tfrac{M}{2}\ln(2\pi)-\tfrac12\ln|A|$ — termo que penaliza ajustes frágeis na evidência aproximada | Aula 5 |
-| BIC | $\ln p(\mathcal{D}\mid\theta_{\mathrm{ML}})-\tfrac12 M\ln N$ (convenção PRML, a **maximizar**); atenção: `scikit-learn` usa $-2\ln p+M\ln N$, a minimizar | Aula 5 |
-| $M(K,d)$ | Número de parâmetros livres de um GMM: $Kd+Kd(d+1)/2+(K-1)$ | Aula 5 |
+| $\mathbf{H}$ | **Reescrito em 2026-09-16** (versão anterior da Aula 5 usava $\mathbf{Z}$ genérico; a atual usa $\mathbf{H}$ propositalmente, para não colidir com $\mathbf{W}$ da PPCA, Aula 6, abaixo): variável não observada genérica na decomposição do ELBO — pode ser a variável latente $\mathbf{Z}$, o parâmetro $\theta$, ou os dois juntos | Aula 5 |
 | $\mathrm{KL}(q\|p)$ | Divergência de Kullback-Leibler, $-\int q\ln\{p/q\}$; $\ge0$, não simétrica | Aula 5 |
-| $q(\mathbf{Z})$ | Distribuição variacional — aproximação livre (ou de família restrita) à posterior sobre variáveis não observadas | Aula 5 |
 | $\mathcal{L}(q)$, $\mathcal{L}(q,\theta)$ | ELBO (*Evidence Lower Bound*) — cota inferior de $\ln p(\mathbf{X})$ (ou $\ln p(\mathbf{X}\mid\theta)$), igual à evidência sse $q$ = posterior exata | Aula 5 |
-| Decomposição $\ln p(\mathbf{X})=\mathcal{L}(q)+\mathrm{KL}(q\|p)$ | Identidade central da Aula 5 — Passo E do EM = minimizar o KL (maximizar $\mathcal{L}$) sobre $q$; Passo M = maximizar $\mathcal{L}$ sobre $\theta$ | Aula 5 |
+| Decomposição $\ln p(\mathbf{X})=\mathcal{L}(q)+\mathrm{KL}(q\|p(\mathbf{H}\mid\mathbf{X}))$ | Identidade central da Aula 5, para qualquer $\mathbf{H}$ e $q(\mathbf{H})$ normalizada | Aula 5 |
+| $q(\mathbf{Z},\theta)\approx q(\mathbf{Z})q(\theta)$ | Aproximação de campo médio (*mean field*) — fatoração usada para tornar o ELBO com $\theta$ dentro do tratamento variacional tratável | Aula 5 |
+| $\alpha_0$ | Parâmetro de concentração da priori de Dirichlet sobre os pesos de mistura $\pi$ num GMM Bayesiano — menor $\alpha_0$ favorece poda automática de componentes supérfluos | Aula 5 |
+| Inferência Bayesiana Variacional (*Variational Bayes*) | Procedimento que otimiza $q(\mathbf{Z})$ **e** $q(\theta)$ (com $\theta$ tendo uma priori $p(\theta)$) — diferente do EM clássico, que trata $\theta$ como ponto fixo, sem prior | Aula 5 |
+| $s(i)$ | Coeficiente de Silhueta de um ponto (Rousseeuw, 1987): $\frac{b(i)-a(i)}{\max\{a(i),b(i)\}}\in[-1,1]$, maior é melhor | Aula 5 |
+| $\mathrm{DB}$ | Índice de Davies-Bouldin (Davies & Bouldin, 1979): $\frac1K\sum_k\max_{j\ne k}R_{jk}$, $R_{jk}=\frac{\sigma_j+\sigma_k}{\|\mathbf{c}_j-\mathbf{c}_k\|}$; menor é melhor | Aula 5 |
+| PPC (*Posterior Predictive Check*) | Amostrar $\theta$ aprendido, gerar $\mathbf{X}_{\text{sim}}$ do modelo generativo, comparar contra $\mathbf{X}_{\text{real}}$ — único teste desta aula que compara **forma**, não só um número agregado (Gelman & Rubin, 1996) | Aula 5 |
 | $\mathbf{S}$ | Matriz de covariância amostral, $\frac1N\sum_n(\mathbf{x}_n-\bar{\mathbf{x}})(\mathbf{x}_n-\bar{\mathbf{x}})^T$ — simétrica e semidefinida positiva | Aula 6 |
 | $\mathbf{u}_i$, subespaço principal | Autovetores de $\mathbf{S}$ associados aos $M$ maiores autovalores; direções/base da PCA | Aula 6 |
 | $J$ | Distorção média de reconstrução da PCA, $\frac1N\sum_n\|\mathbf{x}_n-\tilde{\mathbf{x}}_n\|^2$ (mesma letra do $J$ de distorção do KMeans, Aula 4 — família de significado análoga, não coincidência de símbolo) | Aula 6 |
-| $\mathbf{z}\in\mathbb{R}^M$ | **Atenção — reuso de símbolo:** variável latente **contínua** da PPCA (Gaussiana, $\mathcal{N}(\mathbf{0},\mathbf{I})$); não confundir com $z_n$/$z_{nk}$ da Aula 4, que é a variável latente **categórica** (1-de-$K$) do GMM | Aula 6 |
-| $\mathbf{W}$, $\sigma^2$ | Parâmetros da PPCA: matriz de carregamento ($D\times M$) e variância do ruído isotrópico | Aula 6 |
+| $\mathbf{z}\in\mathbb{R}^M$ | **Atenção — reuso de símbolo:** variável latente **contínua** da PPCA (Gaussiana, $\mathcal{N}(\mathbf{0},\mathbf{I})$); não confundir com $z_n$/$z_{nk}$ da Aula 4, que é a variável latente **categórica** (1-de-$K$) do GMM, nem com o $\mathbf{H}$ genérico da Aula 5 | Aula 6 |
+| $\mathbf{W}$, $\sigma^2$ | Parâmetros da PPCA: matriz de carregamento ($D\times M$) e variância do ruído isotrópico — **não confundir** com o $\mathbf{H}$ genérico da Aula 5 (renomeado de propósito para não colidir com este $\mathbf{W}$) | Aula 6 |
 | $\mathbf{C}=\mathbf{WW}^T+\sigma^2\mathbf{I}$ | Covariância marginal de $\mathbf{x}$ no modelo PPCA | Aula 6 |
-| $M$ (dimensão latente/subespaço) | **Atenção — reuso de símbolo:** aqui é a dimensão do subespaço/variável latente contínua; na Aula 5, $M(K,d)$ denotava o número de parâmetros livres do GMM — contextos diferentes, mesma letra | Aula 6 |
+| $M$ (dimensão latente/subespaço) | Dimensão do subespaço/variável latente contínua da PPCA | Aula 6 |
 
 ## Aula 1 — Data Space, Parametric Generative Models, and Anomalies
 
@@ -941,108 +942,120 @@ created", sem erros. Contagem de glifos no `_site/`: `notas.html` — 48
 `type="checkbox"` em cada HTML é a regra CSS genérica do tema, não um
 checkbox real.
 
-## Aula 5 — Seleção de Modelos e Introdução à Inferência Variacional
+## Aula 5 — Seleção de Modelos, ELBO e Validação Empírica
 
-Construída sem aprovação por etapa (autorização explícita do usuário
-para esta rodada, junto com a Aula 6). Estratégia A (*Outside-In*): o
-"modelo mental catchy" errado — escolher $K$ maximizando a
-log-verossimilhança de treino — é desmontado antes da teoria formal
-(BIC, depois KL/ELBO).
+**Reescrita completa em 2026-09-16**, substituindo do zero a versão
+anterior (focada em BIC/aproximação de Laplace/prova de que o EM é
+subida de coordenadas no ELBO — ver git history para essa versão). A
+reescrita seguiu um roteiro de 5 blocos fornecido pelo usuário,
+mapeado para `_00-planejamento.md` (Etapa 2) e aprovado antes da
+montagem do `index.qmd`. Estratégia A (*Outside-In*): o eixo agora é um
+framework de **decisão prática** — como calibrar e validar a estrutura
+de um modelo não supervisionado sem rótulo de gabarito — não mais uma
+fundamentação matemática autocontida em torno do BIC.
 
-**Fontes** (todas com offset PDF confirmado nesta sessão, comparando o
-cabeçalho impresso de cada página; PRML símlink em `_fontes/prml.pdf`,
-offset **+20**):
+**Motivação da reescrita:** numa sessão anterior (documento
+`_nota-variacional-e-selecao-de-modelos.md`, também desta pasta),
+identificou-se e corrigiu-se um erro conceitual em uma explicação
+informal sobre ELBO e seleção de modelos — a confusão entre "o ELBO que
+o EM clássico calcula" (colapsa a $\ln p(\mathbf{X}\mid
+\theta_{\mathrm{ML}})$, sem penalidade de complexidade) e "o ELBO que
+de fato serve para seleção" (exige $\theta$ **dentro** do tratamento
+variacional, com uma priori de verdade — Inferência Bayesiana
+Variacional). Essa distinção corrigida virou o núcleo do Bloco 1 da
+aula reescrita.
 
-- PRML §4.4.1 "Model comparison and BIC", pp. 216–217 (PDF 236–237) —
-  aproximação de Laplace da evidência e BIC (eq. 4.135–4.139).
-- PRML §1.6.1 "Relative entropy and mutual information", pp. 55–56
-  (PDF 75–76) — definição da KL (eq. 1.113) e prova de não-negatividade
-  via Jensen (eq. 1.118).
-- PRML §9.4 "The EM Algorithm in General", pp. 450–452 (PDF 470–472) —
-  decomposição $\ln p(\mathbf{X}\mid\theta)=\mathcal{L}(q,\theta)+
-  \mathrm{KL}(q\|p)$ com $\theta$ como parâmetro; releitura do Passo
-  E/M da Aula 4 como subida de coordenadas (eq. 9.69–9.74).
-- PRML §10.1 "Variational Inference", pp. 462–463 (PDF 482–483) —
-  versão totalmente Bayesiana da mesma decomposição, com $\theta$
-  absorvido em $\mathbf{Z}$ (eq. 10.2–10.4), usada primeiro (antes da
-  especialização do §9.4).
+**Fontes:**
 
-**Dataset:** Breast Cancer Wisconsin
-(`scikit-learn/breast-cancer-wisconsin`), mesmos dois atributos
-(`radius_worst`, `concave points_worst`) das Aulas 3–4 — GMM ajustado
-para $K=1,\dots,10$, múltiplos reinícios por $K$, guardando o melhor.
+- PRML §1.6.1 "Relative entropy and mutual information" — definição da
+  KL e prova de não-negatividade via Jensen (reaproveitada, mais
+  enxuta, da versão anterior desta aula).
+- PRML §9.4 "The EM Algorithm in General" — decomposição com $\theta$
+  como parâmetro fixo (a especialização que devolve o EM clássico, sem
+  prior).
+- PRML §10.1–10.2 "Variational Inference" / GMM Variacional — base da
+  decomposição com $\theta$ dentro do tratamento variacional (campo
+  médio $q(\mathbf{Z},\theta)\approx q(\mathbf{Z})q(\theta)$) e da poda
+  automática de componentes via priori de Dirichlet.
+- Rousseeuw (1987) e Davies & Bouldin (1979) — Silhueta e Índice de
+  Davies-Bouldin; citados por nome/ano (fórmula reproduzida
+  diretamente), fora dos três livros-texto de `_fontes/`.
+- Gelman & Rubin (1996) — conceito de *Posterior Predictive Check*,
+  citado por nome/ano, explicado com palavras próprias (mesma
+  observação de "fora de `_fontes/`" acima).
 
-**Conteúdo:** Revisão/Introdução (recapitulação formal do GMM/EM da
-Aula 4, retomando literalmente o gancho de fechamento — "$K=10$ vs.
-$K=2$") → Intuição (prévia de duas curvas: log-verossimilhança sempre
-sobe, BIC pico em $K=2$) → Por Que a Verossimilhança Pura Falha
-(Proposição de monotonicidade fraca, demonstrada; segunda perna:
-divergência/singularidade) → A Evidência do Modelo e o BIC (Definição
-formal, aproximação de Laplace passo a passo, Teorema do BIC, aplicação
-ao GMM com contagem de parâmetros $M(K,d)=Kd+Kd(d+1)/2+(K-1)$) → KL e a
-Decomposição Geral (Definição formal da KL, Teorema de Gibbs
-demonstrado via Jensen, decomposição $\ln p(\mathbf{X})=\mathcal{L}(q)+
-\mathrm{KL}(q\|p)$ demonstrada, ELBO como cota inferior, verificação
-numérica reaproveitando o GMM $K=2$ da Aula 4) → O EM da Aula 4 é
-Subida de Coordenadas no ELBO (especialização com $\theta$ como
-parâmetro; Passo E = maximizar $\mathcal{L}$ sobre $q$; Passo M =
-maximizar $\mathcal{L}$ sobre $\theta$; Teorema "o EM nunca piora",
-demonstrado — resultado que a Aula 4 só tinha *afirmado*) → Síntese,
-Fechamento e Ponte para a Aula 6.
+**Dataset:** Breast Cancer Wisconsin (`radius_worst`/`concave
+points_worst`, mesmo par das Aulas 3–4) continua como problema-fio em
+todos os blocos, com divisão treino ($N=398$)/validação ($N=171$,
+$30\%$, `random_state=42`) introduzida nos Blocos 3–4. Contraexemplo
+sintético deliberado (duas "luas", `make_moons`) usado só no Bloco 5,
+para isolar a limitação de métricas agregadas de forma — não substitui
+o dataset real como fio condutor.
 
-**Números centrais, verificados por script Python independente antes
-de escrever a aula** (`verify_bic.py`, `verify_elbo.py`, reproduzidos
-depois no próprio código do `.qmd`, mesma metodologia — 5 reinícios por
-$K$, guardando o melhor): log-verossimilhança de treino estritamente
-não-decrescente em $K=1,\dots,10$ ($-1339{,}45\to-1169{,}66$); BIC
-(convenção PRML, maximizar) com pico em $K=2$ ($-1238{,}98$), caindo
-monotonicamente depois, mesmo com a log-verossimilhança ainda subindo.
-Exemplo do ELBO: com $q=$ responsabilidade verdadeira,
-$\mathcal{L}(q)=\ln p(\mathbf{X}\mid\theta)=-1204{,}09$ exatamente
-(diferença $2{,}3\times10^{-13}$, ponto flutuante); com $q$ uniforme,
-*gap* $=1270{,}58$ nats, batendo exatamente com $\mathrm{KL}$ calculado
-à parte; com $q$ de $\theta$ "errado", *gap* $=2440{,}45$ nats, de novo
-batendo exatamente.
+**Conteúdo (8 blocos):** Revisão/Introdução (EM/GMM da Aula 4 sem
+priori sobre $\theta$; reencena o teste "$K$ sempre sobe") → Intuição
+(duas formas de pagar por complexidade: analítica vs. empírica) → Do EM
+ao ELBO (KL/decomposição geral com $\mathbf{H}$ genérico; EM clássico =
+$\mathbf{H}=\mathbf{Z}$, $\theta$ fixo, sem penalidade; alternativa =
+$\mathbf{H}=(\mathbf{Z},\theta)$, campo médio, priori de verdade,
+Navalha de Occam; demonstração de poda automática via
+`BayesianGaussianMixture`) → O Dilema dos Hiperparâmetros ($\alpha_0$
+vs. $K$ do K-Means vs. $\epsilon$/`min_samples` do DBSCAN, com diagrama
+TikZ) → Validação Empírica em Clusterização Dura (Silhueta,
+Davies-Bouldin, treino/validação) → Validação por Verossimilhança
+(log-verossimilhança treino vs. validação, diagnóstico de sobreajuste,
+mesma receita aplicada a comparar $\alpha_0$) → A Prova Final: PPC
+(dados sintéticos vs. reais, contraexemplo das luas) → Síntese,
+Fechamento e Ponte para a Aula 6 (mantida — mudança de eixo categórico
+→ contínuo, ELBO volta na Aula 7/VAE).
 
-**Pausas ativas:** 5 (verossimilhança de treino e complexidade;
-restringir a covariância eliminaria a divergência?; premissas do BIC e
-casos-limite; se KL pudesse ser negativa; o Passo E sempre fecha o KL —
-garante o máximo global?).
+**Números centrais** (computados por script Python independente antes
+da montagem, reproduzidos no `.qmd`): log-verossimilhança de treino
+(todos os dados) de $-1339{,}45$ ($K=1$) a $-1169{,}66$ ($K=10$),
+monotônica. GMM Bayesiano ($K=8$ "de sobra"): $\alpha_0=0{,}001\to$
+pesos $(0{,}6045,0{,}3955,0,\dots)$, 2 componentes; $\alpha_0=100\to4$
+componentes com peso $>1\%$. Silhueta/Davies-Bouldin na validação
+(K-Means): ambas ótimas em $K=2$ ($0{,}593$ / $0{,}590$). GMM treinado
+só no treino: log-verossimilhança de validação máxima em $K=2$
+($-361{,}95$), caindo depois — descolada da curva de treino
+(monotônica). ELBO em validação por $\alpha_0$: $-366{,}57$
+($\alpha_0=0{,}001$) vs. $-404{,}82$ ($\alpha_0=100$) — priori
+concentrada generaliza melhor. PPC no problema-fio: médias/desvios
+sintéticos batendo com os reais; PPC nas luas: GMM elíptico
+($K=2$, log-verossimilhança $-684{,}75$) gera sintéticos que
+extrapolam o arco real e preenchem a região côncava entre as luas.
 
-**Exercícios:** 3 discursivas + 7 blocos de V/F de 4 itens (28 itens),
-cobrindo: verossimilhança de treino e complexidade; evidência e
-aproximação de Laplace; BIC aplicado a modelos de mistura; divergência
-KL (definição e propriedades); a decomposição $\mathcal{L}+\mathrm{KL}$;
-o EM como subida de coordenadas; síntese/limitações e ponte para a
-Aula 6. Densidade de V/F um pouco menor que a Aula 4 (28 vs. 28 —
-mesma, na verdade, mas menos blocos numérico-aplicados e mais teoria
-unificadora), calibrada conforme a orientação do `CLAUDE.md` de não
-esticar por cota.
+**Pausas ativas:** 5, reescritas do zero (verossimilhança de treino e
+singularidade; priori sobre $\mathbf{Z}$ vs. sobre $\theta$; métricas
+de treino vs. validação em clusterização dura; o que o descolamento
+treino/validação prova e o que não prova; por que boas métricas
+agregadas não garantem forma correta) — discussão em prosa movida para
+`_01-respostas.md` (reescrito).
 
-**Dois diagramas TikZ**: decomposição da evidência (barra única
-dividida em $\mathcal{L}(q)$/$\mathrm{KL}(q\|p)$, coordenadas
-absolutas); Passo E fechando o KL (dois painéis lado a lado, antes/depois,
-mesma convenção). Ambos com margens generosas, sem rótulo tocando borda
-— confirmado por inspeção visual do SVG renderizado.
+**Exercícios:** reescritos do zero — 3 discursivas + 8 blocos de V/F de
+4 itens (32 itens), cobrindo os 8 blocos de conteúdo da aula.
 
-**Validação.** Checador de balanceamento de `:::` (regra LIFO): zero
-unclosed antes do render. `uv run python3 preview-watch.py
---incremental`: render incremental concluído pelo serviço, sem erro.
-Contagem de glifos no `_site/`: `notas.html` — 5 `<img>` (3 figuras
-matplotlib + 2 diagramas TikZ), 48 `□` (28 exercícios + 20 pausas), 0
-`✔`/`✗`; único `type="checkbox"` é a regra CSS genérica do tema
-(confirmado, não é um `<input>` real). `slides.html` — 20 `□`
-(pausas pré-resolução) + 20 `✔`/`✗` (resolvidas). Inspeção visual (via
-`rsvg-convert` dos SVGs renderizados) de todas as 5 figuras: 3 gráficos
-matplotlib conferidos número a número contra o script de verificação
-independente (sem `\mathbb`/`\le`/`\ge` em título/eixo, só texto
-plano/unicode); 2 diagramas TikZ sem sobreposição de texto, margens
-generosas.
+**Correção de notação:** a decomposição geral usa $\mathbf{H}$ (não
+$\mathbf{Z}$ nem $\mathbf{W}$) para a variável não observada genérica —
+$\mathbf{Z}$ ficaria ambíguo com a variável latente categórica
+específica do GMM, e $\mathbf{W}$ colidiria com a matriz de carregamento
+da PPCA (Aula 6). Ver dicionário de notações no topo deste arquivo.
 
-**Pendência para a Aula 6:** nenhuma pendência de conteúdo desta aula
-fica em aberto para a Aula 6 além da mudança de eixo já anunciada na
-Ponte (variável latente categórica → contínua). O ELBO volta a aparecer
-centralmente só na Aula 7 (VAE).
+**Validação.** Balanceamento de `:::` (regra LIFO): zero unclosed em
+`index.qmd`/`exercicios.qmd`/`soluções.qmd`. Grep por `- [ ]`, `- [x]`,
+`☐`, `☒`: zero ocorrências. `uv run quarto render` de cada um dos três
+arquivos, individualmente (evitando o bug de multi-arquivo do
+`preview-watch.py` corrigido em sessão anterior): sem erros, sem
+`NotFound`/`Traceback`/`SyntaxError` no HTML renderizado. Contagem de
+blocos: 8 `## Teste N` em `exercicios.qmd`, 8 pares
+pergunta/resposta em `soluções.qmd` — correspondência 1 a 1 confirmada.
+
+**Pendência para a Aula 6:** nenhuma pendência de conteúdo específica
+desta reescrita além da mudança de eixo já anunciada na Ponte (variável
+latente categórica → contínua). A Aula 6 (já escrita antes desta
+reescrita, ver seção abaixo) não depende de nenhum resultado específico
+do BIC que foi removido — só do ELBO/decomposição geral, que
+permanece.
 
 ## Aula 6 — O Mundo Linear: PCA, PPCA e Autoencoders Lineares
 

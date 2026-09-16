@@ -1,0 +1,1550 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head>
+<link href="../../../more.png" rel="icon" type="image/png">
+<script src="../../../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../../../site_libs/quarto-html/tabby.min.js"></script>
+<script src="../../../site_libs/quarto-html/popper.min.js"></script>
+<script src="../../../site_libs/quarto-html/tippy.umd.min.js"></script>
+<link href="../../../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../../../site_libs/quarto-html/light-border.css" rel="stylesheet">
+<link href="../../../site_libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles"><meta charset="utf-8">
+  <meta name="generator" content="quarto-1.9.37">
+
+  <meta name="author" content="Marcos M. Raimundo — Instituto de Computação, UNICAMP">
+  <meta name="dcterms.date" content="2026-09-16">
+  <title>Marcos M. Raimundo – Aula 5: Seleção de Modelos, ELBO e Validação Empírica</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, minimal-ui">
+  <link rel="stylesheet" href="../../../site_libs/revealjs/dist/reset.css">
+  <link rel="stylesheet" href="../../../site_libs/revealjs/dist/reveal.css">
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+      vertical-align: middle;
+    }
+  </style>
+  <link rel="stylesheet" href="../../../site_libs/revealjs/dist/theme/quarto-9af0d15343d0ec36e497a4ab60ddbc72.css">
+  <link href="../../../site_libs/revealjs/plugin/quarto-line-highlight/line-highlight.css" rel="stylesheet">
+  <link href="../../../site_libs/revealjs/plugin/reveal-menu/menu.css" rel="stylesheet">
+  <link href="../../../site_libs/revealjs/plugin/reveal-menu/quarto-menu.css" rel="stylesheet">
+  <link href="../../../site_libs/revealjs/plugin/reveal-chalkboard/font-awesome/css/all.css" rel="stylesheet">
+  <link href="../../../site_libs/revealjs/plugin/reveal-chalkboard/style.css" rel="stylesheet">
+  <link href="../../../site_libs/revealjs/plugin/quarto-support/footer.css" rel="stylesheet">
+  <style type="text/css">
+    .reveal div.sourceCode {
+      margin: 0;
+      overflow: auto;
+    }
+    .reveal div.hanging-indent {
+      margin-left: 1em;
+      text-indent: -1em;
+    }
+    .reveal .slide:not(.center) {
+      height: 100%;
+      overflow-y: auto;
+    }
+    .reveal .slide.scrollable {
+      overflow-y: auto;
+    }
+    .reveal .footnotes {
+      height: 100%;
+      overflow-y: auto;
+    }
+    .reveal .slide .absolute {
+      position: absolute;
+      display: block;
+    }
+    .reveal .footnotes ol {
+      counter-reset: ol;
+      list-style-type: none; 
+      margin-left: 0;
+    }
+    .reveal .footnotes ol li:before {
+      counter-increment: ol;
+      content: counter(ol) ". "; 
+    }
+    .reveal .footnotes ol li > p:first-child {
+      display: inline-block;
+    }
+    .reveal .slide ul,
+    .reveal .slide ol {
+      margin-bottom: 0.5em;
+    }
+    .reveal .slide ul li,
+    .reveal .slide ol li {
+      margin-top: 0.4em;
+      margin-bottom: 0.2em;
+    }
+    .reveal .slide ul[role="tablist"] li {
+      margin-bottom: 0;
+    }
+    .reveal .slide ul li > *:first-child,
+    .reveal .slide ol li > *:first-child {
+      margin-block-start: 0;
+    }
+    .reveal .slide ul li > *:last-child,
+    .reveal .slide ol li > *:last-child {
+      margin-block-end: 0;
+    }
+    .reveal .slide .columns:nth-child(3) {
+      margin-block-start: 0.8em;
+    }
+    .reveal blockquote {
+      box-shadow: none;
+    }
+    .reveal .tippy-content>* {
+      margin-top: 0.2em;
+      margin-bottom: 0.7em;
+    }
+    .reveal .tippy-content>*:last-child {
+      margin-bottom: 0.2em;
+    }
+    .reveal .slide > img.stretch.quarto-figure-center,
+    .reveal .slide > img.r-stretch.quarto-figure-center {
+      display: block;
+      margin-left: auto;
+      margin-right: auto; 
+    }
+    .reveal .slide > img.stretch.quarto-figure-left,
+    .reveal .slide > img.r-stretch.quarto-figure-left  {
+      display: block;
+      margin-left: 0;
+      margin-right: auto; 
+    }
+    .reveal .slide > img.stretch.quarto-figure-right,
+    .reveal .slide > img.r-stretch.quarto-figure-right  {
+      display: block;
+      margin-left: auto;
+      margin-right: 0; 
+    }
+  </style>
+  <!-- O tema "simple" do RevealJS não carrega bootstrap-icons.css sozinho
+       (isso só acontece no formato HTML, via bootstrap) — sem este link, um
+       ícone `<i class="bi bi-...">` usado em qualquer include do RevealJS
+       (ex.: ../../logos-footer.html) fica invisível nos slides. Caminho
+       relativo à página de SAÍDA (aulaNN/slides.html), não a este arquivo:
+       site_libs/ mora na raiz do site, três níveis acima de aulaNN/. -->
+  <link href="../../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+</head>
+<body class="quarto-light">
+  <div class="reveal">
+    <div class="slides">
+
+<section id="title-slide" data-background-image="../../UNICAMP.png, ../../IC.png" data-background-position="5% 8%, 95% 8%" data-background-size="140px, 140px" class="quarto-title-block center">
+  <h1 class="title">Aula 5: Seleção de Modelos, ELBO e Validação Empírica</h1>
+  <p class="subtitle">Aprendizado Não Supervisionado</p>
+
+<div class="quarto-title-authors">
+<div class="quarto-title-author">
+<div class="quarto-title-author-name">
+Marcos M. Raimundo — Instituto de Computação, UNICAMP 
+</div>
+</div>
+</div>
+
+  <p class="date">2026-09-16</p>
+</section>
+<section>
+<section id="revisão-e-introdução" class="title-slide slide level1 center">
+<h1>Revisão e Introdução</h1>
+
+</section>
+<section id="da-aula-4-o-que-já-temos" class="slide level2">
+<h2>Da Aula 4: O Que Já Temos</h2>
+<div class="fragment">
+<p>GMM: variável latente <span class="math inline">\(z_n\)</span> (1-de-<span class="math inline">\(K\)</span>, prior <span class="math inline">\(\pi_k\)</span>); responsabilidade <span class="math inline">\(\gamma(z_{nk})=p(z_{nk}=1\mid\mathbf{x}_n)\)</span> via Bayes; <strong>EM</strong> alterna Passo E (recalcula <span class="math inline">\(\gamma\)</span>) e Passo M (reestima <span class="math inline">\(\mu_k,\Sigma_k,\pi_k\)</span> por MLE ponderada), sem solução fechada.</p>
+</div>
+<div class="fragment">
+<div class="callout callout-important callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Importante</strong></p>
+</div>
+<div class="callout-content">
+<p>Em nenhum momento o EM da Aula 4 usa uma <strong>priori</strong> sobre <span class="math inline">\(\theta=\{\mu_k,\Sigma_k,\pi_k\}\)</span> — busca direto <span class="math inline">\(\theta_{\mathrm{ML}}\)</span>, com <span class="math inline">\(K\)</span> fixo. Essa ausência é a raiz do problema desta aula.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="fragment">
+<div class="callout callout-note callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Nota</strong></p>
+</div>
+<div class="callout-content">
+<p>No Breast Cancer Wisconsin (<code>radius_worst</code>/<code>concave points_worst</code>, sem rótulo), o GMM com <span class="math inline">\(K=2\)</span> mapeou quase perfeitamente para benigno/maligno — mas <span class="math inline">\(K=2\)</span> foi <strong>fixado a priori</strong>, nunca escolhido pelos dados.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="ideia-central-1" class="slide level2">
+<h2>Ideia Central</h2>
+<div class="fragment">
+<p>Pergunta nova: não “como ajustar <span class="math inline">\(\theta\)</span>” (resolvida), mas “como saber se a <strong>estrutura</strong> do modelo — <span class="math inline">\(K\)</span>, ou qualquer hiperparâmetro que defina sua forma — é boa, sem rótulo de gabarito?”</p>
+</div>
+<div class="fragment">
+<p>Verossimilhança de treino mede só <strong>ajuste</strong>. Plausibilidade do modelo como um todo exige uma penalidade — de uma priori sobre os parâmetros, ou de dados nunca vistos no ajuste.</p>
+</div>
+</section>
+<section id="roteiro-da-aula-1" class="slide level2">
+<h2>Roteiro da Aula</h2>
+<div class="fragment">
+<p><strong>1.</strong> Uma priori sobre os parâmetros resolve o problema de <span class="math inline">\(K\)</span> sempre crescer? Que objeto matemático ela produz?</p>
+</div>
+<div class="fragment">
+<p><strong>2.</strong> Trocar <span class="math inline">\(K\)</span> por hiperparâmetros de priori elimina a subjetividade, ou só a desloca?</p>
+</div>
+<div class="fragment">
+<p><strong>3.</strong> Sem rótulo, como validar clusterização <strong>dura</strong> (K-Means, DBSCAN)?</p>
+</div>
+<div class="fragment">
+<p><strong>4.</strong> Para modelos probabilísticos, existe algo mais direto — e um teste ainda mais definitivo que qualquer número único?</p>
+</div>
+</section>
+<section id="problema-motivador-1" class="slide level2">
+<h2>Problema Motivador</h2>
+<div class="fragment">
+<p>Reencenando o teste que fechou a Aula 4: GMM para <span class="math inline">\(K=1,\dots,10\)</span>, todos os dados, sem separar validação — de propósito, é isso que vamos questionar.</p>
+</div>
+<div class="fig-resize" style="width: 78%; margin: 0 auto;">
+<div id="23ddf244" class="cell" data-execution_count="2">
+<div class="cell-output cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure>
+<p><img data-src="index_files/figure-revealjs/cell-3-output-1.svg" class="img-fluid quarto-figure quarto-figure-center"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="o-resultado-do-teste" class="slide level2">
+<h2>O Resultado do Teste</h2>
+<div class="fragment">
+<p>Mesmo resultado da Aula 4: log-verossimilhança de treino <strong>nunca cai</strong>, de <span class="math inline">\(-1339{,}45\)</span> (<span class="math inline">\(K=1\)</span>) a <span class="math inline">\(-1169{,}66\)</span> (<span class="math inline">\(K=10\)</span>).</p>
+</div>
+<div class="fragment">
+<div class="callout callout-important callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Importante</strong></p>
+</div>
+<div class="callout-content">
+<p>Se o critério fosse “maximizar log-verossimilhança usando todos os dados”, a resposta seria sempre “use o maior <span class="math inline">\(K\)</span> possível”.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="fragment">
+<p>Duas soluções complementares: <strong>analítica</strong> (priori, Bloco 1) e <strong>empírica</strong> (nunca julgar pelos dados já vistos, Blocos 3–5).</p>
+</div>
+</section>
+<section id="pergunta" class="slide level2">
+<h2>Pergunta</h2>
+<div class="callout callout-tip callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Se um componente do GMM pode encolher sua covariância sobre um único ponto de treino, o que isso já revela sobre usar a log-verossimilhança de treino para escolher K?</strong></p>
+</div>
+<div class="callout-content">
+<p>Pense no que acontece com a densidade <span class="math inline">\(\mathcal{N}(\mathbf{x}\mid\mu_k,
+\Sigma_k)\)</span> quando <span class="math inline">\(\mu_k\)</span> se aproxima de um ponto de treino específico e <span class="math inline">\(\Sigma_k\to\mathbf{0}\)</span>.</p>
+<ul>
+<li>□ Um componente pode encolher sua covariância sobre um único ponto de treino, levando a densidade naquele ponto (e a log-verossimilhança total) a divergir — logo o “melhor” <span class="math inline">\(\theta\)</span> para <span class="math inline">\(K\)</span> grande pode nem ser um ponto interessante, só um artefato numérico.</li>
+<li>□ Se, em vez de comparar <span class="math inline">\(K\)</span> por log-verossimilhança de treino, comparássemos por log-verossimilhança medida num conjunto de validação nunca usado no ajuste, mais componentes deixaria de garantir uma melhora monotônica.</li>
+<li>□ Como a log-verossimilhança de treino nunca piora ao acrescentar componentes, um GMM com <span class="math inline">\(K=10\)</span> sempre generaliza melhor que um com <span class="math inline">\(K=2\)</span> no Breast Cancer Wisconsin.</li>
+<li>□ O mesmo fenômeno — erro de treino não-crescente conforme a complexidade do modelo aumenta — aparece em árvores de decisão sem profundidade máxima, cujo erro de treino pode chegar a zero.</li>
+</ul>
+</div>
+</div>
+</div>
+</section>
+<section id="resposta" class="slide level2">
+<h2>Resposta</h2>
+<div class="callout callout-tip callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Resposta — verossimilhança de treino e complexidade</strong></p>
+</div>
+<div class="callout-content">
+<ul>
+<li>✔ A singularidade do Passo M (já anunciada na Aula 4): densidade divergente em torno de um único ponto infla a log-verossimilhança sem significado estatístico algum.</li>
+<li>✔ Log-verossimilhança de <strong>validação</strong> não tem por que crescer com <span class="math inline">\(K\)</span> — um modelo que se ajusta demais ao ruído do treino tende a explicar pior dados novos.</li>
+<li>✗ “Nunca piora no treino” é sobre <strong>ajuste</strong>, não sobre <strong>generalização</strong> — confundir as duas é o erro estrutural que motiva toda esta aula.</li>
+<li>✔ Árvores sem profundidade máxima podem isolar cada ponto de treino num nó-folha próprio, levando o erro de treino a zero — o mesmo padrão “mais complexidade, melhor ajuste ao treino, sem garantia nenhuma de generalização”.</li>
+</ul>
+</div>
+</div>
+</div>
+<div class="fragment">
+<p><strong>Voltando à pergunta:</strong> sim — o próprio mecanismo que permite <span class="math inline">\(K\)</span> grande “vencer” no treino (colapso de covariância) já é um sintoma de que o critério está quebrado. Precisamos de uma penalidade — analítica ou empírica.</p>
+</div>
+</section></section>
+<section>
+<section id="intuição-duas-formas-de-pagar-por-complexidade" class="title-slide slide level1 center">
+<h1>Intuição — Duas Formas de Pagar por Complexidade</h1>
+
+</section>
+<section id="duas-formas-de-pagar-por-complexidade" class="slide level2">
+<h2>Duas Formas de Pagar por Complexidade</h2>
+<div class="fragment">
+<p>Toda liberdade extra de um modelo precisa ser <strong>paga</strong>, ou ele sempre vai preferir usá-la — mesmo só para decorar ruído.</p>
+</div>
+<div class="fragment">
+<p><strong>1. Analiticamente, com uma priori <span class="math inline">\(p(\theta)\)</span>:</strong> mais complexidade só compensa se o ganho de ajuste superar a distância (KL) até a crença prévia.</p>
+</div>
+<div class="fragment">
+<p><strong>2. Empiricamente, com dados nunca vistos:</strong> guardar uma fatia de validação — um modelo que só decorou o treino aparece pior ali, sem precisar calcular penalidade nenhuma.</p>
+</div>
+<div class="fragment">
+<div class="callout callout-note callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Nota</strong></p>
+</div>
+<div class="callout-content">
+<p>Via 1 (Bloco 1) resolve <span class="math inline">\(K\)</span> do GMM, mas cria um problema do mesmo tipo (Bloco 2). Via 2 (Blocos 3–5) nunca desaparece — e é a única disponível para modelos sem verossimilhança fechada (K-Means, DBSCAN).</p>
+</div>
+</div>
+</div>
+</div>
+</section></section>
+<section>
+<section id="do-em-ao-elbo-injetando-uma-priori" class="title-slide slide level1 center">
+<h1>Do EM ao ELBO: Injetando uma Priori</h1>
+
+</section>
+<section id="kl-e-a-decomposição-geral" class="slide level2">
+<h2>KL e a Decomposição Geral</h2>
+<div class="fragment">
+<p><strong>Definição:</strong> <span class="math inline">\(\mathrm{KL}(q\|p)=-\int q(\mathbf{H})\ln\{p(\mathbf{H})/q(\mathbf{H})\}\,\mathrm{d}\mathbf{H}\)</span> — <span class="math inline">\(\mathbf{H}\)</span> = qualquer variável não observada (latente, parâmetro, ou os dois). Não simétrica.</p>
+</div>
+<div class="fragment">
+<div class="callout callout-note callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Nota</strong></p>
+</div>
+<div class="callout-content">
+<p><span class="math inline">\(\int q(\mathbf{H})f(\mathbf{H})\,\mathrm{d}\mathbf{H} =
+\mathbb{E}_q[f(\mathbf{H})]\)</span> (esperança de <span class="math inline">\(f\)</span> sob <span class="math inline">\(q\)</span>), para qualquer <span class="math inline">\(f\)</span>. Logo, a mesma KL, em notação compacta: <span class="math display">\[
+\mathrm{KL}(q\|p) = \mathbb{E}_q\!\left[\ln\frac{q(\mathbf{H})}{p(\mathbf{H})}\right]
+\]</span> — não é objeto novo, só a notação usada daqui em diante.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="fragment">
+<div class="callout callout-note no-icon callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<p><strong>Nota</strong></p>
+</div>
+<div class="callout-content">
+<p><strong>Teorema (Gibbs):</strong> <span class="math inline">\(\mathrm{KL}(q\|p)\ge0\)</span>, igualdade sse <span class="math inline">\(q=p\)</span>.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="fragment">
+<p><em>Prova.</em> <span class="math inline">\(-\ln(\cdot)\)</span> convexa <span class="math inline">\(\Rightarrow\)</span> Jensen: <span class="math inline">\(-\ln\mathbb{E}_q[X]\le\mathbb{E}_q[-\ln X]\)</span>. Com <span class="math inline">\(X=p(\mathbf{H})/q(\mathbf{H})\)</span>: <span class="math inline">\(\mathrm{KL}(q\|p)\ge-\ln\int p(\mathbf{H})\,\mathrm{d}\mathbf{H}=0\)</span>. Igualdade sse <span class="math inline">\(p=q\)</span>. <span class="math inline">\(\blacksquare\)</span></p>
+</div>
+<div class="fragment">
+<div class="callout callout-note no-icon callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<p><strong>Nota</strong></p>
+</div>
+<div class="callout-content">
+<p><strong>Teorema (decomposição, PRML eq. 10.2):</strong> para qualquer <span class="math inline">\(q(\mathbf{H})\)</span> normalizada, <span class="math display">\[
+\ln p(\mathbf{X}) = \mathcal{L}(q) + \mathrm{KL}(q\|p(\mathbf{H}\mid\mathbf{X})) \;\Rightarrow\; \mathcal{L}(q)\le\ln p(\mathbf{X}).
+\]</span></p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="onde-mathbfh-entra-o-em-clássico" class="slide level2">
+<h2>Onde <span class="math inline">\(\mathbf{H}\)</span> Entra: o EM Clássico</h2>
+<div class="fragment">
+<p>EM da Aula 4: <span class="math inline">\(\mathbf{H}=\mathbf{Z}\)</span> só, <span class="math inline">\(\theta\)</span> <strong>fora</strong>, fixo — nunca integrado, nunca penalizado. Isso troca o alvo: não mais <span class="math inline">\(\ln p(\mathbf{X})\)</span>, e sim <span class="math inline">\(\ln p(\mathbf{X}\mid\theta)\)</span> — precisa repetir a conta, condicionando em <span class="math inline">\(\theta\)</span> do início ao fim.</p>
+</div>
+<div class="fragment">
+<p><span class="math inline">\(\mathcal{L}(q,\theta):=\int q(\mathbf{Z})\ln\{p(\mathbf{X},\mathbf{Z}
+\mid\theta)/q(\mathbf{Z})\}\,\mathrm{d}\mathbf{Z}\)</span>. Regra do produto (condicionada): <span class="math inline">\(p(\mathbf{X},\mathbf{Z}\mid\theta)=p(\mathbf{Z}\mid
+\mathbf{X},\theta)p(\mathbf{X}\mid\theta)\)</span> <span class="math inline">\(\Rightarrow\)</span> mesma separação de antes, com <span class="math inline">\(\theta\)</span> em toda parte: <span class="math display">\[
+\ln p(\mathbf{X}\mid\theta) = \mathcal{L}(q,\theta) + \mathrm{KL}(q(\mathbf{Z})\|p(\mathbf{Z}\mid\mathbf{X},\theta))
+\]</span></p>
+</div>
+<div class="fragment">
+<div class="callout callout-important callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Importante</strong></p>
+</div>
+<div class="callout-content">
+<p>No ótimo: <span class="math inline">\(\mathcal{L}(q^\star,\theta_{\mathrm{ML}})=
+\ln p(\mathbf{X}\mid\theta_{\mathrm{ML}})\)</span> — verossimilhança <strong>no melhor ponto</strong>, sem penalidade nenhuma de complexidade.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="a-alternativa-só-pi-dentro-com-priori" class="slide level2">
+<h2>A Alternativa: Só <span class="math inline">\(\pi\)</span> Dentro, com Priori</h2>
+<div class="fragment">
+<p>Não precisa tornar <strong>todo</strong> <span class="math inline">\(\theta=\{\mu_k,\Sigma_k,\pi\}\)</span> aleatório — <span class="math inline">\(K\)</span> crescer sem limite vem só de como <span class="math inline">\(\pi\)</span> se distribui (<span class="math inline">\(\pi_k\approx
+0\)</span> = componente morto). <span class="math inline">\(\mu_k,\Sigma_k\)</span> ficam fixos, como no EM clássico; abrevie <span class="math inline">\(\phi:=\{\mu_k,\Sigma_k\}\)</span>.</p>
+</div>
+<div class="fragment">
+<p><span class="math inline">\(\mathbf{H}=(\mathbf{Z},\pi)\)</span>, campo médio <span class="math inline">\(q(\mathbf{Z},\pi)\approx q(\mathbf{Z})q(\pi)\)</span> (PRML §10.1): <span class="math display">\[
+\mathcal{L}(q,\phi) = \iint q(\mathbf{Z})q(\pi)\ln\frac{p(\mathbf{X},\mathbf{Z},\pi\mid\phi)}{q(\mathbf{Z})q(\pi)}\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi
+\]</span></p>
+</div>
+</section>
+<section id="passo-a-passo-da-simplificação" class="slide level2">
+<h2>Passo a Passo da Simplificação</h2>
+<div class="fragment">
+<p><strong>Passo 1:</strong> dado <span class="math inline">\(\mathbf{Z}\)</span> e <span class="math inline">\(\phi\)</span>, <span class="math inline">\(\mathbf{X}\)</span> não depende mais de <span class="math inline">\(\pi\)</span> (<span class="math inline">\(\pi\)</span> só decide <strong>qual</strong> componente, não a forma dele) — <span class="math inline">\(p(\mathbf{X}\mid\mathbf{Z},\pi,\phi)=p(\mathbf{X}\mid\mathbf{Z},\phi)\)</span>. Produto: <span class="math inline">\(p(\mathbf{X},\mathbf{Z},\pi\mid\phi)=p(\mathbf{X}\mid
+\mathbf{Z},\phi)\,p(\mathbf{Z},\pi\mid\phi)\)</span>.</p>
+</div>
+<div class="fragment">
+<p><strong>Passos 2-3:</strong> substitui no log, separa a integral dupla em dois termos — mesma mecânica de antes, agora com <span class="math inline">\(\pi\)</span> e <span class="math inline">\(\phi\)</span> no lugar de <span class="math inline">\(\theta\)</span>.</p>
+</div>
+<div class="fragment">
+<p><strong>Passo 4:</strong> o termo de ajuste não depende de <span class="math inline">\(\pi\)</span> <span class="math inline">\(\Rightarrow\int q(\pi)\,\mathrm{d}\pi=1\)</span> elimina <span class="math inline">\(\pi\)</span> dele: <span class="math display">\[
+\iint q(\mathbf{Z})q(\pi)\ln p(\mathbf{X}\mid\mathbf{Z},\phi)\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi
+= \mathbb{E}_{q(\mathbf{Z})}[\ln p(\mathbf{X}\mid\mathbf{Z},\phi)]
+\]</span> Ganho concreto de isolar só <span class="math inline">\(\pi\)</span>: esperança só sobre <span class="math inline">\(\mathbf{Z}\)</span>.</p>
+</div>
+<div class="fragment">
+<p><strong>Passo 5:</strong> segundo termo = <span class="math inline">\(\mathrm{KL}(q(\mathbf{Z},\pi)\|p(\mathbf{Z},\pi\mid\phi))\)</span> (mesma definição de esperança de KL). Logo: <span class="math display">\[
+\mathcal{L}(q,\phi) = \underbrace{\mathbb{E}_{q(\mathbf{Z})}[\ln p(\mathbf{X}\mid\mathbf{Z},\phi)]}_{\text{ajuste}}
+- \underbrace{\mathrm{KL}(q(\mathbf{Z},\pi)\|p(\mathbf{Z},\pi\mid\phi))}_{\text{Navalha de Occam}}
+\]</span></p>
+</div>
+<div class="fragment">
+<div class="callout callout-note callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Nota</strong></p>
+</div>
+<div class="callout-content">
+<p><span class="math inline">\(\mu_k,\Sigma_k\)</span> continuam fixos, sem priori — toda a penalidade vem de <span class="math inline">\(\pi\)</span>. <strong>Variational Bayes</strong> (restrito a <span class="math inline">\(\pi\)</span>): procedimento diferente do EM (otimiza <span class="math inline">\(q(\mathbf{Z})\)</span> e <span class="math inline">\(q(\pi)\)</span>, não <span class="math inline">\(q(\mathbf{Z})\)</span> e um ponto <span class="math inline">\(\pi\)</span>).</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="verificação-poda-automática-de-componentes" class="slide level2">
+<h2>Verificação: Poda Automática de Componentes</h2>
+<div class="fragment">
+<p>GMM Bayesiano: priori de Dirichlet em <span class="math inline">\(\pi\)</span>, concentração <span class="math inline">\(\alpha_0\)</span> — menor <span class="math inline">\(\alpha_0\)</span> = crê a priori em menos componentes ativos. <span class="math inline">\(K=8\)</span> “de sobra”, Breast Cancer Wisconsin, três valores de <span class="math inline">\(\alpha_0\)</span>:</p>
+</div>
+<div class="fragment">
+<div class="callout callout-important callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Importante</strong></p>
+</div>
+<div class="callout-content">
+<p><code>BayesianGaussianMixture</code> (scikit-learn) vai além do que derivamos: também trata <span class="math inline">\(\mu_k,\Sigma_k\)</span> variacionalmente (prioris Normal-Wishart) — não desenvolvido aqui. O mecanismo de poda que importa nesta aula vem só da priori sobre <span class="math inline">\(\pi\)</span>.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="fig-resize" style="width: 92%; margin: 0 auto;">
+<div id="b5f50270" class="cell" data-execution_count="3">
+<div class="cell-output cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure>
+<p><img data-src="index_files/figure-revealjs/cell-4-output-1.svg" class="img-fluid quarto-figure quarto-figure-center"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="o-que-os-três-painéis-mostram" class="slide level2">
+<h2>O Que os Três Painéis Mostram</h2>
+<div class="fragment">
+<p><span class="math inline">\(\alpha_0=0{,}001\)</span>: pesos <span class="math inline">\((0{,}6045,\ 0{,}3955,\ 0,\dots)\)</span> — 2 componentes, resto exatamente zerado.</p>
+</div>
+<div class="fragment">
+<p><span class="math inline">\(\alpha_0=1{,}0\)</span>: <span class="math inline">\((0{,}582,\ 0{,}355,\ 0{,}061,\dots)\)</span> — poda mais suave, um 3º componente pequeno sobrevive.</p>
+</div>
+<div class="fragment">
+<p><span class="math inline">\(\alpha_0=100\)</span>: 4 componentes com peso <span class="math inline">\(&gt;1\%\)</span> — priori mais permissiva, “deixa” o modelo usar mais estrutura antes de penalizar.</p>
+</div>
+<div class="fragment">
+<div class="callout callout-important callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Importante</strong></p>
+</div>
+<div class="callout-content">
+<p><span class="math inline">\(\alpha_0\)</span> virou um botão que controla quantos componentes sobrevivem — o problema do próximo bloco.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="pergunta-1" class="slide level2">
+<h2>Pergunta</h2>
+<div class="callout callout-tip callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Se déssemos uma priori de verdade a μ_k e Σ_k (mantendo π fixo, como no EM clássico), o problema de K=N desapareceria?</strong></p>
+</div>
+<div class="callout-content">
+<p>Releia o Passo 4 da derivação: o termo de ajuste virou uma esperança só sobre <span class="math inline">\(\mathbf{Z}\)</span> exatamente porque a verossimilhança de <span class="math inline">\(\mathbf{X}\)</span> não depende de <span class="math inline">\(\pi\)</span>. Pense em qual parâmetro efetivamente controla se um componente “sobrevive” ou não.</p>
+<ul>
+<li>□ Não — o mecanismo de poda vem inteiramente do termo <span class="math inline">\(\mathrm{KL}(q(\mathbf{Z},\pi)\|p(\mathbf{Z},\pi\mid\phi))\)</span>: é a distância entre a priori e a posterior de <span class="math inline">\(\pi\)</span> que penaliza componentes supérfluos; uma priori sobre <span class="math inline">\(\mu_k,\Sigma_k\)</span>, mantendo <span class="math inline">\(\pi\)</span> fixo, não introduz esse termo em lugar nenhum da conta.</li>
+<li>□ No caso-limite em que a priori <span class="math inline">\(p(\pi)\)</span> é extremamente concentrada (quase um ponto único), a decomposição com <span class="math inline">\(\pi\)</span> dentro de <span class="math inline">\(\mathbf{H}\)</span> se aproxima da decomposição do EM clássico, já que <span class="math inline">\(q(\pi)\)</span> tem pouquíssima liberdade para se afastar desse ponto.</li>
+<li>□ Como o campo médio <span class="math inline">\(q(\mathbf{Z},\pi)\approx q(\mathbf{Z})q(\pi)\)</span> é só uma conveniência computacional, o ELBO resultante deixa de ser uma cota inferior válida de <span class="math inline">\(\ln p(\mathbf{X}\mid\phi)\)</span> sempre que essa fatoração não corresponde à dependência real entre <span class="math inline">\(\mathbf{Z}\)</span> e <span class="math inline">\(\pi\)</span>.</li>
+<li>□ O mesmo princípio de poda automática via priori esparsa também aparece em regressão linear regularizada por LASSO, onde uma priori Laplaciana sobre os coeficientes empurra muitos deles exatamente a zero.</li>
+</ul>
+</div>
+</div>
+</div>
+</section>
+<section id="resposta-1" class="slide level2">
+<h2>Resposta</h2>
+<div class="callout callout-tip callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Resposta — a priori certa é sobre π, não sobre μ,Σ</strong></p>
+</div>
+<div class="callout-content">
+<ul>
+<li>✔ O termo de KL do Passo 5 é sobre <span class="math inline">\((\mathbf{Z},\pi)\)</span>, não sobre <span class="math inline">\((\mu_k,\Sigma_k)\)</span> — dar priori a <span class="math inline">\(\mu_k,\Sigma_k\)</span> mantendo <span class="math inline">\(\pi\)</span> fixo não cria penalidade de complexidade nenhuma nesta derivação; o problema de <span class="math inline">\(K=N\)</span> persistiria.</li>
+<li>✔ Consequência direta: priori quase pontual <span class="math inline">\(\Rightarrow\)</span> <span class="math inline">\(q(\pi)\)</span> quase não se move de <span class="math inline">\(p(\pi)\)</span> <span class="math inline">\(\Rightarrow\)</span> o termo de KL se aproxima de zero/constante, reduzindo ao caso do EM.</li>
+<li>✗ A decomposição <span class="math inline">\(\ln p(\mathbf{X}\mid\phi)=\mathcal{L}(q,\phi)+\mathrm{KL}(q\|p)\)</span> vale para <strong>qualquer</strong> <span class="math inline">\(q\)</span> normalizada, campo médio ou não — a fatoração afeta só o quão <strong>apertada</strong> é a cota (o KL residual entre a posterior verdadeira e a família fatorada), nunca a validade da desigualdade <span class="math inline">\(\mathcal{L}(q,\phi)\le\ln p(\mathbf{X}\mid\phi)\)</span>.</li>
+<li>✔ Mesma lógica: priori esparsa (Laplaciana no LASSO, Dirichlet concentrada aqui) empurra parâmetros supérfluos a exatamente zero — regularização como poda automática.</li>
+</ul>
+</div>
+</div>
+</div>
+<div class="fragment">
+<p><strong>Voltando à pergunta:</strong> não — priori sobre <span class="math inline">\(\mu_k,\Sigma_k\)</span> não ataca a raiz do problema, que é como <span class="math inline">\(\pi\)</span> se distribui entre os componentes. É colocar <strong><span class="math inline">\(\pi\)</span></strong>, especificamente, dentro do tratamento variacional, com um prior de verdade, que devolve a propriedade de Occam.</p>
+</div>
+</section></section>
+<section>
+<section id="o-dilema-dos-hiperparâmetros" class="title-slide slide level1 center">
+<h1>O Dilema dos Hiperparâmetros</h1>
+
+</section>
+<section id="a-troca-de-problemas" class="slide level2">
+<h2>A Troca de Problemas</h2>
+<div class="fragment">
+<p>Bloco 1 resolveu <span class="math inline">\(K\)</span> para o GMM — trocando “qual <span class="math inline">\(K\)</span>?” por “qual <span class="math inline">\(\alpha_0\)</span>?”. Não é coincidência do GMM: é um padrão.</p>
+</div>
+<div class="fragment">
+<p><strong>GMM Bayesiano:</strong> <span class="math inline">\(\alpha_0\)</span> (concentração da priori de Dirichlet). <strong>K-Means:</strong> <span class="math inline">\(K\)</span> direto, sem priori nenhuma. <strong>DBSCAN</strong> (Aula 3, via HDBSCAN): <span class="math inline">\(\epsilon\)</span>, <code>min_samples</code>.</p>
+</div>
+<div class="fig-resize" style="width: 90%; margin: 0 auto;">
+<img data-src="index_files/mediabag/28d717440c393d78b4ad864e8365c4de81cea5ef.svg" class="img-fluid">
+</div>
+</section>
+<section id="o-problema-central" class="slide level2">
+<h2>O Problema Central</h2>
+<div class="fragment">
+<p>Limite <strong>rígido</strong> (<span class="math inline">\(K\in\{1,2,\dots\}\)</span>) <span class="math inline">\(\to\)</span> limite <strong>elástico</strong> (<span class="math inline">\(\alpha_0\in\mathbb{R}_{&gt;0}\)</span>) — não elimina subjetividade, só desloca.</p>
+</div>
+<div class="fragment">
+<div class="callout callout-important callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Importante</strong></p>
+</div>
+<div class="callout-content">
+<p>K-Means nem tem priori — seu <span class="math inline">\(K\)</span> precisa de outra calibração inteira. Sem métrica supervisionada (acurácia, MSE), como calibrar e validar qualquer uma dessas escolhas? Blocos 3–5 respondem.</p>
+</div>
+</div>
+</div>
+</div>
+</section></section>
+<section>
+<section id="validação-empírica-clusterização-dura" class="title-slide slide level1 center">
+<h1>Validação Empírica: Clusterização “Dura”</h1>
+
+</section>
+<section id="validação-sem-rótulo-redefinição" class="slide level2">
+<h2>Validação sem Rótulo: Redefinição</h2>
+<div class="fragment">
+<p>K-Means/DBSCAN não têm verossimilhança — única via é <strong>empírica</strong>. Passo preliminar novo: <strong>separar os dados</strong> — sortear uma fração como <strong>treino</strong> (ajusta o modelo) e reservar o resto, nunca tocado no ajuste, como <strong>validação</strong> (só mede o resultado depois).</p>
+</div>
+<div class="fragment">
+<div class="callout callout-important callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Importante</strong></p>
+</div>
+<div class="callout-content">
+<p>Por quê: métrica calculada nos mesmos pontos que moldaram o modelo favorece o próprio ajuste (mesmo problema da Abertura) — medir em pontos nunca vistos é o único jeito honesto de testar generalização.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="fragment">
+<p>“Validação” aqui não é acerto contra gabarito, é <strong>estabilidade topológica</strong>: a estrutura do treino se mantém em dados novos?</p>
+</div>
+<div class="fragment">
+<p>Receita: ajustar (centroides/regras) só no <strong>treino</strong>, aplicar à <strong>validação</strong>, medir a qualidade da partição só ali.</p>
+</div>
+</section>
+<section id="coeficiente-de-silhueta" class="slide level2">
+<h2>Coeficiente de Silhueta</h2>
+<div class="fragment">
+<p>Rousseeuw (1987): <span class="math inline">\(a(i)\)</span> = coesão (distância média ao próprio cluster); <span class="math inline">\(b(i)\)</span> = separação (distância média ao cluster vizinho mais próximo). <span class="math display">\[
+s(i) = \frac{b(i)-a(i)}{\max\{a(i),b(i)\}}\in[-1,1]
+\]</span></p>
+</div>
+<div class="fragment">
+<div class="callout callout-note callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Nota</strong></p>
+</div>
+<div class="callout-content">
+<p>Próximo de <span class="math inline">\(1\)</span>: clusters bem separados/coesos. Próximo de <span class="math inline">\(0\)</span>: sobrepostos. Negativo: ponto provavelmente mal atribuído.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="índice-de-davies-bouldin-dois-objetos-auxiliares" class="slide level2">
+<h2>Índice de Davies-Bouldin: Dois Objetos Auxiliares</h2>
+<div class="fragment">
+<p>Para cada cluster <span class="math inline">\(C_k\)</span>: <strong>centroide</strong> <span class="math inline">\(\mathbf{c}_k:=\frac{1}{|C_k|}\sum_{\mathbf{x}\in C_k}\mathbf{x}\)</span> (ponto médio do cluster) e <strong>dispersão interna</strong> <span class="math inline">\(\sigma_k:=\frac{1}{|C_k|}\sum_{\mathbf{x}\in C_k}\|\mathbf{x}-\mathbf{c}_k\|\)</span> (distância média dos pontos ao próprio centroide — quão “espalhado” é o cluster).</p>
+</div>
+</section>
+<section id="índice-de-davies-bouldin-a-fórmula" class="slide level2">
+<h2>Índice de Davies-Bouldin: A Fórmula</h2>
+<div class="fragment">
+<p>Davies &amp; Bouldin (1979): similaridade entre dois clusters <span class="math inline">\(R_{jk}=\dfrac{\sigma_j+\sigma_k}{\|\mathbf{c}_j-\mathbf{c}_k\|}\)</span> — numerador soma a dispersão dos dois, denominador é a distância entre seus centros. <span class="math inline">\(R_{jk}\)</span> grande = clusters dispersos <strong>ou</strong> centros próximos — difíceis de distinguir.</p>
+</div>
+<div class="fragment">
+<p><span class="math display">\[
+\mathrm{DB} = \frac1K\sum_k \max_{j\ne k} R_{jk}
+\]</span> Cada cluster comparado ao seu <strong>pior</strong> (mais parecido) vizinho, média sobre os <span class="math inline">\(K\)</span> clusters.</p>
+</div>
+<div class="fragment">
+<div class="callout callout-important callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Importante</strong></p>
+</div>
+<div class="callout-content">
+<p><strong>Menor é melhor</strong> aqui (diferente da Silhueta).</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="perturbação-e-consistência" class="slide level2">
+<h2>Perturbação e Consistência</h2>
+<div class="fragment">
+<p>Ajustar no treino, medir na validação <strong>já é</strong> um teste de perturbação: estrutura real se mantém numa amostra diferente da mesma população; estrutura de sobreajuste desaparece (Silhueta cai, DB sobe).</p>
+</div>
+</section>
+<section id="no-breast-cancer-wisconsin" class="slide level2">
+<h2>No Breast Cancer Wisconsin</h2>
+<div class="fragment">
+<p>Treino <span class="math inline">\(N=398\)</span>, validação <span class="math inline">\(N=171\)</span> (<span class="math inline">\(30\%\)</span>, nunca usada no ajuste). K-Means para <span class="math inline">\(K=2,\dots,8\)</span> no treino, Silhueta/DB calculados só na validação.</p>
+</div>
+<div class="fig-resize" style="width: 88%; margin: 0 auto;">
+<div id="41cebf58" class="cell" data-execution_count="4">
+<div class="cell-output cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure>
+<p><img data-src="index_files/figure-revealjs/cell-5-output-1.svg" class="img-fluid quarto-figure quarto-figure-center"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="o-que-as-duas-métricas-dizem" class="slide level2">
+<h2>O Que as Duas Métricas Dizem</h2>
+<div class="fragment">
+<p>Silhueta (validação): máxima em <span class="math inline">\(K=2\)</span> (<span class="math inline">\(0{,}593\)</span>), cai até <span class="math inline">\(K=8\)</span> (<span class="math inline">\(0{,}315\)</span>).</p>
+</div>
+<div class="fragment">
+<p>Davies-Bouldin (validação): mínimo em <span class="math inline">\(K=2\)</span> (<span class="math inline">\(0{,}590\)</span>), sobe até <span class="math inline">\(K=8\)</span> (<span class="math inline">\(0{,}979\)</span>).</p>
+</div>
+<div class="fragment">
+<div class="callout callout-note callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Nota</strong></p>
+</div>
+<div class="callout-content">
+<p>Nenhuma métrica usa rótulo. Duas métricas independentes concordando, medidas em dados nunca vistos no ajuste, é evidência de estrutura real — não artefato do treino.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="pergunta-2" class="slide level2">
+<h2>Pergunta</h2>
+<div class="callout callout-tip callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Se calculássemos a Silhueta e o Davies-Bouldin usando os próprios pontos de TREINO em vez da validação, o resultado seria uma validação igualmente confiável da escolha de K?</strong></p>
+</div>
+<div class="callout-content">
+<p>Pense no que diferencia “medir a qualidade da partição nos mesmos pontos que a definiram” de “medir numa amostra independente”.</p>
+<ul>
+<li>□ Calcular Silhueta/Davies-Bouldin no próprio conjunto de treino mediria só o quão bem o K-Means otimizou sua função objetivo ali — não diria nada sobre se essa estrutura generaliza, o mesmo problema estrutural da log-verossimilhança de treino na Abertura.</li>
+<li>□ No caso-limite <span class="math inline">\(K=N\)</span> (um cluster por ponto de treino), a Silhueta calculada no próprio treino fica matematicamente indefinida, pois cada cluster teria um único ponto e <span class="math inline">\(a(i)\)</span> não seria calculável.</li>
+<li>□ Como a Silhueta e o Davies-Bouldin são métricas puramente geométricas (não usam verossimilhança), elas são igualmente confiáveis calculadas no treino ou na validação, diferente do que acontece com log-verossimilhança.</li>
+<li>□ A mesma lógica de “ajustar num conjunto, validar estabilidade em outro” se aplica a escolher o número de fatores latentes de uma Análise de Componentes Principais (PCA) por variância explicada reconstruída em dados de validação.</li>
+</ul>
+</div>
+</div>
+</div>
+</section>
+<section id="resposta-2" class="slide level2">
+<h2>Resposta</h2>
+<div class="callout callout-tip callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Resposta — treino vs.&nbsp;validação nas métricas intrínsecas</strong></p>
+</div>
+<div class="callout-content">
+<ul>
+<li>✔ Métricas calculadas no treino testam só o ajuste, nunca a generalização — o mesmo problema estrutural da Abertura, agora aplicado a métricas geométricas em vez de log-verossimilhança.</li>
+<li>✔ Com um ponto por cluster, <span class="math inline">\(a(i)\)</span> (distância média a <strong>outros</strong> pontos do mesmo cluster) não tem termos para calcular — a Silhueta perde sentido matemático nesse extremo.</li>
+<li>✗ Ser “puramente geométrica” não isenta a métrica do mesmo problema: qualquer métrica calculada nos dados que definiram a partição tende a favorecer partições mais finas/ajustadas àquele conjunto específico.</li>
+<li>✔ Mesmo princípio: escolher a dimensão latente de uma PCA por erro de reconstrução em validação, não em treino (erro de treino sempre cai com mais componentes).</li>
+</ul>
+</div>
+</div>
+</div>
+<div class="fragment">
+<p><strong>Voltando à pergunta:</strong> não — medir no próprio treino testaria só o ajuste, o mesmo erro conceitual da Abertura. A validação genuína exige dados que o algoritmo nunca usou para decidir centroides/regras.</p>
+</div>
+</section></section>
+<section>
+<section id="validação-por-verossimilhança-modelos-probabilísticos" class="title-slide slide level1 center">
+<h1>Validação por Verossimilhança: Modelos Probabilísticos</h1>
+
+</section>
+<section id="da-topologia-à-probabilidade-direta" class="slide level2">
+<h2>Da Topologia à Probabilidade Direta</h2>
+<div class="fragment">
+<p>Modelos probabilísticos (GMM): congelar <span class="math inline">\(\hat\theta_K\)</span> (aprendido no treino), avaliar <span class="math inline">\(\ln p(\mathbf{X}_{\text{val}}\mid\hat\theta_K)\)</span> — mesma fórmula de verossimilhança, pontos nunca vistos.</p>
+</div>
+<div class="fragment">
+<div class="callout callout-important callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Importante</strong></p>
+</div>
+<div class="callout-content">
+<p>Diagnóstico: modelo complexo demais colapsa densidade sobre poucos pontos de treino (singularidade da Abertura) — na validação, esses pontos não existem, e a log-verossimilhança de validação despenca. O <strong>descolamento</strong> entre as curvas sinaliza sobreajuste.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="fig-resize" style="width: 42%; margin: 0 auto;">
+<div id="d91d09d5" class="cell" data-execution_count="5">
+<div class="cell-output cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure>
+<p><img data-src="index_files/figure-revealjs/cell-6-output-1.svg" class="img-fluid quarto-figure quarto-figure-center"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="o-padrão-treino-sobe-validação-não-acompanha" class="slide level2">
+<h2>O Padrão: Treino Sobe, Validação Não Acompanha</h2>
+<div class="fragment">
+<p>Treino: <span class="math inline">\(-938{,}05\)</span> (<span class="math inline">\(K=1\)</span>) a <span class="math inline">\(-808{,}51\)</span> (<span class="math inline">\(K=10\)</span>), monotônico — mesmo padrão da Abertura, restrito aos 398 pontos de treino.</p>
+</div>
+<div class="fragment">
+<p>Validação: máximo em <span class="math inline">\(K=2\)</span> (<span class="math inline">\(-361{,}95\)</span>), oscila e piora depois (<span class="math inline">\(-376{,}42\)</span> em <span class="math inline">\(K=10\)</span>) — <strong>não acompanha</strong> o treino.</p>
+</div>
+<div class="fragment">
+<div class="callout callout-note callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Nota</strong></p>
+</div>
+<div class="callout-content">
+<p>O descolamento entre as curvas é o sintoma de sobreajuste — mostrado empiricamente, sem priori nem fator de Occam analítico.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="calibrando-alpha_0-pela-mesma-lógica" class="slide level2">
+<h2>Calibrando <span class="math inline">\(\alpha_0\)</span> pela Mesma Lógica</h2>
+<div class="fragment">
+<p>GMM Bayesiano do Bloco 1, reajustado só no treino, avaliado na validação (ELBO total aprox.):</p>
+<table class="caption-top">
+<thead>
+<tr class="header">
+<th style="text-align: right;"><span class="math inline">\(\alpha_0\)</span></th>
+<th style="text-align: right;">ELBO na validação</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: right;"><span class="math inline">\(0{,}001\)</span></td>
+<td style="text-align: right;"><span class="math inline">\(-366{,}57\)</span></td>
+</tr>
+<tr class="even">
+<td style="text-align: right;"><span class="math inline">\(1{,}0\)</span></td>
+<td style="text-align: right;"><span class="math inline">\(-366{,}97\)</span></td>
+</tr>
+<tr class="odd">
+<td style="text-align: right;"><span class="math inline">\(100\)</span></td>
+<td style="text-align: right;"><span class="math inline">\(-404{,}82\)</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="fragment">
+<div class="callout callout-important callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Importante</strong></p>
+</div>
+<div class="callout-content">
+<p>Priori concentrada generaliza melhor que a permissiva — mesma conclusão da Silhueta/DB (Bloco 3), por uma via totalmente diferente. Duas vias concordando é forte — mas não é garantia final (próximo bloco).</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="pergunta-3" class="slide level2">
+<h2>Pergunta</h2>
+<div class="callout callout-tip callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Se a log-verossimilhança de validação fosse máxima em K=3 em vez de K=2, isso significaria necessariamente que K=3 é a “estrutura verdadeira” da população de pacientes?</strong></p>
+</div>
+<div class="callout-content">
+<p>Pense na diferença entre “o critério escolhido aponta para <span class="math inline">\(K=3\)</span>” e “existem, de fato, três populações distintas de pacientes”.</p>
+<ul>
+<li>□ A log-verossimilhança de validação, como qualquer critério estimado a partir de uma amostra finita, tem variância de amostragem — um valor máximo em <span class="math inline">\(K=3\)</span> indicaria que <span class="math inline">\(K=3\)</span> generalizou melhor <strong>nesta</strong> divisão treino/validação específica, não uma garantia de que <span class="math inline">\(3\)</span> é o número “verdadeiro” de populações latentes.</li>
+<li>□ No caso-limite em que o conjunto de validação tem um único ponto, a log-verossimilhança de validação para qualquer <span class="math inline">\(K\ge1\)</span> se torna idêntica, pois um único ponto não permite distinguir modelos.</li>
+<li>□ Como a validação usa dados nunca vistos no ajuste, o <span class="math inline">\(K\)</span> que maximiza a log-verossimilhança de validação é, por construção, a estrutura verdadeira da população, sem nenhuma incerteza residual.</li>
+<li>□ O mesmo cuidado (não confundir “o critério aponta para X” com “X é a verdade”) se aplica a escolher o grau de um polinômio de regressão pelo erro quadrático mínimo num conjunto de validação.</li>
+</ul>
+</div>
+</div>
+</div>
+</section>
+<section id="resposta-3" class="slide level2">
+<h2>Resposta</h2>
+<div class="callout callout-tip callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Resposta — validação escolhe, não garante “a verdade”</strong></p>
+</div>
+<div class="callout-content">
+<ul>
+<li>✔ Toda estimativa em amostra finita tem variância — o <span class="math inline">\(K\)</span> vencedor numa divisão treino/validação é a melhor aposta <strong>sob essa divisão</strong>, não uma prova de estrutura populacional verdadeira (por isso é comum repetir com várias divisões — validação cruzada).</li>
+<li>✗ Com um único ponto de validação, os modelos ainda diferem (cada um atribui uma densidade diferente àquele ponto) — a comparação continua possível, só fica mais ruidosa.</li>
+<li>✗ Validação reduz o risco de sobreajuste, mas não elimina a incerteza de amostragem nem garante acesso à estrutura populacional “verdadeira” — é uma estimativa, não uma certeza.</li>
+<li>✔ Mesmo cuidado epistemológico se aplica à seleção de grau polinomial por erro de validação: o grau escolhido é o que generalizou melhor nessa amostra, não necessariamente o “verdadeiro” grau do processo gerador.</li>
+</ul>
+</div>
+</div>
+</div>
+<div class="fragment">
+<p><strong>Voltando à pergunta:</strong> não — a validação escolhe a estrutura que generaliza melhor <strong>nesta amostra</strong>, uma estimativa sujeita a variância, não uma prova definitiva da estrutura populacional real.</p>
+</div>
+</section></section>
+<section>
+<section id="a-prova-final-posterior-predictive-checks" class="title-slide slide level1 center">
+<h1>A Prova Final: Posterior Predictive Checks</h1>
+
+</section>
+<section id="limitação-dos-números-únicos" class="slide level2">
+<h2>Limitação dos Números Únicos</h2>
+<div class="fragment">
+<p>ELBO, log-verossimilhança de validação, Silhueta: cada um resume a qualidade num único número — pode esconder falha estrutural (bom escore, forma errada).</p>
+</div>
+<div class="callout callout-note no-icon callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<p><strong>Nota</strong></p>
+</div>
+<div class="callout-content">
+<p><strong>Definição (PPC — Gelman &amp; Rubin, 1996):</strong> (1) amostrar <span class="math inline">\(\theta\)</span> aprendido; (2) gerar <span class="math inline">\(\mathbf{X}_{\text{sim}}\)</span> do modelo generativo; (3) comparar <span class="math inline">\(\mathbf{X}_{\text{sim}}\)</span> contra <span class="math inline">\(\mathbf{X}_{\text{real}}\)</span> — visual ou numericamente.</p>
+</div>
+</div>
+</div>
+<div class="fig-resize" style="width: 42%; margin: 0 auto;">
+<div id="999162b5" class="cell" data-execution_count="6">
+<div class="cell-output cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure>
+<p><img data-src="index_files/figure-revealjs/cell-7-output-1.svg" class="img-fluid quarto-figure quarto-figure-center"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="ppc-do-gmm-k2-números-e-visual" class="slide level2">
+<h2>PPC do GMM K=2: Números e Visual</h2>
+<div class="fragment">
+<p>Média sintética <span class="math inline">\((0{,}009,\ 0{,}015)\)</span> (real: <span class="math inline">\(0\)</span>); desvio sintético <span class="math inline">\((0{,}940,\ 0{,}949)\)</span> (real: <span class="math inline">\(1\)</span>). Visualmente, os “blobs” elípticos cobrem a mesma região dos dados reais.</p>
+</div>
+<div class="fragment">
+<div class="callout callout-note callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Nota</strong></p>
+</div>
+<div class="callout-content">
+<p>Para este dataset, o PPC <strong>confirma</strong> o que ELBO e Silhueta já sugeriam: <span class="math inline">\(K=2\)</span> elíptico é família adequada.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="fig-resize" style="width: 88%; margin: 0 auto;">
+<div id="041506a2" class="cell" data-execution_count="7">
+<div class="cell-output cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure>
+<p><img data-src="index_files/figure-revealjs/cell-8-output-1.svg" class="img-fluid quarto-figure quarto-figure-center"></p>
+</figure>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="o-que-o-número-esconde" class="slide level2">
+<h2>O Que o Número Esconde</h2>
+<div class="fragment">
+<p>Log-verossimilhança total: <span class="math inline">\(-684{,}75\)</span> — nada de anormal, sozinho. Cobre razoavelmente a posição média de cada lua.</p>
+</div>
+<div class="fragment">
+<div class="callout callout-important callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Importante</strong></p>
+</div>
+<div class="callout-content">
+<p>PPC revela o que o número esconde: componentes <strong>elípticos</strong> não reproduzem a forma de crescente. Sintético se espalha além do arco real (<span class="math inline">\(x_1\in[-1{,}61,2{,}54]\)</span> vs.&nbsp;real <span class="math inline">\([-1{,}10,2{,}07]\)</span>) e preenche a região côncava entre as luas — onde os dados reais não têm densidade.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="fragment">
+<div class="callout callout-note callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Nota</strong></p>
+</div>
+<div class="callout-content">
+<p>Nenhuma métrica escalar (log-verossimilhança, Silhueta, DB) captura isso — todas dependem de densidade/distância agregada, não de forma. O PPC é o teste que sobra quando o escore parece bom mas a forma pode estar errada.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="pergunta-4" class="slide level2">
+<h2>Pergunta</h2>
+<div class="callout callout-tip callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Se um GMM tivesse log-verossimilhança de validação ótima E Silhueta ótima num dataset com clusters em forma de lua, isso garantiria que o PPC também passaria?</strong></p>
+</div>
+<div class="callout-content">
+<p>Releia o exemplo das duas luas: a log-verossimilhança e a Silhueta concordaram em “razoavelmente bom” mesmo com a forma errada — pense se isso é coincidência do exemplo ou um limite estrutural das duas métricas.</p>
+<ul>
+<li>□ Não necessariamente — tanto a log-verossimilhança quanto a Silhueta são agregados que dependem de densidade/distância entre pontos, não da forma geométrica do cluster; um modelo pode obter bons valores agregados e ainda assim gerar dados com formato visivelmente incompatível com o real, como no exemplo das luas.</li>
+<li>□ No caso-limite em que os dois clusters do formato de lua estão perfeitamente separados (sem sobreposição alguma na fronteira), o PPC de um GMM elíptico necessariamente coincide pixel a pixel com os dados reais.</li>
+<li>□ Como a Silhueta e a log-verossimilhança de validação já são calculadas em dados nunca vistos no ajuste, elas automaticamente capturam qualquer incompatibilidade de forma entre o modelo gerador e os dados reais.</li>
+<li>□ A mesma limitação — métricas agregadas escondendo incompatibilidade de forma — motiva, em modelos generativos de imagens, o uso de inspeção visual das amostras geradas além de métricas escalares como FID (<em>Fréchet Inception Distance</em>).</li>
+</ul>
+</div>
+</div>
+</div>
+</section>
+<section id="resposta-4" class="slide level2">
+<h2>Resposta</h2>
+<div class="callout callout-tip callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Resposta — métricas agregadas vs.&nbsp;forma geométrica</strong></p>
+</div>
+<div class="callout-content">
+<ul>
+<li>✔ Exatamente o limite estrutural exposto pelo exemplo: agregados de densidade/distância não “veem” forma — só o PPC (comparar dados gerados vs.&nbsp;reais diretamente) expõe isso.</li>
+<li>✗ Mesmo com separação perfeita entre as luas, a elipse de cada componente Gaussiano ainda preenche a região côncava entre elas onde não há dados reais — a incompatibilidade de forma persiste independente de sobreposição na fronteira.</li>
+<li>✗ Validação em dados nunca vistos protege contra sobreajuste, não contra incompatibilidade estrutural de forma — as luas de validação também seriam mal explicadas pela mesma elipse, mas a métrica agregada ainda não denunciaria isso diretamente.</li>
+<li>✔ Mesma lógica em modelos generativos de imagem: métricas escalares (FID) podem parecer boas enquanto amostras individuais, inspecionadas visualmente, revelam artefatos que o número não captura.</li>
+</ul>
+</div>
+</div>
+</div>
+<div class="fragment">
+<p><strong>Voltando à pergunta:</strong> não — boas métricas agregadas não garantem forma correta. O PPC é o único dos testes desta aula que compara forma diretamente, e por isso captura falhas que os outros dois (Bloco 3 e Bloco 4) estruturalmente não conseguem ver.</p>
+</div>
+</section></section>
+<section>
+<section id="síntese-fechamento-e-ponte-para-a-aula-6" class="title-slide slide level1 center">
+<h1>Síntese, Fechamento e Ponte para a Aula 6</h1>
+
+</section>
+<section id="síntese-nenhuma-régua-sozinha-basta" class="slide level2">
+<h2>Síntese: Nenhuma Régua Sozinha Basta</h2>
+<div class="fragment">
+<p>Analítica (Bloco 1): só <span class="math inline">\(\pi\)</span> (não <span class="math inline">\(\mu_k,\Sigma_k\)</span>) dentro do ELBO, com priori, já devolve a propriedade de Occam — mas troca <span class="math inline">\(K\)</span> por hiperparâmetros de priori (Bloco 2).</p>
+</div>
+<div class="fragment">
+<p>Empíricas (Blocos 3–5): única opção para clusterização dura (Silhueta/ DB); complementam a via analítica para modelos probabilísticos (verossimilhança em validação); PPC continua sendo o único teste de <strong>forma</strong>.</p>
+</div>
+<div class="fragment">
+<div class="callout callout-note callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Nota</strong></p>
+</div>
+<div class="callout-content">
+<p>As três vias empíricas, juntas, formam uma checagem mais robusta que qualquer uma isolada.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="retomando-as-quatro-perguntas" class="slide level2">
+<h2>Retomando as Quatro Perguntas</h2>
+<div class="fragment">
+<p><strong>1.</strong> Priori sobre θ resolve <span class="math inline">\(K=N\)</span> <strong>só na parte certa</strong>: <span class="math inline">\(\pi\)</span> precisa virar variável do ELBO, não <span class="math inline">\(\mu_k,\Sigma_k\)</span> — a penalidade nasce do KL entre posterior e priori conjunta de <span class="math inline">\(\mathbf{Z}\)</span> e <span class="math inline">\(\pi\)</span>.</p>
+</div>
+<div class="fragment">
+<p><strong>2.</strong> Trocar <span class="math inline">\(K\)</span> por hiperparâmetros de priori desloca a subjetividade (rígido <span class="math inline">\(\to\)</span> contínuo), não a elimina — visível também no K-Means e no DBSCAN.</p>
+</div>
+<div class="fragment">
+<p><strong>3.</strong> Clusterização dura: ajustar no treino, medir Silhueta/DB na validação — concordância entre métricas independentes é evidência de estrutura real.</p>
+</div>
+<div class="fragment">
+<p><strong>4.</strong> Modelos probabilísticos: verossimilhança preditiva em validação; PPC vai além, comparando dados gerados vs.&nbsp;reais, capturando forma.</p>
+</div>
+<div class="callout callout-tip callout-titled callout-style-default">
+<div class="callout-body">
+<div class="callout-title">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<p><strong>Ponte para a Aula 6</strong></p>
+</div>
+<div class="callout-content">
+<p>Mudança de eixo: variável latente <strong>categórica</strong> (Aulas 3–5) <span class="math inline">\(\to\)</span> <strong>contínua</strong> (Aula 6, Parte 2: Redução de Dimensionalidade). PCA, PPCA, autoencoder linear — a mesma pergunta de validação (“quantas dimensões latentes?”) reaparece, mesma lógica treino/validação. ELBO volta na Aula 7 (VAE), quando a posterior deixar de ter forma fechada e a maquinaria de campo médio desta aula for necessária de novo.</p>
+</div>
+</div>
+</div>
+<p><a href="../../../teaching/unsupervised-learning/aula05/exercicios.html" class="see-all exercicios-link" aria-label="Ver exercícios" title="Ver exercícios">Exercícios</a> <a href="../../../teaching/unsupervised-learning/aula05/soluções.html" class="see-all solucoes-link" aria-label="Ver soluções" title="Ver soluções">Soluções</a></p>
+
+
+</section></section>
+    </div>
+  <div class="quarto-auto-generated-content" style="display: none;">
+<div class="footer footer-default">
+<p>UNICAMP — Instituto de Computação</p>
+</div>
+</div></div>
+
+  <script>window.backupDefine = window.define; window.define = undefined;</script>
+  <script src="../../../site_libs/revealjs/dist/reveal.js"></script>
+  <!-- reveal.js plugins -->
+  <script src="../../../site_libs/revealjs/plugin/quarto-line-highlight/line-highlight.js"></script>
+  <script src="../../../site_libs/revealjs/plugin/pdf-export/pdfexport.js"></script>
+  <script src="../../../site_libs/revealjs/plugin/reveal-menu/menu.js"></script>
+  <script src="../../../site_libs/revealjs/plugin/reveal-menu/quarto-menu.js"></script>
+  <script src="../../../site_libs/revealjs/plugin/reveal-chalkboard/plugin.js"></script>
+  <script src="../../../site_libs/revealjs/plugin/quarto-support/support.js"></script>
+  
+
+  <script src="../../../site_libs/revealjs/plugin/notes/notes.js"></script>
+  <script src="../../../site_libs/revealjs/plugin/search/search.js"></script>
+  <script src="../../../site_libs/revealjs/plugin/zoom/zoom.js"></script>
+  <script src="../../../site_libs/revealjs/plugin/math/math.js"></script>
+  <script>window.define = window.backupDefine; window.backupDefine = undefined;</script>
+
+  <script>
+
+      // Full list of configuration options available at:
+      // https://revealjs.com/config/
+      Reveal.initialize({
+'controlsAuto': true,
+'previewLinksAuto': false,
+'pdfSeparateFragments': false,
+'autoAnimateEasing': "ease",
+'autoAnimateDuration': 1,
+'autoAnimateUnmatched': true,
+'jumpToSlide': true,
+'menu': {"side":"left","useTextContentForMissingTitles":true,"markers":false,"loadIcons":false,"custom":[{"title":"Tools","icon":"<i class=\"fas fa-gear\"></i>","content":"<ul class=\"slide-menu-items\">\n<li class=\"slide-tool-item active\" data-item=\"0\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.fullscreen(event)\"><kbd>f</kbd> Fullscreen</a></li>\n<li class=\"slide-tool-item\" data-item=\"1\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.speakerMode(event)\"><kbd>s</kbd> Speaker View</a></li>\n<li class=\"slide-tool-item\" data-item=\"2\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.overview(event)\"><kbd>o</kbd> Slide Overview</a></li>\n<li class=\"slide-tool-item\" data-item=\"3\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.togglePdfExport(event)\"><kbd>e</kbd> PDF Export Mode</a></li>\n<li class=\"slide-tool-item\" data-item=\"4\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.toggleScrollView(event)\"><kbd>r</kbd> Scroll View Mode</a></li>\n<li class=\"slide-tool-item\" data-item=\"5\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.toggleChalkboard(event)\"><kbd>b</kbd> Toggle Chalkboard</a></li>\n<li class=\"slide-tool-item\" data-item=\"6\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.toggleNotesCanvas(event)\"><kbd>c</kbd> Toggle Notes Canvas</a></li>\n<li class=\"slide-tool-item\" data-item=\"7\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.downloadDrawings(event)\"><kbd>d</kbd> Download Drawings</a></li>\n<li class=\"slide-tool-item\" data-item=\"8\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.keyboardHelp(event)\"><kbd>?</kbd> Keyboard Help</a></li>\n</ul>"}],"openButton":true},
+'chalkboard': {"buttons":true,"boardmarkerWidth":3,"chalkWidth":3},
+'smaller': true,
+ 
+        // Display controls in the bottom right corner
+        controls: false,
+
+        // Help the user learn the controls by providing hints, for example by
+        // bouncing the down arrow when they first encounter a vertical slide
+        controlsTutorial: false,
+
+        // Determines where controls appear, "edges" or "bottom-right"
+        controlsLayout: 'edges',
+
+        // Visibility rule for backwards navigation arrows; "faded", "hidden"
+        // or "visible"
+        controlsBackArrows: 'faded',
+
+        // Display a presentation progress bar
+        progress: true,
+
+        // Display the page number of the current slide
+        slideNumber: 'c/t',
+
+        // 'all', 'print', or 'speaker'
+        showSlideNumber: 'all',
+
+        // Add the current slide number to the URL hash so that reloading the
+        // page/copying the URL will return you to the same slide
+        hash: true,
+
+        // Start with 1 for the hash rather than 0
+        hashOneBasedIndex: false,
+
+        // Flags if we should monitor the hash and change slides accordingly
+        respondToHashChanges: true,
+
+        // Push each slide change to the browser history
+        history: true,
+
+        // Enable keyboard shortcuts for navigation
+        keyboard: true,
+
+        // Enable the slide overview mode
+        overview: true,
+
+        // Disables the default reveal.js slide layout (scaling and centering)
+        // so that you can use custom CSS layout
+        disableLayout: false,
+
+        // Vertical centering of slides
+        center: false,
+
+        // Enables touch navigation on devices with touch input
+        touch: true,
+
+        // Loop the presentation
+        loop: false,
+
+        // Change the presentation direction to be RTL
+        rtl: false,
+
+        // see https://revealjs.com/vertical-slides/#navigation-mode
+        navigationMode: 'linear',
+
+        // Randomizes the order of slides each time the presentation loads
+        shuffle: false,
+
+        // Turns fragments on and off globally
+        fragments: true,
+
+        // Flags whether to include the current fragment in the URL,
+        // so that reloading brings you to the same fragment position
+        fragmentInURL: false,
+
+        // Flags if the presentation is running in an embedded mode,
+        // i.e. contained within a limited portion of the screen
+        embedded: false,
+
+        // Flags if we should show a help overlay when the questionmark
+        // key is pressed
+        help: true,
+
+        // Flags if it should be possible to pause the presentation (blackout)
+        pause: true,
+
+        // Flags if speaker notes should be visible to all viewers
+        showNotes: false,
+
+        // Global override for autoplaying embedded media (null/true/false)
+        autoPlayMedia: null,
+
+        // Global override for preloading lazy-loaded iframes (null/true/false)
+        preloadIframes: null,
+
+        // Number of milliseconds between automatically proceeding to the
+        // next slide, disabled when set to 0, this value can be overwritten
+        // by using a data-autoslide attribute on your slides
+        autoSlide: 0,
+
+        // Stop auto-sliding after user input
+        autoSlideStoppable: true,
+
+        // Use this method for navigation when auto-sliding
+        autoSlideMethod: null,
+
+        // Specify the average time in seconds that you think you will spend
+        // presenting each slide. This is used to show a pacing timer in the
+        // speaker view
+        defaultTiming: null,
+
+        // Enable slide navigation via mouse wheel
+        mouseWheel: false,
+
+        // The display mode that will be used to show slides
+        display: 'block',
+
+        // Hide cursor if inactive
+        hideInactiveCursor: true,
+
+        // Time before the cursor is hidden (in ms)
+        hideCursorTime: 5000,
+
+        // Opens links in an iframe preview overlay
+        previewLinks: false,
+
+        // Transition style (none/fade/slide/convex/concave/zoom)
+        transition: 'slide',
+
+        // Transition speed (default/fast/slow)
+        transitionSpeed: 'default',
+
+        // Transition style for full page slide backgrounds
+        // (none/fade/slide/convex/concave/zoom)
+        backgroundTransition: 'none',
+
+        // Number of slides away from the current that are visible
+        viewDistance: 3,
+
+        // Number of slides away from the current that are visible on mobile
+        // devices. It is advisable to set this to a lower number than
+        // viewDistance in order to save resources.
+        mobileViewDistance: 2,
+
+        // The "normal" size of the presentation, aspect ratio will be preserved
+        // when the presentation is scaled to fit different resolutions. Can be
+        // specified using percentage units.
+        width: 1280,
+
+        height: 800,
+
+        // Factor of the display size that should remain empty around the content
+        margin: 2.0e-2,
+
+        math: {
+          mathjax: 'https://cdn.jsdelivr.net/npm/mathjax@2.7.9/MathJax.js',
+          config: 'TeX-AMS_HTML-full',
+          tex2jax: {
+            inlineMath: [['\\(','\\)']],
+            displayMath: [['\\[','\\]']],
+            balanceBraces: true,
+            processEscapes: false,
+            processRefs: true,
+            processEnvironments: true,
+            preview: 'TeX',
+            skipTags: ['script','noscript','style','textarea','pre','code'],
+            ignoreClass: 'tex2jax_ignore',
+            processClass: 'tex2jax_process'
+          },
+        },
+
+        // reveal.js plugins
+        plugins: [QuartoLineHighlight, PdfExport, RevealMenu, RevealChalkboard, QuartoSupport,
+
+          RevealMath,
+          RevealNotes,
+          RevealSearch,
+          RevealZoom
+        ]
+      });
+    </script>
+    <div class="custom-footer-logos">
+      <a href="notas.html" class="back-arrow-slide" title="Voltar às notas" aria-label="Voltar às notas"><i class="bi bi-book-half" aria-hidden="true"></i></a>
+      <img src="../../UNICAMP.png" alt="UNICAMP">
+      <img src="../../IC.png" alt="Instituto de Computação">
+    </div>
+    <script id="quarto-html-after-body" type="application/javascript">
+      window.document.addEventListener("DOMContentLoaded", function (event) {
+        const tabsets =  window.document.querySelectorAll(".panel-tabset-tabby")
+        tabsets.forEach(function(tabset) {
+          const tabby = new Tabby('#' + tabset.id);
+        });
+        const isCodeAnnotation = (el) => {
+          for (const clz of el.classList) {
+            if (clz.startsWith('code-annotation-')) {                     
+              return true;
+            }
+          }
+          return false;
+        }
+        const onCopySuccess = function(e) {
+          // button target
+          const button = e.trigger;
+          // don't keep focus
+          button.blur();
+          // flash "checked"
+          button.classList.add('code-copy-button-checked');
+          var currentTitle = button.getAttribute("title");
+          button.setAttribute("title", "Copiada");
+          let tooltip;
+          if (window.bootstrap) {
+            button.setAttribute("data-bs-toggle", "tooltip");
+            button.setAttribute("data-bs-placement", "left");
+            button.setAttribute("data-bs-title", "Copiada");
+            tooltip = new bootstrap.Tooltip(button, 
+              { trigger: "manual", 
+                customClass: "code-copy-button-tooltip",
+                offset: [0, -8]});
+            tooltip.show();    
+          }
+          setTimeout(function() {
+            if (tooltip) {
+              tooltip.hide();
+              button.removeAttribute("data-bs-title");
+              button.removeAttribute("data-bs-toggle");
+              button.removeAttribute("data-bs-placement");
+            }
+            button.setAttribute("title", currentTitle);
+            button.classList.remove('code-copy-button-checked');
+          }, 1000);
+          // clear code selection
+          e.clearSelection();
+        }
+        const getTextToCopy = function(trigger) {
+          const outerScaffold = trigger.parentElement.cloneNode(true);
+          const codeEl = outerScaffold.querySelector('code');
+          for (const childEl of codeEl.children) {
+            if (isCodeAnnotation(childEl)) {
+              childEl.remove();
+            }
+          }
+          return codeEl.innerText;
+        }
+        const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+          text: getTextToCopy
+        });
+        clipboard.on('success', onCopySuccess);
+        if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+          const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+            text: getTextToCopy,
+            container: window.document.getElementById('quarto-embedded-source-code-modal')
+          });
+          clipboardModal.on('success', onCopySuccess);
+        }
+          var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+          var mailtoRegex = new RegExp(/^mailto:/);
+            var filterRegex = new RegExp('/' + window.location.host + '/');
+          var isInternal = (href) => {
+              return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+          }
+          // Inspect non-navigation links and adorn them if external
+         var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+          for (var i=0; i<links.length; i++) {
+            const link = links[i];
+            if (!isInternal(link.href)) {
+              // undo the damage that might have been done by quarto-nav.js in the case of
+              // links that we want to consider external
+              if (link.dataset.originalHref !== undefined) {
+                link.href = link.dataset.originalHref;
+              }
+            }
+          }
+        function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+          const config = {
+            allowHTML: true,
+            maxWidth: 500,
+            delay: 100,
+            arrow: false,
+            appendTo: function(el) {
+                return el.closest('section.slide') || el.parentElement;
+            },
+            interactive: true,
+            interactiveBorder: 10,
+            theme: 'light-border',
+            placement: 'bottom-start',
+          };
+          if (contentFn) {
+            config.content = contentFn;
+          }
+          if (onTriggerFn) {
+            config.onTrigger = onTriggerFn;
+          }
+          if (onUntriggerFn) {
+            config.onUntrigger = onUntriggerFn;
+          }
+            config['offset'] = [0,0];
+            config['maxWidth'] = 700;
+          window.tippy(el, config); 
+        }
+        const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+        for (var i=0; i<noterefs.length; i++) {
+          const ref = noterefs[i];
+          tippyHover(ref, function() {
+            // use id or data attribute instead here
+            let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+            try { href = new URL(href).hash; } catch {}
+            const id = href.replace(/^#\/?/, "");
+            const note = window.document.getElementById(id);
+            if (note) {
+              return note.innerHTML;
+            } else {
+              return "";
+            }
+          });
+        }
+        const findCites = (el) => {
+          const parentEl = el.parentElement;
+          if (parentEl) {
+            const cites = parentEl.dataset.cites;
+            if (cites) {
+              return {
+                el,
+                cites: cites.split(' ')
+              };
+            } else {
+              return findCites(el.parentElement)
+            }
+          } else {
+            return undefined;
+          }
+        };
+        var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+        for (var i=0; i<bibliorefs.length; i++) {
+          const ref = bibliorefs[i];
+          const citeInfo = findCites(ref);
+          if (citeInfo) {
+            tippyHover(citeInfo.el, function() {
+              var popup = window.document.createElement('div');
+              citeInfo.cites.forEach(function(cite) {
+                var citeDiv = window.document.createElement('div');
+                citeDiv.classList.add('hanging-indent');
+                citeDiv.classList.add('csl-entry');
+                var biblioDiv = window.document.getElementById('ref-' + cite);
+                if (biblioDiv) {
+                  citeDiv.innerHTML = biblioDiv.innerHTML;
+                }
+                popup.appendChild(citeDiv);
+              });
+              return popup.innerHTML;
+            });
+          }
+        }
+      });
+      </script>
+    
+
+</body></html>

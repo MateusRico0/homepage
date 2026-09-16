@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="pt-BR" xml:lang="pt-BR"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.37">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Marcos M. Raimundo — Instituto de Computação, UNICAMP">
+
+<title>Soluções — Aula 5: Seleção de Modelos, ELBO e Validação Empírica – Marcos M. Raimundo</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="../../../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../../../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../../../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../../../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../../../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../../../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../../../">
+<link href="../../../more.png" rel="icon" type="image/png">
+<script src="../../../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../../../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../../../site_libs/quarto-html/popper.min.js"></script>
+<script src="../../../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../../../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../../../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../../../site_libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../../../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../../../site_libs/bootstrap/bootstrap-f6f65eecdb8abf3e35b2d2c28dbef9f5.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "Nenhum resultado",
+    "search-matching-documents-text": "documentos correspondentes",
+    "search-copy-link-title": "Copiar link para a busca",
+    "search-hide-matches-text": "Esconder correspondências adicionais",
+    "search-more-match-text": "mais correspondência neste documento",
+    "search-more-matches-text": "mais correspondências neste documento",
+    "search-clear-button-title": "Limpar",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancelar",
+    "search-submit-button-title": "Enviar",
+    "search-label": "Procurar"
+  }
+}</script>
+
+  <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6"></script>
+  <script defer="" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+
+<script type="text/javascript">
+const typesetMath = (el) => {
+  if (window.MathJax) {
+    // MathJax Typeset
+    window.MathJax.typeset([el]);
+  } else if (window.katex) {
+    // KaTeX Render
+    var mathElements = el.getElementsByClassName("math");
+    var macros = [];
+    for (var i = 0; i < mathElements.length; i++) {
+      var texText = mathElements[i].firstChild;
+      if (mathElements[i].tagName == "SPAN" && texText && texText.data) {
+        window.katex.render(texText.data, mathElements[i], {
+          displayMode: mathElements[i].classList.contains('display'),
+          throwOnError: false,
+          macros: macros,
+          fleqn: false
+        });
+      }
+    }
+  }
+}
+window.Quarto = {
+  typesetMath
+};
+</script>
+
+<link rel="stylesheet" href="../../../styles.css">
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="../../../index.html">
+    <span class="navbar-title">Marcos M. Raimundo</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Procurar"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Alternar de navegação" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="../../../teaching/index.html"> 
+<span class="menu-text">Teaching</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../projects/index.html"> 
+<span class="menu-text">Projects</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../publications/index.html"> 
+<span class="menu-text">Publications</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../people/index.html"> 
+<span class="menu-text">People</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../contact.html"> 
+<span class="menu-text">Contact</span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/marcosmrai"> <i class="bi bi-github" role="img">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://scholar.google.com.br/citations?user=ibe0jfQAAAAJ&amp;hl=pt-BR"> <i class="bi bi-mortarboard-fill" role="img">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar zindex-bottom">
+        
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Soluções — Aula 5: Seleção de Modelos, ELBO e Validação Empírica</h1>
+<p class="subtitle lead">Aprendizado Não Supervisionado</p>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Autor</div>
+    <div class="quarto-title-meta-contents">
+             <p>Marcos M. Raimundo — Instituto de Computação, UNICAMP </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Data de Publicação</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">16 de setembro de 2026</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<p><a href="../../../teaching/unsupervised-learning/aula05/notas.html" class="see-all aula-link" aria-label="Ver aula" title="Ver aula">Aula</a> <a href="../../../teaching/unsupervised-learning/aula05/exercicios.html" class="see-all exercicios-link" aria-label="Ver exercícios" title="Ver exercícios">Exercícios</a></p>
+<div class="callout callout-style-default callout-tip no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+Dica
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Gabarito comentado das questões de Verdadeiro/Falso de <a href="../../../teaching/unsupervised-learning/aula05/exercicios.html"><code>exercicios.qmd</code></a>. As três questões discursivas não têm gabarito único registrado aqui — são abertas, para discussão em aula ou monitoria.</p>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 1 — Por que o EM clássico não penaliza complexidade
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ Se o Algoritmo EM clássico (sem priori sobre <span class="math inline">\(\theta\)</span>) fosse usado para escolher <span class="math inline">\(K\)</span> comparando o ELBO calculado em cada ótimo, o resultado seria equivalente a escolher <span class="math inline">\(K\)</span> pela própria log-verossimilhança de treino máxima — porque, nesse caso, o ELBO no ótimo é igual a <span class="math inline">\(\ln p(\mathbf{X}\mid\theta_{\mathrm{ML}})\)</span>.</li>
+<li>□ Como a variável latente <span class="math inline">\(z_n\)</span> do GMM já tem uma priori <span class="math inline">\(\pi_k\)</span> desde sua própria definição, o EM clássico já incorpora toda a penalização de complexidade necessária para evitar que <span class="math inline">\(K\)</span> cresça sem limite.</li>
+<li>□ Num Kernel Density Estimator (KDE) com largura de banda <span class="math inline">\(h\)</span>, levar <span class="math inline">\(h\to0\)</span> produz um fenômeno de divergência da verossimilhança análogo ao colapso de covariância de um componente do GMM sobre um único ponto — em ambos os casos, concentrar densidade infinita sobre um único ponto de treino infla artificialmente a log-verossimilhança.</li>
+<li>□ No caso-limite em que a priori <span class="math inline">\(p(\pi)\)</span> usada num GMM Bayesiano é extremamente concentrada (quase um ponto único), a decomposição do ELBO com <span class="math inline">\(\pi\)</span> dentro do tratamento variacional se aproxima da decomposição do EM clássico, já que <span class="math inline">\(q(\pi)\)</span> tem pouca liberdade para se afastar desse ponto.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>(Resposta) Teste 1 — Por que o EM clássico não penaliza complexidade
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>✔ Verdadeiro — Com <span class="math inline">\(\theta\)</span> fora do tratamento variacional (sem prior), o Passo E fecha o KL a zero e o Passo M persegue só <span class="math inline">\(\theta_{\mathrm{ML}}\)</span>; no ótimo, <span class="math inline">\(\mathcal{L}(q^\star,
+\theta_{\mathrm{ML}})=\ln p(\mathbf{X}\mid\theta_{\mathrm{ML}})\)</span> exatamente — a mesma quantidade da log-verossimilhança de treino máxima, com o mesmo problema de nunca piorar com mais componentes.</li>
+<li>✗ Falso — <span class="math inline">\(\pi_k\)</span> é usado como priori sobre a variável latente <span class="math inline">\(\mathbf{Z}\)</span> (de qual componente um ponto vem), mas o vetor <span class="math inline">\(\pi\)</span> em si, no EM clássico, nunca tem priori nenhuma — é tratado como um número fixo, igual a <span class="math inline">\(\mu_k,\Sigma_k\)</span>. O problema estrutural é a ausência de priori sobre <strong><span class="math inline">\(\pi\)</span></strong>, não sobre <span class="math inline">\(\mu_k,\Sigma_k\)</span> (dar-lhes priori, mantendo <span class="math inline">\(\pi\)</span> fixo, não resolveria nada).</li>
+<li>✔ Verdadeiro — Levar <span class="math inline">\(h\to0\)</span> concentra o kernel inteiro sobre um único ponto de treino, fazendo a densidade estimada ali (e portanto a log-verossimilhança) divergir a <span class="math inline">\(+\infty\)</span> — a mesma degenerescência estrutural do GMM, agora aplicada a um estimador de densidade não paramétrico visto na Aula 2, não exclusiva de misturas gaussianas.</li>
+<li>✔ Verdadeiro — Priori quase pontual <span class="math inline">\(\Rightarrow\)</span> <span class="math inline">\(q(\pi)\)</span> quase não se move de <span class="math inline">\(p(\pi)\)</span> <span class="math inline">\(\Rightarrow\)</span> o custo de KL sobre <span class="math inline">\(\pi\)</span> vira aproximadamente constante, reduzindo o comportamento ao caso em que <span class="math inline">\(\pi\)</span> é tratado como fixo — o EM clássico.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 2 — ELBO com priori sobre π e a Navalha de Occam
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ Se a fatoração de campo médio <span class="math inline">\(q(\mathbf{Z},\pi)\approx
+q(\mathbf{Z})q(\pi)\)</span> não corresponder exatamente à dependência real entre <span class="math inline">\(\mathbf{Z}\)</span> e <span class="math inline">\(\pi\)</span> na posterior verdadeira, o ELBO resultante deixa de ser uma cota inferior válida de <span class="math inline">\(\ln p(\mathbf{X}\mid\phi)\)</span> (com <span class="math inline">\(\phi=\{\mu_k,\Sigma_k\}\)</span> fixos).</li>
+<li>□ Se um componente não contribui em nada para explicar melhor os dados (o termo de ajuste é indiferente a ele), maximizar o ELBO tende a levar <span class="math inline">\(q(\pi)\)</span> para perto da própria priori <span class="math inline">\(p(\pi)\)</span> naquela coordenada, pagando o menor custo de KL possível.</li>
+<li>□ Como o ELBO com <span class="math inline">\(\pi\)</span> dentro do tratamento variacional é sempre uma cota inferior de <span class="math inline">\(\ln p(\mathbf{X}\mid\phi)\)</span>, maximizar esse ELBO é equivalente a maximizar diretamente a evidência do modelo, sem diferença prática entre as duas quantidades.</li>
+<li>□ O mesmo princípio de penalizar parâmetros supérfluos pelo custo de se afastar de uma crença prévia aparece numa regressão Ridge, cuja priori Gaussiana sobre os coeficientes corresponde ao termo de regularização <span class="math inline">\(L_2\)</span>.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>(Resposta) Teste 2 — ELBO com priori sobre π e a Navalha de Occam
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>✗ Falso — A decomposição <span class="math inline">\(\ln p(\mathbf{X}\mid\phi)=\mathcal{L}(q,\phi)+
+\mathrm{KL}(q\|p)\)</span> vale para <strong>qualquer</strong> <span class="math inline">\(q\)</span> normalizada, fatorada ou não; a fatoração de campo médio afeta só o quão <strong>apertada</strong> é a cota (o KL residual entre a família fatorada e a posterior verdadeira), nunca a validade da desigualdade <span class="math inline">\(\mathcal{L}(q,\phi)\le\ln p(\mathbf{X}\mid\phi)\)</span>.</li>
+<li>✔ Verdadeiro — Sem ganho no termo de ajuste, a única forma de aumentar <span class="math inline">\(\mathcal{L}(q,\phi)\)</span> é reduzir o KL — e o mínimo do KL naquela coordenada é <span class="math inline">\(q(\pi)=p(\pi)\)</span>, custo zero.</li>
+<li>✗ Falso — O ELBO é sempre <span class="math inline">\(\le\ln p(\mathbf{X}\mid\phi)\)</span>, com igualdade só quando <span class="math inline">\(\mathrm{KL}=0\)</span> (a posterior é exatamente atingida); maximizar a cota aproxima a evidência, mas não a torna idêntica a ela em geral — a diferença (o KL residual) é justamente o que a escolha da família de <span class="math inline">\(q\)</span> não elimina.</li>
+<li>✔ Verdadeiro — Uma priori Gaussiana centrada em zero sobre os coeficientes, combinada com MAP, produz exatamente o termo <span class="math inline">\(\lambda\|\mathbf{w}\|_2^2\)</span> da regularização Ridge — o mesmo princípio de “pagar para se afastar de uma crença prévia”, em outra roupagem.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 3 — Priori de Dirichlet e poda automática de componentes
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ Numa priori de Dirichlet sobre os pesos de mistura com concentração <span class="math inline">\(\alpha_0\)</span> pequena, usar um número de componentes “de sobra” (ex.: <span class="math inline">\(K=8\)</span>) maior que o número real de grupos na população tende a produzir vários pesos <span class="math inline">\(\pi_k\)</span> próximos de zero, sem precisar reajustar o modelo para <span class="math inline">\(K\)</span> menor e comparar.</li>
+<li>□ Se, em vez de uma priori de Dirichlet concentrada, usássemos uma priori extremamente ampla e difusa sobre os pesos de mistura, o modelo tenderia a manter <strong>mais</strong> componentes com peso não desprezível, já que o custo de KL por usar cada componente seria menor.</li>
+<li>□ Como a poda automática por priori de Dirichlet não exige comparar <span class="math inline">\(\mathcal{L}\)</span> entre rodadas separadas de <span class="math inline">\(K\)</span>, ela elimina por completo a necessidade de qualquer validação empírica posterior do número de componentes efetivamente usados.</li>
+<li>□ O mesmo mecanismo de “encolher parâmetros supérfluos até perto de zero automaticamente, via uma priori apropriada” aparece numa regressão LASSO, cuja priori Laplaciana sobre os coeficientes empurra muitos deles exatamente a zero.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>(Resposta) Teste 3 — Priori de Dirichlet e poda automática de componentes
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>✔ Verdadeiro — É exatamente o fenômeno de poda automática: a priori concentrada já favorece poucos componentes ativos antes de ver os dados, e a otimização variacional empurra os pesos supérfluos para perto de zero num único ajuste.</li>
+<li>✔ Verdadeiro — Uma priori mais difusa “custa menos” (em KL) para manter um componente ativo, então o modelo tem menos pressão para podá-lo — mais componentes sobrevivem com peso não desprezível.</li>
+<li>✗ Falso — A poda automática depende da família de modelo e da priori escolhida serem adequadas ao problema; ela é uma forma de penalidade <strong>analítica</strong>, não substitui checar, empiricamente (Silhueta, verossimilhança de validação, PPC), se a estrutura resultante de fato generaliza ou captura a forma real dos dados.</li>
+<li>✔ Verdadeiro — Mesmo mecanismo: uma priori que concentra massa perto de zero (Laplaciana no LASSO, Dirichlet concentrada aqui) empurra parâmetros/pesos supérfluos para zero automaticamente, sem exigir busca exaustiva por subconjuntos de variáveis/componentes.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 4 — O dilema dos hiperparâmetros
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ Trocar a escolha de <span class="math inline">\(K\)</span> de um GMM pela escolha de <span class="math inline">\(\alpha_0\)</span> de um GMM Bayesiano elimina a subjetividade da decisão, porque <span class="math inline">\(\alpha_0\)</span> é um único número real, enquanto <span class="math inline">\(K\)</span> é um inteiro que precisa ser testado exaustivamente.</li>
+<li>□ O K-Means, por não ser um modelo probabilístico, não tem priori nenhuma sobre seu hiperparâmetro <span class="math inline">\(K\)</span> — a calibração desse hiperparâmetro precisa vir inteiramente de outra via (empírica, não analítica).</li>
+<li>□ Os hiperparâmetros <span class="math inline">\(\epsilon\)</span> e <code>min_samples</code> do DBSCAN desempenham, na prática, um papel estrutural análogo ao de <span class="math inline">\(K\)</span> no K-Means e ao de <span class="math inline">\(\alpha_0\)</span> num GMM Bayesiano: controlam o quão “fina” ou “grossa” é a estrutura que o modelo está autorizado a enxergar nos dados.</li>
+<li>□ Se um método de clusterização não tem hiperparâmetro nenhum de estrutura para calibrar, ele está automaticamente livre do problema de sobreajuste discutido nesta aula.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>(Resposta) Teste 4 — O dilema dos hiperparâmetros
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>✗ Falso — Ser um número real contínuo não elimina a subjetividade, só troca um conjunto discreto de opções por um contínuo; calibrar <span class="math inline">\(\alpha_0\)</span> ainda exige o mesmo tipo de decisão (e validação) que calibrar <span class="math inline">\(K\)</span> diretamente.</li>
+<li>✔ Verdadeiro — Sem verossimilhança nem priori, a única forma de calibrar <span class="math inline">\(K\)</span> no K-Means é observar o comportamento do algoritmo em dados — daí a necessidade das métricas empíricas do Bloco 3 (Silhueta, Davies-Bouldin) desta aula.</li>
+<li>✔ Verdadeiro — <span class="math inline">\(\epsilon\)</span>/<code>min_samples</code> controlam a granularidade de densidade que o DBSCAN reconhece como cluster, exatamente como <span class="math inline">\(K\)</span> controla quantos grupos o K-Means pode formar e <span class="math inline">\(\alpha_0\)</span> controla quantos componentes a priori “permite” ao GMM Bayesiano.</li>
+<li>✗ Falso — Falsa equivalência: a ausência de um hiperparâmetro explícito de estrutura não impede sobreajuste — ele pode aparecer por outras vias (escolha de métrica de distância, de atributos, do próprio algoritmo) mesmo sem um número único para calibrar.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 5 — Validação empírica de clusterização dura
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ Calcular a Silhueta e o Índice de Davies-Bouldin usando os próprios pontos de treino (os mesmos usados para definir os centroides) mede apenas o quão bem o algoritmo otimizou sua função objetivo ali, não se a estrutura encontrada generaliza para dados novos.</li>
+<li>□ No caso-limite em que, na validação, um cluster recebe um único ponto atribuído a ele, o Coeficiente de Silhueta desse ponto fica matematicamente indefinido, pois <span class="math inline">\(a(i)\)</span> (distância média aos outros pontos do <strong>mesmo</strong> cluster) não tem nenhum termo para calcular.</li>
+<li>□ Como a Silhueta e o Davies-Bouldin são métricas puramente geométricas, que não usam verossimilhança, elas são igualmente confiáveis calculadas no conjunto de treino ou no de validação, ao contrário do que acontece com a log-verossimilhança.</li>
+<li>□ A mesma lógica de “ajustar num conjunto de dados, validar a estabilidade da estrutura encontrada em outro conjunto nunca usado no ajuste” se aplica a escolher o número de componentes principais de uma Análise de Componentes Principais (PCA) pelo erro de reconstrução medido em dados de validação.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>(Resposta) Teste 5 — Validação empírica de clusterização dura
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>✔ Verdadeiro — É o mesmo erro estrutural da log-verossimilhança de treino: qualquer métrica calculada nos dados que definiram a partição favorece partições mais ajustadas àquele conjunto específico, sem dizer nada sobre generalização.</li>
+<li>✔ Verdadeiro — Com um único ponto no cluster, “distância média aos outros pontos do mesmo cluster” não tem nenhum outro ponto para formar a média — a Silhueta perde sentido matemático nesse extremo.</li>
+<li>✗ Falso — Ser geométrica não isenta a métrica do viés de “medir nos dados que já definiram a resposta”; o mesmo problema de inflar a aparência de qualidade se aplica a qualquer métrica, geométrica ou probabilística, calculada no conjunto que gerou o modelo.</li>
+<li>✔ Verdadeiro — Mesmo princípio: erro de reconstrução da PCA no treino sempre cai (ou se mantém) com mais componentes; medir em validação revela se componentes extras generalizam ou só decoram o treino.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 6 — Validação por verossimilhança em modelos probabilísticos
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ Se um GMM ajustado só no conjunto de treino tem um componente cuja covariância colapsou sobre um único ponto de treino, a log-verossimilhança medida no conjunto de validação tende a ser consideravelmente pior do que a medida no próprio treino, já que aquele ponto específico de colapso não está na validação.</li>
+<li>□ Um descolamento crescente entre a log-verossimilhança de treino (subindo) e a de validação (caindo ou estagnada) ao aumentar <span class="math inline">\(K\)</span> é, em si, evidência de sobreajuste, mesmo sem calcular nenhuma penalidade analítica de complexidade.</li>
+<li>□ Como a validação usa dados nunca vistos no ajuste, o valor de <span class="math inline">\(K\)</span> que maximiza a log-verossimilhança de validação é, por construção, o número verdadeiro de populações latentes que geraram os dados, sem incerteza residual.</li>
+<li>□ A mesma receita (congelar o que foi aprendido no treino, avaliar numa métrica de qualidade em dados de validação) pode ser aplicada para comparar dois valores diferentes do hiperparâmetro <span class="math inline">\(\alpha_0\)</span> de um GMM Bayesiano, não só para comparar valores de <span class="math inline">\(K\)</span>.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>(Resposta) Teste 6 — Validação por verossimilhança em modelos probabilísticos
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>✔ Verdadeiro — O colapso infla artificialmente a densidade só naquele ponto específico de treino; pontos de validação, por serem diferentes, não se beneficiam desse artefato, e a densidade que o modelo lhes atribui reflete o resto do ajuste, tipicamente pior.</li>
+<li>✔ Verdadeiro — Esse descolamento é precisamente o sintoma empírico de sobreajuste: o modelo está melhorando o ajuste a particularidades do treino que não se repetem na validação — não precisa de fator de Occam analítico para ser detectado.</li>
+<li>✗ Falso — A validação reduz o risco de sobreajuste, mas o <span class="math inline">\(K\)</span> vencedor é uma estimativa sujeita à variância de amostragem daquela divisão treino/validação específica, não uma prova da estrutura populacional verdadeira.</li>
+<li>✔ Verdadeiro — A receita não depende de o hiperparâmetro ser <span class="math inline">\(K\)</span>: é “ajustar no treino, avaliar em validação”, igualmente aplicável a <span class="math inline">\(\alpha_0\)</span>, ou a qualquer outro hiperparâmetro de estrutura.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 7 — Incerteza da validação e variância amostral
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ O valor de <span class="math inline">\(K\)</span> que maximiza a log-verossimilhança de validação numa divisão específica treino/validação é uma estimativa sujeita à variância de amostragem daquela divisão, não uma prova definitiva do número “verdadeiro” de populações latentes na população de onde os dados vieram.</li>
+<li>□ No caso-limite em que o conjunto de validação tem um único ponto, todos os modelos candidatos (diferentes <span class="math inline">\(K\)</span>) produzem exatamente a mesma log-verossimilhança de validação para esse ponto, tornando a comparação impossível.</li>
+<li>□ Como usar um conjunto de validação já protege contra sobreajuste, repetir a divisão treino/validação várias vezes (validação cruzada) e observar se o mesmo <span class="math inline">\(K\)</span> é escolhido em todas as repetições não traz nenhuma informação adicional sobre a confiabilidade da escolha.</li>
+<li>□ A mesma cautela epistemológica — “o critério escolhido aponta para X” não é o mesmo que “X é a estrutura verdadeira” — se aplica a escolher o grau de um polinômio de regressão pelo menor erro quadrático medido num conjunto de validação.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>(Resposta) Teste 7 — Incerteza da validação e variância amostral
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>✔ Verdadeiro — Toda estimativa calculada sobre uma amostra finita (aqui, a divisão específica treino/validação) carrega variância; o <span class="math inline">\(K\)</span> escolhido é a melhor aposta sob essa amostra, não uma certeza populacional.</li>
+<li>✗ Falso — Modelos com <span class="math inline">\(K\)</span> diferentes atribuem, em geral, densidades diferentes a qualquer ponto específico — mesmo com um único ponto de validação, a comparação continua possível, só fica mais ruidosa (mais sujeita a variância).</li>
+<li>✗ Falso — Repetir a divisão e observar a estabilidade da escolha de <span class="math inline">\(K\)</span> entre repetições é justamente o que informa o quão confiável (ou ruidosa) é aquela escolha — informação que uma única divisão treino/validação, sozinha, não fornece.</li>
+<li>✔ Verdadeiro — O mesmo cuidado: o grau escolhido por erro mínimo de validação é o que generalizou melhor nessa amostra específica, não necessariamente o grau “verdadeiro” do processo gerador dos dados.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 8 — Posterior Predictive Checks
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ Um GMM com componentes elípticos ajustado a um conjunto de dados com clusters em formato de “lua” (não convexos) pode obter uma log-verossimilhança razoável e, ainda assim, gerar dados sintéticos que preenchem uma região côncava entre as luas onde os dados reais não têm densidade nenhuma — uma falha que a log-verossimilhança, sozinha, não denuncia diretamente.</li>
+<li>□ No caso-limite em que o modelo generativo ajustado é exatamente igual ao processo real que gerou os dados observados, dados sintéticos amostrados desse modelo devem ser estatisticamente indistinguíveis dos dados reais, no sentido de reproduzir forma, dispersão e demais estatísticas relevantes.</li>
+<li>□ Como o Posterior Predictive Check compara estatísticas agregadas (médias, variâncias) entre dados reais e sintéticos, ele é, na prática, redundante com a Silhueta e a log-verossimilhança de validação, que já usam as mesmas estatísticas agregadas.</li>
+<li>□ A mesma limitação de métricas escalares — um bom escore agregado escondendo uma incompatibilidade de forma — motiva, em modelos generativos de imagens, complementar métricas como o FID (<em>Fréchet Inception Distance</em>) com inspeção visual direta das amostras geradas.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>(Resposta) Teste 8 — Posterior Predictive Checks
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>✔ Verdadeiro — Componentes elípticos não reproduzem o formato de crescente das luas: cobrem razoavelmente a posição média de cada grupo (log-verossimilhança aceitável) mas preenchem o vão côncavo entre elas — uma falha de forma, não de posição/densidade agregada.</li>
+<li>✔ Verdadeiro — É a definição operacional de “o modelo capturou o processo gerador”: amostras do modelo devem ser, na prática, intercambiáveis com dados reais em qualquer estatística relevante.</li>
+<li>✗ Falso — O PPC não se limita a médias/variâncias: pode (e, para detectar falhas de forma, deve) comparar propriedades estruturais como formato, multimodalidade, densidade espacial — exatamente o que o exemplo das luas mostra que métricas agregadas escalares não capturam. Reduzir o PPC a média/variância perderia seu principal valor.</li>
+<li>✔ Verdadeiro — A mesma lógica: um escore agregado favorável (FID baixo) não garante ausência de artefatos visíveis em amostras individuais — inspeção direta continua sendo necessária.</li>
+</ul>
+</div>
+</div>
+
+
+
+</main> <!-- /main -->
+<!-- Parcial estático, igual em toda aula (não é mais gerado por script —
+     ver histórico do teaching/generate_lesson_nav.py, removido). Só
+     carrega o script que transforma o sumário nativo do Quarto (#TOC,
+     "Nesta página") no painel de acordeão "Nesta aula". -->
+<script src="../../toc-accordion.js"></script>
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copiada");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copiada");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+<footer class="footer">
+  <div class="nav-footer">
+    <div class="nav-footer-left">
+      &nbsp;
+    </div>   
+    <div class="nav-footer-center">
+<p>© 2026 Marcos M. Raimundo</p>
+</div>
+    <div class="nav-footer-right">
+      &nbsp;
+    </div>
+  </div>
+</footer>
+
+
+
+
+</body></html>

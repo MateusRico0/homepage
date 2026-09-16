@@ -1,0 +1,159 @@
+---
+title: "Soluções — O Padrão Decorator e o Padrão Observer: Composição Dinâmica e Desacoplamento de Eventos"
+subtitle: "Aula 13 — Programação Orientada a Objetos"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+
+::: {.callout-note icon=false}
+## Teste 1 — A Explosão Combinatória e o Limite da Herança Estática
+
+- □ Se a cafeteria decidisse tratar cada adicional como um atributo booleano dentro da própria classe `Cafe`, em vez de como uma subclasse, o número de classes necessárias deixaria de crescer exponencialmente com o número de adicionais, mas a decisão de quais adicionais existem passaria a ser fixada em tempo de compilação dentro de `Cafe`.
+- □ Se a cafeteria oferecesse apenas 1 adicional opcional, o número de subclasses exigido pela herança estática seria idêntico ao que a mesma situação exigiria sob o padrão Decorator (uma classe para representar o objeto simples, outra para o objeto com o adicional).
+- □ Um editor de imagens que aplica filtros (preto-e-branco, sépia, desfoque) de forma independente e cumulativa sobre uma foto sofreria do mesmo tipo de explosão combinatória se cada combinação de filtros fosse modelada como uma subclasse de `Imagem`.
+- □ Bastaria usar interfaces em vez de classes abstratas para representar `CafeComLeite`, `CafeComChocolate` etc. para eliminar a explosão combinatória, já que interfaces não sofrem do mesmo problema de herança múltipla que classes sofrem em Java.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 1 — A Explosão Combinatória e o Limite da Herança Estática
+
+- ✔ Verdadeiro — Usar atributos booleanos dentro de `Cafe` (`temLeite`, `temChocolate`, ...) de fato evita a explosão de subclasses — o número de classes deixa de depender do número de adicionais. Mas o conjunto de adicionais possíveis passa a estar fixado dentro do código-fonte de `Cafe`: adicionar um novo adicional exige editar essa classe e recompilá-la, uma forma diferente (mas real) de rigidez em tempo de compilação, ainda que sem explosão combinatória de classes.
+- ✔ Verdadeiro — Com $N=1$, a herança estática exige $2^1=2$ classes (`Cafe` e `CafeComLeite`), e o Decorator também usaria 2 classes (`Cafe` e `Leite`, mais a classe abstrata `BebidaDecorator`, que é infraestrutura reutilizável, não específica de um adicional). No caso trivial de um único adicional, as duas estratégias empatam em número de classes por adicional — é só quando o número de adicionais cresce que a herança diverge exponencialmente enquanto o Decorator continua crescendo linearmente (uma classe nova por adicional, não por combinação).
+- ✔ Verdadeiro — A assinatura estrutural do problema é idêntica à da cafeteria: filtros opcionais, cumulativos e combináveis livremente, modelados como subclasses, geram $2^N$ combinações para $N$ filtros — exatamente o mesmo colapso, em outro domínio.
+- ✗ Falso — O problema da explosão combinatória não nasce da distinção classe/interface, nasce de modelar cada combinação de adicionais como um tipo à parte. Trocar `extends` por `implements` não muda o fato de que ainda seria preciso um tipo (classe ou interface) para cada uma das $2^N$ combinações possíveis — o número de tipos necessários continuaria exponencial.
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — Estrutura do Decorator: Wrapping, É-UM e TEM-UM
+
+- □ Se `Leite` chamasse `bebidaDecorada.getCusto()` diretamente no seu construtor, em vez de dentro do método `getCusto()` sobrescrito, o custo acumulado refletiria apenas o valor do objeto decorado no momento da criação de `Leite`, não permitindo que mudanças posteriores no objeto interno fossem refletidas em chamadas futuras.
+- □ Se um cliente empilhasse dez decoradores `Leite` seguidos sobre o mesmo `Cafe` (`new Leite(new Leite(... new Cafe() ...))`), o custo final refletiria dez incrementos de R$ 1,50 aplicados sucessivamente, mesmo sem existir nenhuma subclasse dedicada a "café com dez leites".
+- □ Um sistema de permissões que envolve um `Usuario` base com decoradores como `PermissaoAdmin` e `PermissaoAuditor`, cada um acrescentando checagens de acesso ao redor do usuário original, estaria aplicando a mesma estrutura É-UM/TEM-UM vista em `BebidaDecorator`.
+- □ Como o Decorator implementa a mesma interface do objeto que envolve, um decorador concreto nunca deveria sobrescrever um método herdado de `BebidaDecorator`, pois isso quebraria o repasse puro que define o padrão.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 2 — Estrutura do Decorator: Wrapping, É-UM e TEM-UM
+
+- ✔ Verdadeiro — Calcular e guardar o custo no construtor "congelaria" o valor no momento da criação; qualquer mutação posterior no objeto decorado (por exemplo, uma promoção aplicada depois) não seria refletida, porque o `getCusto()` de `Leite` retornaria o valor armazenado, não recalcularia via delegação. É por isso que o padrão delega a cada chamada, dentro do próprio método, e não uma única vez no construtor.
+- ✔ Verdadeiro — Cada camada de `Leite` soma seu próprio acréscimo de forma independente — a recursão simplesmente atravessa dez camadas em vez de uma. Nenhuma classe nova é necessária para esse caso extremo, o que evidencia a vantagem central do Decorator sobre a herança estática: a quantidade de camadas é uma decisão de runtime, não de projeto de classes.
+- ✔ Verdadeiro — A mesma dualidade estrutural se aplica: cada decorador de permissão implementaria a interface do `Usuario` (É-UM) e conteria uma referência ao usuário decorado (TEM-UM), permitindo empilhar checagens de acesso de forma cumulativa e transparente ao código cliente.
+- ✗ Falso — É exatamente o oposto: o repasse puro é o comportamento padrão de `BebidaDecorator` (a classe abstrata), mas cada decorador concreto (`Leite`, `Chocolate`) precisa sobrescrever os métodos para acrescentar seu próprio comportamento sobre o repasse (via `super.getCusto() + acréscimo`) — sem essa sobrescrita, o decorador não teria nenhum efeito observável.
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — A Recursão no Decorator: `BebidaDecorator` e `Leite`
+
+- □ Se `Cafe.getCusto()` retornasse um valor diferente a cada chamada (por exemplo, por causa de uma promoção aleatória), uma cadeia `new Chocolate(new Leite(new Cafe()))` ainda produziria um resultado consistente com a soma dos acréscimos de cada camada sobre o valor retornado por `Cafe` naquela chamada específica.
+- □ Na cadeia `new Chocolate(new Leite(new Cafe()))`, se removêssemos a chamada `super.getCusto()` de dentro do método `getCusto()` de `Chocolate`, o valor final retornado ignoraria completamente o custo acumulado por `Leite` e por `Cafe`, refletindo apenas o acréscimo do próprio `Chocolate`.
+- □ Uma pilha (`Stack`) de chamadas de função em qualquer linguagem de programação, na qual cada função retorna depois de invocar a próxima, compartilha a mesma lógica estrutural de "delegar para dentro e acumular ao retornar" que a cadeia de decoradores usa para calcular `getCusto()`.
+- □ Como cada decorador concreto soma um valor fixo ao custo do objeto que envolve, a ordem em que os decoradores são empilhados (`new Chocolate(new Leite(new Cafe()))` vs. `new Leite(new Chocolate(new Cafe()))`) sempre produz um custo final diferente.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 3 — A Recursão no Decorator: `BebidaDecorator` e `Leite`
+
+- ✔ Verdadeiro — O mecanismo de delegação recursiva não depende de `Cafe.getCusto()` ser determinístico — cada chamada de `getCusto()` na cadeia dispara uma nova descida até `Cafe`, e o valor que ele retornar naquele instante é o que sobe acumulando os acréscimos de `Leite` e `Chocolate`. A consistência está no mecanismo (soma sobre o valor retornado naquela chamada), não na estabilidade do valor de `Cafe` entre chamadas diferentes.
+- ✔ Verdadeiro — `super.getCusto()` é exatamente o elo que conecta a camada atual com o valor acumulado por todas as camadas internas. Removê-lo quebra a cadeia recursiva no ponto de `Chocolate`: o método deixa de descer para `Leite`/`Cafe` e retorna apenas o valor que `Chocolate` adicionaria, um caso-limite que expõe a dependência estrutural do padrão em relação a essa chamada.
+- ✔ Verdadeiro — A pilha de chamadas de função é a mesma estrutura recursiva geral que o Decorator usa deliberadamente para acumular valores: descer delegando, subir acumulando — o Decorator apenas dá nome e reuso a essa estrutura no contexto de composição dinâmica de objetos.
+- ✗ Falso — Para operações puramente aditivas sobre um número (soma de acréscimos fixos), a ordem das camadas não altera o resultado final — a soma é comutativa. `getCusto()` produziria R$ 8,50 em qualquer uma das duas ordens (isso contrasta deliberadamente com o exemplo do `NotificadorComRetry`/`NotificadorComLog`, onde a ordem das camadas muda o comportamento observável, porque a operação ali não é aditiva/comutativa).
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — Decorator no Mundo Real: `java.io` e a Cadeia de Notificadores
+
+- □ Se `BufferedInputStream` estendesse diretamente `FileInputStream` em vez de decorar a interface `InputStream`, o mesmo `BufferedInputStream` não poderia ser usado para adicionar buffer a um `SocketInputStream` (leitura de rede) sem duplicar código.
+- □ Se um `NotificadorComRetry` envolvesse um `NotificadorComLog`, que por sua vez envolvesse um `NotificadorEmail`, e a tentativa de envio falhasse repetidamente até esgotar as tentativas de retry, o log registrado pelo `NotificadorComLog` ainda seria disparado a cada tentativa individual, não apenas uma vez ao final.
+- □ Um pipeline de processamento de dados que envolve uma fonte de dados bruta com camadas sucessivas de validação, transformação e cache, cada uma implementando a mesma interface da anterior, está aplicando a mesma lógica de composição em camadas vista em `BufferedInputStream` e na cadeia de notificadores do `Pedido`.
+- □ Como `NotificadorComLog` e `NotificadorComRetry` decoram a mesma interface `Notificador`, a ordem em que são aplicados (log por fora do retry, ou retry por fora do log) é irrelevante para o comportamento observável do sistema.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 4 — Decorator no Mundo Real: `java.io` e a Cadeia de Notificadores
+
+- ✔ Verdadeiro — Herdar diretamente de `FileInputStream` prenderia `BufferedInputStream` a essa única classe concreta em tempo de compilação; para bufferizar um `SocketInputStream`, seria preciso criar uma segunda classe (`BufferedSocketInputStream`), duplicando a lógica de buffer. Decorar a interface `InputStream` é o que permite ao mesmo `BufferedInputStream` envolver qualquer implementação concreta.
+- ✔ Verdadeiro — Como `NotificadorComLog` está na camada logo abaixo de `NotificadorComRetry`, cada iteração do laço de retry chama `super.enviar()`, que é o `enviar()` de `NotificadorComLog` — portanto o log é registrado uma vez por tentativa, não uma única vez ao final da série de tentativas.
+- ✔ Verdadeiro — Mesma estrutura de composição recursiva em camadas, aplicada a um domínio de pipeline de dados em vez de streams de I/O ou notificações — cada camada adiciona uma responsabilidade e delega para a camada interna.
+- ✗ Falso — A ordem muda o comportamento observável: com `NotificadorComRetry` por fora (como no exemplo da aula), o log dispara a cada tentativa de reenvio; com `NotificadorComLog` por fora, o log dispararia uma única vez, antes de todas as tentativas de retry ocorrerem internamente. Diferente do custo aditivo do exemplo da bebida, esta composição não é comutativa.
+:::
+
+::: {.callout-note icon=false}
+## Teste 5 — O Acoplamento de Notificação em Cascata
+
+- □ Se `Pedido.fecharPedido()` recebesse `EmailService`, `LogService` e `InventarioService` por injeção de dependência via construtor, em vez de instanciá-los internamente, isso sozinho já eliminaria a necessidade de editar `Pedido` sempre que um canal de notificação novo (como SMS) for adicionado.
+- □ Se `Pedido` precisasse notificar zero subsistemas periféricos (nenhum e-mail, log ou atualização de estoque), a arquitetura de dependências diretas do exemplo original ainda seria uma violação do OCP, mesmo sem nenhuma chamada real no corpo de `fecharPedido()`.
+- □ Uma função de checkout de e-commerce que, após confirmar um pagamento, chama diretamente APIs de frete, de fidelidade e de recomendação de produtos dentro do mesmo método, sofre do mesmo tipo de acoplamento de notificação em cascata descrito para o `Pedido`.
+- □ O problema do `Pedido` com `EmailService`/`LogService`/`InventarioService` é resolvido simplesmente movendo as três chamadas para um método privado separado dentro da própria classe `Pedido`, já que isso reduz o tamanho do método `fecharPedido()`.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 5 — O Acoplamento de Notificação em Cascata
+
+- ✗ Falso — Injeção de dependência resolve o problema de acoplamento a implementações concretas (permite trocar `EmailService` por um mock, por exemplo), mas não resolve o problema estrutural do OCP aqui em jogo: `Pedido` ainda precisaria de um novo campo e uma nova linha de chamada dentro de `fecharPedido()` para cada canal novo, mesmo que os serviços existentes sejam injetados. Só uma lista de abstrações percorrida em broadcast (Observer) elimina essa necessidade de editar `Pedido`.
+- ✗ Falso — A violação do OCP se manifesta como a necessidade de modificar `Pedido` quando um requisito novo aparece. Sem nenhuma notificação a fazer, não há ainda nenhuma dependência concreta codificada em `Pedido`, logo não há violação a apontar nesse estado — o problema só se manifesta no momento em que o primeiro (ou um novo) canal de notificação precisa ser adicionado.
+- ✔ Verdadeiro — Mesma assinatura estrutural: um método de negócio central que conhece e invoca diretamente múltiplos subsistemas periféricos, tornando-se refém das assinaturas e da disponibilidade de cada um deles.
+- ✗ Falso — Extrair as chamadas para um método privado melhora a organização/legibilidade local, mas não remove o acoplamento: `Pedido` ainda conhece e depende diretamente das três classes concretas, e ainda precisaria ser editado (mesmo que só nesse método privado) para adicionar um canal novo — a violação do OCP permanece intacta.
+:::
+
+::: {.callout-note icon=false}
+## Teste 6 — Estrutura do Observer: Subject, Observer e Broadcast
+
+- □ Se `PedidoSubject.observadores` fosse declarado como `List<EmailService>` em vez de `List<PedidoObserver>`, ainda seria possível registrar um `SmsService` nessa lista, desde que `SmsService` implementasse a interface `PedidoObserver`.
+- □ Se a lista `observadores` de `PedidoSubject` estiver vazia no momento em que `faturar()` é chamado, o método ainda executa corretamente a lógica de negócio principal, apenas sem disparar nenhuma notificação.
+- □ Um sistema de notícias que mantém uma lista de assinantes de uma newsletter, notificando todos eles sempre que um novo artigo é publicado, sem saber se o assinante é uma pessoa física ou um outro sistema automatizado, está aplicando a mesma estrutura Subject/Observer vista no `PedidoSubject`.
+- □ Registrar um observador em `PedidoSubject` usando `registrar(PedidoObserver o)` cria necessariamente uma dependência do `PedidoSubject` em relação à classe concreta do observador registrado, da mesma forma que ocorria na versão original com `EmailService` fixo.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 6 — Estrutura do Observer: Subject, Observer e Broadcast
+
+- ✗ Falso — O sistema de tipos do Java não permite: uma `List<EmailService>` só aceita instâncias de `EmailService` (ou subclasses dela). `SmsService` implementar `PedidoObserver` não o torna um `EmailService`; ele só poderia ser adicionado a uma lista tipada como `List<PedidoObserver>` — exatamente por isso o Sujeito deve depender da interface, não de uma classe concreta.
+- ✔ Verdadeiro — O laço `for` sobre uma lista vazia simplesmente não itera nenhuma vez; a lógica de negócio (processar o faturamento) roda normalmente antes do laço e é completamente independente de haver ou não observadores registrados — mais uma evidência do desacoplamento entre regra de negócio e notificação.
+- ✔ Verdadeiro — Mesma topologia um-para-muitos com anonimato de identidade concreta do lado dos assinantes — o publicador (fonte de notícias) só conhece a interface de notificação comum, exatamente como `PedidoSubject` só conhece `PedidoObserver`.
+- ✗ Falso — É exatamente o oposto — o parâmetro do método `registrar` é tipado como `PedidoObserver` (a interface), então `PedidoSubject` nunca referencia nem depende da classe concreta de quem é registrado; essa é precisamente a diferença estrutural que elimina a dependência direta presente na versão original com `EmailService` fixo.
+:::
+
+::: {.callout-note icon=false}
+## Teste 7 — Push vs. Pull: Estratégias de Tráfego de Dados
+
+- □ Se o modelo Push do `PedidoSubject` já enviasse tanto o `id` quanto o valor total do pedido como parâmetros de `aoFaturar(String id, double valor)`, adicionar um observador que só precisa do `id` não exigiria nenhuma mudança na assinatura da interface `PedidoObserver`.
+- □ No modelo Pull, se o objeto `Subject` passado para `update(Subject s)` não expuser nenhum método público além de construtores, o observador fica impossibilitado de extrair qualquer dado relevante, tornando a notificação praticamente inútil.
+- □ Um sistema de sensores que envia, a cada leitura, apenas um identificador do sensor que mudou (modelo Pull), deixando o painel de monitoramento responsável por consultar o valor atual da temperatura, sofre do mesmo tipo de acoplamento bidirecional descrito para o modelo Pull do Observer.
+- □ Como o modelo Pull é mais flexível a longo prazo do que o Push, ele deveria ser sempre preferido, independentemente de quão homogêneas e estáveis sejam as necessidades de dados dos observadores.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 7 — Push vs. Pull: Estratégias de Tráfego de Dados
+
+- ✔ Verdadeiro — Uma vez que a assinatura já inclui os dois parâmetros, qualquer observador (existente ou novo) pode simplesmente ignorar o parâmetro que não usa — o problema do Push só aparece quando um observador precisa de um dado que a assinatura ainda não inclui, forçando uma mudança que quebraria os observadores já existentes.
+- ✔ Verdadeiro — O modelo Pull depende inteiramente da API pública do Sujeito para que o observador consiga extrair dados; sem nenhum getter público exposto, não há como o observador obter informação alguma a partir da referência recebida, evidenciando o caso-limite em que o Pull falha por falta de superfície pública.
+- ✔ Verdadeiro — O painel precisa conhecer a API pública do sensor para consultar o valor — exatamente o acoplamento bidirecional sutil descrito para o modelo Pull: o observador passa a depender da interface pública do sujeito.
+- ✗ Falso — A escolha entre Push e Pull é um trade-off, não uma hierarquia absoluta: quando as necessidades de dados dos observadores são homogêneas e bem conhecidas, o Push é mais simples e direto, sem o custo do acoplamento bidirecional que o Pull introduz. Preferir sempre um dos dois ignora o contexto que motiva a escolha.
+:::
+
+::: {.callout-note icon=false}
+## Teste 8 — Do Observer Local à Arquitetura Orientada a Eventos
+
+- □ Se um sistema trocasse seu `PedidoSubject` local por um Produtor de Eventos publicando em um tópico Kafka, os Consumidores de Eventos ainda poderiam, em princípio, permanecer completamente alheios à identidade física uns dos outros, da mesma forma que os observadores locais não conheciam a identidade concreta uns dos outros.
+- □ Se um sistema distribuído tiver um único Consumidor de Eventos assinando um único tópico, a topologia ainda é conceitualmente uma aplicação do padrão Observer, mesmo com apenas um assinante em vez de muitos.
+- □ Um sistema de biblioteca que notifica automaticamente todos os leitores inscritos em uma fila de espera assim que um livro é devolvido, sem que o sistema de devolução saiba quantos leitores estão na fila, está aplicando a mesma lógica de mapeamento Sujeito→Produtor de Eventos vista na evolução do Observer para EDA.
+- □ Migrar do Observer local para uma Arquitetura Orientada a Eventos distribuída elimina a necessidade de definir contratos (interfaces/esquemas de mensagem) entre publicador e consumidores, já que o barramento de mensagens absorve toda a responsabilidade de comunicação.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 8 — Do Observer Local à Arquitetura Orientada a Eventos
+
+- ✔ Verdadeiro — A topologia permanece conceitualmente idêntica ao migrar de escala — o desacoplamento entre observadores (ou consumidores) é uma propriedade da estrutura publicador/canal/assinante, preservada independentemente de os assinantes estarem na mesma JVM ou em processos distintos.
+- ✔ Verdadeiro — A relação "um-para-muitos" do Observer degenera, no caso limite de um único assinante, em "um-para-um" sem deixar de ser uma aplicação válida do padrão — o mecanismo de desacoplamento (publicador não conhece assinante concreto) continua presente independentemente da cardinalidade.
+- ✔ Verdadeiro — Mesma lógica de publicador que dispara um evento (devolução) para uma lista de interessados sem conhecê-los individualmente — mapeável diretamente para Sujeito→Produtor de Eventos, Observadores→Consumidores.
+- ✗ Falso — O barramento de mensagens transporta os eventos, mas não elimina a necessidade de um contrato compartilhado sobre o formato/esquema dessas mensagens — produtor e consumidores ainda precisam concordar sobre a estrutura dos dados publicados, o análogo distribuído da interface `PedidoObserver` do Observer local.
+:::

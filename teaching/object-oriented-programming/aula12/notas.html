@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="pt-BR" xml:lang="pt-BR"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.37">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Marcos M. Raimundo — Instituto de Computação, UNICAMP">
+
+<title>O Padrão State e o Padrão Adapter: o Fluxo Seguro do Objeto e a Fronteira Externa – Marcos M. Raimundo</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="../../../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../../../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../../../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../../../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../../../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../../../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../../../">
+<link href="../../../more.png" rel="icon" type="image/png">
+<script src="../../../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../../../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../../../site_libs/quarto-html/popper.min.js"></script>
+<script src="../../../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../../../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../../../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../../../site_libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../../../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../../../site_libs/bootstrap/bootstrap-f6f65eecdb8abf3e35b2d2c28dbef9f5.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "Nenhum resultado",
+    "search-matching-documents-text": "documentos correspondentes",
+    "search-copy-link-title": "Copiar link para a busca",
+    "search-hide-matches-text": "Esconder correspondências adicionais",
+    "search-more-match-text": "mais correspondência neste documento",
+    "search-more-matches-text": "mais correspondências neste documento",
+    "search-clear-button-title": "Limpar",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancelar",
+    "search-submit-button-title": "Enviar",
+    "search-label": "Procurar"
+  }
+}</script>
+
+
+<link rel="stylesheet" href="../../../styles.css">
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="../../../index.html">
+    <span class="navbar-title">Marcos M. Raimundo</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Procurar"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Alternar de navegação" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="../../../teaching/index.html"> 
+<span class="menu-text">Teaching</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../projects/index.html"> 
+<span class="menu-text">Projects</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../publications/index.html"> 
+<span class="menu-text">Publications</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../people/index.html"> 
+<span class="menu-text">People</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../contact.html"> 
+<span class="menu-text">Contact</span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/marcosmrai"> <i class="bi bi-github" role="img">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://scholar.google.com.br/citations?user=ibe0jfQAAAAJ&amp;hl=pt-BR"> <i class="bi bi-mortarboard-fill" role="img">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Nesta página</h2>
+   
+  <ul>
+  <li><a href="#proposta-da-aula" id="toc-proposta-da-aula" class="nav-link active" data-scroll-target="#proposta-da-aula"><span class="header-section-number">1</span> Proposta da Aula</a></li>
+  <li><a href="#o-antipadrão-do-status-como-primitivo" id="toc-o-antipadrão-do-status-como-primitivo" class="nav-link" data-scroll-target="#o-antipadrão-do-status-como-primitivo"><span class="header-section-number">2</span> O Antipadrão do Status como Primitivo</a>
+  <ul class="collapse">
+  <li><a href="#o-antipadrão-do-status-e-a-fragilidade-de-evolução" id="toc-o-antipadrão-do-status-e-a-fragilidade-de-evolução" class="nav-link" data-scroll-target="#o-antipadrão-do-status-e-a-fragilidade-de-evolução"><span class="header-section-number">2.1</span> O Antipadrão do Status e a Fragilidade de Evolução</a></li>
+  </ul></li>
+  <li><a href="#o-padrão-state-estrutura-e-delegação" id="toc-o-padrão-state-estrutura-e-delegação" class="nav-link" data-scroll-target="#o-padrão-state-estrutura-e-delegação"><span class="header-section-number">3</span> O Padrão State: Estrutura e Delegação</a>
+  <ul class="collapse">
+  <li><a href="#strategy-vs.-state-mesma-topologia-intenções-diferentes" id="toc-strategy-vs.-state-mesma-topologia-intenções-diferentes" class="nav-link" data-scroll-target="#strategy-vs.-state-mesma-topologia-intenções-diferentes"><span class="header-section-number">3.1</span> Strategy vs.&nbsp;State: Mesma Topologia, Intenções Diferentes</a></li>
+  </ul></li>
+  <li><a href="#onde-colocar-a-transição-e-o-ciclo-de-vida-robusto" id="toc-onde-colocar-a-transição-e-o-ciclo-de-vida-robusto" class="nav-link" data-scroll-target="#onde-colocar-a-transição-e-o-ciclo-de-vida-robusto"><span class="header-section-number">4</span> Onde Colocar a Transição, e o Ciclo de Vida Robusto</a></li>
+  <li><a href="#da-fronteira-interna-à-fronteira-externa-motivação-do-adapter" id="toc-da-fronteira-interna-à-fronteira-externa-motivação-do-adapter" class="nav-link" data-scroll-target="#da-fronteira-interna-à-fronteira-externa-motivação-do-adapter"><span class="header-section-number">5</span> Da Fronteira Interna à Fronteira Externa: Motivação do Adapter</a></li>
+  <li><a href="#o-padrão-adapter-tradução-de-protocolos" id="toc-o-padrão-adapter-tradução-de-protocolos" class="nav-link" data-scroll-target="#o-padrão-adapter-tradução-de-protocolos"><span class="header-section-number">6</span> O Padrão Adapter: Tradução de Protocolos</a>
+  <ul class="collapse">
+  <li><a href="#o-dilema-da-herança-no-adapter" id="toc-o-dilema-da-herança-no-adapter" class="nav-link" data-scroll-target="#o-dilema-da-herança-no-adapter"><span class="header-section-number">6.1</span> O Dilema da Herança no Adapter</a></li>
+  </ul></li>
+  <li><a href="#conclusão" id="toc-conclusão" class="nav-link" data-scroll-target="#conclusão"><span class="header-section-number">7</span> Conclusão</a>
+  <ul class="collapse">
+  <li><a href="#ponte-para-a-aula-13" id="toc-ponte-para-a-aula-13" class="nav-link" data-scroll-target="#ponte-para-a-aula-13">Ponte para a Aula 13</a></li>
+  </ul></li>
+  </ul>
+<div class="quarto-alternate-formats"><h2>Outros formatos</h2><ul><li><a href="slides.html"><i class="bi bi-file-slides"></i>RevealJS</a></li></ul></div></nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">O Padrão State e o Padrão Adapter: o Fluxo Seguro do Objeto e a Fronteira Externa</h1>
+<p class="subtitle lead">Aula 12 — Programação Orientada a Objetos</p>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Autor</div>
+    <div class="quarto-title-meta-contents">
+             <p>Marcos M. Raimundo — Instituto de Computação, UNICAMP </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Data de Publicação</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">16 de setembro de 2026</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<p><a href="slides.html" class="see-all" aria-label="Ver slides" title="Ver slides">Slides</a> <a href="../../../teaching/object-oriented-programming/index.html" class="see-all lesson-list-link" aria-label="Lista de aulas" title="Lista de aulas">Lista de aulas</a></p>
+<section id="proposta-da-aula" class="level1" data-number="1">
+<h1 data-number="1"><span class="header-section-number">1</span> Proposta da Aula</h1>
+<p>Na Aula 11, o <code>Pedido</code> ganhou dois terços do “tríptico da estabilidade”: o <strong>dado</strong> deixou de correr risco de <em>aliasing</em> (Value Object) e a <strong>gênese</strong> deixou de ser um construtor sujo de parâmetros arriscados (Builder, Factory Method). Falta o terceiro pilar: o <strong>fluxo</strong> — como um objeto muda de comportamento ao longo do seu próprio ciclo de vida sem recair no labirinto de <code>if/else</code> que o Strategy já baniu do cálculo de pagamento. É exatamente aí que o <code>Pedido</code> ainda esconde um problema: ele controla se pode ser pago, cancelado ou enviado através de uma variável <code>status</code> (uma <code>String</code> ou um <code>int</code>) verificada no topo de cada método — a mesma Obsessão por Primitivos da Aula 11, agora infiltrada no comportamento, não no dado.</p>
+<p>O padrão que resolve isso — o <strong>State</strong> — tem uma peculiaridade notável: sua topologia de classes (um Contexto, uma interface, implementações concretas) é quase indistinguível da topologia do Strategy que já dominamos. E é exatamente por isso que o contraste entre os dois vai ser o fio condutor da primeira metade desta aula: mesma estrutura, intenção arquitetural completamente diferente.</p>
+<p>Na segunda metade, a aula muda de direção. Depois de o objeto estar protegido por dentro — dado, gênese e agora fluxo —, resta uma fronteira que nenhum dos padrões anteriores tocou: o ponto onde o sistema conversa com o mundo <em>externo</em> — um SDK de pagamento, uma biblioteca de auditoria de terceiros, um sistema legado que a empresa não pode reescrever. Quando a interface desse mundo externo não bate com a que o domínio espera, surge o padrão <strong>Adapter</strong>.</p>
+<p><strong>O roteiro, em quatro perguntas:</strong></p>
+<ol type="1">
+<li>Por que reduzir o ciclo de vida de um objeto a uma <code>String status</code> verificada em cada método é uma bomba-relógio de manutenção, e não apenas um estilo de código menos elegante?</li>
+<li>Como o State converte esse controle de fluxo em objetos polimórficos — e, já que sua estrutura de classes parece a do Strategy, por que os dois resolvem problemas arquiteturais diferentes?</li>
+<li>Quando um estado decide para onde o objeto vai a seguir, quem deveria guardar essa decisão — o próprio estado, ou o objeto hospedeiro?</li>
+<li>Se o sistema precisa conversar com uma biblioteca cuja interface não foi desenhada para o seu domínio, e você não pode alterar nem a biblioteca nem o jeito como o resto do sistema já fala, quem deveria absorver essa tradução?</li>
+</ol>
+<p>Considere o nosso <code>Pedido</code>, já purificado pelo Strategy (Aula 10) e nascido em segurança pelo Builder (Aula 11). Ele ainda tem um método <code>pagar()</code> que começa perguntando “em que status eu estou?”, um <code>cancelar()</code> que repete a mesma pergunta, e um <code>enviar()</code> que a repete outra vez. Adicionar um único estado novo — digamos, “EM_ANALISE_DE_FRAUDE” — significa abrir os três métodos e inserir um novo <code>if</code> em cada um. É esse <code>Pedido</code>, comportamentalmente ainda no modelo antigo, que os próximos blocos corrigem — e, feito isso, a aula vira a atenção para a fronteira que liga esse <code>Pedido</code> já robusto ao resto do mundo.</p>
+</section>
+<section id="o-antipadrão-do-status-como-primitivo" class="level1" data-number="2">
+<h1 data-number="2"><span class="header-section-number">2</span> O Antipadrão do Status como Primitivo</h1>
+<p><strong>O método que sempre começa com uma pergunta.</strong> Considere o <code>Pedido</code> tal como ele ainda está, depois do Strategy e do Builder — funcional, mas com o ciclo de vida codificado em condicionais:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> Pedido <span class="op">{</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">private</span> <span class="bu">String</span> status <span class="op">=</span> <span class="st">"NOVO"</span><span class="op">;</span> <span class="co">// Obsessao por Primitivos, de volta</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">pagar</span><span class="op">()</span> <span class="op">{</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> <span class="op">(</span>status<span class="op">.</span><span class="fu">equals</span><span class="op">(</span><span class="st">"NOVO"</span><span class="op">))</span> <span class="op">{</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>            <span class="fu">processarPagamento</span><span class="op">();</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>            status <span class="op">=</span> <span class="st">"PAGO"</span><span class="op">;</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span> <span class="cf">else</span> <span class="cf">if</span> <span class="op">(</span>status<span class="op">.</span><span class="fu">equals</span><span class="op">(</span><span class="st">"PAGO"</span><span class="op">))</span> <span class="op">{</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>            <span class="cf">throw</span> <span class="kw">new</span> <span class="bu">IllegalStateException</span><span class="op">(</span><span class="st">"Pedido ja esta pago!"</span><span class="op">);</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span> <span class="cf">else</span> <span class="cf">if</span> <span class="op">(</span>status<span class="op">.</span><span class="fu">equals</span><span class="op">(</span><span class="st">"ENVIADO"</span><span class="op">))</span> <span class="op">{</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>            <span class="cf">throw</span> <span class="kw">new</span> <span class="bu">IllegalStateException</span><span class="op">(</span><span class="st">"Pedido ja foi enviado!"</span><span class="op">);</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>        <span class="co">// E se adicionarmos o estado "CANCELADO" ou "EM_ANALISE_DE_FRAUDE"?</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">cancelar</span><span class="op">()</span> <span class="op">{</span></span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> <span class="op">(</span>status<span class="op">.</span><span class="fu">equals</span><span class="op">(</span><span class="st">"NOVO"</span><span class="op">))</span> <span class="op">{</span></span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>            status <span class="op">=</span> <span class="st">"CANCELADO"</span><span class="op">;</span></span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span> <span class="cf">else</span> <span class="cf">if</span> <span class="op">(</span>status<span class="op">.</span><span class="fu">equals</span><span class="op">(</span><span class="st">"PAGO"</span><span class="op">))</span> <span class="op">{</span></span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>            <span class="fu">estornar</span><span class="op">();</span></span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>            status <span class="op">=</span> <span class="st">"CANCELADO"</span><span class="op">;</span></span>
+<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span> <span class="cf">else</span> <span class="cf">if</span> <span class="op">(</span>status<span class="op">.</span><span class="fu">equals</span><span class="op">(</span><span class="st">"ENVIADO"</span><span class="op">))</span> <span class="op">{</span></span>
+<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a>            <span class="cf">throw</span> <span class="kw">new</span> <span class="bu">IllegalStateException</span><span class="op">(</span><span class="st">"Impossivel cancelar: pedido em transito!"</span><span class="op">);</span></span>
+<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a>        <span class="op">}</span></span>
+<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a>    <span class="co">// enviar() repete a mesma bateria de "if (status.equals(...))"</span></span>
+<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Repare no padrão: a primeira linha de cada método é sempre uma verificação de status, e a lógica de negócio real vem depois, aninhada dentro do <code>if</code> correto. Isso cria um <strong>acoplamento temporal</strong> — a ordem das chamadas importa (não dá para cancelar antes de existir, nem pagar duas vezes), mas a regra que garante essa ordem está espalhada e escondida atrás de condicionais repetidas em cada método.</p>
+<p><strong>Três sintomas concretos.</strong> Primeiro, a <strong>fragilidade de evolução</strong>: adicionar um único estado novo (por exemplo, “EM_ANALISE_DE_FRAUDE” entre “NOVO” e “PAGO”) exige abrir <code>pagar()</code>, <code>cancelar()</code> e <code>enviar()</code> e inserir um <code>else if</code> em cada um — o novo estado age como uma “bomba” que obriga a mexer em todos os métodos que dependem de <code>status</code>, violando diretamente o OCP já visto na Aula 10. Segundo, a <strong>complexidade ciclomática</strong>: a lógica de transição de estado fica misturada com a lógica de negócio (processar pagamento, estornar), tornando o teste unitário exaustivo — para testar “cancelar um pedido pago” é preciso primeiro montar um pedido no estado certo, exatamente o problema de testabilidade que o Strategy já havia resolvido para os algoritmos de pagamento. Terceiro, e talvez o mais familiar: <code>status</code> — normalmente uma <code>String</code> ou um <code>int</code> — é um caso claro de <strong>Obsessão por Primitivos</strong> (Aula 11): nada no tipo <code>String</code> impede que alguém escreva <code>status = "PGO"</code> por engano, ou compare com um valor que nunca existiu. O compilador não ajuda em nada.</p>
+<p>O padrão <strong>State</strong> surge exatamente para converter esse controle de fluxo, hoje expresso em condicionais sobre um primitivo, em estrutura de objetos — a mesma virada conceitual que a Aula 11 já fez para o <em>dado</em> (<code>double</code> → <code>Dinheiro</code>), agora aplicada ao <em>comportamento ao longo do tempo</em>.</p>
+<section id="o-antipadrão-do-status-e-a-fragilidade-de-evolução" class="level2" data-number="2.1">
+<h2 data-number="2.1" class="anchored" data-anchor-id="o-antipadrão-do-status-e-a-fragilidade-de-evolução"><span class="header-section-number">2.1</span> O Antipadrão do Status e a Fragilidade de Evolução</h2>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>Se um novo requisito pedir um estado “EM_ANALISE_DE_FRAUDE” entre “NOVO” e “PAGO” no <code>Pedido</code> do antipadrão acima, quantos métodos já existentes precisam ser abertos e editados — e o que esse número revela sobre a real causa da fragilidade do design?
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Escreva sua resposta e compare com um colega antes de avançar (2 min).</p>
+<ul>
+<li>□ No <code>Pedido</code> do antipadrão, inserir um novo estado exige editar apenas o método <code>pagar()</code>, já que é o único que decide a transição de “NOVO” para “PAGO”.</li>
+<li>□ Um teste unitário que verifica “cancelar um pedido já pago dispara estorno” precisa, antes de chamar <code>cancelar()</code>, montar um <code>Pedido</code> cujo campo <code>status</code> já esteja manualmente ajustado para <code>"PAGO"</code>.</li>
+<li>□ Se o tipo do campo <code>status</code> fosse trocado de <code>String</code> para um <code>enum</code> Java, isso sozinho eliminaria a necessidade de abrir <code>pagar()</code>, <code>cancelar()</code> e <code>enviar()</code> ao adicionar um estado novo.</li>
+<li>□ A fragilidade de evolução do <code>Pedido</code> do antipadrão nasce do fato de a lógica de transição de estado estar fisicamente distribuída dentro de vários métodos que também contêm lógica de negócio não relacionada ao fluxo.</li>
+</ul>
+</div>
+</div>
+</section>
+</section>
+<section id="o-padrão-state-estrutura-e-delegação" class="level1" data-number="3">
+<h1 data-number="3"><span class="header-section-number">3</span> O Padrão State: Estrutura e Delegação</h1>
+<p><strong>A motivação central: tratar estados como estratégias de comportamento.</strong> A limpeza arquitetural do State vem de uma virada conceitual simples: em vez de tratar cada fase do ciclo de vida como um <em>valor</em> guardado numa variável, tratamos cada fase como uma <em>classe polimórfica</em>. O <code>Pedido</code> (o <strong>Contexto</strong>) deixa de saber “como” reagir a <code>pagar()</code> ou <code>cancelar()</code> e passa a perguntar apenas ao “quem” ele é no momento — delegando toda a decisão para um objeto de estado. Quando o estado muda, o Contexto simplesmente aponta para uma instância nova de uma classe diferente. O sistema passa a crescer horizontalmente: um novo estado significa uma nova classe, não um novo <code>if</code> espalhado por três métodos.</p>
+<p><strong>A estrutura em três papéis.</strong> O padrão define:</p>
+<ul>
+<li><strong>Context (Contexto):</strong> a classe que os clientes efetivamente usam — no nosso caso, <code>Pedido</code>. Mantém uma referência para o <code>EstadoAtual</code> e delega todas as operações sensíveis ao estado.</li>
+<li><strong>State (interface):</strong> o contrato dos métodos que dependem do estado.</li>
+<li><strong>Concrete States (Estados Concretos):</strong> uma classe por fase do ciclo de vida, cada uma implementando o comportamento correspondente.</li>
+</ul>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">interface</span> EstadoPedido <span class="op">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">void</span> <span class="fu">pagar</span><span class="op">(</span>Pedido pedido<span class="op">);</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">void</span> <span class="fu">cancelar</span><span class="op">(</span>Pedido pedido<span class="op">);</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">void</span> <span class="fu">enviar</span><span class="op">(</span>Pedido pedido<span class="op">);</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> EstadoNovo <span class="kw">implements</span> EstadoPedido <span class="op">{</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">pagar</span><span class="op">(</span>Pedido pedido<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>        <span class="bu">System</span><span class="op">.</span><span class="fu">out</span><span class="op">.</span><span class="fu">println</span><span class="op">(</span><span class="st">"Pagamento processado!"</span><span class="op">);</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>        pedido<span class="op">.</span><span class="fu">setEstado</span><span class="op">(</span><span class="kw">new</span> <span class="fu">EstadoPago</span><span class="op">());</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">cancelar</span><span class="op">(</span>Pedido pedido<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>        pedido<span class="op">.</span><span class="fu">setEstado</span><span class="op">(</span><span class="kw">new</span> <span class="fu">EstadoCancelado</span><span class="op">());</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">enviar</span><span class="op">(</span>Pedido pedido<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a>        <span class="cf">throw</span> <span class="kw">new</span> <span class="bu">IllegalStateException</span><span class="op">(</span><span class="st">"Pedido ainda nao foi pago!"</span><span class="op">);</span></span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>O <code>EstadoNovo</code> sabe que, após um pagamento bem-sucedido, o próximo passo lógico é o <code>EstadoPago</code> — toda essa inteligência de fluxo está encapsulada fora da classe <code>Pedido</code>, que fica livre para representar apenas a entidade de negócio.</p>
+<p><strong>A “cegueira” deliberada do Contexto.</strong> O <code>Pedido</code>, agora um hospedeiro, limita-se a repassar cada chamada para o objeto de estado atual:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> Pedido <span class="op">{</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">private</span> EstadoPedido estadoAtual<span class="op">;</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">private</span> <span class="dt">double</span> valor<span class="op">;</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="fu">Pedido</span><span class="op">(</span><span class="dt">double</span> valor<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>        <span class="kw">this</span><span class="op">.</span><span class="fu">valor</span> <span class="op">=</span> valor<span class="op">;</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>        <span class="kw">this</span><span class="op">.</span><span class="fu">estadoAtual</span> <span class="op">=</span> <span class="kw">new</span> <span class="fu">EstadoNovo</span><span class="op">();</span> <span class="co">// todo pedido nasce em EstadoNovo</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Invocado apenas pelos objetos de estado concreto</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">protected</span> <span class="dt">void</span> <span class="fu">setEstado</span><span class="op">(</span>EstadoPedido novoEstado<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>        <span class="kw">this</span><span class="op">.</span><span class="fu">estadoAtual</span> <span class="op">=</span> novoEstado<span class="op">;</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">pagar</span><span class="op">()</span>    <span class="op">{</span> estadoAtual<span class="op">.</span><span class="fu">pagar</span><span class="op">(</span><span class="kw">this</span><span class="op">);</span> <span class="op">}</span></span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">cancelar</span><span class="op">()</span> <span class="op">{</span> estadoAtual<span class="op">.</span><span class="fu">cancelar</span><span class="op">(</span><span class="kw">this</span><span class="op">);</span> <span class="op">}</span></span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">enviar</span><span class="op">()</span>   <span class="op">{</span> estadoAtual<span class="op">.</span><span class="fu">enviar</span><span class="op">(</span><span class="kw">this</span><span class="op">);</span> <span class="op">}</span></span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">double</span> <span class="fu">getValor</span><span class="op">()</span> <span class="op">{</span> <span class="cf">return</span> valor<span class="op">;</span> <span class="op">}</span></span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>O ponto-chave é <code>setEstado</code>: marcado como <code>protected</code>, só as classes de estado (que residem no mesmo pacote) podem disparar transições. Isso impede que um cliente externo mude o estado do pedido de forma arbitrária — por exemplo, saltando de “Novo” direto para “Entregue” — preservando a integridade da máquina de estados. Comparando com o <code>Pedido</code> do bloco anterior: a complexidade ciclomática da classe caiu a quase zero, porque a “inteligência” de fluxo foi inteiramente terceirizada. Se você quer saber o que acontece quando um <code>EstadoNovo</code> é cancelado, a resposta mora inteira dentro de <code>EstadoNovo.cancelar()</code> — não espalhada por um método de 100 linhas com 10 <code>if</code>s.</p>
+<div class="fig-resize" style="width: 78%; margin: 0 auto;">
+<img src="index_files/mediabag/031035991f5b16bef11744d26f4b300ab325b577.svg" class="img-fluid">
+</div>
+<p>O diagrama resume o ciclo de vida completo que os próximos parágrafos implementam: de <code>EstadoNovo</code>, o pedido pode ser pago (indo para <code>EstadoPago</code>) ou cancelado diretamente; de <code>EstadoPago</code>, pode ser enviado ou cancelado (com estorno); de <code>EstadoEnviado</code>, o cancelamento deixa de ser permitido — a transição em vermelho tracejado marca uma operação que a classe correspondente rejeita com exceção, não uma transição real.</p>
+<p><strong>O contraste que importa: Strategy vs.&nbsp;State.</strong> Peguem o diagrama do Strategy da Aula 10 e comparem com o <code>Pedido</code>/<code>EstadoPedido</code> acima — a semelhança estrutural é real, não coincidência: ambos têm um Contexto, uma interface e implementações concretas intercambiáveis via polimorfismo. Mas a intenção arquitetural é oposta em um ponto preciso: <strong>quem decide qual implementação está ativa, e quando</strong>.</p>
+<ul>
+<li>No <strong>Strategy</strong>, um agente <em>externo</em> ao Contexto — o código cliente — decide qual <code>ConcretaEstrategia</code> injetar, normalmente uma única vez (ou trocando por decisão explícita do usuário, como o frete escolhido no carrinho). O Contexto nunca troca de estratégia sozinho.</li>
+<li>No <strong>State</strong>, o próprio objeto de estado <em>ativo</em> decide, como consequência de uma operação de negócio, qual será o próximo estado — e dispara a transição chamando <code>setEstado</code> no Contexto. Ninguém de fora precisa (nem deveria) injetar um <code>EstadoPago</code> manualmente; ele nasce como resultado de <code>pagar()</code> ser chamado sobre um <code>EstadoNovo</code>.</li>
+</ul>
+<p>Em outras palavras: o Strategy injeta um algoritmo de fora para dentro; o State faz o objeto mudar de “personalidade” de dentro para fora, como consequência do seu próprio ciclo de vida. Dizer que “State é só Strategy com outro nome” ignora exatamente esse ponto — a topologia de classes é parecida porque ambos resolvem “substituir condicionais por polimorfismo”, mas o <em>gatilho</em> da substituição de implementação mora em lugares opostos.</p>
+<div class="fig-resize" style="width: 92%; margin: 0 auto;">
+<img src="index_files/mediabag/1342f21923e76c3786b5b68ca61b26a5d6b754f8.svg" class="img-fluid">
+</div>
+<p>O painel da esquerda mostra a seta de controle vindo de fora (o Cliente injeta a estratégia); o painel da direita mostra a seta de controle saindo do próprio estado ativo em direção ao Contexto (<code>setEstado</code>) — o Cliente sequer aparece no diagrama do State, porque ele nunca decide diretamente qual estado vem a seguir.</p>
+<section id="strategy-vs.-state-mesma-topologia-intenções-diferentes" class="level2" data-number="3.1">
+<h2 data-number="3.1" class="anchored" data-anchor-id="strategy-vs.-state-mesma-topologia-intenções-diferentes"><span class="header-section-number">3.1</span> Strategy vs.&nbsp;State: Mesma Topologia, Intenções Diferentes</h2>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>Se alguém disser que o State Pattern é apenas “um Strategy com nomes diferentes”, por que essa afirmação, apesar de a topologia de classes ser quase idêntica, erra o ponto central da intenção arquitetural de cada padrão?
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Escreva sua resposta e compare com um colega antes de avançar (2 min).</p>
+<ul>
+<li>□ Em um <code>CalculadoraDeFrete</code> que usa Strategy, é o próprio objeto <code>FreteExpresso</code> injetado que decide, sozinho e sem intervenção externa, substituir-se por <code>FreteGratis</code> durante a execução do sistema.</li>
+<li>□ Num <code>Pedido</code> usando State, é fisicamente o objeto <code>EstadoNovo</code> — e não um código cliente externo chamando <code>pedido.setEstrategia(new EstadoPago())</code> — quem invoca a transição para <code>EstadoPago</code> como consequência de <code>pagar()</code> ter sido chamado.</li>
+<li>□ Se um <code>ConcreteState</code> do padrão State fosse instanciado e injetado manualmente por código cliente externo antes de qualquer operação de negócio ocorrer no Contexto, essa prática ainda preservaria integralmente a intenção arquitetural original do State Pattern.</li>
+<li>□ O fato de tanto Strategy quanto State definirem uma interface implementada por múltiplas classes concretas é suficiente, por si só, para classificá-los como o mesmo padrão de projeto sob nomes diferentes.</li>
+</ul>
+</div>
+</div>
+</section>
+</section>
+<section id="onde-colocar-a-transição-e-o-ciclo-de-vida-robusto" class="level1" data-number="4">
+<h1 data-number="4"><span class="header-section-number">4</span> Onde Colocar a Transição, e o Ciclo de Vida Robusto</h1>
+<p><strong>O dilema mais difícil do State Pattern.</strong> Nos exemplos acima, <code>EstadoNovo.pagar()</code> instancia diretamente <code>new EstadoPago()</code>. Isso funciona, mas cria uma decisão de design que precisa ser feita conscientemente: <strong>onde deve morar o conhecimento de “qual é o próximo estado”?</strong></p>
+<ul>
+<li><strong>Opção A — Transição nos Estados</strong> (a que usamos até aqui): cada estado conhece o seu sucessor. <em>Prós:</em> transições dinâmicas e fluidas, sem nenhuma lógica condicional no Contexto. <em>Contras:</em> os estados ficam acoplados entre si — <code>EstadoNovo</code> precisa conhecer a classe <code>EstadoPago</code>.</li>
+<li><strong>Opção B — Transição no Contexto:</strong> o Contexto centraliza a “tabela” de transições.</li>
+</ul>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Opcao B: o Contexto decide, reintroduzindo condicional</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="kw">protected</span> <span class="dt">void</span> <span class="fu">avancarFluxo</span><span class="op">()</span> <span class="op">{</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">(</span>estadoAtual <span class="kw">instanceof</span> EstadoNovo<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>        <span class="kw">this</span><span class="op">.</span><span class="fu">estadoAtual</span> <span class="op">=</span> <span class="kw">new</span> <span class="fu">EstadoPago</span><span class="op">();</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span> <span class="cf">else</span> <span class="cf">if</span> <span class="op">(</span>estadoAtual <span class="kw">instanceof</span> EstadoPago<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>        <span class="kw">this</span><span class="op">.</span><span class="fu">estadoAtual</span> <span class="op">=</span> <span class="kw">new</span> <span class="fu">EstadoEnviado</span><span class="op">();</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>    <span class="co">// o Contexto volta a ter logica condicional - o que queriamos evitar</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p><em>Prós:</em> os estados ficam totalmente isolados uns dos outros. <em>Contras:</em> o Contexto volta a ter lógica condicional — exatamente o problema que o State foi criado para eliminar.</p>
+<p><strong>O veredito prático:</strong> use transições nos estados (Opção A) para fluxos de negócio naturais e bem definidos, como o ciclo de vida de um <code>Pedido</code> — o acoplamento entre <code>EstadoNovo</code> e <code>EstadoPago</code> é aceitável porque essa sequência já é uma regra de negócio estável, não uma variação livre. Uma técnica avançada para reduzir esse acoplamento sem voltar à Opção B é fazer o método de estado <em>retornar</em> o próximo estado, deixando para o Contexto apenas a tarefa de atualizar a referência (<code>this.estado = estado.proximo();</code>), ou usar uma fábrica de estados dedicada — sem, ainda assim, reintroduzir condicionais no Contexto.</p>
+<p><strong>O ciclo de vida robusto: o polimorfismo cobrindo os casos de borda.</strong> A força real do State aparece quando o mesmo método se comporta de forma distinta em cada classe, sem um único <code>if (status == ...)</code>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> EstadoPago <span class="kw">implements</span> EstadoPedido <span class="op">{</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">pagar</span><span class="op">(</span>Pedido pedido<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>        <span class="cf">throw</span> <span class="kw">new</span> <span class="bu">IllegalStateException</span><span class="op">(</span><span class="st">"Pedido ja esta pago!"</span><span class="op">);</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">cancelar</span><span class="op">(</span>Pedido pedido<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>        <span class="fu">realizarEstornoFinanceiro</span><span class="op">(</span>pedido<span class="op">);</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>        pedido<span class="op">.</span><span class="fu">setEstado</span><span class="op">(</span><span class="kw">new</span> <span class="fu">EstadoCancelado</span><span class="op">());</span></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>        <span class="bu">System</span><span class="op">.</span><span class="fu">out</span><span class="op">.</span><span class="fu">println</span><span class="op">(</span><span class="st">"Pedido estornado e cancelado."</span><span class="op">);</span></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">enviar</span><span class="op">(</span>Pedido pedido<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>        pedido<span class="op">.</span><span class="fu">setEstado</span><span class="op">(</span><span class="kw">new</span> <span class="fu">EstadoEnviado</span><span class="op">());</span></span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> EstadoEnviado <span class="kw">implements</span> EstadoPedido <span class="op">{</span></span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">pagar</span><span class="op">(</span>Pedido pedido<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>        <span class="cf">throw</span> <span class="kw">new</span> <span class="bu">IllegalStateException</span><span class="op">(</span><span class="st">"Pedido ja foi enviado!"</span><span class="op">);</span></span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">cancelar</span><span class="op">(</span>Pedido pedido<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a>        <span class="cf">throw</span> <span class="kw">new</span> <span class="fu">DomainException</span><span class="op">(</span><span class="st">"Impossivel cancelar: produto em transito!"</span><span class="op">);</span></span>
+<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-31"><a href="#cb5-31" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb5-32"><a href="#cb5-32" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">enviar</span><span class="op">(</span>Pedido pedido<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb5-33"><a href="#cb5-33" aria-hidden="true" tabindex="-1"></a>        <span class="cf">throw</span> <span class="kw">new</span> <span class="bu">IllegalStateException</span><span class="op">(</span><span class="st">"Pedido ja foi enviado!"</span><span class="op">);</span></span>
+<span id="cb5-34"><a href="#cb5-34" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-35"><a href="#cb5-35" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>O método <code>cancelar()</code> se comporta de forma distinta em cada estado: em <code>EstadoNovo</code>, apenas muda o status; em <code>EstadoPago</code>, desencadeia um estorno financeiro antes de mudar; em <code>EstadoEnviado</code>, proíbe a ação, protegendo a regra de negócio de que um produto em trânsito não pode ser simplesmente cancelado. Tudo isso sem um único <code>if (status == ...)</code> — o código torna-se auto-documentado: para saber o que acontece quando um pedido pago é cancelado, basta abrir a classe <code>EstadoPago</code>, isolada de ruídos de outros estados.</p>
+</section>
+<section id="da-fronteira-interna-à-fronteira-externa-motivação-do-adapter" class="level1" data-number="5">
+<h1 data-number="5"><span class="header-section-number">5</span> Da Fronteira Interna à Fronteira Externa: Motivação do Adapter</h1>
+<p>Com Strategy, Builder e agora State, o <code>Pedido</code> está protegido por dentro em três frentes: comportamento variável (Strategy), gênese (Builder) e fluxo de vida (State). Mas nenhum desses padrões toca um problema diferente: como o sistema conversa com o que está <em>fora</em> dele. Considere um cenário concreto e comum: a equipe de compliance da empresa exige que toda transição de estado do <code>Pedido</code> seja registrada num sistema de auditoria — mas esse sistema é uma biblioteca legada, mantida por outra equipe, que ninguém tem permissão (nem motivo técnico) para reescrever. A interface que essa biblioteca oferece não é a que o resto do sistema já usa para logar eventos.</p>
+<p>O dilema é o mesmo, em espírito, do dilema do legado descrito na Aula 10: alterar o código de terceiros é impossível (biblioteca fechada); alterar o código central do domínio para se moldar ao formato do fornecedor destrói a arquitetura que as últimas três aulas construíram com tanto cuidado. É esse conflito — uma interface externa incompatível com o contrato que o domínio já espera — que o padrão <strong>Adapter</strong> resolve.</p>
+</section>
+<section id="o-padrão-adapter-tradução-de-protocolos" class="level1" data-number="6">
+<h1 data-number="6"><span class="header-section-number">6</span> O Padrão Adapter: Tradução de Protocolos</h1>
+<p><strong>O papel do Adapter: um tradutor posicionado na fronteira.</strong> O Adapter atua como um intermediário que converte a interface de uma classe incompatível na interface que o cliente já espera. O cliente faz uma chamada baseando-se numa interface abstrata que ele conhece e confia; o Adapter implementa essa interface esperada — o que o torna aceitável aos olhos do cliente — mas, por dentro, guarda uma referência para o objeto do fornecedor externo (o <em>Adaptee</em>). Ele recebe os parâmetros do cliente, faz as conversões necessárias e invoca os métodos nativos do sistema legado. Como o filósofo do design diria: “Adapter permite que classes trabalhem juntas mesmo que não pudessem de outra forma, por causa de interfaces incompatíveis.”</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co">// A fronteira que o resto do sistema ja usa</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">interface</span> LoggerModerno <span class="op">{</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">void</span> <span class="fu">info</span><span class="op">(</span><span class="bu">String</span> mensagem<span class="op">);</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a><span class="co">// A biblioteca legada de auditoria, incompativel, mantida por outra equipe</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> LogServicoLegado <span class="op">{</span></span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">registrarLogNoArquivo</span><span class="op">(</span><span class="bu">String</span> msg<span class="op">,</span> <span class="dt">int</span> severidade<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>        <span class="bu">System</span><span class="op">.</span><span class="fu">out</span><span class="op">.</span><span class="fu">println</span><span class="op">(</span><span class="st">"["</span> <span class="op">+</span> severidade <span class="op">+</span> <span class="st">"] "</span> <span class="op">+</span> msg<span class="op">);</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a><span class="co">// O ADAPTER: harmoniza os dois mundos via composicao</span></span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> LogAdapter <span class="kw">implements</span> LoggerModerno <span class="op">{</span></span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>    <span class="kw">private</span> LogServicoLegado legado<span class="op">;</span> <span class="co">// Object Adapter: TEM-UM legado</span></span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="fu">LogAdapter</span><span class="op">(</span>LogServicoLegado legado<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>        <span class="kw">this</span><span class="op">.</span><span class="fu">legado</span> <span class="op">=</span> legado<span class="op">;</span></span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">info</span><span class="op">(</span><span class="bu">String</span> mensagem<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>        <span class="co">// Traducao: absorve o parametro de severidade que o legado exige</span></span>
+<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a>        legado<span class="op">.</span><span class="fu">registrarLogNoArquivo</span><span class="op">(</span>mensagem<span class="op">,</span> <span class="dv">1</span><span class="op">);</span></span>
+<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Sem o <code>LogAdapter</code>, cada classe de negócio que precisasse registrar um evento de auditoria teria que conhecer o número mágico <code>1</code> (severidade “info”) e o nome exótico <code>registrarLogNoArquivo</code>. Centralizando essa tradução, todo o resto do sistema — incluindo o nosso <code>Pedido</code> — só precisa conhecer <code>LoggerModerno.info(mensagem)</code>.</p>
+<div class="fig-resize" style="width: 100%; margin: 0 auto;">
+<img src="index_files/mediabag/cfc3874bf29877428e7bb2f68e17f29e4ac49c2a.svg" class="img-fluid">
+</div>
+<p><strong>Ligando de volta ao State desta aula:</strong> o <code>Pedido</code> pode receber um <code>LoggerModerno</code> por injeção (o mesmo raciocínio de Dependência Injetada já usado com <code>Pagavel</code> na Aula 10), e cada classe de estado concreta passa a registrar sua própria transição sem conhecer a existência do <code>LogServicoLegado</code>:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> EstadoPago <span class="kw">implements</span> EstadoPedido <span class="op">{</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">cancelar</span><span class="op">(</span>Pedido pedido<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>        <span class="fu">realizarEstornoFinanceiro</span><span class="op">(</span>pedido<span class="op">);</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>        pedido<span class="op">.</span><span class="fu">setEstado</span><span class="op">(</span><span class="kw">new</span> <span class="fu">EstadoCancelado</span><span class="op">());</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>        pedido<span class="op">.</span><span class="fu">getLogger</span><span class="op">().</span><span class="fu">info</span><span class="op">(</span><span class="st">"Pedido estornado e cancelado."</span><span class="op">);</span> <span class="co">// via LogAdapter</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Se amanhã a equipe de compliance trocar a biblioteca legada por outra (com uma assinatura de método totalmente diferente), o único arquivo tocado é <code>LogAdapter</code> — nem <code>Pedido</code>, nem <code>EstadoPago</code>, nem nenhuma outra classe de estado precisa mudar uma linha.</p>
+<p><strong>Object Adapter vs.&nbsp;Class Adapter: por que a composição vence.</strong> O GoF descreve duas topologias técnicas para o Adapter. O <strong>Class Adapter</strong> usa herança: a classe Adapter estende diretamente o <em>Adaptee</em> ao mesmo tempo em que implementa a interface esperada pelo cliente.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Class Adapter (via heranca) - desencorajado</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> LogAdapterPorHeranca <span class="kw">extends</span> LogServicoLegado <span class="kw">implements</span> LoggerModerno <span class="op">{</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">void</span> <span class="fu">info</span><span class="op">(</span><span class="bu">String</span> mensagem<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>        <span class="fu">registrarLogNoArquivo</span><span class="op">(</span>mensagem<span class="op">,</span> <span class="dv">1</span><span class="op">);</span> <span class="co">// metodo herdado, nao delegado</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>O problema é o acoplamento estático em tempo de compilação: o Adapter passa a conhecer os detalhes íntimos e o estado interno da classe herdada, violando o encapsulamento. Pior — se o fornecedor lançar uma nova subclasse de <code>LogServicoLegado</code> (por exemplo, uma versão com <em>rate limiting</em> embutido), o <code>LogAdapterPorHeranca</code> não consegue reaproveitá-la: ele está rigidamente preso à classe-mãe original via <code>extends</code>.</p>
+<p>Por isso, a indústria adota quase exclusivamente o <strong>Object Adapter</strong> (o <code>LogAdapter</code> que já vimos), apoiado no princípio “Tem-Um”. Como o <code>LogAdapter</code> trata o legado como uma caixa preta opaca, recebida por injeção, o mesmo Adapter funciona com qualquer subclasse presente ou futura de <code>LogServicoLegado</code>, sem nenhuma alteração — a regra de ouro é “prefira sempre Object Adapter para manter as caixas pretas fechadas”.</p>
+<section id="o-dilema-da-herança-no-adapter" class="level2" data-number="6.1">
+<h2 data-number="6.1" class="anchored" data-anchor-id="o-dilema-da-herança-no-adapter"><span class="header-section-number">6.1</span> O Dilema da Herança no Adapter</h2>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>Se o <code>LogAdapter</code> decidisse estender (<code>extends</code>) <code>LogServicoLegado</code> em vez de compô-lo por injeção, que capacidade futura o sistema perderia especificamente quando o fornecedor lançasse uma nova subclasse de <code>LogServicoLegado</code>?
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Escreva sua resposta e compare com um colega antes de avançar (2 min).</p>
+<ul>
+<li>□ Um <code>LogAdapter</code> construído por composição (Object Adapter) continua funcionando corretamente mesmo que o objeto injetado no construtor seja, na verdade, uma subclasse de <code>LogServicoLegado</code> lançada pelo fornecedor depois que o <code>LogAdapter</code> já havia sido escrito.</li>
+<li>□ Um <code>LogAdapter</code> que estendesse <code>LogServicoLegado</code> (Class Adapter) precisaria ser reescrito ou duplicado para conseguir adaptar especificamente uma nova subclasse do legado, mesmo que essa subclasse só adicionasse um método novo sem alterar <code>registrarLogNoArquivo</code>.</li>
+<li>□ Trocar <code>LogServicoLegado legado</code> por uma injeção via construtor no <code>LogAdapter</code> (em vez de herança) é o que permite substituir, em um teste automatizado, o legado real por uma versão simulada (<em>mock</em>) sem alterar o código do <code>LogAdapter</code>.</li>
+<li>□ Se <code>LogServicoLegado</code> expusesse um método <code>protected</code> usado internamente por suas próprias subclasses, um <code>LogAdapter</code> implementado como Object Adapter teria acesso direto a esse método da mesma forma que um Class Adapter teria.</li>
+</ul>
+</div>
+</div>
+</section>
+</section>
+<section id="conclusão" class="level1" data-number="7">
+<h1 data-number="7"><span class="header-section-number">7</span> Conclusão</h1>
+<p>Voltando às quatro perguntas da abertura:</p>
+<ol type="1">
+<li><strong>Por que a <code>String status</code> é uma bomba-relógio:</strong> porque a lógica de transição fica espalhada e misturada com regra de negócio em vários métodos, tornando cada estado novo uma edição obrigatória em toda a classe — a mesma Obsessão por Primitivos da Aula 11, agora aplicada ao comportamento em vez do dado.</li>
+<li><strong>Como o State resolve isso, e por que não é “Strategy disfarçado”:</strong> convertendo cada fase do ciclo de vida numa classe polimórfica que se autodetermina — a topologia de classes é semelhante à do Strategy, mas o gatilho da troca de implementação mora dentro do próprio fluxo de negócio, não numa injeção externa.</li>
+<li><strong>Onde mora a transição:</strong> de preferência, dentro dos próprios estados — o acoplamento entre <code>EstadoNovo</code> e <code>EstadoPago</code> é aceitável porque a sequência já é uma regra de negócio estável; centralizar no Contexto reintroduziria a condicional que o padrão existe para eliminar.</li>
+<li><strong>Quem traduz uma interface externa incompatível:</strong> um Adapter posicionado exatamente na fronteira, tratando o legado como caixa preta via composição (Object Adapter) — nunca via herança, que prenderia o sistema à classe concreta do fornecedor.</li>
+</ol>
+<p>O <code>Pedido</code> que começou esta aula perguntando “em que status eu estou?” no topo de cada método termina com o fluxo inteiramente delegado a classes de estado auto-documentadas, e com um canal de comunicação para o mundo externo (auditoria, SDKs, sistemas legados) inteiramente isolado atrás de um Adapter. Strategy, Builder/Factory Method e State fecham o “tríptico da estabilidade” do objeto por dentro; o Adapter abre a primeira fronteira estrutural para fora.</p>
+<section id="ponte-para-a-aula-13" class="level3 unnumbered">
+<h3 class="unnumbered anchored" data-anchor-id="ponte-para-a-aula-13">Ponte para a Aula 13</h3>
+<p>A fronteira externa aberta pelo Adapter não é a única forma de composição estrutural e comportamental que falta explorar. Duas perguntas ficam em aberto: como adicionar responsabilidades a um objeto individual de forma dinâmica e cumulativa, sem recair na explosão combinatória de subclasses que a herança geraria (o padrão <strong>Decorator</strong> — pensem no sistema de I/O do próprio Java, que empilha buffers e streams exatamente assim); e como um evento no núcleo do sistema pode disparar reações em múltiplos subsistemas periféricos sem que o núcleo sequer saiba quem está ouvindo (o padrão <strong>Observer</strong>, a base conceitual de arquiteturas orientadas a eventos). A Aula 13 ataca essas duas questões; a síntese final que compara todos os padrões de isolamento vistos ao longo do curso — e estabelece a fronteira definitiva entre o núcleo estável e a periferia volátil de um sistema — fica para o fechamento da disciplina.</p>
+<p><a href="../../../teaching/object-oriented-programming/aula12/exercicios.html" class="see-all exercicios-link" aria-label="Ver exercícios" title="Ver exercícios">Exercícios</a> <a href="../../../teaching/object-oriented-programming/aula12/soluções.html" class="see-all solucoes-link" aria-label="Ver soluções" title="Ver soluções">Soluções</a></p>
+
+
+</section>
+</section>
+
+</main> <!-- /main -->
+<!-- Parcial estático, igual em toda aula (não é mais gerado por script —
+     ver histórico do teaching/generate_lesson_nav.py, removido). Só
+     carrega o script que transforma o sumário nativo do Quarto (#TOC,
+     "Nesta página") no painel de acordeão "Nesta aula". -->
+<script src="../../toc-accordion.js"></script>
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copiada");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copiada");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+<footer class="footer">
+  <div class="nav-footer">
+    <div class="nav-footer-left">
+      &nbsp;
+    </div>   
+    <div class="nav-footer-center">
+<p>© 2026 Marcos M. Raimundo</p>
+</div>
+    <div class="nav-footer-right">
+      &nbsp;
+    </div>
+  </div>
+</footer>
+
+
+
+
+</body></html>

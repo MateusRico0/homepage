@@ -38,7 +38,7 @@ Cada disciplina é autocontida na sua subpasta. Cada aula é uma subpasta própr
 
 **Por que os nomes com `_` na frente:** o Quarto ignora por convenção qualquer arquivo ou pasta cujo nome comece com `_` — nunca é renderizado nem copiado para o site publicado, e um link para um arquivo assim sempre dá 404 no site ao vivo (não é uma questão de configuração, é assim que o build do Quarto funciona). `_fontes/`, `_progresso.md`, `_00-plano-aula.md` e `_01-fontes.md` usam esse prefixo de propósito: são material de apoio/planejamento (e, no caso de `_fontes/`, PDFs de livros com direitos autorais) que nunca deve aparecer no site ao vivo. **Exceções deliberadas, sem `_`, que são páginas públicas de verdade:** o `index.qmd` de cada aula e da disciplina, e (desde 2026-09-14, ver "Exercícios" abaixo) `aulaNN/exercicios.qmd` e `aulaNN/soluções.qmd` — o gabarito por aula é público nesta convenção, uma mudança deliberada de política em relação à versão anterior deste documento (que só previa um gabarito público consolidado por disciplina, não por aula).
 
-**Migração em andamento (2026-09-14):** a convenção acima (`exercicios.qmd`/`soluções.qmd` públicos por aula, substituindo a seção "Exercícios" embutida no `index.qmd` e o antigo arquivo oculto de gabarito) já foi aplicada em `supervised-learning`, `unsupervised-learning` e `optimization-linear-algebra`. **`computing-and-society` ainda não foi migrada** — continua no padrão anterior (`_02-solucoes.md`/`_03-respostas-pausas.md` ocultos por aula, mais uma página `exercicios.qmd` consolidada na raiz da disciplina reunindo todas as aulas). Ao trabalhar em `computing-and-society`, siga o padrão que já existe lá até que alguém peça a migração explicitamente; não migre por conta própria.
+**Migração concluída (2026-09-14 a 2026-09-15):** a convenção acima (`exercicios.qmd`/`soluções.qmd` públicos por aula, substituindo a seção "Exercícios" embutida no `index.qmd` e o antigo arquivo oculto de gabarito) já foi aplicada em **todas** as disciplinas desta pasta que têm exercícios publicados: `supervised-learning`, `unsupervised-learning`, `optimization-linear-algebra` (2026-09-14), e `object-oriented-programming` e `computing-and-society` (2026-09-15). Não existe mais nenhuma página `exercicios.qmd` consolidada na raiz de disciplina, nem gabarito oculto de V/F por aula (`_01-respostas.md`/`_02-solucoes.md`) — onde esses arquivos ocultos ainda existem (ex.: `_01-respostas.md` em `object-oriented-programming`), sobrou só a seção de Pausas Ativas, que é um mecanismo diferente (ver "Pausa Ativa" acima) e continua oculta por design. Qualquer disciplina nova, ou uma disciplina hoje sem exercícios (`ai-ethics`, `operational-research`) que ganhe uma seção de Exercícios no futuro, deve nascer direto neste padrão — não recriar a página consolidada antiga.
 
 **Fontes como link simbólico.** Os arquivos em `_fontes/` podem ser links simbólicos apontando para os PDFs/slides originais em outro lugar do disco (ex.: `ln -s ../../../livros/prml.pdf _fontes/prml.pdf`) — leia-os normalmente pelo caminho dentro de `_fontes/`, sem tratamento especial. Prefira links relativos, para o projeto continuar funcionando se a pasta for movida. **Nunca copie o PDF de verdade para dentro do projeto** — o prefixo `_` só garante que o Quarto ignore a pasta; um link simbólico garante também que o arquivo de direitos autorais nunca é versionado como blob do git.
 
@@ -83,7 +83,7 @@ Tendo em vista a natureza dos conteúdos do curso, a estrutura da aula deve segu
 Ambas as abordagens devem manter os **3 movimentos fundamentais** (Abertura com problema/roteiro, Desenvolvimento segmentado em blocos de 10–15 min com pausas ativas onde tem perguntas e testes de V/F, e Fechamento retomando os desafios iniciais da aula):
 
 **1. Abertura (10 min)** — o objetivo é criar o "gancho" cognitivo (deve ser chamado de Revisão e Introdução):
-- **Revisão**: Faça uma revisão cuidadosa dos conceitos principais da aula anterior. Dando foco no que liga com a aula atual.
+- **Revisão**: Faça uma revisão cuidadosa dos conceitos principais da aula anterior. Dando foco no que liga com a aula atual. **"Cuidadosa" significa explicar cada conceito, não só nomeá-lo ou enunciar o resultado em uma linha** — feedback explícito do usuário depois de revisar uma Revisão Rápida que citava três resultados da aula anterior num parágrafo só, cada um em uma frase, sem lembrar o porquê/mecanismo. Para cada conceito revisado: diga o que ele afirma, relembre (em 1-2 frases, não a prova inteira de novo) por que é verdade ou de onde vem, e só então conecte com a aula atual — não vale supor que citar o nome/resultado já reativa o entendimento do aluno. Isso é a mesma regra de "quantidade de informação quase igual entre notas e slides, nunca um resumo de tópicos" (ver "Formato do arquivo de aula" abaixo) aplicada especificamente à seção de Revisão, que é onde a tentação de só listar rótulos é maior.
 - **Idéia Central** (Ausubel): Uma ideia-ponte que conecta o novo conteúdo ao que foi visto anteriormente.
 - **Roteiro explícito**: dizer as 3–4 perguntas que a aula vai responder (não dá para ser só uma pergunta, deve ter alguma introdução para não ficar uma lista que é lida de passagem). Isso reduz carga cognitiva extrínseca porque o aluno para de gastar memória de trabalho tentando adivinhar para onde vai.
 - **Problema motivador**: discuta e provoque os alunos a pensar um pouco. Isso vem antes do formalismo, não depois.
@@ -252,7 +252,7 @@ Toda aula precisa de exercícios de fechamento. **Desde 2026-09-14, em `supervis
 - **`aulaNN/exercicios.qmd`** — as questões em si, sem solução: **2 a 3 questões discursivas/conceituais** e **entre 6 e 10 questões de V/F** (não itens — **blocos de 4 itens cada**, ou seja, 24 a 40 itens ao todo, cada bloco num tema diferente da aula, cobrindo o conteúdo da aula de ponta a ponta) — o número exato dentro dessas faixas ajusta conforme a densidade da aula: uma aula com menos blocos de conteúdo não deve ser esticada até 10 questões de V/F só para bater uma cota, nem uma aula densa deve ser espremida em 6. Pode reaproveitar questões de fim de capítulo das próprias fontes bibliográficas (citando de onde vieram, como já se faz com trechos citados) ou propor questões originais — nesse caso, sinalizar que são originais, não da fonte. Cada questão de V/F tem 4 itens do mesmo tema, e só é considerada correta se todos os 4 forem acertados (na avaliação, o aluno pode deixar a questão em branco com punição de 20% da nota da questão). Use esse formato:
 
   ::: {.callout-note icon=false}
-  ## Tema das questões
+  ## Teste N — Tema das questões
 
   - □ Afirmação 1.
   - □ Afirmação 2.
@@ -260,13 +260,17 @@ Toda aula precisa de exercícios de fechamento. **Desde 2026-09-14, em `supervis
   - □ Afirmação 4.
   :::
 
+  **Numeração "Teste N" (desde 2026-09-15).** Cada bloco de V/F leva um número sequencial no próprio título do bloco, no formato `Teste N — Tema das questões` — nunca só `Tema das questões` sem o prefixo. A numeração **reinicia em 1 a cada aula** (a primeira aula de uma disciplina e a última não compartilham a sequência; cada `aulaNN/exercicios.qmd` tem seu próprio `Teste 1`, `Teste 2`, ...) e segue a ordem em que os blocos já aparecem no arquivo — não há critério de ordenação além disso. O mesmo prefixo é repetido em `soluções.qmd`, em ambos os títulos do par pergunta/resposta (`## Teste N — Tema` e `## (Resposta) Teste N — Tema`, ver "Registro da justificativa" abaixo). Um eventual bloco de aviso/nota solto no fim do arquivo (fora do padrão pergunta+resposta) não é numerado.
+
   **Mesma regra do glifo não-clicável da Pausa Ativa se aplica aqui**: nunca usar a sintaxe de lista de tarefas do Markdown (`- [ ]`), nem os glifos `☐`/`☒` (ambos especiais para a extensão `task_lists` do Pandoc, viram `<input type="checkbox">` clicável mesmo fora dos colchetes) — usar sempre `□` (U+25A1) como texto simples.
 
   **Autocontido é obrigatório.** Como `exercicios.qmd` pode ser usado diretamente como banco de questões de prova (feedback explícito do usuário/monitor, depois de um monitor encontrar blocos que só faziam sentido lendo a aula inteira), nenhum item pode depender de contexto que só existe no `index.qmd` da aula — nunca escrever algo como "os pontos B e C desta aula" ou usar uma notação/exemplo introduzido só na aula sem redefini-lo ali mesmo. Se o item precisa de um exemplo ou de notação da aula para fazer sentido, inclua esse contexto (reescrito, resumido) diretamente no enunciado do item ou num preâmbulo curto do bloco — o item deve poder ser lido, entendido e resolvido por alguém que nunca assistiu àquela aula.
 
   **`aulaNN/soluções.qmd`** — o gabarito de `exercicios.qmd`, também publicado (ver "Registro da justificativa" abaixo para o formato).
 
-- **`index.qmd` da aula:** não tem seção de Exercícios própria — no lugar dela (tipicamente perto do Fechamento, tanto nas notas quanto nos slides), um link simples para as duas páginas-irmãs, no mesmo padrão dos links `[Slides](slides.html)`/`[Lista de aulas](../index.qmd)` já usados no topo de cada aula, por exemplo: `[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}`. **As classes `.exercicios-link`/`.solucoes-link` são obrigatórias** (desde 2026-09-14) — é o que dá a cada link seu ícone (lápis para Exercícios, `bi-check2-square` para Soluções; CSS em `styles.css`, regras `a.see-all.exercicios-link::before`/`a.see-all.solucoes-link::before`); sem a classe, o link aparece sem ícone. `exercicios.qmd` e `soluções.qmd` também usam essas classes nos links de navegação de topo que apontam um para o outro (`[Aula](index.qmd){.see-all}`, sem classe extra, não precisa de ícone próprio).
+- **`index.qmd` da aula:** não tem seção de Exercícios própria — no lugar dela (tipicamente perto do Fechamento, tanto nas notas quanto nos slides), um link simples para as duas páginas-irmãs, no mesmo padrão dos links `[Slides](slides.html)`/`[Lista de aulas](../index.qmd)` já usados no topo de cada aula, por exemplo: `[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}`. **As classes `.exercicios-link`/`.solucoes-link` são obrigatórias** (desde 2026-09-14) — é o que dá a cada link seu ícone (interrogação para Exercícios, `bi-check2-square` para Soluções; CSS em `styles.css`, regras `a.see-all.exercicios-link::before`/`a.see-all.solucoes-link::before`); sem a classe, o link aparece sem ícone. `exercicios.qmd` e `soluções.qmd` também usam essas classes nos links de navegação de topo que apontam um para o outro, mais uma terceira classe própria no link de volta pra aula: `[Aula](index.qmd){.see-all .aula-link}` (`bi-journal-text`, `a.see-all.aula-link::before`) — **as três classes são obrigatórias nesses dois arquivos**, correção feita em 2026-09-15 depois de um usuário notar que os links de `exercicios.qmd`/`soluções.qmd` não apareciam "bonitos" como os da aula: faltava tanto a classe do ícone de "Aula" (sem ela a caixa do cabeçalho ficava vazia, sem ícone nenhum) quanto o include abaixo.
+
+  **`include-after-body` obrigatório no YAML de `exercicios.qmd`/`soluções.qmd`.** O visual "caixa quadrada só com ícone" desses três links no cabeçalho da aula (ver "Cabeçalho da aula" em `styles.css`) não é CSS puro — depende de `teaching/toc-accordion.js`, que move todo `a.see-all` da página pra dentro de `.quarto-title-meta` (o bloco de metadados abaixo do título, ao lado de Autor/Data). Sem carregar esse script, os três links de `exercicios.qmd`/`soluções.qmd` ficam onde o Markdown os colocou — pílulas azuis genéricas com texto, não as caixas do cabeçalho — mesmo com as classes de ícone certas. O `index.qmd` de cada aula já carrega o script via `include-after-body: ../../lesson-toc-accordion.html` no YAML (bloco `format: html:`); `exercicios.qmd` e `soluções.qmd` **precisam da mesma linha**, logo abaixo de `html:`, senão os links nunca saem do corpo da página. Esse era um requisito que faltava desde a criação do padrão (2026-09-14) — corrigido retroativamente em todas as disciplinas em 2026-09-15.
 
 - **Slides (RevealJS):** as Pausas Ativas continuam intercaladas ao longo da aula (sem passar mais de 15 minutos de conteúdo sem uma) — isso não muda; é a seção final de Exercícios que saiu do `index.qmd`.
 
@@ -295,7 +299,7 @@ Toda aula precisa de exercícios de fechamento. **Desde 2026-09-14, em `supervis
 
 ```markdown
 ::: {.callout-note icon=false}
-## [Tema do bloco]
+## Teste N — [Tema do bloco]
 
 - □ [texto exato da afirmação, idêntico a exercicios.qmd, com o glifo □].
 - □ [outra afirmação do mesmo bloco].
@@ -304,7 +308,7 @@ Toda aula precisa de exercícios de fechamento. **Desde 2026-09-14, em `supervis
 :::
 
 ::: {.callout-tip}
-## (Resposta) [Tema do bloco]
+## (Resposta) Teste N — [Tema do bloco]
 
 - ✔ Verdadeiro — [justificativa: explicação analítica e direta de por que é V/F — sem meio-termo, apontando o erro conceitual específico que o aluno cometeria ao marcar a resposta errada].
 - ✗ Falso — [justificativa].
@@ -312,21 +316,7 @@ Toda aula precisa de exercícios de fechamento. **Desde 2026-09-14, em `supervis
 :::
 ```
 
-E, por questão discursiva:
-
-```markdown
-::: {.callout-note icon=false}
-## Questão N
-
-[o enunciado da questão N, idêntico a exercicios.qmd]
-:::
-
-::: {.callout-tip}
-## (Resposta) Questão N
-
-[a resposta]
-:::
-```
+**Na prática (todas as disciplinas já migradas), `soluções.qmd` contém só os blocos de V/F — as questões discursivas não têm gabarito publicado.** A correção de uma questão discursiva depende da qualidade e precisão técnica do argumento apresentado, não de uma resposta fixa comparável a um V/F, então não há um par pergunta/resposta "Questão N" a publicar; o enunciado da questão discursiva mora só em `exercicios.qmd`. Se um dia isso mudar para alguma disciplina específica, o par de caixas seguiria o mesmo padrão do bloco de V/F acima, com `## Questão N` / `## (Resposta) Questão N` no lugar de `## Teste N — [Tema]` (sem o prefixo "Teste", que é exclusivo dos blocos de V/F) — mas essa não é a convenção atual.
 
 Note que a caixa da pergunta usa `callout-note icon=false` (sem ícone) e a caixa da resposta usa `callout-tip` puro (com o ícone padrão do tip) — a diferença de ícone já ajuda a distinguir pergunta de resposta visualmente, além da cor. Quando o arquivo já tem um título maior agrupando várias questões (ex.: `## Questões de Verdadeiro/Falso` ou `## Questões discursivas`), o título dentro de cada par de caixas desce um nível, para `### Tema` / `### Questão N` / `### (Resposta) ...`, mantendo as caixas do mesmo jeito.
 

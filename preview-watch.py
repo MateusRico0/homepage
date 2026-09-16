@@ -203,6 +203,30 @@ def render_full():
     return ok
 
 
+def _render_each(files):
+    # BUG CORRIGIDO (2026-09-15) — as duas funções abaixo chamavam
+    # `quarto render arquivo1 arquivo2 ... arquivoN` num ÚNICO processo,
+    # assumindo (incorretamente) que `quarto render` aceita vários
+    # arquivos de entrada como múltiplos alvos independentes. Não
+    # aceita: `quarto render` só reconhece o PRIMEIRO argumento
+    # posicional como arquivo de entrada; o resto é repassado adiante
+    # (acaba virando argumento do pandoc) e o resultado é, na melhor
+    # das hipóteses, só o primeiro arquivo da lista sendo renderizado de
+    # verdade — às vezes retornando código de saída 0 mesmo assim (o
+    # que fazia essa função logar "✅ atualizado." mesmo tendo ignorado
+    # silenciosamente todos os arquivos exceto o primeiro), às vezes
+    # travando com erro do pandoc tipo `withBinaryFile: does not exist`
+    # quando o segundo caminho não corresponde a nada que o pandoc
+    # entenda. Confirmado empiricamente renderizando manualmente listas
+    # de 2+ arquivos fora do watcher. A correção é chamar `quarto
+    # render` uma vez POR ARQUIVO, cada um em seu próprio processo.
+    ok_all = True
+    for f in files:
+        if not run_render(["quarto", "render", f]):
+            ok_all = False
+    return ok_all
+
+
 def render_lessons(files):
     files = sorted(set(files))
     rel = [os.path.relpath(f, ROOT) for f in files]
@@ -219,11 +243,14 @@ def render_lessons(files):
     # seguinte, o oposto. Resultado: a ÚLTIMA chamada sempre vencia,
     # deixando as figuras do OUTRO formato quebradas (imagens 404) toda
     # vez que uma aula com blocos de código Python/TikZ mudava. Uma
-    # única chamada combinada (sem `--to`) renderiza os dois formatos
-    # no mesmo processo e escreve ambos os conjuntos de figuras na
-    # mesma pasta corretamente — e já resolve o problema original que
-    # motivou a divisão (os dois `.html` de saída são gerados juntos).
-    ok = run_render(["quarto", "render"] + files)
+    # única chamada combinada (sem `--to`) por arquivo renderiza os dois
+    # formatos desse arquivo no mesmo processo e escreve ambos os
+    # conjuntos de figuras na mesma pasta corretamente — e já resolve o
+    # problema original que motivou a divisão (os dois `.html` de saída
+    # de um mesmo arquivo são gerados juntos). Ver `_render_each` acima
+    # para o motivo de cada arquivo da lista precisar do seu próprio
+    # processo `quarto render`.
+    ok = _render_each(files)
     log("✅ atualizado." if ok else "❌ falhou — rode `quarto render <arquivo>` manualmente pra ver o erro completo.")
     return ok
 
@@ -232,7 +259,7 @@ def render_files(files):
     files = sorted(set(files))
     rel = [os.path.relpath(f, ROOT) for f in files]
     log(f"🔄 renderizando: {', '.join(rel)}")
-    ok = run_render(["quarto", "render"] + files)
+    ok = _render_each(files)
     log("✅ atualizado." if ok else "❌ falhou — rode `quarto render <arquivo>` manualmente pra ver o erro completo.")
     return ok
 

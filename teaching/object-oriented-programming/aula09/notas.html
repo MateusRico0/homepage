@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="pt-BR" xml:lang="pt-BR"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.37">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Marcos M. Raimundo — Instituto de Computação, UNICAMP">
+
+<title>Substituição e Falha: o Princípio de Liskov e a Taxonomia de Exceções – Marcos M. Raimundo</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+/* CSS for syntax highlighting */
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+  { counter-reset: source-line 0; }
+pre.numberSource code > span
+  { position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+  { content: counter(source-line);
+    position: relative; left: -1em; text-align: right; vertical-align: baseline;
+    border: none; display: inline-block;
+    -webkit-touch-callout: none; -webkit-user-select: none;
+    -khtml-user-select: none; -moz-user-select: none;
+    -ms-user-select: none; user-select: none;
+    padding: 0 4px; width: 4em;
+  }
+pre.numberSource { margin-left: 3em;  padding-left: 4px; }
+div.sourceCode
+  {   }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+</style>
+
+
+<script src="../../../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../../../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../../../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../../../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../../../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../../../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../../../">
+<link href="../../../more.png" rel="icon" type="image/png">
+<script src="../../../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../../../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../../../site_libs/quarto-html/popper.min.js"></script>
+<script src="../../../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../../../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../../../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../../../site_libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../../../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../../../site_libs/bootstrap/bootstrap-f6f65eecdb8abf3e35b2d2c28dbef9f5.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "Nenhum resultado",
+    "search-matching-documents-text": "documentos correspondentes",
+    "search-copy-link-title": "Copiar link para a busca",
+    "search-hide-matches-text": "Esconder correspondências adicionais",
+    "search-more-match-text": "mais correspondência neste documento",
+    "search-more-matches-text": "mais correspondências neste documento",
+    "search-clear-button-title": "Limpar",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancelar",
+    "search-submit-button-title": "Enviar",
+    "search-label": "Procurar"
+  }
+}</script>
+
+  <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6"></script>
+  <script defer="" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+
+<script type="text/javascript">
+const typesetMath = (el) => {
+  if (window.MathJax) {
+    // MathJax Typeset
+    window.MathJax.typeset([el]);
+  } else if (window.katex) {
+    // KaTeX Render
+    var mathElements = el.getElementsByClassName("math");
+    var macros = [];
+    for (var i = 0; i < mathElements.length; i++) {
+      var texText = mathElements[i].firstChild;
+      if (mathElements[i].tagName == "SPAN" && texText && texText.data) {
+        window.katex.render(texText.data, mathElements[i], {
+          displayMode: mathElements[i].classList.contains('display'),
+          throwOnError: false,
+          macros: macros,
+          fleqn: false
+        });
+      }
+    }
+  }
+}
+window.Quarto = {
+  typesetMath
+};
+</script>
+
+<link rel="stylesheet" href="../../../styles.css">
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="../../../index.html">
+    <span class="navbar-title">Marcos M. Raimundo</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Procurar"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Alternar de navegação" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="../../../teaching/index.html"> 
+<span class="menu-text">Teaching</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../projects/index.html"> 
+<span class="menu-text">Projects</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../publications/index.html"> 
+<span class="menu-text">Publications</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../people/index.html"> 
+<span class="menu-text">People</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../contact.html"> 
+<span class="menu-text">Contact</span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/marcosmrai"> <i class="bi bi-github" role="img">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://scholar.google.com.br/citations?user=ibe0jfQAAAAJ&amp;hl=pt-BR"> <i class="bi bi-mortarboard-fill" role="img">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Nesta página</h2>
+   
+  <ul>
+  <li><a href="#proposta-da-aula" id="toc-proposta-da-aula" class="nav-link active" data-scroll-target="#proposta-da-aula"><span class="header-section-number">1</span> Proposta da Aula</a></li>
+  <li><a href="#do-binding-ao-contrato-late-binding-vtable-e-override" id="toc-do-binding-ao-contrato-late-binding-vtable-e-override" class="nav-link" data-scroll-target="#do-binding-ao-contrato-late-binding-vtable-e-override"><span class="header-section-number">2</span> Do Binding ao Contrato: Late Binding, VTable e <code>@Override</code></a>
+  <ul class="collapse">
+  <li><a href="#late-binding-vtable-e-o-contrato-de-sobrescrita" id="toc-late-binding-vtable-e-o-contrato-de-sobrescrita" class="nav-link" data-scroll-target="#late-binding-vtable-e-o-contrato-de-sobrescrita"><span class="header-section-number">2.1</span> Late Binding, VTable e o Contrato de Sobrescrita</a></li>
+  </ul></li>
+  <li><a href="#o-princípio-da-substituição-de-liskov" id="toc-o-princípio-da-substituição-de-liskov" class="nav-link" data-scroll-target="#o-princípio-da-substituição-de-liskov"><span class="header-section-number">3</span> O Princípio da Substituição de Liskov</a></li>
+  <li><a href="#as-três-regras-de-contrato-do-lsp" id="toc-as-três-regras-de-contrato-do-lsp" class="nav-link" data-scroll-target="#as-três-regras-de-contrato-do-lsp"><span class="header-section-number">4</span> As Três Regras de Contrato do LSP</a></li>
+  <li><a href="#o-paradoxo-círculo-elipse" id="toc-o-paradoxo-círculo-elipse" class="nav-link" data-scroll-target="#o-paradoxo-círculo-elipse"><span class="header-section-number">5</span> O Paradoxo Círculo-Elipse</a>
+  <ul class="collapse">
+  <li><a href="#o-paradoxo-círculo-elipse-e-a-falácia-do-é-um" id="toc-o-paradoxo-círculo-elipse-e-a-falácia-do-é-um" class="nav-link" data-scroll-target="#o-paradoxo-círculo-elipse-e-a-falácia-do-é-um"><span class="header-section-number">5.1</span> O Paradoxo Círculo-Elipse e a Falácia do “É-UM”</a></li>
+  </ul></li>
+  <li><a href="#contratos-de-exceção-e-a-instabilidade-do-lsp" id="toc-contratos-de-exceção-e-a-instabilidade-do-lsp" class="nav-link" data-scroll-target="#contratos-de-exceção-e-a-instabilidade-do-lsp"><span class="header-section-number">6</span> Contratos de Exceção e a Instabilidade do LSP</a></li>
+  <li><a href="#taxonomia-do-erro-hierarquia-e-captura-polimórfica" id="toc-taxonomia-do-erro-hierarquia-e-captura-polimórfica" class="nav-link" data-scroll-target="#taxonomia-do-erro-hierarquia-e-captura-polimórfica"><span class="header-section-number">7</span> Taxonomia do Erro: Hierarquia e Captura Polimórfica</a></li>
+  <li><a href="#tradução-de-exceções-wrapping-e-o-princípio-da-menor-surpresa" id="toc-tradução-de-exceções-wrapping-e-o-princípio-da-menor-surpresa" class="nav-link" data-scroll-target="#tradução-de-exceções-wrapping-e-o-princípio-da-menor-surpresa"><span class="header-section-number">8</span> Tradução de Exceções (Wrapping) e o Princípio da Menor Surpresa</a></li>
+  <li><a href="#checked-vs.-unchecked-o-critério-de-responsabilidade" id="toc-checked-vs.-unchecked-o-critério-de-responsabilidade" class="nav-link" data-scroll-target="#checked-vs.-unchecked-o-critério-de-responsabilidade"><span class="header-section-number">9</span> Checked vs.&nbsp;Unchecked: o Critério de Responsabilidade</a>
+  <ul class="collapse">
+  <li><a href="#checked-unchecked-e-as-três-estratégias-de-erro" id="toc-checked-unchecked-e-as-três-estratégias-de-erro" class="nav-link" data-scroll-target="#checked-unchecked-e-as-três-estratégias-de-erro"><span class="header-section-number">9.1</span> Checked, Unchecked e as Três Estratégias de Erro</a></li>
+  </ul></li>
+  <li><a href="#conclusão" id="toc-conclusão" class="nav-link" data-scroll-target="#conclusão"><span class="header-section-number">10</span> Conclusão</a>
+  <ul class="collapse">
+  <li><a href="#ponte-para-a-aula-10" id="toc-ponte-para-a-aula-10" class="nav-link" data-scroll-target="#ponte-para-a-aula-10">Ponte para a Aula 10</a></li>
+  </ul></li>
+  </ul>
+<div class="quarto-alternate-formats"><h2>Outros formatos</h2><ul><li><a href="slides.html"><i class="bi bi-file-slides"></i>RevealJS</a></li></ul></div></nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Substituição e Falha: o Princípio de Liskov e a Taxonomia de Exceções</h1>
+<p class="subtitle lead">Aula 9 — Programação Orientada a Objetos</p>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Autor</div>
+    <div class="quarto-title-meta-contents">
+             <p>Marcos M. Raimundo — Instituto de Computação, UNICAMP </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Data de Publicação</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">16 de setembro de 2026</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<p><a href="slides.html" class="see-all" aria-label="Ver slides" title="Ver slides">Slides</a> <a href="../../../teaching/object-oriented-programming/index.html" class="see-all lesson-list-link" aria-label="Lista de aulas" title="Lista de aulas">Lista de aulas</a></p>
+<section id="proposta-da-aula" class="level1" data-number="1">
+<h1 data-number="1"><span class="header-section-number">1</span> Proposta da Aula</h1>
+<p>Na Aula 8, a Herança nos deu um jeito poderoso de compartilhar estrutura: um filho que <code>extends</code> um pai incorpora fisicamente seu DNA. Mas “compartilhar DNA” e “poder substituir com segurança” são perguntas diferentes — a primeira é sobre estrutura, a segunda é sobre <strong>comportamento observável</strong>. Esta aula fecha essa lacuna.</p>
+<p><strong>O roteiro, em quatro perguntas:</strong></p>
+<ol type="1">
+<li>Quando a JVM decide, em tempo de execução, qual código realmente roda — e o que exatamente essa decisão promete manter estável?</li>
+<li>O que significa, com rigor (não só “parece a mesma coisa”), dizer que um filho pode substituir o pai em qualquer lugar do sistema?</li>
+<li>Por que um Quadrado “ser” um Retângulo no mundo real não garante, sozinho, que ele seja um substituto válido no código?</li>
+<li>Como transformar o erro de “acidente imprevisto” em parte estruturada e confiável do design de um objeto?</li>
+</ol>
+<p>Considere o sistema de pagamentos que atravessa a disciplina: <code>Pagavel p = new Pix();</code> compila porque <code>Pix</code> é um subtipo de <code>Pagavel</code>. Mas o compilador só verificou a sintaxe — nada nele garante que trocar um <code>Pix</code> por um <code>Boleto</code> em produção não vai quebrar alguma suposição que o resto do sistema fazia sobre o comportamento de <code>Pagavel</code>. É exatamente essa garantia que faltava, e que os próximos blocos formalizam.</p>
+</section>
+<section id="do-binding-ao-contrato-late-binding-vtable-e-override" class="level1" data-number="2">
+<h1 data-number="2"><span class="header-section-number">2</span> Do Binding ao Contrato: Late Binding, VTable e <code>@Override</code></h1>
+<p>O <strong>polimorfismo de inclusão</strong> é o mecanismo que permite tratar diferentes subtipos de forma uniforme através de uma abstração comum: se <span class="math inline">\(S\)</span> é um subtipo de <span class="math inline">\(T\)</span>, objetos do tipo <span class="math inline">\(T\)</span> podem ser substituídos por instâncias de <span class="math inline">\(S\)</span> sem que o sistema precise conhecer a identidade concreta da classe.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co">// T e Pagavel, S e Pix</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>Pagavel p <span class="op">=</span> <span class="kw">new</span> <span class="fu">Pix</span><span class="op">();</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="co">// O sistema aceita 'p' em qualquer lugar que peça um Pagavel</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>checkoutController<span class="op">.</span><span class="fu">processar</span><span class="op">(</span>p<span class="op">);</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Duas visões coexistem sobre essa mesma linha: <strong>a lente do compilador</strong> enxerga só o tipo declarado (<code>Pagavel</code>) e garante que as mensagens enviadas são válidas para ele; <strong>a realidade do Heap</strong> é que o objeto é, de fato, um <code>Pix</code> completo, com todo o estado e comportamento da sua classe concreta. Um sistema bem desenhado nunca precisa de <code>instanceof</code> para operar — essa transparência é o próprio objetivo do polimorfismo de inclusão.</p>
+<p><strong>A mecânica do Late Binding.</strong> Diferente de linguagens de <em>Early Binding</em>, em que o compilador decide estaticamente qual código executar olhando o tipo da variável, o Java resolve a chamada em tempo de execução, seguindo um protocolo fixo:</p>
+<ol type="1">
+<li>O código chama o método sobre uma referência de tipo <code>Pagavel</code>.</li>
+<li>A JVM segue o ponteiro da referência até o objeto no Heap.</li>
+<li>Ela consulta a <strong>VTable</strong> (<em>Virtual Method Table</em>) da classe concreta daquele objeto (ex.: <code>Pix</code>).</li>
+<li>Ela executa o endereço de memória da implementação específica encontrada na tabela.</li>
+</ol>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">void</span> <span class="fu">verificar</span><span class="op">(</span>Pagavel p<span class="op">,</span> <span class="bu">String</span> id<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">(</span>p<span class="op">.</span><span class="fu">pagamentoConfirmado</span><span class="op">(</span>id<span class="op">))</span> <span class="op">{</span> <span class="co">// a JVM faz o lookup na VTable aqui</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>        <span class="fu">notificarSucesso</span><span class="op">();</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Essa descentralização transforma o objeto num agente inteligente: não é quem chama o método que decide o comportamento, é o próprio objeto que “declara”: <em>“Eu sou um Pix, logo sei como confirmar meu pagamento.”</em></p>
+<div class="fig-resize" style="width: 62%; margin: 0 auto;">
+<img src="index_files/mediabag/5e577a53535afe1d7ecb8b9f63323e71df912359.svg" class="img-fluid">
+</div>
+<p><strong>A sobrescrita como preservação de contrato.</strong> <code>@Override</code> permite que o especialista mude o <em>como</em>, preservando rigorosamente o <em>o quê</em>. Três exigências sustentam isso: a assinatura deve ser idêntica (ou covariante no retorno) para não quebrar o contrato; a semântica deve ser preservada — se o pai promete “validar”, o filho não pode mudar a lógica para “deletar”; e a anotação <code>@Override</code> não é decoração, é um guarda de segurança que impede a criação acidental de um método novo por erro de digitação (assinatura levemente diferente que o compilador aceitaria como um método distinto).</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> Boleto <span class="kw">implements</span> Pagavel <span class="op">{</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="dt">boolean</span> <span class="fu">pagamentoConfirmado</span><span class="op">(</span><span class="bu">String</span> id<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>        <span class="co">// logica especifica: boleto demora ate 48h para compensar</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>        <span class="bu">System</span><span class="op">.</span><span class="fu">out</span><span class="op">.</span><span class="fu">println</span><span class="op">(</span><span class="st">"Consultando compensacao bancaria: "</span> <span class="op">+</span> id<span class="op">);</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> bancoAPI<span class="op">.</span><span class="fu">verificarStatus</span><span class="op">(</span>id<span class="op">);</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>O cliente de <code>Pagavel</code> continua chamando o mesmo método, com a mesma assinatura — só que recebe uma resposta mais sofisticada e condizente com a realidade do <code>Boleto</code>. Essa é a peça que falta para a pergunta desta aula: <strong>“mesma assinatura” não é o mesmo que “mesmo contrato”</strong> — e é exatamente a distância entre as duas que o LSP formaliza a seguir.</p>
+<section id="late-binding-vtable-e-o-contrato-de-sobrescrita" class="level2" data-number="2.1">
+<h2 data-number="2.1" class="anchored" data-anchor-id="late-binding-vtable-e-o-contrato-de-sobrescrita"><span class="header-section-number">2.1</span> Late Binding, VTable e o Contrato de Sobrescrita</h2>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>Se o compilador só enxerga o tipo declarado (<code>Pagavel</code>), por que a chamada ainda “sabe” executar o código certo de <code>Pix</code> ou <code>Boleto</code> em tempo de execução?
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Escreva sua resposta e compare com um colega antes de avançar (2 min).</p>
+<ul>
+<li>□ A VTable consultada pela JVM pertence à classe concreta do objeto no Heap, não ao tipo declarado da referência.</li>
+<li>□ Em Early Binding, a decisão de qual código executar é tomada pelo compilador; em Late Binding, pela JVM em tempo de execução.</li>
+<li>□ A anotação <code>@Override</code> garante, por si só, que a semântica do método sobrescrito é preservada, independente do que o código do filho faça.</li>
+<li>□ Se <code>Boleto</code> e <code>Pix</code> implementam <code>pagamentoConfirmado</code> com a mesma assinatura, o método efetivamente executado depende só da identidade real do objeto, nunca do tipo da variável usada para chamá-lo.</li>
+</ul>
+</div>
+</div>
+</section>
+</section>
+<section id="o-princípio-da-substituição-de-liskov" class="level1" data-number="3">
+<h1 data-number="3"><span class="header-section-number">3</span> O Princípio da Substituição de Liskov</h1>
+<p>O <strong>Princípio de Substituição de Liskov (LSP)</strong>, proposto por Barbara Liskov, é o critério que eleva a pergunta de sintaxe (“o código compila?”) para semântica (“o programa continua correto sob substituição?”). Formalmente:</p>
+<blockquote class="blockquote">
+<p>Se <span class="math inline">\(S\)</span> é um subtipo de <span class="math inline">\(T\)</span>, então objetos do tipo <span class="math inline">\(T\)</span> podem ser substituídos por objetos do tipo <span class="math inline">\(S\)</span> sem que as propriedades desejáveis do programa sejam alteradas.</p>
+</blockquote>
+<p>Em notação lógica, sendo <span class="math inline">\(\phi(x)\)</span> o conjunto de todas as propriedades observáveis (comportamento, tempo de resposta, estado final) que o sistema espera de um objeto do tipo <span class="math inline">\(T\)</span>:</p>
+<p><span class="math display">\[\forall x: T,\ \phi(x) \implies \forall y: S,\ \phi(y)\]</span></p>
+<p>A intuição é a de um <strong>cliente cego para a implementação</strong>: o código que consome <code>Pagavel</code> não deveria conseguir distinguir, pelo comportamento observado, se recebeu um <code>Pix</code> ou um <code>Boleto</code>.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co">// O cliente espera um Pagavel. Ele assume que:</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="co">// 1. O metodo criarCobranca retorna um ID valido.</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="co">// 2. Nao havera travas inesperadas se o valor for positivo.</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="dt">void</span> <span class="fu">realizarCheckOut</span><span class="op">(</span>Pagavel p<span class="op">,</span> <span class="dt">double</span> valor<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    <span class="bu">String</span> id <span class="op">=</span> p<span class="op">.</span><span class="fu">criarCobranca</span><span class="op">(</span>valor<span class="op">);</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">(</span>id <span class="op">==</span> <span class="kw">null</span><span class="op">)</span> <span class="cf">throw</span> <span class="kw">new</span> <span class="bu">Error</span><span class="op">(</span><span class="st">"Violação de LSP!"</span><span class="op">);</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Se passarmos um <code>Pix</code> e ele retornar <code>null</code>, o programa quebra — não porque <code>Pix</code> “não é” um <code>Pagavel" sintaticamente (ele implementa a interface, o código compila), mas porque seu comportamento observável surpreende quem depende do contrato de</code>Pagavel`. <strong>A conclusão central:</strong> se o comportamento de um subtipo muda a ponto de surpreender quem usa o tipo base, a hierarquia está errada — não importa quão bem ela reflita uma taxonomia do mundo real.</p>
+</section>
+<section id="as-três-regras-de-contrato-do-lsp" class="level1" data-number="4">
+<h1 data-number="4"><span class="header-section-number">4</span> As Três Regras de Contrato do LSP</h1>
+<p>O LSP se operacionaliza em três regras verificáveis, todas sobre o comportamento de métodos sobrescritos.</p>
+<p><strong>Regra 1 — Pré-condições: não seja mais exigente.</strong> A subclasse deve ser tão tolerante quanto o pai; pré-condições podem ser mantidas ou enfraquecidas, nunca fortalecidas.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Na interface/pai:</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="co">// Pre-condicao: valor &gt; 0</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="bu">String</span> <span class="fu">criarCobranca</span><span class="op">(</span><span class="dt">double</span> valor<span class="op">);</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="co">// Na subclasse (VIOLACAO):</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="bu">String</span> <span class="fu">criarCobranca</span><span class="op">(</span><span class="dt">double</span> valor<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Fortalecendo a pre-condicao (exigindo mais)</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">(</span>valor <span class="op">&lt;</span> <span class="fl">100.0</span><span class="op">)</span> <span class="cf">throw</span> <span class="kw">new</span> <span class="bu">IllegalArgumentException</span><span class="op">(</span><span class="st">"Valor muito baixo"</span><span class="op">);</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> <span class="st">"ID-OK"</span><span class="op">;</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Se a base aceita qualquer valor positivo, o filho não pode restringir esse domínio exigindo valores acima de 100 — isso quebraria qualquer código cliente que já passasse valores legítimos (como 50), disparando uma <code>IllegalArgumentException</code> inesperada. O código que usa <code>Pagavel</code> espera que R$5,00 seja válido; se o objeto concreto falha ali, o tipo foi quebrado.</p>
+<p><strong>Regra 2 — Pós-condições: cumpra as promessas.</strong> A subclasse deve ser tão generosa quanto o pai; pós-condições podem ser mantidas ou fortalecidas, nunca enfraquecidas.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb6"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co">// No pai: promete retornar uma String de identificacao unica</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="co">// Na subclasse (VIOLACAO):</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="bu">String</span> <span class="fu">criarCobranca</span><span class="op">(</span><span class="dt">double</span> valor<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Enfraquecendo a garantia: retorna string vazia</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> <span class="st">""</span><span class="op">;</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Se o pai prometia um resultado útil, o filho não pode retornar “nada” ou um estado inconsistente — ele pode até entregar algo <em>mais</em> refinado (um ID mais específico, por exemplo), mas nunca menos do que o prometido.</p>
+<p><strong>Regra 3 — Preservação de invariantes.</strong> A subclasse deve manter íntegro o estado herdado; as “leis de física” da base continuam valendo no filho. Se a base garante que <code>saldo &gt;= 0</code>, um <code>sacar()</code> sobrescrito no filho não pode deixar o saldo negativo — o filho tem acesso à “cozinha” (atributos <code>protected</code>), mas não pode deixar o gás ligado ao sair.</p>
+<p>Note que as três regras são, na prática, a mesma preocupação vista de três ângulos: <strong>o comportamento do subtipo não pode surpreender ninguém que confiava no comportamento do tipo base</strong> — seja recusando entradas que antes eram aceitas, entregando menos do que era prometido, ou corrompendo um estado que a base jurava proteger.</p>
+</section>
+<section id="o-paradoxo-círculo-elipse" class="level1" data-number="5">
+<h1 data-number="5"><span class="header-section-number">5</span> O Paradoxo Círculo-Elipse</h1>
+<p>O erro mais comum ao violar o LSP é confundir a taxonomia do <strong>mundo real</strong> com o comportamento de <strong>software</strong>. O exemplo clássico: geometricamente, todo Círculo é uma Elipse — mas no software mutável, essa relação pode se inverter.</p>
+<p>Uma <code>Elipse</code> tem o método <code>setAxes(a, b)</code>, que permite alterar os dois eixos de forma independente. Um <code>Circulo</code> exige, por natureza, que <code>a == b</code>. Se forçarmos a herança (<code>Circulo extends Elipse</code>), o que acontece quando o cliente chama <code>elipse.setAxes(10, 20)</code> num objeto que ele <em>acredita</em> ser uma <code>Elipse</code>, mas que na verdade é um <code>Circulo</code>?</p>
+<div class="fig-resize" style="width: 78%; margin: 0 auto;">
+<img src="index_files/mediabag/cc87a8d96972fffa9b2c81bf71d5e28a4f6fe5be.svg" class="img-fluid">
+</div>
+<p>Não há terceira opção honesta: ou o <code>Circulo</code> quebra sua própria natureza (aceitando <span class="math inline">\(a \neq b\)</span>, e deixando de ser um círculo de verdade), ou ele quebra a expectativa do cliente de que os eixos ficariam exatamente <span class="math inline">\(10\)</span> e <span class="math inline">\(20\)</span> (lançando uma exceção que o código escrito para <code>Elipse</code> nunca previu). Qualquer uma das duas saídas viola o LSP.</p>
+<p><strong>A lição:</strong> embora um quadrado <em>seja</em> um retângulo no mundo real (e um círculo <em>seja</em> uma elipse), essa relação de taxonomia não se transfere automaticamente para software mutável. Se o comportamento mutável de <span class="math inline">\(S\)</span> não condiz com o que <span class="math inline">\(T\)</span> promete, <span class="math inline">\(S\)</span> <strong>não é um subtipo válido</strong> de <span class="math inline">\(T\)</span> — não importa quão natural pareça a relação “É-UM” fora do código. A correção, nesses casos, costuma ser tornar os objetos imutáveis (sem <code>setAxes</code>, um novo objeto a cada mudança de forma) ou abandonar a herança em favor de uma interface comum mais genérica, como <code>FormaGeometrica</code>, sem o método problemático.</p>
+<section id="o-paradoxo-círculo-elipse-e-a-falácia-do-é-um" class="level2" data-number="5.1">
+<h2 data-number="5.1" class="anchored" data-anchor-id="o-paradoxo-círculo-elipse-e-a-falácia-do-é-um"><span class="header-section-number">5.1</span> O Paradoxo Círculo-Elipse e a Falácia do “É-UM”</h2>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>Por que um Quadrado “ser” um Retângulo no mundo real não garante que ele seja um subtipo válido de Retângulo no código?
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Escreva sua resposta e compare com um colega antes de avançar (2 min).</p>
+<ul>
+<li>□ Se <code>Retangulo</code> tiver um método <code>setAxes(a, b)</code> que altera largura e altura de forma independente, forçar <code>Quadrado extends Retangulo</code> cria uma chamada sem resposta honesta.</li>
+<li>□ O paradoxo desaparece completamente se <code>Retangulo</code> e <code>Quadrado</code> forem tornados imutáveis, sem nenhum método que altere os eixos depois da criação.</li>
+<li>□ Uma classe <code>FormaGeometrica</code> mais genérica, sem o método <code>setAxes</code>, resolveria o mesmo problema sem forçar uma relação de herança inválida.</li>
+<li>□ Toda relação de taxonomia do mundo real (“todo X é um Y”) pode ser traduzida diretamente para uma relação <code>extends</code> no código, sem risco de violar o LSP.</li>
+</ul>
+</div>
+</div>
+</section>
+</section>
+<section id="contratos-de-exceção-e-a-instabilidade-do-lsp" class="level1" data-number="6">
+<h1 data-number="6"><span class="header-section-number">6</span> Contratos de Exceção e a Instabilidade do LSP</h1>
+<p>Há uma quarta forma de violar o LSP, além das três regras já vistas: as <strong>exceções fazem parte da assinatura</strong> de um método, tanto quanto seu tipo de retorno. Uma subclasse que lança uma exceção nova, mais ampla ou não declarada pelo pai “assusta” o cliente com um erro que ele nunca foi preparado para tratar.</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb7"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="kw">class</span> PagamentoCartaoBloqueado <span class="kw">extends</span> Cartao <span class="op">{</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">@Override</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">public</span> <span class="bu">String</span> <span class="fu">criarCobranca</span><span class="op">(</span><span class="dt">double</span> v<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>        <span class="co">// VIOLACAO: o cliente do Pagavel espera um ID ou um erro previsto</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>        <span class="cf">throw</span> <span class="kw">new</span> <span class="bu">SecurityException</span><span class="op">(</span><span class="st">"Usuario banido"</span><span class="op">);</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Nenhum código escrito contra <code>Pagavel</code>/<code>Cartao</code> esperava uma <code>SecurityException</code> — ela não fazia parte do contrato original. Um padrão especialmente traiçoeiro: lançar <code>UnsupportedOperationException</code> (ou qualquer <code>RuntimeException</code> genérica) para “pular” um método do pai que o filho não quis implementar é, invariavelmente, uma violação do LSP e um sinal de que a hierarquia de herança está mal desenhada — se o filho não pode honrar o método, ele provavelmente não deveria ser um subtipo daquele pai.</p>
+<p>Essa instabilidade de contrato de exceção é a ponte natural para o próximo assunto: se as exceções são parte do contrato, elas merecem o mesmo cuidado de design que qualquer outro elemento da interface pública de um objeto — e é isso que uma <strong>taxonomia de exceções</strong> bem projetada entrega.</p>
+</section>
+<section id="taxonomia-do-erro-hierarquia-e-captura-polimórfica" class="level1" data-number="7">
+<h1 data-number="7"><span class="header-section-number">7</span> Taxonomia do Erro: Hierarquia e Captura Polimórfica</h1>
+<p>O erro não é um “acidente” ou algo que simplesmente “deu errado” — é uma <strong>saída prevista</strong> de uma função quando as pré-condições não permitem o sucesso. Pensando na máquina de estados da Aula 2: se um <code>Pedido</code> não pode transitar para “Pago”, ele transita para “Falha de Pagamento” — ambos são estados válidos e antecipados, não uma quebra da máquina. Usar o fluxo de exceção para essa transição separa o “caminho feliz” do “caminho de recuperação”, às custas de um custo real: lançar uma exceção é caro (a montagem do <em>stack trace</em> consome tempo), então reserve-a para situações realmente excepcionais, não para controle de fluxo comum.</p>
+<p><strong>A árvore de falhas.</strong> Não trate exceções como simples mensagens de texto — trate-as como uma <strong>Hierarquia de Tipos</strong> que espelha o domínio de negócio, com uma raiz comum (por exemplo, <code>LojaException</code>), grandes categorias (falhas de <strong>Infraestrutura</strong> — rede, banco — separadas de falhas de <strong>Negócio</strong> — saldo, estoque) e especialistas que carregam dados específicos da falha.</p>
+<div class="fig-resize" style="width: 72%; margin: 0 auto;">
+<img src="index_files/mediabag/d4f3da127e17fcfae2cd84cd782e20c68eb1db84.svg" class="img-fluid">
+</div>
+<p><strong>Captura polimórfica.</strong> A vantagem central de organizar exceções como hierarquia (em vez de uma lista plana) é que o <code>catch</code> pode escolher o nível de especificidade da reação — o mesmo polimorfismo do Bloco 2, agora aplicado ao tratamento de erro:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb8"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="cf">try</span> <span class="op">{</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>    servicoPagamento<span class="op">.</span><span class="fu">processar</span><span class="op">(</span>pedido<span class="op">);</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="op">}</span> <span class="cf">catch</span> <span class="op">(</span>CartaoExpiradoException e<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>    <span class="co">// reacao ultra-especifica: sugerir atualizar os dados do cartao</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>    view<span class="op">.</span><span class="fu">pedirNovosDados</span><span class="op">(</span>e<span class="op">.</span><span class="fu">getDataExpiracao</span><span class="op">());</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="op">}</span> <span class="cf">catch</span> <span class="op">(</span>PagamentoException e<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>    <span class="co">// reacao por categoria: nao importa se foi saldo ou bloqueio,</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>    <span class="co">// o tratamento e o mesmo: "pagamento nao autorizado"</span></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>    view<span class="op">.</span><span class="fu">notificarFalhaGenerica</span><span class="op">(</span>e<span class="op">.</span><span class="fu">getMensagemAmigavel</span><span class="op">());</span></span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a><span class="op">}</span> <span class="cf">catch</span> <span class="op">(</span>LojaException e<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>    <span class="co">// reacao de ultima instancia: algo na loja falhou</span></span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>    log<span class="op">.</span><span class="fu">registrarCritico</span><span class="op">(</span>e<span class="op">);</span></span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Essa estrutura evita que o código fique infestado de <code>if/else</code> de tratamento de erro, mantendo o “caminho feliz” limpo. O cuidado simétrico: <strong>não capture <code>Exception</code> (ou pior, <code>Throwable</code>) indiscriminadamente</strong> — isso esconderia erros de lógica (como um <code>NullPointerException</code> inesperado) que deveriam, na verdade, interromper a execução para correção, não ser silenciados.</p>
+</section>
+<section id="tradução-de-exceções-wrapping-e-o-princípio-da-menor-surpresa" class="level1" data-number="8">
+<h1 data-number="8"><span class="header-section-number">8</span> Tradução de Exceções (Wrapping) e o Princípio da Menor Surpresa</h1>
+<p>Camadas de alto nível — como um <code>CheckoutController</code> — não deveriam lidar com <code>SQLException</code> ou <code>TimeoutException</code>: isso é detalhe de implementação de uma camada inferior. A solução é capturar o erro técnico e <strong>re-embalá-lo</strong> (<em>wrapping</em>) numa exceção de domínio:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb9"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co">// dentro do meio de pagamento (nivel baixo)</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="cf">try</span> <span class="op">{</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>    apiBanco<span class="op">.</span><span class="fu">conectar</span><span class="op">();</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="op">}</span> <span class="cf">catch</span> <span class="op">(</span><span class="bu">IOException</span> e<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>    <span class="co">// traduzindo "erro de rede" para "falha de comunicacao no pagamento"</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>    <span class="cf">throw</span> <span class="kw">new</span> <span class="fu">FalhaComunicacaoException</span><span class="op">(</span><span class="st">"Banco indisponivel no momento"</span><span class="op">,</span> e<span class="op">);</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>Note o segundo argumento do construtor: a exceção original (<code>e</code>) é preservada como <strong>causa</strong>, nunca descartada — isso mantém o <em>stack trace</em> completo disponível para depuração técnica, mesmo que a camada superior só veja <code>FalhaComunicacaoException</code>. O controlador agora lida só com o que ele entende (Pagamento), sem precisar saber se o erro veio de SQL, de uma API REST ou de um socket.</p>
+<p>Essa técnica adere ao <strong>Princípio da Menor Surpresa</strong>: o sistema de erro faz parte da interface pública de um objeto, e deve ser tão previsível quanto qualquer outro método. Se um método diz que lança <code>SaldoInsuficienteException</code>, ele não deve deixar escapar um <code>NullPointerException</code> interno — isso vazaria um detalhe de implementação (um bug de inicialização, por exemplo) através de uma interface que prometia apenas erros de negócio bem definidos.</p>
+</section>
+<section id="checked-vs.-unchecked-o-critério-de-responsabilidade" class="level1" data-number="9">
+<h1 data-number="9"><span class="header-section-number">9</span> Checked vs.&nbsp;Unchecked: o Critério de Responsabilidade</h1>
+<p>A escolha entre uma exceção <code>Checked</code> ou <code>Unchecked</code> em Java não é uma questão técnica de sintaxe — é sobre <strong>quem detém a responsabilidade</strong> pelo erro.</p>
+<p><strong>Unchecked (violação do DNA).</strong> Representa um erro de lógica: o contrato do método foi violado (um valor negativo passado onde só positivos são válidos, por exemplo). O sistema deve falhar rápido (<strong>Fail-Fast</strong>): validar no construtor ou no início do método, e lançar a exceção imediatamente se algo está errado. Não se recupera um bug com <code>try/catch</code> — o problema não está no fluxo de execução, está no código que chamou o método com argumentos inválidos, e é ali que a correção precisa acontecer. É muito mais fácil depurar um erro que aconteceu na entrada do método do que um erro que só se manifesta minutos depois, longe da causa real.</p>
+<p><strong>Checked (contingência do mundo).</strong> Representa uma falha externa que o sistema <em>deve</em> prever — rede instável, timeout de API, arquivo ausente. O chamador é obrigado (pelo compilador) a ter um “Plano B”: tratar (buscar uma rota alternativa) ou reembalar (traduzir para uma exceção de domínio, como visto no bloco anterior).</p>
+<p>O exemplo que amarra as três estratégias de erro num único método:</p>
+<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb10"><pre class="sourceCode java code-with-copy"><code class="sourceCode java"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="kw">public</span> <span class="dt">void</span> <span class="fu">realizarPagamento</span><span class="op">(</span><span class="dt">double</span> valor<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>    <span class="co">// 1. UNCHECKED (DNA): falha rapida em caso de violacao de contrato</span></span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">checkarValor</span><span class="op">(</span>valor<span class="op">);</span> <span class="co">// lanca IllegalArgumentException se valor &lt; 0</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>    <span class="cf">try</span> <span class="op">{</span></span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>        gatewayPrincipal<span class="op">.</span><span class="fu">conectar</span><span class="op">();</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>        gatewayPrincipal<span class="op">.</span><span class="fu">pagar</span><span class="op">(</span>valor<span class="op">);</span></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span> <span class="cf">catch</span> <span class="op">(</span>ConexaoException e<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a>        <span class="co">// 2. TRATAR (recuperacao): contingencia transparente</span></span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a>        gatewayBackup<span class="op">.</span><span class="fu">pagar</span><span class="op">(</span>valor<span class="op">);</span></span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span> <span class="cf">catch</span> <span class="op">(</span><span class="bu">IOException</span> e<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a>        <span class="co">// 3. REEMBALAR (abstracao): traducao para linguagem de negocio</span></span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>        <span class="cf">throw</span> <span class="kw">new</span> <span class="fu">ErroDeNegocioException</span><span class="op">(</span><span class="st">"Falha na rede bancaria"</span><span class="op">,</span> e<span class="op">);</span></span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div><button title="Copiar para a área de transferência" class="code-copy-button"><i class="bi"></i></button></div>
+<p>As três decisões coexistem porque respondem perguntas diferentes: <em>“o chamador errou?”</em> (Unchecked, corrige-se acima, nunca no <code>catch</code>); <em>“o mundo falhou, mas há uma rota de escape?”</em> (Tratar, contingência transparente); <em>“o mundo falhou e não há solução local?”</em> (Reembalar, traduzindo para o vocabulário de quem chamou). Confundir as três — por exemplo, capturando uma <code>IllegalArgumentException</code> com um <code>try/catch</code> “para o sistema não cair” — só adia o problema, escondendo um bug real atrás de um comportamento silenciosamente incorreto.</p>
+<section id="checked-unchecked-e-as-três-estratégias-de-erro" class="level2" data-number="9.1">
+<h2 data-number="9.1" class="anchored" data-anchor-id="checked-unchecked-e-as-três-estratégias-de-erro"><span class="header-section-number">9.1</span> Checked, Unchecked e as Três Estratégias de Erro</h2>
+<div class="callout callout-style-default callout-tip callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>Um método precisa lidar com um valor inválido do chamador e, separadamente, com uma falha de rede do banco. Por que essas duas situações não deveriam usar a mesma estratégia de tratamento?
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Escreva sua resposta e compare com um colega antes de avançar (2 min).</p>
+<ul>
+<li>□ Um valor inválido passado pelo chamador é uma violação de contrato — a resposta correta é Fail-Fast, não um <code>try/catch</code> que tenta “seguir em frente”.</li>
+<li>□ Uma falha de rede é uma contingência do mundo externo, que o método pode tentar contornar (rota alternativa) ou reembalar numa exceção de domínio.</li>
+<li>□ Se um desenvolvedor captura <code>IllegalArgumentException</code> só para evitar que o sistema pare, ele elimina o bug de origem, não apenas adia sua manifestação.</li>
+<li>□ Ao reembalar uma <code>IOException</code> numa exceção de domínio, é uma boa prática preservar a exceção original como causa, em vez de descartá-la.</li>
+</ul>
+</div>
+</div>
+</section>
+</section>
+<section id="conclusão" class="level1" data-number="10">
+<h1 data-number="10"><span class="header-section-number">10</span> Conclusão</h1>
+<p>Voltando às quatro perguntas da abertura:</p>
+<ol type="1">
+<li><strong>Quem decide, e o que essa decisão preserva:</strong> a JVM decide em tempo de execução, consultando a VTable da classe real do objeto — e <code>@Override</code> promete preservar a assinatura e a semântica do método, não só a sintaxe.</li>
+<li><strong>Substituir com segurança, formalizado:</strong> o LSP exige que o subtipo não fortaleça pré-condições, não enfraqueça pós-condições, e preserve todas as invariantes herdadas — e que suas exceções não surpreendam quem confiava no contrato do tipo base.</li>
+<li><strong>Taxonomia do mundo vs.&nbsp;subtipagem de software:</strong> o paradoxo Círculo-Elipse mostra que “ser um X no mundo real” não garante “ser um subtipo válido de X no código” — o critério é sempre o comportamento observável, nunca a intuição geométrica ou biológica.</li>
+<li><strong>Erro estruturado, não acidente:</strong> uma taxonomia de exceções bem desenhada, com captura polimórfica e tradução entre camadas, transforma a falha em parte confiável do design — e o critério Checked/Unchecked decide, caso a caso, se a responsabilidade é de quem chamou (Unchecked, Fail-Fast) ou do ambiente externo (Checked, com plano de contingência).</li>
+</ol>
+<section id="ponte-para-a-aula-10" class="level3 unnumbered">
+<h3 class="unnumbered anchored" data-anchor-id="ponte-para-a-aula-10">Ponte para a Aula 10</h3>
+<p>Até aqui, a disciplina garantiu que um objeto se comporta corretamente sozinho (Aulas 1–5), que ele promete comportamentos estáveis através de interfaces e herança (Aulas 6–8), e que essas promessas seguem válidas sob substituição, mesmo quando algo falha (Aula 9). A próxima pergunta ataca a própria ferramenta usada até aqui para modelar variação: herança resolve bem <strong>um</strong> eixo de especialização — mas o que acontece quando o negócio precisa variar em <strong>dois ou mais eixos independentes ao mesmo tempo</strong> (um produto físico ou digital, e, separadamente, nacional ou importado)? A Aula 10 mostra a herança colapsando sob essa explosão combinatória, e a composição — culminando no padrão Strategy — resolvendo exatamente o mesmo problema sem colisão.</p>
+<p><a href="../../../teaching/object-oriented-programming/aula09/exercicios.html" class="see-all exercicios-link" aria-label="Ver exercícios" title="Ver exercícios">Exercícios</a> <a href="../../../teaching/object-oriented-programming/aula09/soluções.html" class="see-all solucoes-link" aria-label="Ver soluções" title="Ver soluções">Soluções</a></p>
+
+
+</section>
+</section>
+
+</main> <!-- /main -->
+<!-- Parcial estático, igual em toda aula (não é mais gerado por script —
+     ver histórico do teaching/generate_lesson_nav.py, removido). Só
+     carrega o script que transforma o sumário nativo do Quarto (#TOC,
+     "Nesta página") no painel de acordeão "Nesta aula". -->
+<script src="../../toc-accordion.js"></script>
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copiada");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copiada");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+<footer class="footer">
+  <div class="nav-footer">
+    <div class="nav-footer-left">
+      &nbsp;
+    </div>   
+    <div class="nav-footer-center">
+<p>© 2026 Marcos M. Raimundo</p>
+</div>
+    <div class="nav-footer-right">
+      &nbsp;
+    </div>
+  </div>
+</footer>
+
+
+
+
+</body></html>

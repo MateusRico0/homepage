@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="pt-BR" xml:lang="pt-BR"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.37">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Marcos M. Raimundo — Instituto de Computação, UNICAMP">
+
+<title>Exercícios — Aula 2: Estimação de Densidade Não-Paramétrica (k-NN e KDE) – Marcos M. Raimundo</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
+<script src="../../../site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="../../../site_libs/quarto-nav/headroom.min.js"></script>
+<script src="../../../site_libs/clipboard/clipboard.min.js"></script>
+<script src="../../../site_libs/quarto-search/autocomplete.umd.js"></script>
+<script src="../../../site_libs/quarto-search/fuse.min.js"></script>
+<script src="../../../site_libs/quarto-search/quarto-search.js"></script>
+<meta name="quarto:offset" content="../../../">
+<link href="../../../more.png" rel="icon" type="image/png">
+<script src="../../../site_libs/quarto-html/quarto.js" type="module"></script>
+<script src="../../../site_libs/quarto-html/tabsets/tabsets.js" type="module"></script>
+<script src="../../../site_libs/quarto-html/popper.min.js"></script>
+<script src="../../../site_libs/quarto-html/tippy.umd.min.js"></script>
+<script src="../../../site_libs/quarto-html/anchor.min.js"></script>
+<link href="../../../site_libs/quarto-html/tippy.css" rel="stylesheet">
+<link href="../../../site_libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="../../../site_libs/bootstrap/bootstrap.min.js"></script>
+<link href="../../../site_libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="../../../site_libs/bootstrap/bootstrap-f6f65eecdb8abf3e35b2d2c28dbef9f5.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script id="quarto-search-options" type="application/json">{
+  "location": "navbar",
+  "copy-button": false,
+  "collapse-after": 3,
+  "panel-placement": "end",
+  "type": "overlay",
+  "limit": 50,
+  "keyboard-shortcut": [
+    "f",
+    "/",
+    "s"
+  ],
+  "show-item-context": false,
+  "language": {
+    "search-no-results-text": "Nenhum resultado",
+    "search-matching-documents-text": "documentos correspondentes",
+    "search-copy-link-title": "Copiar link para a busca",
+    "search-hide-matches-text": "Esconder correspondências adicionais",
+    "search-more-match-text": "mais correspondência neste documento",
+    "search-more-matches-text": "mais correspondências neste documento",
+    "search-clear-button-title": "Limpar",
+    "search-text-placeholder": "",
+    "search-detached-cancel-button-title": "Cancelar",
+    "search-submit-button-title": "Enviar",
+    "search-label": "Procurar"
+  }
+}</script>
+
+  <script src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6"></script>
+  <script defer="" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js" type="text/javascript"></script>
+
+<script type="text/javascript">
+const typesetMath = (el) => {
+  if (window.MathJax) {
+    // MathJax Typeset
+    window.MathJax.typeset([el]);
+  } else if (window.katex) {
+    // KaTeX Render
+    var mathElements = el.getElementsByClassName("math");
+    var macros = [];
+    for (var i = 0; i < mathElements.length; i++) {
+      var texText = mathElements[i].firstChild;
+      if (mathElements[i].tagName == "SPAN" && texText && texText.data) {
+        window.katex.render(texText.data, mathElements[i], {
+          displayMode: mathElements[i].classList.contains('display'),
+          throwOnError: false,
+          macros: macros,
+          fleqn: false
+        });
+      }
+    }
+  }
+}
+window.Quarto = {
+  typesetMath
+};
+</script>
+
+<link rel="stylesheet" href="../../../styles.css">
+</head>
+
+<body class="nav-fixed quarto-light">
+
+<div id="quarto-search-results"></div>
+  <header id="quarto-header" class="headroom fixed-top">
+    <nav class="navbar navbar-expand-lg " data-bs-theme="dark">
+      <div class="navbar-container container-fluid">
+      <div class="navbar-brand-container mx-auto">
+    <a class="navbar-brand" href="../../../index.html">
+    <span class="navbar-title">Marcos M. Raimundo</span>
+    </a>
+  </div>
+            <div id="quarto-search" class="" title="Procurar"></div>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse" aria-controls="navbarCollapse" role="menu" aria-expanded="false" aria-label="Alternar de navegação" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
+  <span class="navbar-toggler-icon"></span>
+</button>
+          <div class="collapse navbar-collapse" id="navbarCollapse">
+            <ul class="navbar-nav navbar-nav-scroll ms-auto">
+  <li class="nav-item">
+    <a class="nav-link" href="../../../teaching/index.html"> 
+<span class="menu-text">Teaching</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../projects/index.html"> 
+<span class="menu-text">Projects</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../publications/index.html"> 
+<span class="menu-text">Publications</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../people/index.html"> 
+<span class="menu-text">People</span></a>
+  </li>  
+  <li class="nav-item">
+    <a class="nav-link" href="../../../contact.html"> 
+<span class="menu-text">Contact</span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://github.com/marcosmrai"> <i class="bi bi-github" role="img">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+  <li class="nav-item compact">
+    <a class="nav-link" href="https://scholar.google.com.br/citations?user=ibe0jfQAAAAJ&amp;hl=pt-BR"> <i class="bi bi-mortarboard-fill" role="img">
+</i> 
+<span class="menu-text"></span></a>
+  </li>  
+</ul>
+          </div> <!-- /navcollapse -->
+            <div class="quarto-navbar-tools">
+</div>
+      </div> <!-- /container-fluid -->
+    </nav>
+</header>
+<!-- content -->
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article page-navbar">
+<!-- sidebar -->
+<!-- margin-sidebar -->
+    <div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+        <nav id="TOC" role="doc-toc" class="toc-active">
+    <h2 id="toc-title">Nesta página</h2>
+   
+  <ul class="collapse">
+  <li><a href="#questões-discursivas" id="toc-questões-discursivas" class="nav-link active" data-scroll-target="#questões-discursivas">Questões discursivas</a></li>
+  <li><a href="#questões-de-verdadeirofalso" id="toc-questões-de-verdadeirofalso" class="nav-link" data-scroll-target="#questões-de-verdadeirofalso">Questões de Verdadeiro/Falso</a></li>
+  <li><a href="#aviso" id="toc-aviso" class="nav-link" data-scroll-target="#aviso">Aviso</a></li>
+  </ul>
+</nav>
+    </div>
+<!-- main -->
+<main class="content" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Exercícios — Aula 2: Estimação de Densidade Não-Paramétrica (<span class="math inline">\(k\)</span>-NN e KDE)</h1>
+<p class="subtitle lead">Aprendizado Não Supervisionado</p>
+</div>
+
+
+
+<div class="quarto-title-meta">
+
+    <div>
+    <div class="quarto-title-meta-heading">Autor</div>
+    <div class="quarto-title-meta-contents">
+             <p>Marcos M. Raimundo — Instituto de Computação, UNICAMP </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Data de Publicação</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">16 de setembro de 2026</p>
+    </div>
+  </div>
+  
+    
+  </div>
+  
+
+
+</header>
+
+
+<p><a href="../../../teaching/unsupervised-learning/aula02/notas.html" class="see-all aula-link" aria-label="Ver aula" title="Ver aula">Aula</a> <a href="../../../teaching/unsupervised-learning/aula02/soluções.html" class="see-all solucoes-link" aria-label="Ver soluções" title="Ver soluções">Soluções</a></p>
+<div class="callout callout-style-default callout-tip no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Dica</span>Convenções usadas nesta lista
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>Os itens abaixo tratam de estimação de densidade <strong>não-paramétrica</strong> (sem assumir uma família como a Gaussiana), a partir da mesma identidade geral: fixado um ponto de consulta <span class="math inline">\(\mathbf{x}\)</span>, escolhe-se uma região pequena <span class="math inline">\(R\)</span> (uma esfera ou um cubo) ao redor dele, de volume <span class="math inline">\(V\)</span>, contendo <span class="math inline">\(K\)</span> dos <span class="math inline">\(N\)</span> pontos de treino disponíveis; a densidade estimada é <span class="math inline">\(p(\mathbf{x})=K/(NV)\)</span>. Dessa identidade nascem dois métodos, conforme o que se fixa e o que se deixa livre:</p>
+<ul>
+<li><strong><span class="math inline">\(k\)</span>-NN para densidade:</strong> fixa-se <span class="math inline">\(K\)</span> (um número de vizinhos) e deixa-se <span class="math inline">\(V\)</span> crescer até que a esfera capture exatamente <span class="math inline">\(K\)</span> pontos de treino. Chama-se <span class="math inline">\(d_K(\mathbf{x})\)</span> a distância de <span class="math inline">\(\mathbf{x}\)</span> ao seu <span class="math inline">\(K\)</span>-ésimo vizinho mais próximo — o raio dessa esfera. Como o volume de uma esfera de raio <span class="math inline">\(r\)</span> em <span class="math inline">\(D\)</span> dimensões é proporcional a <span class="math inline">\(r^D\)</span>, tem-se <span class="math inline">\(V\propto d_K(\mathbf{x})^D\)</span> e, substituindo na identidade geral, <span class="math inline">\(p(\mathbf{x})\propto 1/d_K(\mathbf{x})^D\)</span>.</li>
+<li><strong>KDE / Janela de Parzen:</strong> fixa-se o volume <span class="math inline">\(V\)</span> de antemão (via um parâmetro de largura <span class="math inline">\(h\)</span>, com <span class="math inline">\(V=h^D\)</span> no caso de um hipercubo) e conta-se quantos pontos de treino caem dentro dele — ou, na versão suavizada (kernel gaussiano), soma-se um peso que decai suavemente com a distância de cada ponto de treino a <span class="math inline">\(\mathbf{x}\)</span>, em vez de um corte abrupto de “dentro/fora”.</li>
+</ul>
+<p>Vários itens usam como exemplo recorrente a variável <code>radius_mean</code> do dataset <strong>Breast Cancer Wisconsin</strong> (569 pacientes) — o raio médio do tumor medido no exame, um único número por paciente. É apenas um exemplo concreto: nenhum item exige ter visto esse exemplo antes, e toda informação necessária para resolver cada item está no próprio enunciado ou no preâmbulo do bloco a que pertence.</p>
+</div>
+</div>
+<section id="questões-discursivas" class="level2">
+<h2 class="anchored" data-anchor-id="questões-discursivas">Questões discursivas</h2>
+<ol type="1">
+<li><p>O ajuste de uma Gaussiana multivariada por máxima verossimilhança exige <span class="math inline">\(N&gt;d\)</span> (mais observações do que dimensões) para que a matriz de covariância estimada <span class="math inline">\(\hat\Sigma\)</span> seja invertível — uma exigência estrutural do método paramétrico. Explique por que <span class="math inline">\(k\)</span>-NN e KDE não têm essa mesma exigência formal — e, ainda assim, por que isso não significa que eles “resolveram” a maldição da dimensionalidade. Use os dois resultados a seguir na sua resposta: (i) o comprimento de aresta necessário para capturar uma fração fixa <span class="math inline">\(r\)</span> dos dados cresce como <span class="math inline">\(r^{1/p}\)</span> conforme o número de dimensões <span class="math inline">\(p\)</span> aumenta; (ii) a quantidade de dados necessária para manter a mesma densidade amostral local cresce como <span class="math inline">\(N^{1/p}\)</span>.</p></li>
+<li><p>Considere <span class="math inline">\(k\)</span>-NN e KDE ajustados à mesma variável contínua real — por exemplo, <code>radius_mean</code> (o raio médio de um tumor, do dataset Breast Cancer Wisconsin). Suponha que as densidades estimadas pelos dois métodos concordem visualmente no grosso da distribuição (onde há muitos pontos de treino), mas divirjam nas caudas (regiões de poucos pontos, longe do centro da distribuição). Explique, em termos da definição de cada método (fixar <span class="math inline">\(K\)</span> e deixar <span class="math inline">\(V\)</span> variar, vs.&nbsp;fixar <span class="math inline">\(V\)</span> e deixar <span class="math inline">\(K\)</span> variar), por que é justamente nas regiões de baixa densidade que essa divergência deveria aparecer com mais força.</p></li>
+<li><p>Escolha uma situação prática (pode ser fora de medicina) em que usar um estimador de densidade não-paramétrico (<span class="math inline">\(k\)</span>-NN ou KDE) seria preferível a assumir uma família paramétrica fixa (por exemplo, uma Gaussiana multivariada) — e uma situação em que o custo de armazenar todo o conjunto de dados de treino tornaria essa escolha impraticável. Justifique os dois casos.</p></li>
+</ol>
+</section>
+<section id="questões-de-verdadeirofalso" class="level2">
+<h2 class="anchored" data-anchor-id="questões-de-verdadeirofalso">Questões de Verdadeiro/Falso</h2>
+<p>Cada bloco de 4 itens trata do mesmo tema. A questão só é considerada correta se todos os 4 itens forem julgados corretamente (deixar em branco tem penalidade de 20% da nota da questão).</p>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 1 — Concentração de volume na hiperesfera
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ Se <span class="math inline">\(\epsilon=0{,}5\)</span> (a casca cobre metade do raio), a fração do volume de uma esfera de raio 1 contida nessa casca, em <span class="math inline">\(D=1\)</span> dimensão, é exatamente <span class="math inline">\(0{,}5\)</span>.</li>
+<li>□ Para qualquer <span class="math inline">\(\epsilon\in(0,1)\)</span> fixo, a fração do volume contida na casca de espessura <span class="math inline">\(\epsilon\)</span> é uma função estritamente crescente de <span class="math inline">\(D\)</span>.</li>
+<li>□ Um argumento análogo ao da hiperesfera se aplicaria a um hipercubo de lado 1 em <span class="math inline">\(D\)</span> dimensões: a fração do volume contida numa casca de espessura relativa <span class="math inline">\(\epsilon\)</span> próxima da superfície do cubo também tenderia a 1 conforme <span class="math inline">\(D\to\infty\)</span>.</li>
+<li>□ Se a massa de probabilidade de uma Gaussiana multivariada se concentra numa casca fina afastada da média em alta dimensão, isso implica que a moda da distribuição (o ponto de densidade máxima) não é mais o ponto de <span class="math inline">\(\mathbf{x}\)</span> onde a maior parte da massa de probabilidade está localizada.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 2 — As fórmulas do ESL (comprimento de aresta e distância mediana)
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ Segundo <span class="math inline">\(e_p(r)=r^{1/p}\)</span> (o comprimento de aresta de um hipercubo centrado na origem necessário para capturar uma fração <span class="math inline">\(r\)</span> do volume total, em <span class="math inline">\(p\)</span> dimensões), para capturar uma fração fixa <span class="math inline">\(r&lt;1\)</span> dos dados, o comprimento de aresta necessário aumenta conforme <span class="math inline">\(p\)</span> aumenta.</li>
+<li>□ A fórmula <span class="math inline">\(d(p,N)=(1-(1/2)^{1/N})^{1/p}\)</span> (a distância mediana, em <span class="math inline">\(p\)</span> dimensões, do ponto mais próximo da origem entre <span class="math inline">\(N\)</span> pontos sorteados uniformemente) prevê que, mantendo <span class="math inline">\(p\)</span> fixo e aumentando <span class="math inline">\(N\)</span> para infinito, essa distância mediana tende a zero.</li>
+<li>□ Se, para <span class="math inline">\(N=500\)</span> e <span class="math inline">\(p=10\)</span>, a distância mediana ao vizinho mais próximo da origem é <span class="math inline">\(\approx 0{,}52\)</span> (mais da metade do raio), então, necessariamente, mais da metade dos 500 pontos está a uma distância menor que <span class="math inline">\(0{,}52\)</span> da origem.</li>
+<li>□ O crescimento da densidade amostral necessária, <span class="math inline">\(N^{1/p}\)</span>, e o crescimento do comprimento de aresta necessário, <span class="math inline">\(r^{1/p}\)</span>, são dois sintomas independentes da maldição da dimensionalidade, sem relação matemática direta entre si.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 3 — Concentração de medida e métricas de distância
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ Se o contraste relativo <span class="math inline">\((\text{dist}_{\max}-\text{dist}_{\min})/\text{dist}_{\min}\)</span> (a diferença entre a maior e a menor distância a um ponto de consulta, dividida pela menor) tende a zero conforme o número de dimensões <span class="math inline">\(d\)</span> cresce, isso implica que a distância absoluta entre pontos também tende a zero.</li>
+<li>□ Num dataset em que só um pequeno subconjunto dos atributos carrega informação relevante para a tarefa e o restante é ruído independente, aumentar <span class="math inline">\(d\)</span> usando apenas os atributos informativos NÃO deveria produzir a mesma queda no contraste relativo observada ao aumentar <span class="math inline">\(d\)</span> com atributos aleatórios (informativos + ruído).</li>
+<li>□ O fato de o contraste relativo cair de <span class="math inline">\(\approx 220\)</span> (<span class="math inline">\(d=2\)</span>) para <span class="math inline">\(\approx 10\)</span> (<span class="math inline">\(d=30\)</span>) no dataset Breast Cancer Wisconsin (569 pacientes, atributos contínuos de exame) depende da escolha específica desse dataset, e um dataset sintético com atributos i.i.d. uniformes mostraria, em geral, o oposto (contraste relativo crescente com <span class="math inline">\(d\)</span>).</li>
+<li>□ Padronizar os atributos (subtrair a média, dividir pelo desvio) antes de calcular distâncias é irrelevante para o fenômeno de concentração de medida — ele ocorreria de forma idêntica mesmo sem essa padronização.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 4 — O resultado geral <span class="math inline">\(p(\mathbf{x})=K/(NV)\)</span>
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ A derivação de <span class="math inline">\(p(\mathbf{x})=K/(NV)\)</span> depende da suposição de que <span class="math inline">\(p(\mathbf{x})\)</span> é aproximadamente constante dentro da região <span class="math inline">\(R\)</span> (a vizinhança de volume <span class="math inline">\(V\)</span> ao redor do ponto de consulta) — se essa suposição falhar (por exemplo, <span class="math inline">\(R\)</span> grande demais numa região de densidade muito variável), a estimativa fica sistematicamente distorcida mesmo com <span class="math inline">\(N\)</span> muito grande.</li>
+<li>□ A aproximação <span class="math inline">\(K\simeq NP\)</span> (onde <span class="math inline">\(P\)</span> é a massa de probabilidade verdadeira dentro de <span class="math inline">\(R\)</span>) é uma consequência de a distribuição binomial <span class="math inline">\(\mathrm{Bin}(K\mid N,P)\)</span> ficar mais concentrada em torno da sua média conforme <span class="math inline">\(N\)</span> cresce — não é uma igualdade exata para qualquer <span class="math inline">\(N\)</span> finito.</li>
+<li>□ Se <span class="math inline">\(V\to 0\)</span> mantendo <span class="math inline">\(N\)</span> fixo, a estimativa <span class="math inline">\(K/(NV)\)</span> tende, na prática, a ficar mais estável e menos ruidosa, porque <span class="math inline">\(R\)</span> fica mais fiel à suposição de densidade constante.</li>
+<li>□ As duas rotas — fixar <span class="math inline">\(K\)</span> e achar <span class="math inline">\(V\)</span> (<span class="math inline">\(k\)</span>-NN), ou fixar <span class="math inline">\(V\)</span> e achar <span class="math inline">\(K\)</span> (KDE) — produzem, em geral, estimativas numericamente idênticas ponto a ponto, para o mesmo dataset e os mesmos valores nominais de “quantos pontos” ou “que tamanho de região” foram usados.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 5 — <span class="math inline">\(k\)</span>-NN para densidade
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ A relação <span class="math inline">\(p(\mathbf{x})\propto 1/d_K(\mathbf{x})^D\)</span> implica que, para o mesmo valor de <span class="math inline">\(d_K(\mathbf{x})\)</span>, a densidade estimada em <span class="math inline">\(D=30\)</span> dimensões é numericamente igual à densidade estimada em <span class="math inline">\(D=2\)</span> dimensões.</li>
+<li>□ Se dois pontos <span class="math inline">\(\mathbf{x}_1\)</span> e <span class="math inline">\(\mathbf{x}_2\)</span> têm o mesmo valor de <span class="math inline">\(d_K(\mathbf{x})\)</span> para o mesmo <span class="math inline">\(K\)</span>, o modelo de <span class="math inline">\(k\)</span>-NN atribui a eles a mesma densidade estimada, independentemente de quaisquer outras diferenças entre suas vizinhanças.</li>
+<li>□ Aumentar <span class="math inline">\(K\)</span> de 5 para 50 num ponto na região mais densa dos dados produz uma variação relativa menor em <span class="math inline">\(d_K(\mathbf{x})\)</span> do que a mesma variação de <span class="math inline">\(K\)</span> produziria num ponto na cauda da distribuição.</li>
+<li>□ Como o <span class="math inline">\(k\)</span>-NN não assume nenhuma forma funcional para <span class="math inline">\(p(\mathbf{x})\)</span>, ele está imune a qualquer viés sistemático — ao contrário de um ajuste paramétrico (por exemplo, uma Gaussiana), que pode enviesar a estimativa se a forma verdadeira dos dados não for a assumida.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 6 — “Isto não é uma densidade de verdade”
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ O fato de a integral de <span class="math inline">\(p(\mathbf{x})\propto 1/d_K(\mathbf{x})^D\)</span> sobre todo o espaço divergir é uma consequência de como a cauda dessa função decai com a distância, não um erro de implementação específico de algum software.</li>
+<li>□ Ainda que o modelo de <span class="math inline">\(k\)</span>-NN não seja uma densidade normalizada, ele pode ser usado de forma válida para ordenar pontos do menos denso ao mais denso.</li>
+<li>□ Se o objetivo fosse calcular a probabilidade exata de um novo ponto pertencer a uma região específica do espaço (uma integral de <span class="math inline">\(p(\mathbf{x})\)</span> sobre essa região), o modelo de <span class="math inline">\(k\)</span>-NN, sem modificação, forneceria essa probabilidade corretamente.</li>
+<li>□ Normalizar a saída do <span class="math inline">\(k\)</span>-NN dividindo pelo seu valor máximo observado no conjunto de teste resolve, por si só, o problema da integral divergente e produz uma densidade de probabilidade válida.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 7 — Janela de Parzen e kernel gaussiano
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ A janela de Parzen (hipercubo, que conta 1 se um ponto de treino cai dentro dele e 0 caso contrário) e o kernel gaussiano (que atribui um peso que decai suavemente com a distância) produzem a mesma estimativa de densidade sempre que a largura <span class="math inline">\(h\)</span> é escolhida de forma equivalente nos dois casos, porque ambos implementam exatamente a mesma função de peso.</li>
+<li>□ Um ponto de treino localizado exatamente na borda de um hipercubo de largura <span class="math inline">\(h\)</span> centrado num ponto de consulta <span class="math inline">\(\mathbf{x}\)</span> pode contar ou não para <span class="math inline">\(K\)</span>, dependendo de detalhes de borda (inclusão estrita ou não) que não têm análogo no kernel gaussiano, que atribui peso positivo (ainda que pequeno) a qualquer distância finita.</li>
+<li>□ As condições que definem um kernel válido — peso sempre não-negativo e integral total igual a 1 — seriam violadas por um kernel gaussiano com <span class="math inline">\(h\)</span> negativo, mas não por nenhuma outra escolha razoável de <span class="math inline">\(h&gt;0\)</span>.</li>
+<li>□ Trocar o kernel gaussiano por um kernel uniforme (janela dura) de mesma largura <span class="math inline">\(h\)</span> elimina completamente a possibilidade de descontinuidades na densidade estimada.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 8 — <span class="math inline">\(h\)</span> como parâmetro de suavização
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ No limite <span class="math inline">\(h\to 0^+\)</span>, cada ponto de treino distinto se torna, ele mesmo, um pico isolado da densidade estimada — no limite, até <span class="math inline">\(N\)</span> picos, um por ponto de treino.</li>
+<li>□ Se dois datasets diferentes têm o mesmo número de pontos <span class="math inline">\(N\)</span> mas escalas muito diferentes (um varia entre 0 e 1, outro entre 0 e 1000), usar o mesmo valor absoluto de <span class="math inline">\(h\)</span> para os dois produzirá, em geral, graus de suavização relativa muito diferentes.</li>
+<li>□ O trade-off entre <span class="math inline">\(h\)</span> pequeno (estimativa ruidosa, com muitos picos espúrios) e <span class="math inline">\(h\)</span> grande (estimativa borrada, que esconde estrutura real) é conceitualmente o mesmo trade-off entre viés e variância discutido em outros contextos de ajuste de modelo — <span class="math inline">\(h\)</span> pequeno tende a variância alta, <span class="math inline">\(h\)</span> grande tende a viés alto.</li>
+<li>□ Escolher <span class="math inline">\(h\)</span> de forma a minimizar o erro no próprio conjunto de treino (sem nenhuma validação separada) tende a favorecer valores de <span class="math inline">\(h\)</span> artificialmente pequenos.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 9 — <span class="math inline">\(k\)</span>-NN vs.&nbsp;KDE: suavização adaptativa vs.&nbsp;fixa
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ A vantagem da suavização adaptativa do <span class="math inline">\(k\)</span>-NN (o raio <span class="math inline">\(d_K\)</span> cresce ou encolhe conforme a densidade local) é mais pronunciada em datasets onde a densidade real varia muito de uma região para outra do que em datasets aproximadamente uniformes.</li>
+<li>□ Como o <span class="math inline">\(k\)</span>-NN adapta <span class="math inline">\(d_K(\mathbf{x})\)</span> à densidade local, ele nunca pode sofrer do mesmo problema de “borrar estrutura real” que o KDE sofre com <span class="math inline">\(h\)</span> grande demais.</li>
+<li>□ Se dois pontos de consulta estão na mesma região densa dos dados, mas um deles coincide exatamente com um ponto de treino e o outro não, isso não deveria, em geral, causar uma diferença grande em <span class="math inline">\(d_K(\mathbf{x})\)</span> para <span class="math inline">\(K\)</span> moderado ou grande.</li>
+<li>□ Suponha que, para uma mesma variável contínua real, as curvas de densidade estimadas por KDE e por <span class="math inline">\(k\)</span>-NN concordem visualmente no grosso da distribuição. Essa concordância entre dois métodos independentes, com mecanismos de suavização diferentes, seria esperada mesmo se um dos dois estivesse capturando um artefato espúrio (uma estrutura que não existe na população real) e o outro não.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 10 — Custo computacional e armazenamento
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ A necessidade de armazenar todo o conjunto de treino, comum a <span class="math inline">\(k\)</span>-NN e KDE, é uma consequência de esses métodos não resumirem os dados em um número fixo de parâmetros — ao contrário de um ajuste paramétrico (por exemplo, Gaussiano), que resume <span class="math inline">\(N\)</span> pontos em um vetor de médias e uma matriz de covariância, de tamanho fixo independente de <span class="math inline">\(N\)</span>.</li>
+<li>□ Se o objetivo fosse só classificar um único ponto novo (não estimar densidade em toda parte), o custo de avaliar <span class="math inline">\(k\)</span>-NN ou KDE nesse único ponto ainda cresceria, em geral, com <span class="math inline">\(N\)</span>.</li>
+<li>□ Construir uma estrutura de busca em árvore para os dados de treino (uma otimização computacional comum para acelerar a busca pelos vizinhos mais próximos) elimina completamente a necessidade de armazenar o conjunto de treino.</li>
+<li>□ O custo de armazenamento de <span class="math inline">\(k\)</span>-NN/KDE e a exigência <span class="math inline">\(N&gt;d\)</span> para que a matriz de covariância de um ajuste Gaussiano seja invertível são, ambos, formas do mesmo problema subjacente: dados insuficientes relativos à complexidade do modelo.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 11 — Maldição da dimensionalidade em métodos não-paramétricos
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ Como <span class="math inline">\(k\)</span>-NN e KDE não assumem nenhuma família paramétrica, eles não sofrem de nenhuma versão da maldição da dimensionalidade — só um ajuste paramétrico (como uma Gaussiana) sofre desse problema.</li>
+<li>□ Manter a mesma densidade amostral (cobertura local) ao passar de <span class="math inline">\(p=1\)</span> para <span class="math inline">\(p=10\)</span> dimensões exigiria multiplicar o tamanho do conjunto de dados por um fator que cresce exponencialmente com <span class="math inline">\(p\)</span> (segundo a relação densidade amostral necessária <span class="math inline">\(\propto N^{1/p}\)</span>).</li>
+<li>□ O fato de <span class="math inline">\(k\)</span>-NN e KDE precisarem armazenar todo o conjunto de treino é agravado, não resolvido, pelo crescimento da quantidade de dados necessária em alta dimensão — os dois problemas se combinam.</li>
+<li>□ Uma forma de escapar completamente da maldição da dimensionalidade, para qualquer método não-paramétrico, é aumentar <span class="math inline">\(N\)</span> até que <span class="math inline">\(N&gt;2^d\)</span>.</li>
+</ul>
+</div>
+</div>
+<div class="callout callout-style-default callout-note no-icon callout-titled">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon no-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Nota</span>Teste 12 — <span class="math inline">\(d_K(\mathbf{x})\)</span> como métrica reaproveitável
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<ul>
+<li>□ Reaproveitar <span class="math inline">\(d_K(\mathbf{x})\)</span> (a distância de <span class="math inline">\(\mathbf{x}\)</span> ao seu <span class="math inline">\(K\)</span>-ésimo vizinho mais próximo) como métrica de densidade local para construir um grafo de proximidade é possível porque essa quantidade já é, por definição, inversamente relacionada à densidade local: <span class="math inline">\(d_K\)</span> pequeno indica região densa, <span class="math inline">\(d_K\)</span> grande indica região esparsa — a mesma quantidade, um uso diferente.</li>
+<li>□ Se dois pontos <span class="math inline">\(\mathbf{x}_1,\mathbf{x}_2\)</span> pertencem à mesma região de alta densidade, é razoável esperar que <span class="math inline">\(d_K(\mathbf{x}_1)\)</span> e <span class="math inline">\(d_K(\mathbf{x}_2)\)</span> sejam parecidos entre si, para o mesmo <span class="math inline">\(K\)</span>.</li>
+<li>□ Usar <span class="math inline">\(d_K(\mathbf{x})\)</span> para construir caminhos num grafo exige, necessariamente, resolver primeiro o problema de a integral de <span class="math inline">\(1/d_K(\mathbf{x})^D\)</span> divergir — sem isso, a construção do grafo não é matematicamente válida.</li>
+<li>□ A escolha de <span class="math inline">\(K\)</span> que funciona bem para estimar densidade (nem pequeno, nem grande demais) é, a priori, um bom candidato para o mesmo papel de parâmetro de suavização em outro uso da mesma quantidade <span class="math inline">\(d_K(\mathbf{x})\)</span> (por exemplo, para construir um grafo de proximidade), ainda que a validação final dependa do objetivo específico dessa outra tarefa, não só da qualidade de estimativa de densidade isolada.</li>
+</ul>
+</div>
+</div>
+</section>
+<section id="aviso" class="level2">
+<h2 class="anchored" data-anchor-id="aviso">Aviso</h2>
+<p>As questões de Verdadeiro/Falso e discursivas ficam sem solução neste arquivo — são para resolução autônoma do aluno, fora do horário de aula.</p>
+
+
+</section>
+
+</main> <!-- /main -->
+<!-- Parcial estático, igual em toda aula (não é mais gerado por script —
+     ver histórico do teaching/generate_lesson_nav.py, removido). Só
+     carrega o script que transforma o sumário nativo do Quarto (#TOC,
+     "Nesta página") no painel de acordeão "Nesta aula". -->
+<script src="../../toc-accordion.js"></script>
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copiada");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copiada");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
+      });
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
+          }
+        }
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
+        }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
+          }
+        }
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
+            } else {
+              container.appendChild(child.cloneNode(true));
+              break;
+            }
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
+        }
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
+            }
+          } else {
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
+            });
+          }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
+        }
+      }, function(instance) {
+      });
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+<footer class="footer">
+  <div class="nav-footer">
+    <div class="nav-footer-left">
+      &nbsp;
+    </div>   
+    <div class="nav-footer-center">
+<p>© 2026 Marcos M. Raimundo</p>
+</div>
+    <div class="nav-footer-right">
+      &nbsp;
+    </div>
+  </div>
+</footer>
+
+
+
+
+</body></html>

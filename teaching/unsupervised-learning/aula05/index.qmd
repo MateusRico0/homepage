@@ -1,8 +1,8 @@
 ---
-title: "Aula 5: Seleção de Modelos e Introdução à Inferência Variacional"
+title: "Aula 5: Seleção de Modelos, ELBO e Validação Empírica"
 subtitle: "Aprendizado Não Supervisionado"
 author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
-date: "2026-09-12"
+date: "2026-09-16"
 lang: pt-BR
 format:
   html:
@@ -66,8 +66,11 @@ from datasets import load_dataset
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
-from sklearn.mixture import GaussianMixture
-from scipy.stats import multivariate_normal
+from sklearn.mixture import GaussianMixture, BayesianGaussianMixture
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score, davies_bouldin_score
+from sklearn.model_selection import train_test_split
+from sklearn.datasets import make_moons
 
 plt.style.use('seaborn-v0_8-whitegrid')
 plt.rcParams.update({
@@ -79,12 +82,12 @@ plt.rcParams.update({
     "legend.framealpha": 0.9,
 })
 
-rng = np.random.default_rng(20260912)
+rng = np.random.default_rng(20260916)
 
 # --- Paleta do IC, ordem preferencial (mesma das Aulas 1-4) -----------
-COR_A   = "#0085CA"   # log-verossimilhança / componente 1
-COR_B   = "#FF5E00"   # BIC / componente 2
-COR_LIM = "#E03C31"   # avisos, KL, casos ambíguos
+COR_A   = "#0085CA"   # ajuste / treino / componente 1
+COR_B   = "#FF5E00"   # validação / componente 2
+COR_LIM = "#E03C31"   # avisos, casos ambíguos, sobreajuste
 COR_NEU = "#5D6D7E"   # dados brutos, elementos neutros
 
 
@@ -94,7 +97,7 @@ def brl(x, nd=2):
     return f"{x:.{nd}f}".replace(".", ",")
 
 
-# --- Problema-fio: Breast Cancer Wisconsin, mesmos 2 atributos da Aula 4
+# --- Problema-fio: Breast Cancer Wisconsin, mesmos 2 atributos das Aulas 3-4
 ds = load_dataset("scikit-learn/breast-cancer-wisconsin")["train"].to_pandas()
 ds = ds.drop(columns=["id", "Unnamed: 32"])
 FEAT_2D = ["radius_worst", "concave points_worst"]
@@ -109,75 +112,88 @@ def n_params_gmm(K, d):
     return K * d + K * d * (d + 1) // 2 + (K - 1)
 
 
-# --- Ajuste de GMM para K=1..10, múltiplos reinícios, guardando o melhor
+# --- Abertura: GMM para K=1..10 em TODOS os dados, log-verossimilhança
+# de treino — o mesmo teste "K=N sempre vence" da Aula 4.
 Ks = list(range(1, 11))
 loglik_total = []
-n_params_list = []
-bic_prml = []      # convenção do PRML (eq. 4.139): maximizar
-bic_sklearn = []   # convenção do scikit-learn: minimizar (-2LL + M ln N)
-models_by_K = {}
-
 for K in Ks:
     best_ll = -np.inf
-    best_model = None
     for seed in range(5):
         m = GaussianMixture(n_components=K, covariance_type="full",
                              random_state=seed, n_init=1, max_iter=300)
         m.fit(X_2d)
-        ll = m.score(X_2d) * N_2d  # log-verossimilhança TOTAL (não média)
-        if ll > best_ll:
-            best_ll = ll
-            best_model = m
-    M = n_params_gmm(K, d_2d)
+        ll = m.score(X_2d) * N_2d
+        best_ll = max(best_ll, ll)
     loglik_total.append(best_ll)
-    n_params_list.append(M)
-    bic_prml.append(best_ll - 0.5 * M * np.log(N_2d))
-    bic_sklearn.append(best_model.bic(X_2d))
-    models_by_K[K] = best_model
-
 loglik_total = np.array(loglik_total)
-n_params_arr = np.array(n_params_list)
-bic_prml = np.array(bic_prml)
-bic_sklearn = np.array(bic_sklearn)
-K_star = Ks[int(np.argmax(bic_prml))]
 
-# --- Exemplo numérico do ELBO, reaproveitando o GMM K=2 já ajustado ----
-gmm2 = models_by_K[2]
-joint2 = np.zeros((N_2d, 2))
-for k in range(2):
-    joint2[:, k] = gmm2.weights_[k] * multivariate_normal.pdf(
-        X_2d, mean=gmm2.means_[k], cov=gmm2.covariances_[k])
-resp_true = joint2 / joint2.sum(axis=1, keepdims=True)
+# --- Bloco 1: BayesianGaussianMixture (priori de Dirichlet, processo de
+# Dirichlet truncado) com n_components=8 "de sobra", variando alpha0
+ALPHA0_GRID = [0.001, 1.0, 100.0]
+bgm_by_alpha = {}
+for alpha0 in ALPHA0_GRID:
+    bgm = BayesianGaussianMixture(
+        n_components=8, weight_concentration_prior_type="dirichlet_process",
+        weight_concentration_prior=alpha0, random_state=0,
+        max_iter=500, n_init=3)
+    bgm.fit(X_2d)
+    bgm_by_alpha[alpha0] = bgm
 
+# --- Blocos 3-4: divisão treino/validação (nunca usada no ajuste)
+X_train, X_val = train_test_split(X_2d, test_size=0.3, random_state=42)
+N_train, N_val = len(X_train), len(X_val)
 
-def elbo(q, joint):
-    """L(q) = sum_n sum_k q_nk * ln( joint_nk / q_nk )."""
-    eps = 1e-300
-    q_safe = np.clip(q, eps, 1.0)
-    return np.sum(q * (np.log(joint + eps) - np.log(q_safe)))
+# --- Bloco 3: KMeans no treino, Silhueta/Davies-Bouldin na validação
+Ks_km = list(range(2, 9))
+sil_val, db_val = [], []
+for K in Ks_km:
+    km = KMeans(n_clusters=K, random_state=0, n_init=10).fit(X_train)
+    labels_val = km.predict(X_val)
+    sil_val.append(silhouette_score(X_val, labels_val))
+    db_val.append(davies_bouldin_score(X_val, labels_val))
+sil_val = np.array(sil_val)
+db_val = np.array(db_val)
+K_star_sil = Ks_km[int(np.argmax(sil_val))]
 
+# --- Bloco 4: GMM ajustado só no treino, log-verossimilhança em treino
+# E em validação, para cada K
+loglik_train, loglik_val = [], []
+for K in Ks:
+    best_ll_tr, best_model = -np.inf, None
+    for seed in range(5):
+        m = GaussianMixture(n_components=K, covariance_type="full",
+                             random_state=seed, n_init=1, max_iter=300)
+        m.fit(X_train)
+        ll = m.score(X_train) * N_train
+        if ll > best_ll_tr:
+            best_ll_tr, best_model = ll, m
+    loglik_train.append(best_ll_tr)
+    loglik_val.append(best_model.score(X_val) * N_val)
+loglik_train = np.array(loglik_train)
+loglik_val = np.array(loglik_val)
+K_star_val = Ks[int(np.argmax(loglik_val))]
 
-def kl_discrete(q, p):
-    """KL(q || p), somada sobre todos os pontos e componentes."""
-    eps = 1e-300
-    return np.sum(q * (np.log(q + eps) - np.log(p + eps)))
+# Comparando alpha0 (Bloco 1) por validação (Bloco 4): reajustar só no
+# treino e avaliar o score (ELBO médio por amostra) na validação
+val_score_by_alpha = {}
+for alpha0 in ALPHA0_GRID:
+    bgm_tr = BayesianGaussianMixture(
+        n_components=8, weight_concentration_prior_type="dirichlet_process",
+        weight_concentration_prior=alpha0, random_state=0,
+        max_iter=500, n_init=3)
+    bgm_tr.fit(X_train)
+    val_score_by_alpha[alpha0] = bgm_tr.score(X_val) * N_val
 
+# --- Bloco 5: PPC no problema-fio (GMM K=2, ajuste com todos os dados)
+gmm_ppc = GaussianMixture(n_components=2, covariance_type="full",
+                           random_state=0, n_init=5).fit(X_2d)
+X_sim, _ = gmm_ppc.sample(N_2d)
 
-total_ll_k2 = loglik_total[Ks.index(2)]
-L_posterior = elbo(resp_true, joint2)
-
-q_unif = np.full((N_2d, 2), 0.5)
-L_unif = elbo(q_unif, joint2)
-kl_unif = kl_discrete(q_unif, resp_true)
-
-means_wrong = gmm2.means_[::-1] * 0.7  # theta "errado": médias trocadas e encolhidas
-joint_wrong = np.zeros((N_2d, 2))
-for k in range(2):
-    joint_wrong[:, k] = gmm2.weights_[k] * multivariate_normal.pdf(
-        X_2d, mean=means_wrong[k], cov=gmm2.covariances_[k])
-resp_wrong = joint_wrong / joint_wrong.sum(axis=1, keepdims=True)
-L_wrong = elbo(resp_wrong, joint2)
-kl_wrong = kl_discrete(resp_wrong, resp_true)
+# --- Bloco 5: contraexemplo controlado — duas "luas" (forma não-convexa)
+X_moons, _ = make_moons(n_samples=400, noise=0.06, random_state=0)
+gmm_moons = GaussianMixture(n_components=2, covariance_type="full",
+                             random_state=0, n_init=5).fit(X_moons)
+X_moons_sim, _ = gmm_moons.sample(len(X_moons))
 ```
 
 # Revisão e Introdução
@@ -188,9 +204,9 @@ kl_wrong = kl_discrete(resp_wrong, resp_true)
 
 A Aula 4 trocou a atribuição rígida de cluster (Aula 3, HDBSCAN) por uma
 atribuição **probabilística**: o Modelo de Mistura Gaussiana (GMM).
-Formalmente, cada ponto $\mathbf{x}_n$ nasce de uma variável latente
-categórica $z_n$, 1-de-$K$, com prior $\pi_k=p(z_{nk}=1)$ — o ponto é
-então amostrado de $\mathcal{N}(\mathbf{x}\mid\mu_k,\Sigma_k)$ para o
+Cada ponto $\mathbf{x}_n$ nasce de uma variável latente categórica
+$z_n$, 1-de-$K$, com prior $\pi_k=p(z_{nk}=1)$ — o ponto é então
+amostrado de $\mathcal{N}(\mathbf{x}\mid\mu_k,\Sigma_k)$ para o
 componente $k$ sorteado, mas $z_n$ nunca é observado. A
 **responsabilidade** $\gamma(z_{nk})=p(z_{nk}=1\mid\mathbf{x}_n)$,
 calculada por Bayes a partir dos parâmetros correntes, mede o quanto
@@ -199,10 +215,12 @@ parâmetros que ela mesma ajuda a reestimar, o ajuste não tem solução
 fechada — o **Algoritmo EM** resolve isso alternando um **Passo E**
 (recalcular $\gamma(z_{nk})$ com os parâmetros fixos) e um **Passo M**
 (reestimar $\mu_k,\Sigma_k,\pi_k$ por máxima verossimilhança ponderada
-por $\gamma$, com $\gamma$ fixo), até convergir. A Aula 4 também
-mostrou, tanto analítica quanto numericamente, que o **KMeans** é o
-caso limite do GMM quando as covariâncias são esféricas, idênticas
-entre componentes, e levadas a $\epsilon\to0$.
+por $\gamma$, com $\gamma$ fixo), até convergir. Em nenhum momento desse
+processo o Algoritmo EM, como a Aula 4 o apresentou, usa uma **priori**
+sobre os parâmetros $\theta=\{\mu_k,\Sigma_k,\pi_k\}$ — ele busca
+diretamente o $\theta$ de máxima verossimilhança, $\theta_{\mathrm{ML}}$,
+dado $K$ fixo. Essa ausência de priori é exatamente o que esta aula vai
+identificar como a raiz do problema de escolher $K$.
 
 Ajustado ao Breast Cancer Wisconsin (mesmos dois atributos padronizados
 `radius_worst`/`concave points_worst` usados nas Aulas 3–4, sem usar o
@@ -211,58 +229,46 @@ final, mapeavam quase perfeitamente para benigno/maligno — mas o
 **valor $K=2$ nunca foi escolhido pelos dados**: foi fixado de
 antemão, porque já se sabia (só para *avaliar*, nunca para *ajustar*)
 que fazia sentido nesse dataset específico. A Aula 4 fechou nomeando
-essa lacuna explicitamente, com uma pergunta sem resposta: se
-tentássemos escolher $K$ **maximizando a própria log-verossimilhança de
-treino**, esse critério funcionaria? A suspeita levantada foi que não
-— que mais componentes **sempre pode aumentar, ou no mínimo nunca
-piorar**, a log-verossimilhança de treino, tornando esse critério
-inútil (o mesmo problema de sobreajuste já anunciado como singularidade
-no Passo M, agora em escala maior). Esta aula começa respondendo essa
-pergunta de forma definitiva.
+essa lacuna explicitamente: se tentássemos escolher $K$ **maximizando a
+própria log-verossimilhança de treino**, esse critério funcionaria? A
+suspeita levantada foi que não. Esta aula começa testando essa suspeita
+de novo, de forma literal.
 
 ## Ideia Central
 
-A Aula 4 respondeu "como ajustar os parâmetros de um modelo com
-variável latente". Esta aula pergunta uma coisa diferente e, em certo
-sentido, anterior: "como saber se o modelo — e, em particular, o número
-de componentes $K$ — é *bom*?" Ajustar e avaliar são tarefas
-distintas, e a ferramenta certa para uma (a log-verossimilhança, que a
-Aula 4 usou para *ajustar* $\mu_k,\Sigma_k,\pi_k$ com $K$ fixo) não
-serve automaticamente para a outra (*escolher* $K$). A ideia-ponte desta
-aula é que a pergunta certa não é "qual $\theta$ explica melhor os
-dados?" (verossimilhança, já resolvida na Aula 4), mas "qual **modelo**,
-como um todo, é mais plausível à luz dos dados?" — uma pergunta sobre a
-**evidência do modelo**, um objeto matemático novo que esta aula
-constrói do zero, culminando numa ferramenta (o ELBO) geral o
-suficiente para também reinterpretar o próprio EM da Aula 4 sob uma luz
-nova.
+A pergunta desta aula é diferente da Aula 4: não "como ajustar os
+parâmetros de um modelo com variável latente" (resolvida), mas "como
+saber se a **estrutura** do modelo — o número de componentes $K$, ou
+qualquer outro hiperparâmetro que defina a forma do modelo — é boa,
+quando não existe rótulo de gabarito para comparar?" A ideia-ponte:
+maximizar a verossimilhança de treino mede só **ajuste**; escolher
+estrutura exige medir **plausibilidade do modelo como um todo**, e essa
+plausibilidade só aparece quando alguma forma de penalidade — vinda de
+uma priori sobre os parâmetros, ou de dados nunca vistos no ajuste —
+entra na conta.
 
 ## Roteiro da Aula
 
 Quatro perguntas organizam esta aula:
 
-1. Por que maximizar a log-verossimilhança de treino **falha** como
-   critério para escolher $K$ — e por que essa falha é estrutural, não
-   um acidente de implementation?
-2. A evidência do modelo, $p(\mathcal{D})$, é o objeto certo para
-   comparar modelos — mas envolve uma integral geralmente intratável.
-   Como aproximá-la de forma principiada, chegando a um critério
-   calculável (o **BIC**)?
-3. O BIC depende de suposições (aproximação de Laplace) que nem sempre
-   valem. Existe uma ferramenta mais geral, que funcione mesmo quando
-   essas suposições falham — e que sirva não só para *selecionar*
-   modelos, mas também para *ajustá-los*?
-4. Essa ferramenta mais geral tem alguma relação com o Algoritmo EM que
-   já conhecemos da Aula 4, ou é um capítulo totalmente separado da
-   matéria?
+1. Injetar uma priori sobre os parâmetros do GMM (em vez de buscar
+   direto $\theta_{\mathrm{ML}}$) resolve o problema de $K$ sempre
+   crescer? Que objeto matemático essa priori produz?
+2. Trocar "escolher $K$" por "calibrar hiperparâmetros de uma priori"
+   elimina a subjetividade da escolha, ou só a desloca para outro lugar?
+3. Sem rótulo de gabarito algum, como validar uma clusterização "dura"
+   (K-Means, DBSCAN) usando só os próprios dados?
+4. Para modelos probabilísticos, existe uma validação mais direta que
+   as métricas de clusterização dura — e existe algum teste **ainda
+   mais definitivo** do que qualquer número único?
 
 ## Problema Motivador
 
-Em vez de discutir isso em abstrato, vamos direto ao teste: ajustamos
-um GMM (mesmos dois atributos do Breast Cancer Wisconsin, mesma receita
-da Aula 4) para **cada** $K$ de $1$ a $10$, e registramos a
-log-verossimilhança de treino máxima atingida em cada caso — o teste
-literal da suspeita que fechou a Aula 4 ("$K=10$ vs. $K=2$").
+Reencenando o teste que fechou a Aula 4: ajustamos um GMM (mesmos dois
+atributos do Breast Cancer Wisconsin) para **cada** $K$ de $1$ a $10$,
+usando **todos** os dados disponíveis (sem separar validação ainda — é
+exatamente esse "sem separar nada" que vamos questionar), e registramos
+a log-verossimilhança de treino máxima atingida em cada caso.
 
 :::
 
@@ -277,9 +283,10 @@ Passo E (recalcula $\gamma$) e Passo M (reestima $\mu_k,\Sigma_k,\pi_k$
 por MLE ponderada), sem solução fechada.
 :::
 
-::: {.fragment}
-KMeans = caso limite do GMM (covariâncias esféricas idênticas,
-$\epsilon\to0$) — provado analítica e numericamente na Aula 4.
+::: {.fragment .callout-important}
+Em nenhum momento o EM da Aula 4 usa uma **priori** sobre
+$\theta=\{\mu_k,\Sigma_k,\pi_k\}$ — busca direto $\theta_{\mathrm{ML}}$,
+com $K$ fixo. Essa ausência é a raiz do problema desta aula.
 :::
 
 ::: {.fragment .callout-note}
@@ -289,59 +296,48 @@ benigno/maligno — mas $K=2$ foi **fixado a priori**, nunca escolhido
 pelos dados.
 :::
 
-## Da Aula 4: A Pergunta em Aberto
-
-::: {.fragment}
-Fechamento da Aula 4: "mais componentes sempre pode aumentar, ou nunca
-piorar, a log-verossimilhança de treino" — o mesmo problema de
-sobreajuste da singularidade do Passo M, em escala maior.
-:::
-
-::: {.fragment}
-Essa suspeita nunca foi testada de fato. Esta aula começa testando-a.
-:::
-
 ## Ideia Central
 
 ::: {.fragment}
-Ajustar ($\theta$ ótimo dado $K$) e avaliar (o próprio $K$ é bom?) são
-tarefas **distintas** — a ferramenta certa para uma não serve
-automaticamente para a outra.
+Pergunta nova: não "como ajustar $\theta$" (resolvida), mas "como saber
+se a **estrutura** do modelo — $K$, ou qualquer hiperparâmetro que
+defina sua forma — é boa, sem rótulo de gabarito?"
 :::
 
 ::: {.fragment}
-Pergunta certa: não "qual $\theta$ explica melhor os dados?"
-(verossimilhança), mas "qual **modelo**, como um todo, é mais
-plausível?" — a **evidência do modelo**, $p(\mathcal{D})$.
+Verossimilhança de treino mede só **ajuste**. Plausibilidade do modelo
+como um todo exige uma penalidade — de uma priori sobre os parâmetros,
+ou de dados nunca vistos no ajuste.
 :::
 
 ## Roteiro da Aula
 
 ::: {.fragment}
-**1.** Por que a log-verossimilhança de treino falha para escolher $K$?
+**1.** Uma priori sobre os parâmetros resolve o problema de $K$ sempre
+crescer? Que objeto matemático ela produz?
 :::
 
 ::: {.fragment}
-**2.** Como aproximar a evidência intratável $p(\mathcal{D})$, chegando
-ao **BIC**?
+**2.** Trocar $K$ por hiperparâmetros de priori elimina a subjetividade,
+ou só a desloca?
 :::
 
 ::: {.fragment}
-**3.** Existe uma ferramenta mais geral, além do BIC — que sirva para
-selecionar **e** ajustar modelos?
+**3.** Sem rótulo, como validar clusterização **dura** (K-Means,
+DBSCAN)?
 :::
 
 ::: {.fragment}
-**4.** Essa ferramenta se relaciona com o EM da Aula 4, ou é outro
-capítulo?
+**4.** Para modelos probabilísticos, existe algo mais direto — e um
+teste ainda mais definitivo que qualquer número único?
 :::
 
 ## Problema Motivador
 
 ::: {.fragment}
-Teste literal da suspeita que fechou a Aula 4: ajustar GMM para
-$K=1,\dots,10$ (mesmos dois atributos), registrar a log-verossimilhança
-de treino máxima em cada caso.
+Reencenando o teste que fechou a Aula 4: GMM para $K=1,\dots,10$, todos
+os dados, sem separar validação — de propósito, é isso que vamos
+questionar.
 :::
 
 :::
@@ -363,7 +359,7 @@ ax.annotate(f"K=10\n{brl(loglik_total[Ks.index(10)], 1)}",
             fontsize=9, color=COR_LIM)
 ax.set_xlabel("K (número de componentes)")
 ax.set_ylabel("log-verossimilhança total de treino")
-ax.set_title("Log-verossimilhança de treino do GMM, K=1..10\nBreast Cancer Wisconsin (radius_worst, concave points_worst)")
+ax.set_title("Log-verossimilhança de treino do GMM, K=1..10\nBreast Cancer Wisconsin — sem separar validação")
 ax.set_xticks(Ks)
 plt.tight_layout()
 plt.show()
@@ -372,17 +368,14 @@ plt.show()
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-O resultado é inequívoco: a log-verossimilhança de treino **nunca cai**
-ao longo de $K=1,\dots,10$ — de $-1339{,}45$ nats em $K=1$ a
-$-1169{,}66$ nats em $K=10$, estritamente crescente em quase todo o
-percurso. $K=10$ explica os dados de treino estritamente melhor que
-$K=2$, segundo esse critério. Se a régua fosse "maximizar a
-log-verossimilhança de treino", a resposta seria sempre "use o maior
-$K$ que você conseguir rodar" — o que não é o julgamento que qualquer
-pessoa faria olhando o problema clinicamente (duas populações,
-benigna e maligna, são a explicação mais parcimoniosa). O restante
-desta aula desenvolve, com rigor, por que esse critério falha
-estruturalmente, e o que usar no lugar dele.
+O resultado é o mesmo da Aula 4: a log-verossimilhança de treino **nunca
+cai** ao longo de $K=1,\dots,10$ — de $-1339{,}45$ nats em $K=1$ a
+$-1169{,}66$ nats em $K=10$. Se a régua fosse "maximizar a
+log-verossimilhança de treino usando todos os dados", a resposta seria
+sempre "use o maior $K$ que você conseguir rodar". O resto desta aula
+desenvolve duas soluções complementares: uma **analítica** (injetar uma
+priori, Bloco 1) e uma **empírica** (nunca julgar um modelo pelos dados
+que ele já viu, Blocos 3–5).
 
 :::
 
@@ -391,15 +384,18 @@ estruturalmente, e o que usar no lugar dele.
 ## O Resultado do Teste
 
 ::: {.fragment}
-Log-verossimilhança de treino **nunca cai** de $K=1$ a $K=10$: de
-$-1339{,}45$ ($K=1$) a $-1169{,}66$ ($K=10$) — estritamente crescente
-quase todo o percurso.
+Mesmo resultado da Aula 4: log-verossimilhança de treino **nunca cai**,
+de $-1339{,}45$ ($K=1$) a $-1169{,}66$ ($K=10$).
 :::
 
 ::: {.fragment .callout-important}
-Se o critério fosse "maximizar log-verossimilhança de treino", a
-resposta seria sempre "use o maior $K$ possível" — não o julgamento que
-faria sentido clinicamente (duas populações, benigna/maligna).
+Se o critério fosse "maximizar log-verossimilhança usando todos os
+dados", a resposta seria sempre "use o maior $K$ possível".
+:::
+
+::: {.fragment}
+Duas soluções complementares: **analítica** (priori, Bloco 1) e
+**empírica** (nunca julgar pelos dados já vistos, Blocos 3–5).
 :::
 
 :::
@@ -407,19 +403,20 @@ faria sentido clinicamente (duas populações, benigna/maligna).
 ## Pergunta
 
 ::: {.callout-tip}
-## Mais componentes sempre aumenta (ou nunca piora) a log-verossimilhança de treino de um GMM? O que isso diz sobre usar esse critério para escolher K?
+## Se um componente do GMM pode encolher sua covariância sobre um único ponto de treino, o que isso já revela sobre usar a log-verossimilhança de treino para escolher K?
 
-Pense no que acontece com um componente extra cujo peso $\pi_k$ pode
-ser levado a $0$: o modelo maior pode sempre "desistir" de usá-lo de
-verdade.
+Pense no que acontece com a densidade $\mathcal{N}(\mathbf{x}\mid\mu_k,
+\Sigma_k)$ quando $\mu_k$ se aproxima de um ponto de treino específico e
+$\Sigma_k\to\mathbf{0}$.
 
+- □ Um componente pode encolher sua covariância sobre um único ponto de
+  treino, levando a densidade naquele ponto (e a log-verossimilhança
+  total) a divergir — logo o "melhor" $\theta$ para $K$ grande pode nem
+  ser um ponto interessante, só um artefato numérico.
 - □ Se, em vez de comparar $K$ por log-verossimilhança de treino,
   comparássemos por log-verossimilhança medida num conjunto de
   validação nunca usado no ajuste, mais componentes deixaria de
   garantir uma melhora monotônica.
-- □ No limite em que $K\to N$ (um componente por ponto), a
-  log-verossimilhança de treino de um GMM com covariâncias livres tende
-  a $+\infty$, não a um valor finito.
 - □ Como a log-verossimilhança de treino nunca piora ao acrescentar
   componentes, um GMM com $K=10$ sempre generaliza melhor que um com
   $K=2$ no Breast Cancer Wisconsin.
@@ -435,16 +432,15 @@ verdade.
 ::: {.callout-tip}
 ## Resposta — verossimilhança de treino e complexidade
 
+- ✔ A singularidade do Passo M (já anunciada na Aula 4): densidade
+  divergente em torno de um único ponto infla a log-verossimilhança sem
+  significado estatístico algum.
 - ✔ Log-verossimilhança de **validação** não tem por que crescer com
   $K$ — um modelo que se ajusta demais ao ruído do treino tende a
-  explicar pior dados novos; é exatamente essa diferença que motiva um
-  critério de seleção que não seja a verossimilhança de treino pura.
-- ✔ Um componente pode encolher sua covariância sobre um único ponto de
-  treino, levando a densidade naquele ponto (e a log-verossimilhança
-  total) a divergir — a singularidade já anunciada no Passo M da Aula 4.
+  explicar pior dados novos.
 - ✗ "Nunca piora no treino" é sobre **ajuste**, não sobre
-  **generalização** — confundir as duas é exatamente o erro estrutural
-  que motiva toda esta aula.
+  **generalização** — confundir as duas é o erro estrutural que motiva
+  toda esta aula.
 - ✔ Árvores sem profundidade máxima podem isolar cada ponto de treino
   num nó-folha próprio, levando o erro de treino a zero — o mesmo
   padrão "mais complexidade, melhor ajuste ao treino, sem garantia
@@ -452,59 +448,468 @@ verdade.
 :::
 
 ::: {.fragment}
-**Voltando à pergunta:** sim, mais componentes nunca piora o ajuste de
-treino — e é exatamente por isso que esse critério não serve para
-escolher $K$. Falta uma ferramenta que penalize complexidade.
+**Voltando à pergunta:** sim — o próprio mecanismo que permite $K$
+grande "vencer" no treino (colapso de covariância) já é um sintoma de
+que o critério está quebrado. Precisamos de uma penalidade — analítica
+ou empírica.
 :::
 
 :::
 
-# Intuição — Duas Réguas, Duas Respostas
+# Intuição — Duas Formas de Pagar por Complexidade
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-Antes de qualquer fórmula, veja o resultado inteiro. A figura abaixo
-sobrepõe duas curvas, ambas função de $K$: a log-verossimilhança de
-treino (a régua que acabamos de testar, sempre subindo) e o **BIC**
-(*Bayesian Information Criterion* — o critério que o Bloco 4 desta aula
-deriva com cuidado), calculado exatamente sobre os mesmos ajustes. Por
-enquanto, trate o BIC apenas como "uma segunda régua, calculada a partir
-dos mesmos números (log-verossimilhança e contagem de parâmetros), mas
-que penaliza modelos com mais parâmetros livres" — a fórmula exata e a
-justificativa de por que essa penalidade é a "certa" vêm no Bloco 4.
+Antes de qualquer fórmula, o panorama inteiro da aula em uma ideia: toda
+vez que um modelo ganha liberdade extra (mais componentes, um
+hiperparâmetro mais permissivo), essa liberdade precisa ser **paga** de
+alguma forma, ou o modelo sempre vai preferir usá-la — mesmo quando isso
+só decora o ruído do treino. Duas formas de cobrar esse pagamento:
+
+1. **Analiticamente, com uma priori.** Se dermos aos parâmetros
+   $\theta$ uma distribuição de crença prévia $p(\theta)$, um modelo só
+   "vale a pena" ficar mais complexo se o ganho de ajuste compensar o
+   quanto ele precisa se afastar dessa crença prévia — essa distância
+   (medida em KL, Bloco 1) é a penalidade.
+2. **Empiricamente, com dados nunca vistos.** Se guardarmos uma fatia
+   dos dados de fora do ajuste (o **conjunto de validação**) e só
+   confiarmos no desempenho medido ali, um modelo que só decorou o
+   treino automaticamente aparece pior — não precisamos calcular
+   nenhuma penalidade analítica, o próprio dado novo já "cobra a conta".
+
+A primeira via (Bloco 1) resolve o problema de $K$ para o GMM — mas
+troca "escolher $K$" por "escolher os hiperparâmetros da priori" (Bloco
+2), um problema **do mesmo tipo**. A segunda via (Blocos 3–5) não
+desaparece nunca: mesmo tendo uma priori, ainda vale a pena checar o
+modelo em dados novos — e para modelos sem verossimilhança fechada
+(K-Means, DBSCAN), é literalmente a única via disponível.
 
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## Duas Réguas Diferentes
+## Duas Formas de Pagar por Complexidade
 
 ::: {.fragment}
-Sobrepor duas curvas, função de $K$: log-verossimilhança de treino (já
-vista, sempre sobe) e o **BIC** — penaliza modelos com mais parâmetros
-livres. Fórmula exata vem no Bloco 4; aqui só a forma do resultado.
+Toda liberdade extra de um modelo precisa ser **paga**, ou ele sempre
+vai preferir usá-la — mesmo só para decorar ruído.
+:::
+
+::: {.fragment}
+**1. Analiticamente, com uma priori $p(\theta)$:** mais complexidade só
+compensa se o ganho de ajuste superar a distância (KL) até a crença
+prévia.
+:::
+
+::: {.fragment}
+**2. Empiricamente, com dados nunca vistos:** guardar uma fatia de
+validação — um modelo que só decorou o treino aparece pior ali, sem
+precisar calcular penalidade nenhuma.
+:::
+
+::: {.fragment .callout-note}
+Via 1 (Bloco 1) resolve $K$ do GMM, mas cria um problema do mesmo tipo
+(Bloco 2). Via 2 (Blocos 3–5) nunca desaparece — e é a única disponível
+para modelos sem verossimilhança fechada (K-Means, DBSCAN).
 :::
 
 :::
 
-::: {.fig-resize style="width: 82%; margin: 0 auto;"}
+# Do EM ao ELBO: Injetando uma Priori
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O Algoritmo EM da Aula 4, olhado com cuidado, é a otimização de um
+objeto mais geral — e é exatamente o "mais geral" que revela por que ele
+não penaliza complexidade. Para expor isso, precisamos de uma peça nova:
+a **divergência de Kullback-Leibler**.
+
+::: {.callout-note icon=false}
+## Definição (divergência de Kullback-Leibler)
+
+Sejam $p(\mathbf{H})$ e $q(\mathbf{H})$ duas distribuições de
+probabilidade sobre o mesmo espaço (aqui, $\mathbf{H}$ denota qualquer
+variável não observada — variável latente, parâmetro, ou os dois
+juntos). A **divergência de Kullback-Leibler** de $q$ para $p$ é
+$$
+\mathrm{KL}(q\|p) = -\int q(\mathbf{H})\ln\left\{\frac{p(\mathbf{H})}{q(\mathbf{H})}\right\}\mathrm{d}\mathbf{H}.
+$$
+:::
+
+Vale reescrever essa integral de outra forma, porque é essa segunda
+forma que vamos reaproveitar pelo resto da aula. Para **qualquer**
+função $f(\mathbf{H})$, a integral $\int q(\mathbf{H})f(\mathbf{H})\,
+\mathrm{d}\mathbf{H}$ é, por definição, a **esperança de $f$ sob a
+distribuição $q$**, denotada $\mathbb{E}_q[f(\mathbf{H})]$ — a média de
+$f(\mathbf{H})$, ponderada por quão provável cada valor de $\mathbf{H}$
+é segundo $q$ (o mesmo conceito de esperança de outras disciplinas,
+aqui só integrando contra $q$ em vez de somar contra uma distribuição
+discreta). A definição de KL acima é exatamente uma integral desse
+tipo, com $f(\mathbf{H})=-\ln\{p(\mathbf{H})/q(\mathbf{H})\}=
+\ln\{q(\mathbf{H})/p(\mathbf{H})\}$:
+$$
+\mathrm{KL}(q\|p) = \mathbb{E}_q\!\left[\ln\frac{q(\mathbf{H})}{p(\mathbf{H})}\right]
+= -\mathbb{E}_q\!\left[\ln\frac{p(\mathbf{H})}{q(\mathbf{H})}\right].
+$$
+Não é um objeto novo, só uma notação mais compacta para a mesma
+integral — mas é a notação que a prova logo abaixo, e a definição do
+ELBO mais adiante, usam diretamente, sem reabrir o símbolo de integral
+a cada passo.
+
+$\mathrm{KL}(q\|p)\ne\mathrm{KL}(p\|q)$ em geral — não é uma distância
+no sentido formal —, mas o resultado que a torna útil é que ela nunca é
+negativa:
+
+::: {.callout-note icon=false}
+## Teorema (não-negatividade da divergência KL — desigualdade de Gibbs; PRML §1.6.1)
+
+Para quaisquer distribuições $p(\mathbf{H})$ e $q(\mathbf{H})$,
+$\mathrm{KL}(q\|p)\ge0$, com igualdade se, e somente se,
+$q(\mathbf{H})=p(\mathbf{H})$.
+:::
+
+*Demonstração* (via desigualdade de Jensen). A função $-\ln(\cdot)$ é
+convexa (segunda derivada $1/x^2>0$), então, para qualquer distribuição
+$q$ e variável $X=p(\mathbf{H})/q(\mathbf{H})$ tratada sob $q$,
+$-\ln\mathbb{E}_q[X]\le\mathbb{E}_q[-\ln X]$. Logo
+$$
+\mathrm{KL}(q\|p) = \int q(\mathbf{H})\left[-\ln\frac{p(\mathbf{H})}{q(\mathbf{H})}\right]\mathrm{d}\mathbf{H}
+\ge -\ln\int q(\mathbf{H})\frac{p(\mathbf{H})}{q(\mathbf{H})}\,\mathrm{d}\mathbf{H}
+= -\ln\int p(\mathbf{H})\,\mathrm{d}\mathbf{H} = -\ln 1 = 0.
+$$
+A igualdade em Jensen ocorre quando $p(\mathbf{H})/q(\mathbf{H})$ é
+constante sob $q$, o que, como ambas integram a $1$, força
+$p(\mathbf{H})=q(\mathbf{H})$. $\blacksquare$
+
+**A decomposição geral.** Para dados observados $\mathbf{X}$ e
+**qualquer** variável não observada $\mathbf{H}$ (de novo: latente,
+parâmetro, ou os dois), e qualquer $q(\mathbf{H})$ normalizada, a regra
+do produto ($p(\mathbf{X},\mathbf{H})=p(\mathbf{H}\mid\mathbf{X})p(\mathbf{X})$)
+aplicada a $\mathcal{L}(q)=\int q(\mathbf{H})\ln\{p(\mathbf{X},\mathbf{H})/q(\mathbf{H})\}\,\mathrm{d}\mathbf{H}$
+dá, pelos mesmos passos algébricos usados na definição de KL acima,
+
+::: {.callout-note icon=false}
+## Teorema (decomposição da evidência; PRML eq. 10.2, §10.1)
+
+Para qualquer distribuição $q(\mathbf{H})$ normalizada,
+$$
+\ln p(\mathbf{X}) = \mathcal{L}(q) + \mathrm{KL}\big(q\,\|\,p(\mathbf{H}\mid\mathbf{X})\big),
+\qquad
+\mathcal{L}(q) = \int q(\mathbf{H})\ln\left\{\frac{p(\mathbf{X},\mathbf{H})}{q(\mathbf{H})}\right\}\mathrm{d}\mathbf{H}.
+$$
+:::
+
+Como $\mathrm{KL}\ge0$, $\mathcal{L}(q)\le\ln p(\mathbf{X})$ **para
+qualquer $q$** — o **ELBO** (*Evidence Lower Bound*), com igualdade
+exatamente quando $q(\mathbf{H})=p(\mathbf{H}\mid\mathbf{X})$, a
+posterior verdadeira.
+
+**Onde $\mathbf{H}$ entra é o que decide tudo.** O EM da Aula 4
+corresponde a uma escolha **muito específica** de $\mathbf{H}$: só a
+variável latente, $\mathbf{H}=\mathbf{Z}=\{z_n\}$, com $\theta$
+**mantido de fora**, tratado como parâmetro fixo, não como variável
+aleatória — nunca integrado, nunca penalizado por se afastar de nenhuma
+priori. Isso muda o objeto que decompomos: em vez de $\ln p(\mathbf{X})$
+(marginal, sem condicionar em nada), queremos decompor
+$\ln p(\mathbf{X}\mid\theta)$ — a log-verossimilhança **para um
+$\theta$ fixo**, exatamente a quantidade que o Passo M da Aula 4
+maximizava. A equação não sai pronta da decomposição geral por
+substituição direta — precisamos repetir a mesma conta, agora
+condicionando em $\theta$ do início ao fim (PRML §9.4). Defina
+$$
+\mathcal{L}(q,\theta) := \int q(\mathbf{Z})\ln\left\{\frac{p(\mathbf{X},\mathbf{Z}\mid\theta)}{q(\mathbf{Z})}\right\}\mathrm{d}\mathbf{Z}.
+$$
+A regra do produto, agora condicionada em $\theta$,
+$p(\mathbf{X},\mathbf{Z}\mid\theta)=p(\mathbf{Z}\mid\mathbf{X},\theta)\,
+p(\mathbf{X}\mid\theta)$, substituída dentro do logaritmo, separa a
+integral em dois termos — os mesmos passos algébricos de antes, só com
+$\theta$ presente em toda parte:
+$$
+\mathcal{L}(q,\theta) = \underbrace{\int q(\mathbf{Z})\ln p(\mathbf{X}\mid\theta)\,\mathrm{d}\mathbf{Z}}_{=\ln p(\mathbf{X}\mid\theta)}
+\;+\; \underbrace{\int q(\mathbf{Z})\ln\left\{\frac{p(\mathbf{Z}\mid\mathbf{X},\theta)}{q(\mathbf{Z})}\right\}\mathrm{d}\mathbf{Z}}_{=-\mathrm{KL}(q(\mathbf{Z})\|p(\mathbf{Z}\mid\mathbf{X},\theta))} ,
+$$
+onde o primeiro termo usou que $\ln p(\mathbf{X}\mid\theta)$ não
+depende de $\mathbf{Z}$ (sai da integral) e $\int q(\mathbf{Z})\,
+\mathrm{d}\mathbf{Z}=1$ ($q$ normalizada). Rearranjando,
+
+$$
+\ln p(\mathbf{X}\mid\theta) = \mathcal{L}(q,\theta) + \mathrm{KL}\big(q(\mathbf{Z})\,\|\,p(\mathbf{Z}\mid\mathbf{X},\theta)\big).
+$$
+
+O Passo E maximiza $\mathcal{L}(q,\theta^{\text{old}})$ sobre $q$ (o
+mínimo do KL, $q=\gamma(z_{nk})$); o Passo M maximiza
+$\mathcal{L}(q,\theta)$ sobre $\theta$ — mas sem prior nenhum sobre
+$\theta$, essa maximização persegue só $\theta_{\mathrm{ML}}$. No ótimo,
+$$
+\mathcal{L}(q^\star,\theta_{\mathrm{ML}}) = \ln p(\mathbf{X}\mid\theta_{\mathrm{ML}}),
+$$
+que é exatamente a verossimilhança **no melhor ponto** — a mesma
+quantidade que a Abertura já rejeitou como critério de seleção. **O ELBO
+do EM clássico não tem propriedade de Occam nenhuma**, porque nunca
+integra ou penaliza $\theta$: usá-lo para comparar $K$ diferentes teria
+o mesmo problema da log-verossimilhança crua.
+
+**A alternativa: dar uma priori de verdade só a $\pi$, mantendo
+$\mu_k,\Sigma_k$ fixos.** Não precisamos tornar **todo** o vetor de
+parâmetros $\theta=\{\mu_k,\Sigma_k,\pi\}$ aleatório para recuperar uma
+penalidade de complexidade. O problema de $K$ crescer sem limite nasce
+inteiramente de como os **pesos de mistura** $\pi=(\pi_1,\dots,\pi_K)$
+se distribuem entre os componentes — um componente "morto", com
+$\pi_k\approx0$, já é, na prática, um componente a menos, não importa
+quão bem ajustados $\mu_k,\Sigma_k$ estejam. Basta colocar **só $\pi$**
+dentro do tratamento variacional, dando-lhe uma priori de verdade
+$p(\pi)$ — mantendo $\mu_k,\Sigma_k$ exatamente como no EM clássico:
+pontos fixos, sem priori nenhuma, carregados como parâmetro extra em
+toda a conta, do mesmo jeito que $\theta$ inteiro era carregado na
+especialização anterior. Para abreviar, escreva
+$\phi:=\{\mu_k,\Sigma_k\}_{k=1}^K$ (o que continua fixo). Escolhendo
+$\mathbf{H}=(\mathbf{Z},\pi)$, com campo médio
+$q(\mathbf{Z},\pi)\approx q(\mathbf{Z})\,q(\pi)$ (PRML §10.1), repetimos
+a mesma conta de antes — agora com $\phi$ no lugar de $\theta$, e só
+$(\mathbf{Z},\pi)$ dentro de $\mathbf{H}$:
+$$
+\mathcal{L}(q,\phi) := \iint q(\mathbf{Z})q(\pi)\ln
+\frac{p(\mathbf{X},\mathbf{Z},\pi\mid\phi)}{q(\mathbf{Z})q(\pi)}\,
+\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi .
+$$
+
+**Passo 1 — separar $\mathbf{X}$ do resto.** Dados o componente
+$\mathbf{Z}$ de cada ponto e os parâmetros $\phi$ de cada componente, a
+densidade de $\mathbf{X}$ não depende mais de $\pi$ — os pesos de
+mistura só afetam **qual** componente um ponto tende a vir, não a forma
+da gaussiana daquele componente:
+$p(\mathbf{X}\mid\mathbf{Z},\pi,\phi)=p(\mathbf{X}\mid\mathbf{Z},\phi)$.
+Pela regra do produto,
+$$
+p(\mathbf{X},\mathbf{Z},\pi\mid\phi) = p(\mathbf{X}\mid\mathbf{Z},\pi,\phi)\,p(\mathbf{Z},\pi\mid\phi)
+= p(\mathbf{X}\mid\mathbf{Z},\phi)\,p(\mathbf{Z},\pi\mid\phi) .
+$$
+
+**Passo 2 — substituir e separar o logaritmo.**
+$$
+\ln\frac{p(\mathbf{X},\mathbf{Z},\pi\mid\phi)}{q(\mathbf{Z})q(\pi)}
+= \ln p(\mathbf{X}\mid\mathbf{Z},\phi) + \ln\frac{p(\mathbf{Z},\pi\mid\phi)}{q(\mathbf{Z})q(\pi)}
+= \ln p(\mathbf{X}\mid\mathbf{Z},\phi) - \ln\frac{q(\mathbf{Z})q(\pi)}{p(\mathbf{Z},\pi\mid\phi)} .
+$$
+
+**Passo 3 — voltar à integral dupla e separar em dois termos.**
+$$
+\mathcal{L}(q,\phi) = \iint q(\mathbf{Z})q(\pi)\ln p(\mathbf{X}\mid\mathbf{Z},\phi)\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi
+\;-\; \iint q(\mathbf{Z})q(\pi)\ln\frac{q(\mathbf{Z})q(\pi)}{p(\mathbf{Z},\pi\mid\phi)}\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi .
+$$
+
+**Passo 4 — simplificar o primeiro termo.** O integrando
+$\ln p(\mathbf{X}\mid\mathbf{Z},\phi)$ não depende de $\pi$: integrando
+primeiro em $\pi$, $\int q(\pi)\,\mathrm{d}\pi=1$ ($q(\pi)$ normalizada)
+elimina essa variável por completo,
+$$
+\iint q(\mathbf{Z})q(\pi)\ln p(\mathbf{X}\mid\mathbf{Z},\phi)\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi
+= \int q(\mathbf{Z})\ln p(\mathbf{X}\mid\mathbf{Z},\phi)\,\mathrm{d}\mathbf{Z}
+= \mathbb{E}_{q(\mathbf{Z})}[\ln p(\mathbf{X}\mid\mathbf{Z},\phi)] .
+$$
+Esse é o ganho concreto de tratar só $\pi$ (em vez de $\theta$ inteiro)
+como variável: o termo de ajuste simplifica para uma esperança só sobre
+$\mathbf{Z}$, sem precisar de esperança sobre $\pi$ também.
+
+**Passo 5 — reconhecer o segundo termo como KL.** Pela mesma noção de
+esperança usada na definição de KL, com $\mathbf{Z}$ e $\pi$ juntos no
+papel de variável não observada, o segundo termo é exatamente
+$\mathrm{KL}(q(\mathbf{Z},\pi)\|p(\mathbf{Z},\pi\mid\phi))$. Juntando os
+dois passos:
+$$
+\mathcal{L}(q,\phi) =
+\underbrace{\mathbb{E}_{q(\mathbf{Z})}[\ln p(\mathbf{X}\mid\mathbf{Z},\phi)]}_{\text{ajuste — tenta "decorar" os dados}}
+\;-\;
+\underbrace{\mathrm{KL}\big(q(\mathbf{Z},\pi)\,\|\,p(\mathbf{Z},\pi\mid\phi)\big)}_{\text{Navalha de Occam}} .
+$$
+
+Essa é uma cota inferior de $\ln p(\mathbf{X}\mid\phi)$ que, ao
+contrário do EM clássico, carrega uma penalidade de complexidade de
+verdade: um componente cujo peso $\pi_k$ a posteriori não precisa se
+afastar muito da priori (porque os dados não sustentam esse componente)
+custa pouco KL; um componente que os dados realmente sustentam custa
+mais KL, mas ganha mais no termo de ajuste. **$\mu_k,\Sigma_k$
+continuam exatamente como no EM clássico** — não precisamos de nenhuma
+priori sobre eles para obter essa penalidade; toda ela vem de $\pi$.
+Este procedimento — **Inferência Bayesiana Variacional** (*Variational
+Bayes*), aqui restrita a $\pi$ — é **diferente** do EM clássico, não um
+caso particular dele: otimiza sobre $q(\mathbf{Z})$ e $q(\pi)$
+alternadamente (não sobre $q(\mathbf{Z})$ e um ponto $\pi$), e o
+resultado carrega, de verdade, a penalização de complexidade.
+
+**Verificação numérica — poda automática de componentes.** Dando a
+$\pi=(\pi_1,\dots,\pi_K)$ uma priori de Dirichlet com concentração
+$\alpha_0$ — quanto **menor** $\alpha_0$, mais a priori já "acredita"
+em poucos componentes ativos antes de ver os dados —, o Passo 5 prevê
+exatamente a poda automática: componentes supérfluos têm seu $\pi_k$
+empurrado para perto da priori (baixo), pagando pouco KL sem ajudar o
+ajuste. Verificamos isso com `BayesianGaussianMixture` do scikit-learn
+— na prática, essa implementação vai além do que derivamos aqui e
+também trata $\mu_k,\Sigma_k$ variacionalmente, com prioris
+Normal-Wishart (uma extensão natural do mesmo princípio, que não
+desenvolvemos nesta aula: o mecanismo de poda que importa aqui vem
+inteiramente da priori sobre $\pi$, como o Passo 4 mostrou). Ajustando
+com $K=8$ componentes "de sobra" e três valores de $\alpha_0$, no mesmo
+Breast Cancer Wisconsin:
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## KL e a Decomposição Geral
+
+::: {.fragment}
+**Definição:** $\mathrm{KL}(q\|p)=-\int q(\mathbf{H})\ln\{p(\mathbf{H})/q(\mathbf{H})\}\,\mathrm{d}\mathbf{H}$
+— $\mathbf{H}$ = qualquer variável não observada (latente, parâmetro, ou
+os dois). Não simétrica.
+:::
+
+::: {.fragment .callout-note}
+$\int q(\mathbf{H})f(\mathbf{H})\,\mathrm{d}\mathbf{H} =
+\mathbb{E}_q[f(\mathbf{H})]$ (esperança de $f$ sob $q$), para qualquer
+$f$. Logo, a mesma KL, em notação compacta:
+$$
+\mathrm{KL}(q\|p) = \mathbb{E}_q\!\left[\ln\frac{q(\mathbf{H})}{p(\mathbf{H})}\right]
+$$
+— não é objeto novo, só a notação usada daqui em diante.
+:::
+
+::: {.callout-note .fragment icon=false}
+**Teorema (Gibbs):** $\mathrm{KL}(q\|p)\ge0$, igualdade sse $q=p$.
+:::
+
+::: {.fragment}
+*Prova.* $-\ln(\cdot)$ convexa $\Rightarrow$ Jensen:
+$-\ln\mathbb{E}_q[X]\le\mathbb{E}_q[-\ln X]$. Com $X=p(\mathbf{H})/q(\mathbf{H})$:
+$\mathrm{KL}(q\|p)\ge-\ln\int p(\mathbf{H})\,\mathrm{d}\mathbf{H}=0$.
+Igualdade sse $p=q$. $\blacksquare$
+:::
+
+::: {.callout-note .fragment icon=false}
+**Teorema (decomposição, PRML eq. 10.2):** para qualquer $q(\mathbf{H})$
+normalizada,
+$$
+\ln p(\mathbf{X}) = \mathcal{L}(q) + \mathrm{KL}(q\|p(\mathbf{H}\mid\mathbf{X})) \;\Rightarrow\; \mathcal{L}(q)\le\ln p(\mathbf{X}).
+$$
+:::
+
+## Onde $\mathbf{H}$ Entra: o EM Clássico
+
+::: {.fragment}
+EM da Aula 4: $\mathbf{H}=\mathbf{Z}$ só, $\theta$ **fora**, fixo — nunca
+integrado, nunca penalizado. Isso troca o alvo: não mais
+$\ln p(\mathbf{X})$, e sim $\ln p(\mathbf{X}\mid\theta)$ — precisa
+repetir a conta, condicionando em $\theta$ do início ao fim.
+:::
+
+::: {.fragment}
+$\mathcal{L}(q,\theta):=\int q(\mathbf{Z})\ln\{p(\mathbf{X},\mathbf{Z}
+\mid\theta)/q(\mathbf{Z})\}\,\mathrm{d}\mathbf{Z}$. Regra do produto
+(condicionada): $p(\mathbf{X},\mathbf{Z}\mid\theta)=p(\mathbf{Z}\mid
+\mathbf{X},\theta)p(\mathbf{X}\mid\theta)$ $\Rightarrow$ mesma separação
+de antes, com $\theta$ em toda parte:
+$$
+\ln p(\mathbf{X}\mid\theta) = \mathcal{L}(q,\theta) + \mathrm{KL}(q(\mathbf{Z})\|p(\mathbf{Z}\mid\mathbf{X},\theta))
+$$
+:::
+
+::: {.fragment .callout-important}
+No ótimo: $\mathcal{L}(q^\star,\theta_{\mathrm{ML}})=
+\ln p(\mathbf{X}\mid\theta_{\mathrm{ML}})$ — verossimilhança **no melhor
+ponto**, sem penalidade nenhuma de complexidade.
+:::
+
+## A Alternativa: Só $\pi$ Dentro, com Priori
+
+::: {.fragment}
+Não precisa tornar **todo** $\theta=\{\mu_k,\Sigma_k,\pi\}$ aleatório —
+$K$ crescer sem limite vem só de como $\pi$ se distribui ($\pi_k\approx
+0$ = componente morto). $\mu_k,\Sigma_k$ ficam fixos, como no EM
+clássico; abrevie $\phi:=\{\mu_k,\Sigma_k\}$.
+:::
+
+::: {.fragment}
+$\mathbf{H}=(\mathbf{Z},\pi)$, campo médio
+$q(\mathbf{Z},\pi)\approx q(\mathbf{Z})q(\pi)$ (PRML §10.1):
+$$
+\mathcal{L}(q,\phi) = \iint q(\mathbf{Z})q(\pi)\ln\frac{p(\mathbf{X},\mathbf{Z},\pi\mid\phi)}{q(\mathbf{Z})q(\pi)}\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi
+$$
+:::
+
+## Passo a Passo da Simplificação
+
+::: {.fragment}
+**Passo 1:** dado $\mathbf{Z}$ e $\phi$, $\mathbf{X}$ não depende mais
+de $\pi$ ($\pi$ só decide **qual** componente, não a forma dele) —
+$p(\mathbf{X}\mid\mathbf{Z},\pi,\phi)=p(\mathbf{X}\mid\mathbf{Z},\phi)$.
+Produto: $p(\mathbf{X},\mathbf{Z},\pi\mid\phi)=p(\mathbf{X}\mid
+\mathbf{Z},\phi)\,p(\mathbf{Z},\pi\mid\phi)$.
+:::
+
+::: {.fragment}
+**Passos 2-3:** substitui no log, separa a integral dupla em dois
+termos — mesma mecânica de antes, agora com $\pi$ e $\phi$ no lugar de
+$\theta$.
+:::
+
+::: {.fragment}
+**Passo 4:** o termo de ajuste não depende de $\pi$
+$\Rightarrow\int q(\pi)\,\mathrm{d}\pi=1$ elimina $\pi$ dele:
+$$
+\iint q(\mathbf{Z})q(\pi)\ln p(\mathbf{X}\mid\mathbf{Z},\phi)\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi
+= \mathbb{E}_{q(\mathbf{Z})}[\ln p(\mathbf{X}\mid\mathbf{Z},\phi)]
+$$
+Ganho concreto de isolar só $\pi$: esperança só sobre $\mathbf{Z}$.
+:::
+
+::: {.fragment}
+**Passo 5:** segundo termo = $\mathrm{KL}(q(\mathbf{Z},\pi)\|p(\mathbf{Z},\pi\mid\phi))$
+(mesma definição de esperança de KL). Logo:
+$$
+\mathcal{L}(q,\phi) = \underbrace{\mathbb{E}_{q(\mathbf{Z})}[\ln p(\mathbf{X}\mid\mathbf{Z},\phi)]}_{\text{ajuste}}
+- \underbrace{\mathrm{KL}(q(\mathbf{Z},\pi)\|p(\mathbf{Z},\pi\mid\phi))}_{\text{Navalha de Occam}}
+$$
+:::
+
+::: {.fragment .callout-note}
+$\mu_k,\Sigma_k$ continuam fixos, sem priori — toda a penalidade vem de
+$\pi$. **Variational Bayes** (restrito a $\pi$): procedimento diferente
+do EM (otimiza $q(\mathbf{Z})$ e $q(\pi)$, não $q(\mathbf{Z})$ e um
+ponto $\pi$).
+:::
+
+## Verificação: Poda Automática de Componentes
+
+::: {.fragment}
+GMM Bayesiano: priori de Dirichlet em $\pi$, concentração $\alpha_0$ —
+menor $\alpha_0$ = crê a priori em menos componentes ativos. $K=8$
+"de sobra", Breast Cancer Wisconsin, três valores de $\alpha_0$:
+:::
+
+::: {.fragment .callout-important}
+`BayesianGaussianMixture` (scikit-learn) vai além do que derivamos: também
+trata $\mu_k,\Sigma_k$ variacionalmente (prioris Normal-Wishart) — não
+desenvolvido aqui. O mecanismo de poda que importa nesta aula vem só da
+priori sobre $\pi$.
+:::
+
+:::
+
+::: {.fig-resize style="width: 92%; margin: 0 auto;"}
 ```{python}
 #| echo: false
 #| fig-align: center
 
-fig, ax = plt.subplots(figsize=(7.6, 4.4))
-ax.plot(Ks, loglik_total, marker="o", color=COR_A, linewidth=2,
-        markersize=6, label="log-verossimilhança de treino")
-ax.plot(Ks, bic_prml, marker="s", color=COR_B, linewidth=2,
-        markersize=6, label="BIC (convenção PRML, maximizar)")
-ax.axvline(K_star, color=COR_NEU, linestyle=":", linewidth=1.4)
-ax.annotate(f"BIC máximo em K={K_star}", xy=(K_star, bic_prml.max()),
-            xytext=(3.0, -1225), fontsize=9, color=COR_B)
-ax.set_xlabel("K (número de componentes)")
-ax.set_ylabel("nats")
-ax.set_title("Duas réguas para o mesmo GMM: log-verossimilhança vs. BIC")
-ax.set_xticks(Ks)
-ax.legend(loc="lower right", fontsize=9)
+fig, axes = plt.subplots(1, 3, figsize=(11, 3.6), sharey=True)
+for ax, alpha0 in zip(axes, ALPHA0_GRID):
+    w = np.sort(bgm_by_alpha[alpha0].weights_)[::-1]
+    cores = [COR_A if wi > 0.01 else COR_NEU for wi in w]
+    ax.bar(range(1, len(w) + 1), w, color=cores)
+    ax.set_title(f"$\\alpha_0={brl(alpha0,3) if alpha0<1 else int(alpha0)}$")
+    ax.set_xlabel("componente (ordenado)")
+    ax.set_ylim(0, 0.75)
+axes[0].set_ylabel("peso $\\pi_k$ aprendido")
+fig.suptitle("Pesos de mistura de um GMM Bayesiano com K=8 'de sobra' — poda automática", y=1.03)
 plt.tight_layout()
 plt.show()
 ```
@@ -512,152 +917,42 @@ plt.show()
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-As duas curvas contam histórias opostas depois de $K=2$: a
-log-verossimilhança continua subindo (mais parâmetros, melhor ajuste ao
-treino, sempre), enquanto o BIC **atinge seu pico em $K=2$** e cai
-monotonicamente depois — mesmo o ajuste continuando a melhorar no
-treino, a penalidade por complexidade cresce mais rápido que esse
-ganho. É essa segunda curva — não a primeira — que vamos justificar,
-passo a passo, a partir do Bloco 3 em diante: por que a
-log-verossimilhança pura é a régua errada, e de onde exatamente vem a
-penalidade que faz o BIC "virar de lado" depois de $K=2$.
+Com $\alpha_0=0{,}001$ (priori bem concentrada em poucos componentes), o
+ajuste converge para pesos $(0{,}6045,\ 0{,}3955,\ 0,\dots,0)$ — **dois**
+componentes significativos, os outros seis exatamente zerados: a poda é
+automática, sem comparar $\mathcal{L}$ entre rodadas separadas de $K$.
+Com $\alpha_0=1{,}0$, a poda é mais suave: $(0{,}582,\ 0{,}355,\ 0{,}061,
+\dots)$, um terceiro componente pequeno mas não nulo sobrevive. Com
+$\alpha_0=100$ (priori bem mais permissiva), quatro componentes ficam
+com peso acima de $1\%$ — a priori "deixa" o modelo usar mais
+componentes antes de penalizar. O próprio $\alpha_0$ virou um botão que
+controla quantos componentes "sobrevivem" — o que já antecipa o
+problema do próximo bloco.
 
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## O Que as Duas Curvas Dizem
+## O Que os Três Painéis Mostram
 
 ::: {.fragment}
-Log-verossimilhança: sempre sobe. BIC: pico em $K=2$, cai depois — a
-penalidade por complexidade cresce mais rápido que o ganho de ajuste.
-:::
-
-::: {.fragment .callout-note}
-O resto da aula justifica de onde vem essa penalidade, e por que ela é
-a "certa" (não arbitrária) sob certas premissas.
-:::
-
-:::
-
-# Por Que a Verossimilhança Pura Falha
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-O gráfico da Intuição mostrou o sintoma; este bloco prova a causa. O
-argumento tem duas pernas: primeiro, por que a log-verossimilhança de
-treino **nunca pode piorar** ao aumentar $K$ (uma propriedade estrutural,
-não um acidente numérico); segundo, por que ela pode **divergir**
-(tender a $+\infty$), retomando a singularidade já avisada no Passo M da
-Aula 4.
-
-**Primeira perna — monotonicidade.** Considere um GMM ótimo com $K$
-componentes, log-verossimilhança máxima $\ell_K^\star$. Construa um GMM
-com $K+1$ componentes que **replica exatamente** essa solução: os
-primeiros $K$ componentes recebem os mesmos $\mu_k,\Sigma_k$ e o
-mesmo $\pi_k$ do modelo de $K$ componentes, escalados por um fator
-$(1-\epsilon)$; o componente extra recebe peso $\pi_{K+1}=\epsilon$ e
-parâmetros arbitrários (digamos, os mesmos do componente $1$). No
-limite $\epsilon\to0^+$, essa mistura de $K+1$ componentes converge à
-mistura original de $K$ componentes, ponto a ponto, e portanto sua
-log-verossimilhança converge a $\ell_K^\star$. Ou seja: existe **pelo
-menos um** ponto no espaço de parâmetros de $K+1$ componentes cuja
-log-verossimilhança é $\ell_K^\star$ — logo o **máximo** sobre todos os
-parâmetros de $K+1$ componentes não pode ser menor que $\ell_K^\star$.
-
-::: {.callout-note icon=false}
-## Proposição (monotonicidade fraca da log-verossimilhança máxima em $K$)
-
-Seja $\ell_K^\star=\max_\theta \ln p(\mathbf{X}\mid\theta,K)$ a
-log-verossimilhança máxima de treino de um GMM com $K$ componentes
-(covariâncias livres, sem restrição). Então
-$\ell_{K+1}^\star\ge\ell_K^\star$ para todo $K\ge1$.
-:::
-
-*Demonstração.* Pelo argumento acima, o conjunto de misturas de
-$K+1$ componentes contém, no limite $\epsilon\to0^+$, pontos cuja
-verossimilhança se aproxima arbitrariamente de $\ell_K^\star$ (e, por
-continuidade da função de verossimilhança nos parâmetros, o supremo
-sobre o espaço de $K+1$ componentes é $\ge\ell_K^\star$). Como o espaço
-de modelos de $K+1$ componentes **contém** (via essa construção) toda
-solução possível de $K$ componentes como caso particular, maximizar
-sobre um espaço maior nunca produz um máximo menor. $\blacksquare$
-
-**Segunda perna — divergência.** A Aula 4 já registrou o aviso técnico:
-se, durante o ajuste, um componente $k$ encolhe sua covariância sobre
-um único ponto de treino $\mathbf{x}_{n_0}$ (isto é, $\mu_k\to
-\mathbf{x}_{n_0}$ e $\Sigma_k\to\mathbf{0}$), a densidade
-$\mathcal{N}(\mathbf{x}_{n_0}\mid\mu_k,\Sigma_k)$ diverge, e com ela a
-log-verossimilhança total do modelo. Restringir a forma de $\Sigma_k$
-(diagonal, ou até isotrópica $\sigma_k^2 I$) **não elimina** esse
-problema — mesmo sob covariância isotrópica, $\sigma_k^2\to0$ com
-$\mu_k$ centrado num único ponto ainda diverge; restringir a forma
-reduz o número de parâmetros livres (o que vai importar no Bloco 4),
-mas não remove a direção degenerada do espaço de parâmetros. Somando as
-duas pernas: a log-verossimilhança de treino não só nunca piora com
-mais componentes — ela pode ser levada, na pior das hipóteses, a
-$+\infty$, tornando-se um critério inútil (ou pior, enganoso) para
-escolher $K$.
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Por Que Nunca Piora: a Construção
-
-::: {.fragment}
-GMM ótimo com $K$ componentes, log-verossimilhança $\ell_K^\star$.
-Construa um modelo de $K+1$ componentes: os $K$ primeiros replicam o
-modelo de $K$ (escalados por $1-\epsilon$); o extra recebe peso
-$\pi_{K+1}=\epsilon$, parâmetros arbitrários.
+$\alpha_0=0{,}001$: pesos $(0{,}6045,\ 0{,}3955,\ 0,\dots)$ — 2
+componentes, resto exatamente zerado.
 :::
 
 ::: {.fragment}
-No limite $\epsilon\to0^+$: a mistura de $K+1$ converge, ponto a ponto,
-à mistura de $K$ — logo a log-verossimilhança converge a
-$\ell_K^\star$.
-:::
-
-::: {.fragment .callout-note}
-Existe um ponto do espaço de $K+1$ parâmetros com verossimilhança
-$\approx\ell_K^\star$ $\Rightarrow$ o **máximo** sobre $K+1$ componentes
-não pode ser menor.
-:::
-
-## Proposição e Demonstração
-
-::: {.callout-note icon=false}
-**Proposição:** $\ell_K^\star=\max_\theta\ln p(\mathbf{X}\mid\theta,K)$
-satisfaz $\ell_{K+1}^\star\ge\ell_K^\star$ para todo $K\ge1$ (GMM,
-covariâncias livres).
+$\alpha_0=1{,}0$: $(0{,}582,\ 0{,}355,\ 0{,}061,\dots)$ — poda mais
+suave, um 3º componente pequeno sobrevive.
 :::
 
 ::: {.fragment}
-*Prova.* O espaço de misturas de $K+1$ componentes **contém**, via a
-construção acima, toda solução de $K$ componentes como caso particular
-($\epsilon\to0^+$). Maximizar sobre um espaço que contém o anterior
-nunca produz máximo menor. $\blacksquare$
-:::
-
-## A Segunda Perna: Divergência
-
-::: {.fragment}
-Já visto no Passo M (Aula 4): $\mu_k\to\mathbf{x}_{n_0}$,
-$\Sigma_k\to\mathbf{0}$ $\Rightarrow$ densidade em $\mathbf{x}_{n_0}$
-diverge, e com ela a log-verossimilhança total.
-:::
-
-::: {.fragment}
-Restringir a forma de $\Sigma_k$ (diagonal, isotrópica $\sigma_k^2I$)
-**não elimina** o problema — $\sigma_k^2\to0$ sobre um único ponto ainda
-diverge. Reduz parâmetros livres (importa no Bloco 4), não remove a
-direção degenerada.
+$\alpha_0=100$: 4 componentes com peso $>1\%$ — priori mais permissiva,
+"deixa" o modelo usar mais estrutura antes de penalizar.
 :::
 
 ::: {.fragment .callout-important}
-Conclusão: log-verossimilhança de treino nunca piora com mais
-componentes, e pode divergir a $+\infty$ — critério inútil, ou
-enganoso, para escolher $K$.
+$\alpha_0$ virou um botão que controla quantos componentes sobrevivem —
+o problema do próximo bloco.
 :::
 
 :::
@@ -665,29 +960,31 @@ enganoso, para escolher $K$.
 ## Pergunta
 
 ::: {.callout-tip}
-## Se a covariância de cada componente fosse restrita a ser isotrópica em vez de totalmente livre, o problema de divergência desapareceria?
+## Se déssemos uma priori de verdade a μ_k e Σ_k (mantendo π fixo, como no EM clássico), o problema de K=N desapareceria?
 
-Pense separadamente em "quantos parâmetros livres o modelo tem" e "quais
-direções do espaço de parâmetros ainda permitem colapso sobre um único
-ponto".
+Releia o Passo 4 da derivação: o termo de ajuste virou uma esperança só
+sobre $\mathbf{Z}$ exatamente porque a verossimilhança de $\mathbf{X}$
+não depende de $\pi$. Pense em qual parâmetro efetivamente controla se
+um componente "sobrevive" ou não.
 
-- □ Se a covariância de cada componente fosse restrita a ser isotrópica
-  ($\Sigma_k=\sigma_k^2 I$) em vez de totalmente livre, a possibilidade
-  de a log-verossimilhança de treino divergir para infinito ao encolher
-  um componente sobre um único ponto desapareceria.
-- □ No caso-limite em que dois componentes de um GMM com $K$ componentes
-  têm exatamente os mesmos parâmetros (mesma média, mesma covariância),
-  a log-verossimilhança máxima com $K$ componentes é idêntica à de um
-  modelo com $K-1$ componentes.
-- □ Como a Aula 4 já mostrou que $\Sigma_k\to\mathbf{0}$ causa
-  log-verossimilhança $\to\infty$ apenas quando exatamente um único
-  ponto fica isolado sob um componente, GMMs ajustados com covariância
-  diagonal (não livre) estão completamente imunes a esse problema.
-- □ Uma regressão polinomial de grau muito alto ajustada por mínimos
-  quadrados também pode reduzir seu erro de treino a exatamente zero,
-  interpolando perfeitamente todos os pontos — o mesmo tipo de
-  "sobreajuste sem penalidade" que motiva o restante desta aula para o
-  GMM.
+- □ Não — o mecanismo de poda vem inteiramente do termo
+  $\mathrm{KL}(q(\mathbf{Z},\pi)\|p(\mathbf{Z},\pi\mid\phi))$: é a
+  distância entre a priori e a posterior de $\pi$ que penaliza
+  componentes supérfluos; uma priori sobre $\mu_k,\Sigma_k$, mantendo
+  $\pi$ fixo, não introduz esse termo em lugar nenhum da conta.
+- □ No caso-limite em que a priori $p(\pi)$ é extremamente concentrada
+  (quase um ponto único), a decomposição com $\pi$ dentro de
+  $\mathbf{H}$ se aproxima da decomposição do EM clássico, já que
+  $q(\pi)$ tem pouquíssima liberdade para se afastar desse ponto.
+- □ Como o campo médio $q(\mathbf{Z},\pi)\approx q(\mathbf{Z})q(\pi)$ é
+  só uma conveniência computacional, o ELBO resultante deixa de ser
+  uma cota inferior válida de $\ln p(\mathbf{X}\mid\phi)$ sempre que
+  essa fatoração não corresponde à dependência real entre $\mathbf{Z}$
+  e $\pi$.
+- □ O mesmo princípio de poda automática via priori esparsa também
+  aparece em regressão linear regularizada por LASSO, onde uma priori
+  Laplaciana sobre os coeficientes empurra muitos deles exatamente a
+  zero.
 :::
 
 ::: {.content-visible when-format="revealjs"}
@@ -695,932 +992,418 @@ ponto".
 ## Resposta
 
 ::: {.callout-tip}
-## Resposta — restringir a forma de $\Sigma_k$ não basta
+## Resposta — a priori certa é sobre π, não sobre μ,Σ
 
-- ✗ Isotrópica ainda permite $\sigma_k^2\to0$ com $\mu_k$ sobre um único
-  ponto — a divergência não depende da forma da matriz, só da direção
-  "colapsar sobre um ponto" continuar disponível.
-- ✔ Consequência direta da construção desta seção: um modelo de $K$
-  componentes é replicável exatamente por um de $K-1$ quando dois
-  componentes coincidem — logo o máximo do maior nunca fica abaixo do
-  menor.
-- ✗ Covariância diagonal ainda tem $d$ graus de liberdade que podem ir a
-  zero individualmente — reduz parâmetros livres, não elimina a direção
-  degenerada.
-- ✔ Mesmo padrão de sobreajuste sem penalidade: mais graus de liberdade,
-  melhor ajuste ao treino garantido, sem nenhuma garantia sobre dados
-  novos.
+- ✔ O termo de KL do Passo 5 é sobre $(\mathbf{Z},\pi)$, não sobre
+  $(\mu_k,\Sigma_k)$ — dar priori a $\mu_k,\Sigma_k$ mantendo $\pi$
+  fixo não cria penalidade de complexidade nenhuma nesta derivação; o
+  problema de $K=N$ persistiria.
+- ✔ Consequência direta: priori quase pontual $\Rightarrow$ $q(\pi)$
+  quase não se move de $p(\pi)$ $\Rightarrow$ o termo de KL se aproxima
+  de zero/constante, reduzindo ao caso do EM.
+- ✗ A decomposição $\ln p(\mathbf{X}\mid\phi)=\mathcal{L}(q,\phi)+\mathrm{KL}(q\|p)$
+  vale para **qualquer** $q$ normalizada, campo médio ou não — a
+  fatoração afeta só o quão **apertada** é a cota (o KL residual entre
+  a posterior verdadeira e a família fatorada), nunca a validade da
+  desigualdade $\mathcal{L}(q,\phi)\le\ln p(\mathbf{X}\mid\phi)$.
+- ✔ Mesma lógica: priori esparsa (Laplaciana no LASSO, Dirichlet
+  concentrada aqui) empurra parâmetros supérfluos a exatamente zero —
+  regularização como poda automática.
 :::
 
 ::: {.fragment}
-**Voltando à pergunta:** não — a forma da covariância só muda *quantos*
-parâmetros livres existem, nunca remove a direção degenerada em si.
-Precisamos penalizar complexidade diretamente, não só restringir a
-forma do modelo.
+**Voltando à pergunta:** não — priori sobre $\mu_k,\Sigma_k$ não ataca a
+raiz do problema, que é como $\pi$ se distribui entre os componentes. É
+colocar **$\pi$**, especificamente, dentro do tratamento variacional,
+com um prior de verdade, que devolve a propriedade de Occam.
 :::
 
 :::
 
-# A Evidência do Modelo e o BIC
+# O Dilema dos Hiperparâmetros
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-Se a log-verossimilhança de treino é a régua errada, qual é a régua
-certa? Em uma comparação Bayesiana de modelos, o objeto correto não é
-"quão bem o melhor $\theta$ explica os dados" — é quão provável são os
-dados **sob o modelo como um todo**, integrando sobre toda a incerteza
-nos parâmetros:
-
-::: {.callout-note icon=false}
-## Definição (evidência do modelo, ou verossimilhança marginal)
-
-Dado um modelo $\mathcal{M}$ com parâmetros $\theta$ e um prior
-$p(\theta\mid\mathcal{M})$, a **evidência do modelo** para um conjunto
-de dados $\mathcal{D}$ é
-$$
-p(\mathcal{D}\mid\mathcal{M}) = \int p(\mathcal{D}\mid\theta,\mathcal{M})\,p(\theta\mid\mathcal{M})\,\mathrm{d}\theta.
-$$
-:::
-
-A ideia é: um modelo com muitos parâmetros livres pode encaixar
-perfeitamente **um** $\theta$ aos dados de treino, mas se a imensa
-maioria dos valores de $\theta$ nesse espaço grande explica mal os
-dados, a integral (que pesa **todo** o espaço de parâmetros, não só o
-melhor ponto) fica pequena — a evidência penaliza automaticamente
-modelos que só funcionam bem numa região minúscula do seu próprio
-espaço de parâmetros (o chamado "fator de Occam", que o desenvolvimento
-abaixo torna explícito).
-
-**O problema.** Essa integral é, em geral, intratável — exatamente o
-mesmo tipo de integral sobre variáveis ocultas/parâmetros que já
-apareceu como obstáculo na Aula 4 (lá, a soma sobre $z_n$; aqui, a
-integral sobre $\theta$). Precisamos de uma aproximação.
-
-**Premissas da aproximação de Laplace.** Sejam
-$f(\theta)=p(\mathcal{D}\mid\theta)p(\theta)$ e $\theta_{\mathrm{MAP}}$
-o ponto de máximo de $f$. A aproximação de Laplace assume:
-
-1. $f(\theta)$ tem um único modo bem definido em $\theta_{\mathrm{MAP}}$
-   (não uma distribuição multimodal ou achatada).
-2. Perto desse modo, $\ln f(\theta)$ é bem aproximado por uma expansão
-   de Taylor de segunda ordem — ou seja, a curvatura local (a Hessiana)
-   captura a forma da distribuição o bastante para descrevê-la como
-   aproximadamente Gaussiana ali.
-
-Sob essas premissas, expandindo $\ln f(\theta)$ em série de Taylor até
-segunda ordem em torno de $\theta_{\mathrm{MAP}}$ (PRML, §4.4, tradução
-livre — ver `_00-planejamento.md` para o trecho original em inglês):
-
-$$
-f(\theta) \approx f(\theta_{\mathrm{MAP}})\exp\left\{-\tfrac{1}{2}(\theta-\theta_{\mathrm{MAP}})^T A(\theta-\theta_{\mathrm{MAP}})\right\},
-\qquad A=-\nabla\nabla\ln f(\theta)\big|_{\theta_{\mathrm{MAP}}}.
-$$
-
-Integrando os dois lados (o lado direito é o núcleo de uma Gaussiana
-não normalizada em $M$ dimensões, $M=\dim\theta$):
-
-$$
-p(\mathcal{D}) = \int f(\theta)\,\mathrm{d}\theta \approx
-f(\theta_{\mathrm{MAP}})\,\frac{(2\pi)^{M/2}}{|A|^{1/2}}.
-$$
-
-Tomando o logaritmo e substituindo $f(\theta)=p(\mathcal{D}\mid\theta)p(\theta)$:
-
-$$
-\ln p(\mathcal{D}) \approx \ln p(\mathcal{D}\mid\theta_{\mathrm{MAP}}) + \ln p(\theta_{\mathrm{MAP}})
-+ \underbrace{\tfrac{M}{2}\ln(2\pi) - \tfrac{1}{2}\ln|A|}_{\text{fator de Occam}}.
-$$
-
-O primeiro termo é o ajuste (log-verossimilhança no ponto ótimo); os
-três últimos, juntos, são o **fator de Occam** — e é aqui, explicitamente,
-que a penalidade por complexidade do modelo entra: quanto mais
-"afiado" o pico da verossimilhança em torno de $\theta_{\mathrm{MAP}}$
-(Hessiana $A$ com autovalores grandes, $|A|$ grande), menor esse fator,
-penalizando modelos cuja boa performance depende de um ajuste fino e
-frágil dos parâmetros.
-
-**Da aproximação de Laplace ao BIC.** Assumindo, adicionalmente, que o
-prior $p(\theta)$ é amplo (quase constante na região relevante) e que a
-Hessiana $A$ tem posto completo, o termo $\ln p(\theta_{\mathrm{MAP}})$
-e a maior parte do fator de Occam podem ser aproximados de forma
-muito mais grosseira, retendo só a dependência dominante em $N$ (o
-número de pontos de dados) — cada observação contribui, em média, um
-fator de curvatura à Hessiana, de modo que $\ln|A|\approx M\ln N$ a
-menos de termos que não crescem com $N$:
-
-::: {.callout-note icon=false}
-## Teorema (Critério de Informação Bayesiano, BIC — Schwarz, 1978; PRML eq. 4.139)
-
-Sob as premissas da aproximação de Laplace (prior amplo, Hessiana de
-posto completo), a evidência do modelo é aproximada por
-$$
-\ln p(\mathcal{D}) \approx \ln p(\mathcal{D}\mid\theta_{\mathrm{ML}}) - \frac{1}{2}M\ln N,
-$$
-onde $N$ é o número de pontos de dados e $M$ é o número de parâmetros
-livres do modelo.
-:::
-
-O BIC (o lado direito dessa aproximação) é, por construção, **maior**
-quanto melhor o ajuste ($\ln p(\mathcal{D}\mid\theta_{\mathrm{ML}})$
-alto) e **menor** quanto mais parâmetros livres o modelo tiver — a
-penalidade formal que faltava.
-
-**Aplicando ao GMM.** Um GMM com $K$ componentes, covariância completa,
-em $d$ dimensões, tem: $Kd$ parâmetros de média; $Kd(d+1)/2$ parâmetros
-de covariância (cada matriz $\Sigma_k$ simétrica de $d\times d$ tem
-$d(d+1)/2$ entradas livres); e $K-1$ pesos de mistura livres (somam
-$1$). Logo
-$$
-M(K,d) = Kd + K\frac{d(d+1)}{2} + (K-1).
-$$
-Para $d=2$ (nosso par de atributos): $M(K,2)=2K+3K+(K-1)=6K-1$.
-
-A tabela abaixo mostra $M(K)$ e o BIC (convenção PRML, a **maximizar**)
-para cada $K$ já ajustado:
-
-| $K$ | $M(K)$ | log-verossimilhança | BIC (PRML) |
-|---:|---:|---:|---:|
-```{python}
-#| echo: false
-#| output: asis
-for K in Ks:
-    i = Ks.index(K)
-    print(f"| {K} | {n_params_arr[i]} | {brl(loglik_total[i], 2)} | {brl(bic_prml[i], 2)} |")
-```
-
-O BIC atinge seu máximo em $K=2$ (o mesmo pico já visto na Intuição):
-mesmo a log-verossimilhança de treino subindo até $K=10$, o custo de
-$M(K)$ crescer (que entra multiplicado por $\tfrac12\ln N$, com
-$N=569$ pacientes, $\ln 569\approx6{,}34$) supera o ganho marginal de
-ajuste a partir de $K=3$.
-
-::: {.callout-warning}
-## Atenção de convenção
-
-O PRML (eq. 4.139, usada acima) define o BIC como algo a
-**maximizar** — quanto maior, melhor. Bibliotecas de software, porém,
-costumam usar a convenção oposta: o `scikit-learn`
-(`GaussianMixture.bic()`) reporta
-$-2\ln p(\mathcal{D}\mid\theta_{\mathrm{ML}}) + M\ln N$, a
-**minimizar**. É o mesmo critério, com sinal (e fator $2$) trocados —
-mas confundir as duas convenções leva a escolher exatamente o $K$
-errado. Nesta aula, mantemos a convenção do PRML (maximizar); ao usar
-`scikit-learn` fora daqui, lembre de inverter o sentido da comparação.
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## A Evidência do Modelo
-
-::: {.fragment}
-**Definição:** evidência (verossimilhança marginal) —
-$p(\mathcal{D}\mid\mathcal{M})=\int p(\mathcal{D}\mid\theta,\mathcal{M})\,p(\theta\mid\mathcal{M})\,\mathrm{d}\theta$
-— integra sobre **todo** o espaço de parâmetros, não só o melhor ponto.
-:::
-
-::: {.fragment}
-Modelo com muitos parâmetros pode encaixar **um** $\theta$ perfeitamente
-— mas se a maioria do espaço de $\theta$ explica mal os dados, a
-integral fica pequena. Penaliza automaticamente ajustes "frágeis".
-:::
-
-::: {.fragment .callout-important}
-Problema: a integral é intratável em geral — mesmo obstáculo da soma
-sobre $z_n$ na Aula 4, agora sobre $\theta$.
-:::
-
-## Premissas da Aproximação de Laplace
-
-::: {.fragment}
-$f(\theta)=p(\mathcal{D}\mid\theta)p(\theta)$, modo em
-$\theta_{\mathrm{MAP}}$.
-:::
-
-::: {.fragment}
-**Premissa 1:** modo único, bem definido (não multimodal/achatado).
-:::
-
-::: {.fragment}
-**Premissa 2:** perto do modo, $\ln f(\theta)$ é bem aproximado por
-Taylor de 2ª ordem — a curvatura (Hessiana $A$) captura a forma local.
-:::
-
-## Da Expansão de Taylor à Evidência Aproximada
-
-::: {.fragment}
-$$
-f(\theta) \approx f(\theta_{\mathrm{MAP}})\exp\left\{-\tfrac12(\theta-\theta_{\mathrm{MAP}})^TA(\theta-\theta_{\mathrm{MAP}})\right\}
-$$
-($A=-\nabla\nabla\ln f\mid_{\theta_{\mathrm{MAP}}}$, Premissa 2).
-:::
-
-::: {.fragment}
-Integrando (núcleo de Gaussiana em $M=\dim\theta$ dimensões):
-$$
-p(\mathcal{D})\approx f(\theta_{\mathrm{MAP}})\frac{(2\pi)^{M/2}}{|A|^{1/2}}
-$$
-:::
-
-::: {.fragment}
-Log e substituindo $f=p(\mathcal{D}\mid\theta)p(\theta)$:
-$$
-\ln p(\mathcal{D}) \approx \ln p(\mathcal{D}\mid\theta_{\mathrm{MAP}}) + \ln p(\theta_{\mathrm{MAP}})
-+ \underbrace{\tfrac{M}{2}\ln(2\pi)-\tfrac12\ln|A|}_{\text{fator de Occam}}
-$$
-:::
-
-::: {.fragment .callout-note}
-Fator de Occam: pico mais "afiado" ($|A|$ grande) $\Rightarrow$ fator
-menor — penaliza ajustes frágeis, que só funcionam num $\theta$
-específico.
-:::
-
-## Do Fator de Occam ao BIC
-
-::: {.fragment}
-Premissas extras: prior amplo (quase constante), Hessiana de posto
-completo $\Rightarrow$ $\ln|A|\approx M\ln N$ (cada ponto contribui um
-fator de curvatura).
-:::
-
-::: {.callout-note icon=false}
-**Teorema (BIC, Schwarz 1978; PRML eq. 4.139):** sob essas premissas,
-$$
-\ln p(\mathcal{D}) \approx \ln p(\mathcal{D}\mid\theta_{\mathrm{ML}}) - \tfrac12 M\ln N.
-$$
-:::
-
-::: {.fragment}
-Maior $\Rightarrow$ melhor: cresce com o ajuste
-($\ln p(\mathcal{D}\mid\theta_{\mathrm{ML}})$), cai com mais parâmetros
-livres ($M$) — a penalidade formal que faltava.
-:::
-
-## Contagem de Parâmetros do GMM
-
-::: {.fragment}
-$K$ componentes, covariância completa, $d$ dimensões: $Kd$ médias +
-$Kd(d+1)/2$ covariâncias (cada $\Sigma_k$ simétrica) + $(K-1)$ pesos
-(somam $1$):
-$$
-M(K,d)=Kd+K\tfrac{d(d+1)}{2}+(K-1).
-$$
-Para $d=2$: $M(K,2)=6K-1$.
-:::
-
-::: {.fragment}
-$M(K)$ para $K=1,\dots,10$: $5,11,17,23,29,35,41,47,53,59$ — cresce
-linearmente em $K$, entra na penalidade multiplicado por
-$\tfrac12\ln(569)\approx3{,}17$.
-:::
-
-## BIC no Breast Cancer Wisconsin
-
-::: {.fragment}
-Pico do BIC (convenção PRML, maximizar) em $K=2$ — mesmo com
-log-verossimilhança subindo até $K=10$: o custo de $M(K)$ crescer supera
-o ganho de ajuste a partir de $K=3$.
-:::
-
-::: {.fragment .callout-warning}
-Convenção: PRML **maximiza** o BIC; `scikit-learn`
-(`GaussianMixture.bic()`) reporta $-2\ln p+M\ln N$, a **minimizar** —
-mesmo critério, sinal trocado. Confundir as convenções escolhe o $K$
-errado.
-:::
-
-:::
-
-## Pergunta
-
-::: {.callout-tip}
-## O BIC depende de premissas específicas (prior amplo, Hessiana de posto completo) — o que acontece nos casos-limite dessas premissas?
-
-Verifique algebricamente o que acontece com o termo de penalidade
-$\tfrac12 M\ln N$ em casos extremos de $N$.
-
-- □ Se a Hessiana da log-verossimilhança no ótimo não tivesse posto
-  completo (contrariando uma das premissas usadas para chegar ao BIC),
-  a aproximação (eq. 4.139) ainda seria válida sem ressalvas.
-- □ No caso-limite $N=1$ (um único ponto de dado), o termo de
-  penalidade do BIC se anula exatamente, pois $\ln(1)=0$.
-- □ Como o BIC é uma aproximação assintótica derivada supondo prior
-  amplo e Hessiana de posto completo, o fato de $N$ crescer sempre
-  torna o BIC mais conservador em relação a modelos complexos, nunca
-  menos.
-- □ O mesmo princípio do BIC — penalizar o número de parâmetros livres
-  por meio de $\ln N$ — se aplica igualmente a comparar um modelo de
-  regressão logística com poucas variáveis contra um com muitas
-  variáveis (interações incluídas), mesmo fora do contexto de variáveis
-  latentes.
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Resposta
-
-::: {.callout-tip}
-## Resposta — premissas do BIC e casos-limite
-
-- ✗ O próprio PRML assinala essa ressalva explicitamente: sem posto
-  completo, a aproximação de $\ln|A|\approx M\ln N$ perde a
-  justificativa, e o BIC deixa de ser confiável.
-- ✔ Álgebra direta: $\tfrac12 M\ln(1)=\tfrac12 M\cdot0=0$ — a penalidade
-  desaparece exatamente quando $N=1$.
-- ✗ A penalidade cresce só como $\ln N$ (devagar), enquanto o termo de
-  ajuste $\ln p(\mathcal{D}\mid\theta_{\mathrm{ML}})$ tipicamente cresce
-  quase linearmente em $N$ — na prática, mais dados tornam o BIC mais
-  tolerante a modelos complexos, não menos.
-- ✔ O BIC é um resultado geral de comparação de modelos por máxima
-  verossimilhança penalizada — não depende de variável latente
-  nenhuma, só de $N$, $M$ e do ajuste ótimo.
-:::
-
-::: {.fragment}
-**Voltando à pergunta:** o BIC funciona bem sob suas premissas — mas
-elas podem falhar (posto incompleto é comum quando parâmetros não são
-"bem-determinados"). Precisamos de uma ferramenta que não dependa dessas
-premissas.
-:::
-
-:::
-
-# KL e a Decomposição Geral $\ln p(\mathbf{X})=\mathcal{L}(q)+\mathrm{KL}(q\|p)$
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-O BIC resolve o problema de seleção de $K$ para o GMM — mas é uma
-aproximação **pontual** (usa só $\theta_{\mathrm{ML}}$ e a curvatura
-local), válida apenas sob as premissas de Laplace. Vamos construir algo
-mais geral: uma ferramenta que funcione mesmo quando a posterior sobre
-parâmetros (ou sobre variáveis latentes) não é aproximadamente
-Gaussiana, nem tem Hessiana de posto completo — e que, de quebra,
-sirva não só para *comparar* modelos, mas para *ajustá-los*. A peça que
-falta é a **divergência de Kullback-Leibler**.
-
-::: {.callout-note icon=false}
-## Definição (divergência de Kullback-Leibler)
-
-Sejam $p(\mathbf{Z})$ e $q(\mathbf{Z})$ duas distribuições de
-probabilidade sobre o mesmo espaço. A **divergência de
-Kullback-Leibler** de $q$ para $p$ é
-$$
-\mathrm{KL}(q\|p) = -\int q(\mathbf{Z})\ln\left\{\frac{p(\mathbf{Z})}{q(\mathbf{Z})}\right\}\mathrm{d}\mathbf{Z}.
-$$
-:::
-
-Note que $\mathrm{KL}(q\|p)\ne\mathrm{KL}(p\|q)$ em geral — não é uma
-distância no sentido formal (falta simetria), mas mede uma noção de
-dissimilaridade entre distribuições. O resultado que a torna útil como
-ferramenta de otimização é que ela nunca é negativa:
-
-::: {.callout-note icon=false}
-## Teorema (não-negatividade da divergência KL — desigualdade de Gibbs; PRML §1.6.1)
-
-Para quaisquer distribuições $p(\mathbf{Z})$ e $q(\mathbf{Z})$,
-$\mathrm{KL}(q\|p)\ge0$, com igualdade se, e somente se,
-$q(\mathbf{Z})=p(\mathbf{Z})$.
-:::
-
-*Demonstração* (via desigualdade de Jensen). Uma função $f$ é
-**convexa** se, para todo $\lambda\in[0,1]$ e todo par $a,b$,
-$f(\lambda a+(1-\lambda)b)\le\lambda f(a)+(1-\lambda)f(b)$ — todo
-segmento de reta ligando dois pontos do gráfico de $f$ fica acima (ou
-sobre) o próprio gráfico. Por indução, essa propriedade se generaliza a
-qualquer combinação convexa de $M$ pontos
-($\lambda_i\ge0$, $\sum_i\lambda_i=1$):
-$f\!\left(\sum_i\lambda_i x_i\right)\le\sum_i\lambda_i f(x_i)$ — a
-**desigualdade de Jensen** —, que para variáveis contínuas, tratando
-$\lambda_i$ como uma distribuição de probabilidade, se escreve
-$$
-f\left(\int \mathbf{x}\,q(\mathbf{x})\,\mathrm{d}\mathbf{x}\right) \le \int f(\mathbf{x})\,q(\mathbf{x})\,\mathrm{d}\mathbf{x}.
-$$
-A função $-\ln(\cdot)$ é convexa (sua segunda derivada, $1/x^2$, é
-sempre positiva). Aplicando Jensen com $f=-\ln$ e $\mathbf{x}=p(\mathbf{Z})/q(\mathbf{Z})$
-(uma "variável aleatória" sob a distribuição $q$):
-$$
-\mathrm{KL}(q\|p) = \int q(\mathbf{Z})\left[-\ln\frac{p(\mathbf{Z})}{q(\mathbf{Z})}\right]\mathrm{d}\mathbf{Z}
-\ge -\ln\int q(\mathbf{Z})\frac{p(\mathbf{Z})}{q(\mathbf{Z})}\,\mathrm{d}\mathbf{Z}
-= -\ln\int p(\mathbf{Z})\,\mathrm{d}\mathbf{Z} = -\ln 1 = 0.
-$$
-A igualdade em Jensen ocorre exatamente quando $-\ln$ é aplicado a uma
-"variável" constante (sem variabilidade sob $q$), ou seja, quando
-$p(\mathbf{Z})/q(\mathbf{Z})$ é constante em todo o suporte — que,
-como ambas integram a $1$, força $p(\mathbf{Z})=q(\mathbf{Z})$.
-$\blacksquare$
-
-**A decomposição.** Considere um modelo com dados observados
-$\mathbf{X}$ e variáveis não observadas $\mathbf{Z}$ (que podem ser
-variáveis latentes discretas, como o $z_n$ do GMM, contínuas, ou
-parâmetros — a derivação não usa nada específico sobre a natureza de
-$\mathbf{Z}$). Para **qualquer** distribuição $q(\mathbf{Z})$
-(normalizada, $\int q(\mathbf{Z})\,\mathrm{d}\mathbf{Z}=1$), defina
-
-$$
-\mathcal{L}(q) = \int q(\mathbf{Z})\ln\left\{\frac{p(\mathbf{X},\mathbf{Z})}{q(\mathbf{Z})}\right\}\mathrm{d}\mathbf{Z}.
-$$
-
-Usando a regra do produto, $p(\mathbf{X},\mathbf{Z})=p(\mathbf{Z}\mid
-\mathbf{X})\,p(\mathbf{X})$, substituímos dentro do logaritmo:
-
-$$
-\mathcal{L}(q) = \int q(\mathbf{Z})\Big[\ln p(\mathbf{Z}\mid\mathbf{X}) + \ln p(\mathbf{X}) - \ln q(\mathbf{Z})\Big]\mathrm{d}\mathbf{Z}
-= \int q(\mathbf{Z})\ln p(\mathbf{X})\,\mathrm{d}\mathbf{Z} + \int q(\mathbf{Z})\ln\left\{\frac{p(\mathbf{Z}\mid\mathbf{X})}{q(\mathbf{Z})}\right\}\mathrm{d}\mathbf{Z}.
-$$
-
-O primeiro termo é $\ln p(\mathbf{X})\int q(\mathbf{Z})\,\mathrm{d}\mathbf{Z}=\ln p(\mathbf{X})$
-(pois $q$ é normalizada e $\ln p(\mathbf{X})$ não depende de
-$\mathbf{Z}$); o segundo é, por definição, $-\mathrm{KL}(q\|p(\cdot\mid
-\mathbf{X}))$. Logo
-
-::: {.callout-note icon=false}
-## Teorema (decomposição da evidência; PRML eq. 10.2, §10.1)
-
-Para qualquer distribuição $q(\mathbf{Z})$ normalizada,
-$$
-\ln p(\mathbf{X}) = \mathcal{L}(q) + \mathrm{KL}\big(q\,\|\,p(\mathbf{Z}\mid\mathbf{X})\big).
-$$
-:::
-
-Como $\mathrm{KL}(q\|p)\ge0$ (teorema anterior), segue imediatamente
-que $\mathcal{L}(q)\le\ln p(\mathbf{X})$ **para toda escolha de $q$** —
-$\mathcal{L}(q)$ é sempre uma cota inferior da log-evidência, chamada
-**ELBO** (*Evidence Lower Bound*). A igualdade
-$\mathcal{L}(q)=\ln p(\mathbf{X})$ ocorre exatamente quando
-$\mathrm{KL}=0$, ou seja, quando $q(\mathbf{Z})=p(\mathbf{Z}\mid
-\mathbf{X})$ — a posterior verdadeira.
-
-**Por que isso importa.** $\ln p(\mathbf{X})$ (o lado esquerdo) é fixo —
-não depende de $q$. Se a posterior $p(\mathbf{Z}\mid\mathbf{X})$ é
-intratável (não conseguimos calculá-la para obter $\mathrm{KL}=0$
-diretamente), ainda assim podemos **escolher** uma família tratável de
-distribuições $q$ e otimizar $\mathcal{L}(q)$ sobre essa família — cada
-escolha de $q$ fornece uma cota inferior **calculável** para
-$\ln p(\mathbf{X})$, tão mais apertada quanto mais perto $q$ estiver da
-posterior verdadeira.
-
-**Verificação numérica, reaproveitando o GMM $K=2$ da Aula 4.** O
-próprio GMM ajustado é um caso em que a posterior $p(z_n\mid
-\mathbf{x}_n,\theta)$ (a responsabilidade $\gamma(z_{nk})$) é
-exatamente calculável — então podemos testar a decomposição em três
-escolhas de $q$ e conferir que a diferença bate exatamente com o KL:
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Definição e Não-Negatividade da KL
-
-::: {.fragment}
-**Definição:** $\mathrm{KL}(q\|p)=-\int q(\mathbf{Z})\ln\{p(\mathbf{Z})/q(\mathbf{Z})\}\,\mathrm{d}\mathbf{Z}$.
-Não simétrica: $\mathrm{KL}(q\|p)\ne\mathrm{KL}(p\|q)$ em geral.
-:::
-
-::: {.callout-note icon=false}
-**Teorema (Gibbs):** $\mathrm{KL}(q\|p)\ge0$, igualdade sse $q=p$.
-:::
-
-::: {.fragment}
-*Prova.* $-\ln(\cdot)$ é convexa $\Rightarrow$ Jensen:
-$f(\mathbb{E}_q[X])\le\mathbb{E}_q[f(X)]$. Com $f=-\ln$,
-$X=p(\mathbf{Z})/q(\mathbf{Z})$:
-$$
-\mathrm{KL}(q\|p) \ge -\ln\int q(\mathbf{Z})\frac{p(\mathbf{Z})}{q(\mathbf{Z})}\mathrm{d}\mathbf{Z} = -\ln1 = 0.
-$$
-Igualdade sse $p/q$ constante $\Rightarrow$ (ambas normalizadas)
-$p=q$. $\blacksquare$
-:::
-
-## A Decomposição: Construção
-
-::: {.fragment}
-Para qualquer $q(\mathbf{Z})$ normalizada:
-$$
-\mathcal{L}(q) = \int q(\mathbf{Z})\ln\left\{\frac{p(\mathbf{X},\mathbf{Z})}{q(\mathbf{Z})}\right\}\mathrm{d}\mathbf{Z}
-$$
-:::
-
-::: {.fragment}
-Regra do produto, $p(\mathbf{X},\mathbf{Z})=p(\mathbf{Z}\mid\mathbf{X})p(\mathbf{X})$:
-$$
-\mathcal{L}(q) = \underbrace{\ln p(\mathbf{X})\textstyle\int q\,\mathrm{d}\mathbf{Z}}_{=\ln p(\mathbf{X})}
-\;+\; \underbrace{\textstyle\int q(\mathbf{Z})\ln\left\{\frac{p(\mathbf{Z}\mid\mathbf{X})}{q(\mathbf{Z})}\right\}\mathrm{d}\mathbf{Z}}_{=-\mathrm{KL}(q\|p(\cdot\mid\mathbf{X}))}
-$$
-:::
-
-::: {.callout-note icon=false}
-**Teorema (PRML eq. 10.2):**
-$\ln p(\mathbf{X}) = \mathcal{L}(q) + \mathrm{KL}(q\|p(\mathbf{Z}\mid\mathbf{X}))$,
-para toda $q$ normalizada.
-:::
-
-## O ELBO Como Cota Inferior
-
-::: {.fragment}
-$\mathrm{KL}\ge0 \Rightarrow \mathcal{L}(q)\le\ln p(\mathbf{X})$ para
-**toda** escolha de $q$ — $\mathcal{L}(q)$ é o **ELBO**. Igualdade sse
-$q=p(\mathbf{Z}\mid\mathbf{X})$.
-:::
-
-::: {.fragment .callout-important}
-$\ln p(\mathbf{X})$ é fixo. Se a posterior é intratável, ainda podemos
-escolher $q$ tratável e otimizar $\mathcal{L}(q)$ — cota inferior
-**calculável**, mais apertada quanto mais perto $q$ está da posterior.
-:::
-
-:::
-
-::: {.fig-resize style="width: 76%; margin: 0 auto;"}
+O Bloco 1 resolveu o problema de $K$ para o GMM — mas note o preço: a
+escolha "qual $K$?" virou a escolha "qual $\alpha_0$?". Isso não é uma
+coincidência local do GMM Bayesiano; é um padrão que se repete em todo
+método não supervisionado com algum grau de liberdade na sua forma:
+
+- No **GMM Bayesiano** (Bloco 1): o hiperparâmetro é $\alpha_0$, a
+  concentração da priori de Dirichlet sobre os pesos de mistura.
+- No **K-Means** (Aula 4, caso-limite do GMM): o hiperparâmetro é
+  diretamente $K$, o número de clusters — sem priori nenhuma para
+  suavizar a escolha, já que o K-Means não é um modelo probabilístico.
+- No **DBSCAN** (Aula 3, via HDBSCAN): os hiperparâmetros são o raio de
+  vizinhança $\epsilon$ e o número mínimo de pontos `min_samples` — já
+  discutidos então como controle da granularidade da densidade.
+
+::: {.fig-resize style="width: 82%; margin: 0 auto;"}
 ```{.tikz}
 \definecolor{barA}{RGB}{0,133,202}
 \definecolor{barB}{RGB}{224,60,49}
-\definecolor{neu}{RGB}{93,109,126}
 
-\begin{tikzpicture}[x=1cm,y=1cm]
+\begin{tikzpicture}[x=1cm,y=1cm, every node/.style={font=\small}]
 
-\draw[fill=barA] (2,0) rectangle (4,4.4);
-\draw[fill=barB] (2,4.4) rectangle (4,6);
-\draw[thick] (2,0) rectangle (4,6);
+\node[draw, fill=barA!12, rounded corners, align=center, minimum width=3.6cm, minimum height=1.5cm] (gmm) at (0,4) {GMM Bayesiano\\hiperparâmetro: $\alpha_0$\\(concentração da priori)};
+\node[draw, fill=barA!12, rounded corners, align=center, minimum width=3.6cm, minimum height=1.5cm] (km) at (4.6,4) {K-Means\\hiperparâmetro: $K$\\(sem priori)};
+\node[draw, fill=barA!12, rounded corners, align=center, minimum width=3.6cm, minimum height=1.5cm] (db) at (9.2,4) {DBSCAN\\hiperparâmetros: $\epsilon$, minPts\\(Aula 3)};
 
-\draw[decorate,decoration={brace,amplitude=8pt},thick] (1.5,6) -- (1.5,0);
-\node[font=\small] at (0.35,3.6) {$\ln p(\mathbf{X})$};
-\node[font=\scriptsize, color=neu] at (0.35,2.9) {(fixo,};
-\node[font=\scriptsize, color=neu] at (0.35,2.5) {não depende};
-\node[font=\scriptsize, color=neu] at (0.35,2.1) {de $q$)};
+\node[draw, fill=barB!12, rounded corners, align=center, minimum width=10.5cm, minimum height=1.3cm] (q) at (4.6,1.2) {Sem rótulo de gabarito: como calibrar e validar cada escolha?};
 
-\draw[decorate,decoration={brace,amplitude=6pt,mirror},thick] (4.3,0) -- (4.3,4.4);
-\node[right, font=\small] at (4.6,2.2) {$\mathcal{L}(q)$};
-\node[right, font=\scriptsize, color=neu] at (4.6,1.5) {ELBO};
-\node[right, font=\scriptsize, color=neu] at (4.6,1.1) {(cota inferior,};
-\node[right, font=\scriptsize, color=neu] at (4.6,0.7) {calculável)};
-
-\draw[decorate,decoration={brace,amplitude=6pt,mirror},thick] (4.3,4.4) -- (4.3,6);
-\node[right, font=\small] at (4.6,5.2) {$\mathrm{KL}(q\|p)$};
-\node[right, font=\scriptsize, color=neu] at (4.6,5.7) {$\ge 0$ sempre};
+\draw[->, thick] (gmm) -- (q);
+\draw[->, thick] (km) -- (q);
+\draw[->, thick] (db) -- (q);
 
 \end{tikzpicture}
 ```
 :::
 
-::: {.content-visible when-format="html" unless-format="revealjs"}
+Trocar "escolher $K$" por "calibrar hiperparâmetros de priori" não
+elimina a subjetividade — apenas a desloca de um limite **rígido**
+($K\in\{1,2,3,\dots\}$) para um limite **elástico**
+($\alpha_0\in\mathbb{R}_{>0}$, contínuo). E note que essa troca de
+problema não é exclusiva de modelos Bayesianos: o K-Means nem tenta ter
+uma priori — seu $K$ precisa ser calibrado de outro jeito inteiramente.
+**O problema central que os Blocos 3–5 resolvem:** como calibrar e
+validar cada uma dessas escolhas de estrutura, quando o domínio é não
+supervisionado e não existe uma métrica de erro supervisionada
+(acurácia, MSE) disponível?
 
-```{python}
-#| echo: false
-#| fig-align: center
+:::
 
-fig, ax = plt.subplots(figsize=(7.6, 4.6))
-labels = ["q = posterior\nverdadeira", "q = uniforme\n(50/50)", "q = posterior de\nθ 'errado'"]
-Ls = [L_posterior, L_unif, L_wrong]
-xs = np.arange(3)
+::: {.content-visible when-format="revealjs"}
 
-ax.bar(xs, Ls, color=[COR_A, COR_B, COR_LIM], width=0.55, alpha=0.9)
-ax.axhline(total_ll_k2, color="black", linestyle="--", linewidth=1.6,
-           label=f"ln p(X|θ) = {brl(total_ll_k2, 2)} (fixo)")
-for x, L in zip(xs, Ls):
-    ax.annotate(brl(L, 1), xy=(x, L), xytext=(x, L - 220 if L < total_ll_k2 - 5 else L + 40),
-                ha="center", fontsize=9)
-ax.set_xticks(xs)
-ax.set_xticklabels(labels, fontsize=9)
-ax.set_ylabel("nats")
-ax.set_title("L(q) para três escolhas de q, GMM K=2 já ajustado (Aula 4)\ntodas ≤ ln p(X|θ), com igualdade só na posterior verdadeira")
-ax.legend(loc="lower left", fontsize=9)
-plt.tight_layout()
-plt.show()
+## A Troca de Problemas
+
+::: {.fragment}
+Bloco 1 resolveu $K$ para o GMM — trocando "qual $K$?" por "qual
+$\alpha_0$?". Não é coincidência do GMM: é um padrão.
+:::
+
+::: {.fragment}
+**GMM Bayesiano:** $\alpha_0$ (concentração da priori de Dirichlet).
+**K-Means:** $K$ direto, sem priori nenhuma. **DBSCAN** (Aula 3, via
+HDBSCAN): $\epsilon$, `min_samples`.
+:::
+
+:::
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{barA}{RGB}{0,133,202}
+\definecolor{barB}{RGB}{224,60,49}
+
+\begin{tikzpicture}[x=1cm,y=1cm, every node/.style={font=\small}]
+
+\node[draw, fill=barA!12, rounded corners, align=center, minimum width=3.6cm, minimum height=1.5cm] (gmm) at (0,4) {GMM Bayesiano\\hiperparâmetro: $\alpha_0$};
+\node[draw, fill=barA!12, rounded corners, align=center, minimum width=3.6cm, minimum height=1.5cm] (km) at (4.6,4) {K-Means\\hiperparâmetro: $K$};
+\node[draw, fill=barA!12, rounded corners, align=center, minimum width=3.6cm, minimum height=1.5cm] (db) at (9.2,4) {DBSCAN\\$\epsilon$, minPts};
+
+\node[draw, fill=barB!12, rounded corners, align=center, minimum width=10.5cm, minimum height=1.3cm] (q) at (4.6,1.2) {Sem rótulo: como calibrar e validar cada escolha?};
+
+\draw[->, thick] (gmm) -- (q);
+\draw[->, thick] (km) -- (q);
+\draw[->, thick] (db) -- (q);
+
+\end{tikzpicture}
 ```
-
-Os números batem exatamente com a teoria. Com $q$ igual à posterior
-verdadeira (a responsabilidade $\gamma(z_{nk})$ da Aula 4),
-$\mathcal{L}(q)=-1204{,}0898$ — igual a $\ln p(\mathbf{X}\mid\theta)$ a
-menos de $2{,}3\times10^{-13}$, um erro de arredondamento de ponto
-flutuante, confirmando $\mathrm{KL}=0$. Com $q$ uniforme ($50\%/50\%$
-para todo paciente, ignorando os dados), $\mathcal{L}(q)=-2474{,}67$ —
-um *gap* de $1270{,}58$ nats em relação a $\ln p(\mathbf{X}\mid\theta)$,
-que bate, casa decimal por casa decimal, com
-$\mathrm{KL}(q_{\text{unif}}\|p)=1270{,}58$ calculado de forma
-totalmente independente (sem passar pela decomposição, só a definição
-de KL). Com $q$ vindo das responsabilidades de um $\theta$ deliberadamente
-errado (médias trocadas entre os dois componentes e encolhidas),
-$\mathcal{L}(q)=-3644{,}54$, um *gap* ainda maior ($2440{,}45$ nats),
-de novo batendo exatamente com o KL calculado à parte. A teoria não é
-só qualitativamente correta — é numericamente exata, a menos de erro de
-ponto flutuante.
-
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## Verificação Numérica: Três Escolhas de $q$
+## O Problema Central
 
 ::: {.fragment}
-Reaproveitando o GMM $K=2$ da Aula 4. Com $q=$ responsabilidade
-verdadeira $\gamma(z_{nk})$: $\mathcal{L}(q)=-1204{,}0898$, igual a
-$\ln p(\mathbf{X}\mid\theta)=-1204{,}0898$ (diferença $2{,}3\times
-10^{-13}$, arredondamento) $\Rightarrow \mathrm{KL}=0$.
-:::
-
-::: {.fragment}
-Com $q$ uniforme ($50/50$, ignora os dados): $\mathcal{L}(q)=-2474{,}67$
-— *gap* $=1270{,}58$ nats, batendo exatamente com
-$\mathrm{KL}(q_{\text{unif}}\|p)$ calculado independentemente.
-:::
-
-::: {.fragment}
-Com $q$ de um $\theta$ errado (médias trocadas/encolhidas):
-$\mathcal{L}(q)=-3644{,}54$ — *gap* $=2440{,}45$ nats, de novo batendo
-exatamente com o KL calculado à parte.
-:::
-
-::: {.fragment .callout-note}
-Não é só qualitativo: a teoria bate numericamente exata, a menos de
-erro de ponto flutuante.
-:::
-
-:::
-
-## Pergunta
-
-::: {.callout-tip}
-## Se KL pudesse ser negativa para algum q, o que aconteceria com o papel do ELBO como cota inferior?
-
-Releia a decomposição $\ln p(\mathbf{X})=\mathcal{L}(q)+\mathrm{KL}(q\|p)$
-e pense no que muda se o segundo termo pudesse ser negativo.
-
-- □ Se $\mathrm{KL}(q\|p)$ pudesse ser negativa para alguma escolha de
-  $q$, seria possível que $\mathcal{L}(q) > \ln p(\mathbf{X})$ para essa
-  escolha — violando o papel do ELBO como cota inferior.
-- □ No caso-limite em que a família escolhida para $q(\mathbf{Z})$ é
-  rica o suficiente para incluir a própria posterior exata
-  $p(\mathbf{Z}\mid\mathbf{X})$, o máximo de $\mathcal{L}(q)$ sobre essa
-  família é exatamente $\ln p(\mathbf{X})$, com $\mathrm{KL}=0$.
-- □ Como $\mathcal{L}(q)\le\ln p(\mathbf{X})$ para toda escolha de $q$,
-  o valor de $\mathcal{L}(q)$ obtido ao maximizar numericamente pode ser
-  usado diretamente como um substituto sempre conservador de
-  $\ln p(\mathbf{X})$ ao comparar dois modelos **diferentes** entre si.
-- □ Numa Rede Bayesiana com variáveis ocultas ajustada por EM (não um
-  GMM), a mesma decomposição
-  $\ln p(\mathbf{X})=\mathcal{L}(q)+\mathrm{KL}(q\|p)$ vale sem
-  alteração, pois a derivação não usa nenhuma propriedade específica de
-  misturas gaussianas.
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Resposta
-
-::: {.callout-tip}
-## Resposta — KL, ELBO e seus limites
-
-- ✔ Segue diretamente da decomposição: se $\mathrm{KL}<0$ fosse
-  possível, $\mathcal{L}(q)=\ln p(\mathbf{X})-\mathrm{KL}(q\|p)$ ficaria
-  **maior** que $\ln p(\mathbf{X})$ — o teorema de não-negatividade é
-  exatamente o que impede isso.
-- ✔ Exatamente a condição de igualdade do teorema da decomposição.
-- ✗ A cota vale para o **mesmo** modelo/mesmo $\mathbf{X}$ — comparando
-  dois modelos diferentes, o "aperto" da cota (o próprio KL) pode ser
-  bem diferente entre eles, podendo inverter a comparação; usar
-  $\mathcal{L}(q)$ como substituto direto de $\ln p(\mathbf{X})$ entre
-  modelos distintos não é automaticamente seguro.
-- ✔ A derivação usa só regra do produto e normalização de $q$ — nenhuma
-  hipótese específica de mistura gaussiana.
-:::
-
-::: {.fragment}
-**Voltando à pergunta:** o ELBO é uma cota sempre válida e sempre
-calculável — mas comparar ELBOs de modelos diferentes exige cuidado, já
-que a folga (o KL) pode não ser comparável entre eles.
-:::
-
-:::
-
-# O EM da Aula 4 é Subida de Coordenadas no ELBO
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-A decomposição do Bloco 5 foi escrita na forma mais geral (Bayesiana
-plena, com $\theta$ absorvido em $\mathbf{Z}$). Para reencontrar o
-Algoritmo EM exatamente como a Aula 4 o apresentou — com $\theta$ como
-parâmetro, não como variável aleatória —, especializamos a mesma
-decomposição mantendo $\theta$ de fora de $\mathbf{Z}$ (PRML §9.4):
-para qualquer $q(\mathbf{Z})$ normalizada e qualquer $\theta$,
-
-$$
-\ln p(\mathbf{X}\mid\theta) = \mathcal{L}(q,\theta) + \mathrm{KL}(q\|p),
-\qquad
-\mathcal{L}(q,\theta) = \int q(\mathbf{Z})\ln\left\{\frac{p(\mathbf{X},\mathbf{Z}\mid\theta)}{q(\mathbf{Z})}\right\}\mathrm{d}\mathbf{Z},
-\qquad
-\mathrm{KL}(q\|p) = -\int q(\mathbf{Z})\ln\left\{\frac{p(\mathbf{Z}\mid\mathbf{X},\theta)}{q(\mathbf{Z})}\right\}\mathrm{d}\mathbf{Z}.
-$$
-
-A demonstração é idêntica à do Bloco 5 (regra do produto,
-$p(\mathbf{X},\mathbf{Z}\mid\theta)=p(\mathbf{Z}\mid\mathbf{X},\theta)
-p(\mathbf{X}\mid\theta)$), só carregando $\theta$ como argumento extra
-em toda parte — não repetimos os passos.
-
-**O Passo E é, exatamente, maximizar $\mathcal{L}$ sobre $q$.** Fixe
-$\theta=\theta^{\text{old}}$ (o valor corrente dos parâmetros). Como
-$\ln p(\mathbf{X}\mid\theta^{\text{old}})$ não depende de $q$, maximizar
-$\mathcal{L}(q,\theta^{\text{old}})$ sobre $q$ é equivalente a
-**minimizar** $\mathrm{KL}(q\|p(\cdot\mid\mathbf{X},\theta^{\text{old}}))$
-sobre $q$ — e, pelo Teorema de não-negatividade (Bloco 5), esse mínimo
-é exatamente $0$, atingido quando
-$$
-q(\mathbf{Z}) = p(\mathbf{Z}\mid\mathbf{X},\theta^{\text{old}}).
-$$
-Para o GMM da Aula 4, $\mathbf{Z}=\{z_n\}$, e essa posterior
-$p(z_{nk}=1\mid\mathbf{x}_n,\theta^{\text{old}})$ **é**, por definição,
-a responsabilidade $\gamma(z_{nk})$ — o objeto que o Passo E da Aula 4
-calculava via Bayes. Ou seja: o Passo E não é um truque separado, é a
-maximização exata de $\mathcal{L}(q,\theta)$ sobre $q$, com $\theta$
-congelado.
-
-**O Passo M é, exatamente, maximizar $\mathcal{L}$ sobre $\theta$.**
-Com $q$ fixo (na posterior recém-calculada), substituir de volta em
-$\mathcal{L}(q,\theta)$ dá
-
-$$
-\mathcal{L}(q,\theta) = \int q(\mathbf{Z})\ln p(\mathbf{X},\mathbf{Z}\mid\theta)\,\mathrm{d}\mathbf{Z} - \int q(\mathbf{Z})\ln q(\mathbf{Z})\,\mathrm{d}\mathbf{Z}
-= \mathbb{E}_q[\ln p(\mathbf{X},\mathbf{Z}\mid\theta)] + \text{const},
-$$
-
-onde a constante (a entropia negativa de $q$) não depende de $\theta$.
-Maximizar $\mathcal{L}(q,\theta)$ sobre $\theta$, portanto, é o mesmo
-que maximizar $\mathbb{E}_q[\ln p(\mathbf{X},\mathbf{Z}\mid\theta)]$ — a
-esperança da log-verossimilhança completa sob $q$ — que é exatamente a
-quantidade que a Aula 4 maximizava no Passo M (a soma ponderada por
-$\gamma(z_{nk})$ que levou às atualizações de $\mu_k$, $\Sigma_k$,
-$\pi_k$).
-
-::: {.callout-note icon=false}
-## Teorema (o EM nunca piora a log-verossimilhança)
-
-Sejam $\theta^{\text{old}}$ e $\theta^{\text{new}}$ os parâmetros antes
-e depois de uma iteração completa (Passo E seguido de Passo M) do
-Algoritmo EM. Então $\ln p(\mathbf{X}\mid\theta^{\text{new}})\ge
-\ln p(\mathbf{X}\mid\theta^{\text{old}})$.
-:::
-
-*Demonstração.* Seja $q^\star=p(\mathbf{Z}\mid\mathbf{X},\theta^{\text{old}})$,
-a distribuição obtida pelo Passo E. Por construção do Passo E,
-$\mathcal{L}(q^\star,\theta^{\text{old}}) =
-\ln p(\mathbf{X}\mid\theta^{\text{old}})$ (KL nulo nesse ponto). O
-Passo M maximiza $\mathcal{L}(q^\star,\theta)$ sobre $\theta$, logo
-$\mathcal{L}(q^\star,\theta^{\text{new}}) \ge \mathcal{L}(q^\star,\theta^{\text{old}})
-= \ln p(\mathbf{X}\mid\theta^{\text{old}})$. Por fim, pela decomposição
-geral (válida para *qualquer* $q$, em particular $q^\star$, e qualquer
-$\theta$, em particular $\theta^{\text{new}}$) e pela não-negatividade
-do KL:
-$$
-\ln p(\mathbf{X}\mid\theta^{\text{new}}) = \mathcal{L}(q^\star,\theta^{\text{new}}) + \mathrm{KL}(q^\star\|p(\cdot\mid\mathbf{X},\theta^{\text{new}}))
-\ge \mathcal{L}(q^\star,\theta^{\text{new}}) \ge \ln p(\mathbf{X}\mid\theta^{\text{old}}).
-$$
-Encadeando as duas desigualdades, $\ln p(\mathbf{X}\mid\theta^{\text{new}})
-\ge \ln p(\mathbf{X}\mid\theta^{\text{old}})$. $\blacksquare$
-
-Esse resultado já era mencionado na Aula 4 (cada rodada do EM
-"garantidamente não piorando a log-verossimilhança") — mas lá ficou
-como uma afirmação sem demonstração completa. Agora ela está provada, e
-a prova revela exatamente **por que**: a subida acontece porque cada
-Passo E fecha o KL a zero (tocando o teto $\ln p(\mathbf{X}\mid\theta)$),
-e cada Passo M só pode aumentar (ou manter) o piso $\mathcal{L}$, que o
-Passo E seguinte vai alcançar de novo.
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## A Mesma Decomposição, com $\theta$ como Parâmetro
-
-::: {.fragment}
-Especializando a decomposição do Bloco 5 (PRML §9.4): para qualquer
-$q(\mathbf{Z})$ e qualquer $\theta$,
-$$
-\ln p(\mathbf{X}\mid\theta) = \mathcal{L}(q,\theta) + \mathrm{KL}(q\|p(\cdot\mid\mathbf{X},\theta))
-$$
-mesma prova do Bloco 5, só com $\theta$ como argumento extra em toda
-parte.
-:::
-
-## O Passo E = Maximizar $\mathcal{L}$ sobre $q$
-
-::: {.fragment}
-Fixe $\theta=\theta^{\text{old}}$. $\ln p(\mathbf{X}\mid\theta^{\text{old}})$
-não depende de $q$ $\Rightarrow$ maximizar $\mathcal{L}(q,\theta^{\text{old}})$
-= minimizar $\mathrm{KL}(q\|p)$.
+Limite **rígido** ($K\in\{1,2,\dots\}$) $\to$ limite **elástico**
+($\alpha_0\in\mathbb{R}_{>0}$) — não elimina subjetividade, só desloca.
 :::
 
 ::: {.fragment .callout-important}
-Mínimo do KL é $0$ (Bloco 5), atingido em
-$q(\mathbf{Z})=p(\mathbf{Z}\mid\mathbf{X},\theta^{\text{old}})$ — para o
-GMM, isso **é** $\gamma(z_{nk})$: o Passo E da Aula 4.
+K-Means nem tem priori — seu $K$ precisa de outra calibração inteira.
+Sem métrica supervisionada (acurácia, MSE), como calibrar e validar
+qualquer uma dessas escolhas? Blocos 3–5 respondem.
 :::
 
-## O Passo M = Maximizar $\mathcal{L}$ sobre $\theta$
-
-::: {.fragment}
-Com $q$ fixo:
-$$
-\mathcal{L}(q,\theta) = \mathbb{E}_q[\ln p(\mathbf{X},\mathbf{Z}\mid\theta)] + \text{const}
-$$
-(a constante, entropia de $q$, não depende de $\theta$).
 :::
 
-::: {.fragment}
-Maximizar $\mathcal{L}$ sobre $\theta$ = maximizar
-$\mathbb{E}_q[\ln p(\mathbf{X},\mathbf{Z}\mid\theta)]$ — exatamente a
-soma ponderada por $\gamma(z_{nk})$ que a Aula 4 maximizava no Passo M.
-:::
+# Validação Empírica: Clusterização "Dura"
 
-## Teorema: o EM Nunca Piora a Log-Verossimilhança
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Para K-Means e DBSCAN, não existe log-verossimilhança nem ELBO — a
+única via disponível é **empírica**. Antes de qualquer métrica, um
+passo preliminar que esta disciplina ainda não tinha precisado até
+agora: **separar os dados em dois subconjuntos disjuntos**. Sorteamos
+aleatoriamente uma fração dos pontos originais para formar o
+**conjunto de treino** — usado só para *ajustar* o modelo (encontrar os
+centroides do K-Means, ou aplicar as regras de vizinhança do DBSCAN) —
+e reservamos o restante, nunca tocado nesse ajuste, como **conjunto de
+validação** — usado só para *medir* a qualidade do resultado depois.
+Essa separação existe por um motivo preciso, já anunciado na Abertura:
+qualquer métrica calculada nos mesmos pontos que moldaram o modelo
+tende a favorecer o próprio ajuste (o K-Means, por exemplo, já
+minimiza a distorção interna nos pontos de treino, por construção) —
+isso não diz nada sobre se a estrutura encontrada é real ou generaliza
+para pacientes novos. Medir a qualidade em pontos que o algoritmo nunca
+viu durante o ajuste é o único jeito de testar isso honestamente.
+
+Com essa separação em mãos, a ideia central: redefinir o que
+"validação" significa quando não há rótulo. Em vez de medir acerto
+contra um gabarito, medimos **estabilidade topológica** — o quanto a
+estrutura descoberta no treino se mantém coerente em dados nunca vistos.
+A receita: ajustar (encontrar centroides/regras) só no **conjunto de
+treino**, aplicar essas regras ao **conjunto de validação**, e medir a
+qualidade da partição resultante ali — nunca no treino.
+
+**Duas métricas intrínsecas.** Ambas usam só a geometria dos pontos e
+dos rótulos de cluster atribuídos, sem depender de verossimilhança:
 
 ::: {.callout-note icon=false}
-**Teorema:** $\theta^{\text{old}}\to\theta^{\text{new}}$ por uma
-iteração completa do EM $\Rightarrow$
-$\ln p(\mathbf{X}\mid\theta^{\text{new}})\ge\ln p(\mathbf{X}\mid\theta^{\text{old}})$.
+## Definição (Coeficiente de Silhueta — Rousseeuw, 1987)
+
+Para um ponto $\mathbf{x}_i$ atribuído ao cluster $C_i$, sejam
+$a(i)$ a distância média de $\mathbf{x}_i$ aos demais pontos do **mesmo**
+cluster (coesão) e $b(i)$ a menor distância média de $\mathbf{x}_i$
+aos pontos de **outro** cluster, minimizada sobre os clusters vizinhos
+(separação). O coeficiente de silhueta do ponto é
+$$
+s(i) = \frac{b(i)-a(i)}{\max\{a(i),b(i)\}} \in[-1,1],
+$$
+e o coeficiente da partição é a média de $s(i)$ sobre todos os pontos.
+Valores próximos de $1$ indicam clusters bem separados e coesos;
+próximos de $0$, clusters sobrepostos; negativos, pontos provavelmente
+mal atribuídos.
+:::
+
+::: {.callout-note icon=false}
+## Definição (Índice de Davies-Bouldin — Davies & Bouldin, 1979)
+
+Para cada cluster $C_k$ (com $|C_k|$ pontos), defina primeiro dois
+objetos auxiliares, ambos calculados só com os pontos daquele cluster:
+
+- o **centroide** $\mathbf{c}_k := \dfrac{1}{|C_k|}\sum_{\mathbf{x}\in
+  C_k}\mathbf{x}$ — o ponto médio dos pontos do cluster (o mesmo tipo
+  de centroide que o K-Means já calcula no seu próprio ajuste);
+- a **dispersão interna** $\sigma_k := \dfrac{1}{|C_k|}\sum_{\mathbf{x}
+  \in C_k}\|\mathbf{x}-\mathbf{c}_k\|$ — a distância média dos pontos
+  do cluster ao seu próprio centroide, ou seja, o quão "espalhado" é
+  aquele cluster ($\sigma_k$ grande = pontos tipicamente longe do
+  centro; $\sigma_k$ pequeno = cluster compacto).
+
+Com $\mathbf{c}_k$ e $\sigma_k$ definidos, a **similaridade** entre um
+par de clusters $j,k$ é
+$$
+R_{jk} := \frac{\sigma_j+\sigma_k}{\|\mathbf{c}_j-\mathbf{c}_k\|}.
+$$
+O numerador soma a dispersão dos dois clusters; o denominador é a
+distância entre seus centros. $R_{jk}$ fica **grande** quando os dois
+clusters são muito dispersos (numerador grande) **ou** seus centros
+estão muito próximos (denominador pequeno) — em ambos os casos, sinal
+de que $j$ e $k$ são difíceis de distinguir um do outro. O índice de
+Davies-Bouldin compara cada cluster ao seu **pior** (mais parecido)
+vizinho, e tira a média sobre todos os $K$ clusters:
+$$
+\mathrm{DB} := \frac{1}{K}\sum_{k=1}^K \max_{j\ne k} R_{jk}.
+$$
+Diferente da Silhueta, **menor é melhor**: um bom particionamento
+minimiza essa pior semelhança, em média.
+:::
+
+**Técnica de perturbação e consistência.** Ajustar no treino e medir na
+validação já é, em si, um teste de perturbação: se a estrutura
+encontrada é real (não um artefato do ruído específico da amostra de
+treino), ela deve se manter coerente quando aplicada a uma amostra
+diferente da mesma população. Estruturas geradas por sobreajuste — um
+cluster que só existe porque um punhado de pontos de treino, por acaso,
+formou um agrupamento — tendem a desaparecer (Silhueta cai, DB sobe)
+quando confrontadas com dados novos.
+
+**Aplicando ao Breast Cancer Wisconsin.** Dividimos os $569$ pacientes
+em treino ($N=398$) e validação ($N=171$, $30\%$, nunca usados no
+ajuste). Para cada $K=2,\dots,8$, ajustamos K-Means só no treino,
+aplicamos os centroides à validação, e calculamos Silhueta e
+Davies-Bouldin **só na validação**:
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Validação sem Rótulo: Redefinição
+
+::: {.fragment}
+K-Means/DBSCAN não têm verossimilhança — única via é **empírica**.
+Passo preliminar novo: **separar os dados** — sortear uma fração como
+**treino** (ajusta o modelo) e reservar o resto, nunca tocado no
+ajuste, como **validação** (só mede o resultado depois).
+:::
+
+::: {.fragment .callout-important}
+Por quê: métrica calculada nos mesmos pontos que moldaram o modelo
+favorece o próprio ajuste (mesmo problema da Abertura) — medir em
+pontos nunca vistos é o único jeito honesto de testar generalização.
 :::
 
 ::: {.fragment}
-*Prova.* $q^\star=p(\mathbf{Z}\mid\mathbf{X},\theta^{\text{old}})$
-(Passo E) $\Rightarrow \mathcal{L}(q^\star,\theta^{\text{old}})=
-\ln p(\mathbf{X}\mid\theta^{\text{old}})$.
+"Validação" aqui não é acerto contra gabarito, é **estabilidade
+topológica**: a estrutura do treino se mantém em dados novos?
 :::
 
 ::: {.fragment}
-Passo M maximiza sobre $\theta$:
-$\mathcal{L}(q^\star,\theta^{\text{new}})\ge\mathcal{L}(q^\star,\theta^{\text{old}})$.
+Receita: ajustar (centroides/regras) só no **treino**, aplicar à
+**validação**, medir a qualidade da partição só ali.
 :::
 
+## Coeficiente de Silhueta
+
 ::: {.fragment}
-Decomposição + KL$\ge0$:
-$\ln p(\mathbf{X}\mid\theta^{\text{new}})\ge\mathcal{L}(q^\star,\theta^{\text{new}})$.
-Encadeando as três: $\ln p(\mathbf{X}\mid\theta^{\text{new}})\ge
-\ln p(\mathbf{X}\mid\theta^{\text{old}})$. $\blacksquare$
+Rousseeuw (1987): $a(i)$ = coesão (distância média ao próprio cluster);
+$b(i)$ = separação (distância média ao cluster vizinho mais próximo).
+$$
+s(i) = \frac{b(i)-a(i)}{\max\{a(i),b(i)\}}\in[-1,1]
+$$
 :::
 
 ::: {.fragment .callout-note}
-A Aula 4 já **afirmava** isso ("garantidamente não piora") sem prova
-completa — agora está demonstrado, e a prova revela o porquê: Passo E
-fecha o KL a zero; Passo M só sobe (ou mantém) o piso $\mathcal{L}$.
+Próximo de $1$: clusters bem separados/coesos. Próximo de $0$:
+sobrepostos. Negativo: ponto provavelmente mal atribuído.
+:::
+
+## Índice de Davies-Bouldin: Dois Objetos Auxiliares
+
+::: {.fragment}
+Para cada cluster $C_k$: **centroide**
+$\mathbf{c}_k:=\frac{1}{|C_k|}\sum_{\mathbf{x}\in C_k}\mathbf{x}$ (ponto
+médio do cluster) e **dispersão interna**
+$\sigma_k:=\frac{1}{|C_k|}\sum_{\mathbf{x}\in C_k}\|\mathbf{x}-\mathbf{c}_k\|$
+(distância média dos pontos ao próprio centroide — quão "espalhado" é
+o cluster).
+:::
+
+## Índice de Davies-Bouldin: A Fórmula
+
+::: {.fragment}
+Davies & Bouldin (1979): similaridade entre dois clusters
+$R_{jk}=\dfrac{\sigma_j+\sigma_k}{\|\mathbf{c}_j-\mathbf{c}_k\|}$ —
+numerador soma a dispersão dos dois, denominador é a distância entre
+seus centros. $R_{jk}$ grande = clusters dispersos **ou** centros
+próximos — difíceis de distinguir.
+:::
+
+::: {.fragment}
+$$
+\mathrm{DB} = \frac1K\sum_k \max_{j\ne k} R_{jk}
+$$
+Cada cluster comparado ao seu **pior** (mais parecido) vizinho, média
+sobre os $K$ clusters.
+:::
+
+::: {.fragment .callout-important}
+**Menor é melhor** aqui (diferente da Silhueta).
+:::
+
+## Perturbação e Consistência
+
+::: {.fragment}
+Ajustar no treino, medir na validação **já é** um teste de perturbação:
+estrutura real se mantém numa amostra diferente da mesma população;
+estrutura de sobreajuste desaparece (Silhueta cai, DB sobe).
+:::
+
+## No Breast Cancer Wisconsin
+
+::: {.fragment}
+Treino $N=398$, validação $N=171$ ($30\%$, nunca usada no ajuste).
+K-Means para $K=2,\dots,8$ no treino, Silhueta/DB calculados só na
+validação.
 :::
 
 :::
 
 ::: {.fig-resize style="width: 88%; margin: 0 auto;"}
-```{.tikz}
-\definecolor{barA}{RGB}{0,133,202}
-\definecolor{barB}{RGB}{224,60,49}
-\definecolor{neu}{RGB}{93,109,126}
+```{python}
+#| echo: false
+#| fig-align: center
 
-\begin{tikzpicture}[x=1cm,y=1cm]
+fig, axes = plt.subplots(1, 2, figsize=(9.6, 4.0))
 
-\draw[dashed, thick, color=neu] (0.6,6) -- (10.4,6);
-\node[font=\small, color=neu] at (2.9,6.4) {$\ln p(\mathbf{X}\mid\theta^{\text{old}})$ (mesma altura nos dois painéis — $\theta$ fixo durante o Passo E)};
+axes[0].plot(Ks_km, sil_val, marker="o", color=COR_A, linewidth=2, markersize=6)
+axes[0].axvline(K_star_sil, color=COR_NEU, linestyle=":", linewidth=1.4)
+axes[0].set_xlabel("K")
+axes[0].set_ylabel("Silhueta (validação)")
+axes[0].set_title("Silhueta — maior é melhor")
 
-\draw[fill=barA] (1.2,0) rectangle (3.4,3.3);
-\draw[fill=barB] (1.2,3.3) rectangle (3.4,6);
-\draw[thick] (1.2,0) rectangle (3.4,6);
-\node[font=\small] at (2.3,-0.6) {Antes do Passo E: $q$ arbitrário};
-\node[right, font=\scriptsize] at (3.55,1.65) {$\mathcal{L}(q,\theta^{\text{old}})$};
-\node[right, font=\scriptsize] at (3.55,4.65) {$\mathrm{KL}>0$};
+axes[1].plot(Ks_km, db_val, marker="s", color=COR_B, linewidth=2, markersize=6)
+axes[1].axvline(K_star_sil, color=COR_NEU, linestyle=":", linewidth=1.4)
+axes[1].set_xlabel("K")
+axes[1].set_ylabel("Davies-Bouldin (validação)")
+axes[1].set_title("Davies-Bouldin — menor é melhor")
 
-\draw[fill=barA] (7.2,0) rectangle (9.4,6);
-\draw[thick] (7.2,0) rectangle (9.4,6);
-\node[font=\small] at (8.3,-0.6) {Depois do Passo E: $q=p(\mathbf{Z}\mid\mathbf{X},\theta^{\text{old}})$};
-\node[right, font=\scriptsize] at (9.55,3.6) {$\mathcal{L}(q,\theta^{\text{old}})=\ln p(\mathbf{X}\mid\theta^{\text{old}})$};
-\node[right, font=\scriptsize] at (9.55,2.6) {$\mathrm{KL}=0$};
-
-\draw[->, thick, color=neu] (3.9,3) -- (6.7,3);
-\node[font=\scriptsize, color=neu] at (5.3,3.4) {Passo E};
-
-\end{tikzpicture}
+fig.suptitle("K-Means ajustado no treino, métricas calculadas na validação", y=1.02)
+plt.tight_layout()
+plt.show()
 ```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+As duas métricas concordam: a Silhueta na validação é máxima em $K=2$
+($0{,}593$) e cai monotonicamente até $K=8$ ($0{,}315$); o
+Davies-Bouldin na validação é mínimo em $K=2$ ($0{,}590$) e sobe daí em
+diante (chegando a $0{,}979$ em $K=8$). Note que **nenhuma das duas
+métricas usa rótulo algum** — ambas são calculadas só a partir da
+geometria dos pontos de validação e da partição que o K-Means (treinado
+no treino) atribuiu a eles. O acordo entre duas métricas independentes,
+medidas num conjunto nunca visto no ajuste, é a evidência de que
+$K=2$ é uma escolha estrutural real, não um artefato do treino.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Que as Duas Métricas Dizem
+
+::: {.fragment}
+Silhueta (validação): máxima em $K=2$ ($0{,}593$), cai até $K=8$
+($0{,}315$).
+:::
+
+::: {.fragment}
+Davies-Bouldin (validação): mínimo em $K=2$ ($0{,}590$), sobe até $K=8$
+($0{,}979$).
+:::
+
+::: {.fragment .callout-note}
+Nenhuma métrica usa rótulo. Duas métricas independentes concordando,
+medidas em dados nunca vistos no ajuste, é evidência de estrutura real
+— não artefato do treino.
+:::
+
 :::
 
 ## Pergunta
 
 ::: {.callout-tip}
-## O Passo E sempre fecha o KL a zero — isso significa que o EM sempre encontra o máximo global da log-verossimilhança?
+## Se calculássemos a Silhueta e o Davies-Bouldin usando os próprios pontos de TREINO em vez da validação, o resultado seria uma validação igualmente confiável da escolha de K?
 
-Separe "a cada passo, nunca piora" de "converge para o melhor ponto
-possível entre todos os pontos possíveis".
+Pense no que diferencia "medir a qualidade da partição nos mesmos pontos
+que a definiram" de "medir numa amostra independente".
 
-- □ Se, no Passo M, em vez de maximizar $\mathcal{L}(q,\theta)$ sobre
-  $\theta$ mantendo $q$ fixo, apenas um passo parcial de gradiente fosse
-  dado (sem maximizar completamente), a garantia de que a
-  log-verossimilhança nunca piora a cada iteração deixaria de valer
-  automaticamente pela mesma prova usada nesta aula.
-- □ No caso-limite em que a posterior $p(\mathbf{Z}\mid\mathbf{X},\theta)$
-  já é exatamente igual a $q$ antes mesmo do Passo E ($\mathrm{KL}$ já é
-  $0$), o Passo E não altera $q$, e a iteração se reduz a só o Passo M.
-- □ Como o Passo E sempre fecha o KL exatamente a zero, o Algoritmo EM
-  encontra sempre o máximo **global** da log-verossimilhança, nunca
-  ficando preso num máximo local.
-- □ O mesmo argumento de subida de coordenadas no ELBO (Passo E fixa
-  $q$, Passo M fixa $\theta$, alternando) se aplica ao ajuste de um
-  Modelo de Markov Oculto (HMM) por Baum-Welch, que também alterna entre
-  estimar probabilidades posteriores de estados ocultos e reestimar
-  parâmetros de transição/emissão.
+- □ Calcular Silhueta/Davies-Bouldin no próprio conjunto de treino
+  mediria só o quão bem o K-Means otimizou sua função objetivo ali —
+  não diria nada sobre se essa estrutura generaliza, o mesmo problema
+  estrutural da log-verossimilhança de treino na Abertura.
+- □ No caso-limite $K=N$ (um cluster por ponto de treino), a Silhueta
+  calculada no próprio treino fica matematicamente indefinida, pois
+  cada cluster teria um único ponto e $a(i)$ não seria calculável.
+- □ Como a Silhueta e o Davies-Bouldin são métricas puramente
+  geométricas (não usam verossimilhança), elas são igualmente
+  confiáveis calculadas no treino ou na validação, diferente do que
+  acontece com log-verossimilhança.
+- □ A mesma lógica de "ajustar num conjunto, validar estabilidade em
+  outro" se aplica a escolher o número de fatores latentes de uma
+  Análise de Componentes Principais (PCA) por variância explicada
+  reconstruída em dados de validação.
 :::
 
 ::: {.content-visible when-format="revealjs"}
@@ -1628,27 +1411,459 @@ possível entre todos os pontos possíveis".
 ## Resposta
 
 ::: {.callout-tip}
-## Resposta — EM, subida de coordenadas e ótimo global
+## Resposta — treino vs. validação nas métricas intrínsecas
 
-- ✔ A prova usada depende exatamente de o Passo M **maximizar**
-  $\mathcal{L}$ sobre $\theta$ (para garantir
-  $\mathcal{L}(q^\star,\theta^{\text{new}})\ge\mathcal{L}(q^\star,\theta^{\text{old}})$)
-  — um passo parcial não garante essa desigualdade pela mesma prova
-  (é a base do "EM Generalizado", que exige só não-decréscimo).
-- ✔ Consequência trivial: se $\mathrm{KL}$ já é $0$, o Passo E encontra
-  $q$ igual ao que já tinha — nada muda.
-- ✗ Subida de coordenadas garante **não-decréscimo monotônico**, nunca
-  otimalidade global — o EM pode (e na prática às vezes fica) preso num
-  máximo local, por isso a Aula 4 já recomendava múltiplos reinícios.
-- ✔ Baum-Welch é exatamente uma instância do EM para HMMs — alterna
-  posteriores de estado oculto (Passo E) e reestimação de parâmetros de
-  transição/emissão (Passo M), mesma estrutura de subida de coordenadas.
+- ✔ Métricas calculadas no treino testam só o ajuste, nunca a
+  generalização — o mesmo problema estrutural da Abertura, agora
+  aplicado a métricas geométricas em vez de log-verossimilhança.
+- ✔ Com um ponto por cluster, $a(i)$ (distância média a **outros**
+  pontos do mesmo cluster) não tem termos para calcular — a Silhueta
+  perde sentido matemático nesse extremo.
+- ✗ Ser "puramente geométrica" não isenta a métrica do mesmo problema:
+  qualquer métrica calculada nos dados que definiram a partição tende a
+  favorecer partições mais finas/ajustadas àquele conjunto específico.
+- ✔ Mesmo princípio: escolher a dimensão latente de uma PCA por erro de
+  reconstrução em validação, não em treino (erro de treino sempre cai
+  com mais componentes).
 :::
 
 ::: {.fragment}
-**Voltando à pergunta:** não — o EM garante só que cada iteração não
-piora, nunca que o resultado final é o ótimo global. É por isso que
-múltiplos reinícios (já usados nesta e na Aula 4) continuam necessários.
+**Voltando à pergunta:** não — medir no próprio treino testaria só o
+ajuste, o mesmo erro conceitual da Abertura. A validação genuína exige
+dados que o algoritmo nunca usou para decidir centroides/regras.
+:::
+
+:::
+
+# Validação por Verossimilhança: Modelos Probabilísticos
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Para modelos probabilísticos (GMM, e por extensão qualquer modelo com
+$p(\mathbf{x}\mid\theta)$ calculável), a avaliação empírica migra da
+topologia (Bloco 3) para a **probabilidade direta**: em vez de medir
+coesão/separação geométrica, congela-se o que foi aprendido no treino e
+avalia-se a **log-verossimilhança preditiva** (ou o próprio ELBO, no
+caso Bayesiano) nas amostras de validação — nunca ajustadas.
+
+**Mecânica.** Ajuste o GMM com $K$ componentes só no conjunto de
+treino, obtendo $\hat\theta_K$. Calcule $\ln p(\mathbf{X}_{\text{val}}
+\mid\hat\theta_K)=\sum_{n\in\text{val}}\ln p(\mathbf{x}_n\mid
+\hat\theta_K)$ — a mesma fórmula de verossimilhança do treino, só que
+avaliada em pontos que $\hat\theta_K$ nunca viu. **Diagnóstico de
+sub/sobreajuste:** se o modelo é complexo demais para o treino (um
+componente colapsando sobre poucos pontos, a mesma singularidade da
+Abertura), ele concentra densidade quase infinita nesses pontos
+específicos — mas, ao avaliar pontos de validação (que não coincidem
+com os de colapso), a densidade ali é baixa, e a log-verossimilhança de
+validação despenca. É esse **descolamento entre as duas curvas** — não
+o valor absoluto de nenhuma delas — que sinaliza sobreajuste.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Da Topologia à Probabilidade Direta
+
+::: {.fragment}
+Modelos probabilísticos (GMM): congelar $\hat\theta_K$ (aprendido no
+treino), avaliar $\ln p(\mathbf{X}_{\text{val}}\mid\hat\theta_K)$ —
+mesma fórmula de verossimilhança, pontos nunca vistos.
+:::
+
+::: {.fragment .callout-important}
+Diagnóstico: modelo complexo demais colapsa densidade sobre poucos
+pontos de treino (singularidade da Abertura) — na validação, esses
+pontos não existem, e a log-verossimilhança de validação despenca. O
+**descolamento** entre as curvas sinaliza sobreajuste.
+:::
+
+:::
+
+::: {.fig-resize style="width: 42%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(7.6, 4.4))
+ax.plot(Ks, loglik_train, marker="o", color=COR_A, linewidth=2,
+        markersize=6, label="log-verossimilhança de treino")
+ax.plot(Ks, loglik_val, marker="s", color=COR_B, linewidth=2,
+        markersize=6, label="log-verossimilhança de validação")
+ax.axvline(K_star_val, color=COR_NEU, linestyle=":", linewidth=1.4)
+ax.annotate(f"máximo em K={K_star_val}", xy=(K_star_val, loglik_val.max()),
+            xytext=(3.2, -395), fontsize=9, color=COR_B)
+ax.set_xlabel("K (número de componentes)")
+ax.set_ylabel("log-verossimilhança (nats)")
+ax.set_title("GMM ajustado só no treino: log-verossimilhança de treino vs. validação")
+ax.set_xticks(Ks)
+ax.legend(loc="center right", fontsize=9)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O padrão é nítido: a log-verossimilhança de **treino** sobe
+monotonicamente, de $-938{,}05$ ($K=1$) a $-808{,}51$ ($K=10$) — o
+mesmo comportamento da Abertura, agora restrito aos $398$ pontos de
+treino. A log-verossimilhança de **validação**, calculada nos $171$
+pontos nunca ajustados, atinge seu **máximo em $K=2$** ($-361{,}95$) e,
+daí em diante, oscila e piora (chegando a $-376{,}42$ em $K=10$) — a
+curva de validação **não** acompanha a de treino. Esse descolamento é
+exatamente o sintoma de sobreajuste que a Abertura previu, agora
+mostrado de forma empírica, sem precisar de nenhuma priori ou fator de
+Occam analítico.
+
+**Usando a mesma lógica para calibrar $\alpha_0$ (Bloco 1).** A mesma
+receita — congelar o que foi aprendido no treino, avaliar em validação
+— serve para comparar hiperparâmetros de priori, não só $K$. Reajustando
+o GMM Bayesiano do Bloco 1 **só no treino**, para os três valores de
+$\alpha_0$, e avaliando o *score* (proporcional ao ELBO médio por
+amostra) na validação:
+
+| $\alpha_0$ | ELBO total (aprox.) na validação |
+|---:|---:|
+| $0{,}001$ | $-366{,}57$ |
+| $1{,}0$ | $-366{,}97$ |
+| $100$ | $-404{,}82$ |
+
+A priori mais concentrada ($\alpha_0=0{,}001$) generaliza melhor que a
+mais permissiva ($\alpha_0=100$) — a mesma conclusão da Silhueta/DB do
+Bloco 3 (poucos componentes bastam para este dataset), agora obtida por
+uma via totalmente diferente (probabilidade em dados novos, não
+geometria). Duas vias independentes concordando é um sinal forte — mas,
+como o próximo bloco mostra, ainda não é garantia de que o modelo
+capturou a estrutura certa.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Padrão: Treino Sobe, Validação Não Acompanha
+
+::: {.fragment}
+Treino: $-938{,}05$ ($K=1$) a $-808{,}51$ ($K=10$), monotônico — mesmo
+padrão da Abertura, restrito aos 398 pontos de treino.
+:::
+
+::: {.fragment}
+Validação: máximo em $K=2$ ($-361{,}95$), oscila e piora depois
+($-376{,}42$ em $K=10$) — **não acompanha** o treino.
+:::
+
+::: {.fragment .callout-note}
+O descolamento entre as curvas é o sintoma de sobreajuste — mostrado
+empiricamente, sem priori nem fator de Occam analítico.
+:::
+
+## Calibrando $\alpha_0$ pela Mesma Lógica
+
+::: {.fragment}
+GMM Bayesiano do Bloco 1, reajustado só no treino, avaliado na
+validação (ELBO total aprox.):
+
+| $\alpha_0$ | ELBO na validação |
+|---:|---:|
+| $0{,}001$ | $-366{,}57$ |
+| $1{,}0$ | $-366{,}97$ |
+| $100$ | $-404{,}82$ |
+:::
+
+::: {.fragment .callout-important}
+Priori concentrada generaliza melhor que a permissiva — mesma conclusão
+da Silhueta/DB (Bloco 3), por uma via totalmente diferente. Duas vias
+concordando é forte — mas não é garantia final (próximo bloco).
+:::
+
+:::
+
+## Pergunta
+
+::: {.callout-tip}
+## Se a log-verossimilhança de validação fosse máxima em K=3 em vez de K=2, isso significaria necessariamente que K=3 é a "estrutura verdadeira" da população de pacientes?
+
+Pense na diferença entre "o critério escolhido aponta para $K=3$" e
+"existem, de fato, três populações distintas de pacientes".
+
+- □ A log-verossimilhança de validação, como qualquer critério estimado
+  a partir de uma amostra finita, tem variância de amostragem — um
+  valor máximo em $K=3$ indicaria que $K=3$ generalizou melhor **nesta**
+  divisão treino/validação específica, não uma garantia de que $3$ é o
+  número "verdadeiro" de populações latentes.
+- □ No caso-limite em que o conjunto de validação tem um único ponto,
+  a log-verossimilhança de validação para qualquer $K\ge1$ se torna
+  idêntica, pois um único ponto não permite distinguir modelos.
+- □ Como a validação usa dados nunca vistos no ajuste, o $K$ que
+  maximiza a log-verossimilhança de validação é, por construção, a
+  estrutura verdadeira da população, sem nenhuma incerteza residual.
+- □ O mesmo cuidado (não confundir "o critério aponta para X" com "X é
+  a verdade") se aplica a escolher o grau de um polinômio de regressão
+  pelo erro quadrático mínimo num conjunto de validação.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Resposta
+
+::: {.callout-tip}
+## Resposta — validação escolhe, não garante "a verdade"
+
+- ✔ Toda estimativa em amostra finita tem variância — o $K$ vencedor
+  numa divisão treino/validação é a melhor aposta **sob essa divisão**,
+  não uma prova de estrutura populacional verdadeira (por isso é comum
+  repetir com várias divisões — validação cruzada).
+- ✗ Com um único ponto de validação, os modelos ainda diferem (cada um
+  atribui uma densidade diferente àquele ponto) — a comparação continua
+  possível, só fica mais ruidosa.
+- ✗ Validação reduz o risco de sobreajuste, mas não elimina a incerteza
+  de amostragem nem garante acesso à estrutura populacional "verdadeira"
+  — é uma estimativa, não uma certeza.
+- ✔ Mesmo cuidado epistemológico se aplica à seleção de grau polinomial
+  por erro de validação: o grau escolhido é o que generalizou melhor
+  nessa amostra, não necessariamente o "verdadeiro" grau do processo
+  gerador.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não — a validação escolhe a estrutura que
+generaliza melhor **nesta amostra**, uma estimativa sujeita a variância,
+não uma prova definitiva da estrutura populacional real.
+:::
+
+:::
+
+# A Prova Final: Posterior Predictive Checks
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Métricas escalares — ELBO, log-verossimilhança de validação, Silhueta —
+resumem a qualidade do modelo num único número. Mas um número único
+pode esconder falhas estruturais: um modelo pode ter um bom escore e,
+ainda assim, não ter capturado a **forma** real do processo gerador de
+dados. O teste mais direto contra esse risco não compara números — ele
+compara **dados gerados pelo modelo contra dados reais**.
+
+::: {.callout-note icon=false}
+## Definição (checagem preditiva a posteriori — *Posterior Predictive Check*, PPC; Gelman & Rubin, 1996)
+
+Dado um modelo ajustado (parâmetros $\hat\theta$, ou uma posterior
+$q(\theta)$), um PPC consiste em: (1) amostrar parâmetros a partir do
+que foi aprendido ($\hat\theta$, ou $\theta\sim q(\theta)$); (2) gerar
+um conjunto de dados sintéticos $\mathbf{X}_{\text{sim}}$ a partir do
+modelo generativo com esses parâmetros; (3) comparar estatísticas e
+propriedades de $\mathbf{X}_{\text{sim}}$ contra as de
+$\mathbf{X}_{\text{real}}$ — visualmente (sobrepondo distribuições) ou
+numericamente (comparando médias, variâncias, formato).
+:::
+
+Se o modelo capturou o processo gerador, dados sintéticos devem ser
+**estatisticamente indistinguíveis** dos reais, no sentido informal de
+reproduzir forma, dispersão e demais características relevantes. Se não
+capturou, o PPC revela **onde** exatamente a família de modelo (não só
+o valor de um hiperparâmetro) falhou — informação que nenhuma métrica
+escalar sozinha entrega.
+
+**Aplicando ao GMM do problema-fio.** Amostrando $N=569$ pontos
+sintéticos do GMM com $K=2$ (o mesmo ajustado no Bloco 4), e comparando
+contra os dados reais (ambos padronizados, média $0$, desvio $1$ por
+construção dos dados reais):
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Limitação dos Números Únicos
+
+::: {.fragment}
+ELBO, log-verossimilhança de validação, Silhueta: cada um resume a
+qualidade num único número — pode esconder falha estrutural (bom
+escore, forma errada).
+:::
+
+::: {.callout-note icon=false}
+**Definição (PPC — Gelman & Rubin, 1996):** (1) amostrar $\theta$
+aprendido; (2) gerar $\mathbf{X}_{\text{sim}}$ do modelo generativo;
+(3) comparar $\mathbf{X}_{\text{sim}}$ contra $\mathbf{X}_{\text{real}}$
+— visual ou numericamente.
+:::
+
+:::
+
+::: {.fig-resize style="width: 42%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(6.4, 5.2))
+ax.scatter(X_2d[:, 0], X_2d[:, 1], s=14, color=COR_A, alpha=0.55, label="dados reais")
+ax.scatter(X_sim[:, 0], X_sim[:, 1], s=14, color=COR_B, alpha=0.55, label="dados sintéticos (PPC)")
+ax.set_xlabel("radius_worst (padronizado)")
+ax.set_ylabel("concave points_worst (padronizado)")
+ax.set_title("PPC do GMM K=2: dados reais vs. sintéticos")
+ax.legend(loc="upper left", fontsize=9)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A sobreposição é boa: média dos dados sintéticos $(0{,}009,\ 0{,}015)$,
+essencialmente $0$ como nos dados reais (por construção); desvio-padrão
+sintético $(0{,}940,\ 0{,}949)$, próximo de $1$. Visualmente, os dois
+"blobs" elípticos — a estrutura que o GMM assume por construção — cobrem
+a mesma região dos dados reais. Para este dataset especificamente, o
+PPC **confirma** o que o ELBO e a Silhueta já sugeriam: $K=2$, com
+covariâncias elípticas, é uma família de modelo adequada.
+
+**Quando o PPC discorda dos números — um contraexemplo controlado.**
+Nem sempre um bom escore implica um bom PPC. Considere um dataset
+sintético de duas "luas" entrelaçadas (forma deliberadamente não
+convexa, usado aqui só para isolar este ponto matemático específico —
+não é um dado real do curso) e um GMM com $K=2$, covariância completa,
+ajustado a ele:
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## PPC do GMM K=2: Números e Visual
+
+::: {.fragment}
+Média sintética $(0{,}009,\ 0{,}015)$ (real: $0$); desvio sintético
+$(0{,}940,\ 0{,}949)$ (real: $1$). Visualmente, os "blobs" elípticos
+cobrem a mesma região dos dados reais.
+:::
+
+::: {.fragment .callout-note}
+Para este dataset, o PPC **confirma** o que ELBO e Silhueta já
+sugeriam: $K=2$ elíptico é família adequada.
+:::
+
+:::
+
+::: {.fig-resize style="width: 88%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 2, figsize=(9.6, 4.4), sharex=True, sharey=True)
+axes[0].scatter(X_moons[:, 0], X_moons[:, 1], s=14, color=COR_A, alpha=0.7)
+axes[0].set_title("Dados reais (duas luas)")
+axes[1].scatter(X_moons_sim[:, 0], X_moons_sim[:, 1], s=14, color=COR_B, alpha=0.7)
+axes[1].set_title("Sintético — GMM K=2 elíptico")
+for ax in axes:
+    ax.set_xlabel("$x_1$")
+axes[0].set_ylabel("$x_2$")
+fig.suptitle("PPC revelando incompatibilidade de forma (log-verossimilhança total: −684,75)", y=1.03)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O GMM converge, atinge uma log-verossimilhança total de $-684{,}75$ —
+um número que, sozinho, não denuncia nada de anormal — e cobre
+razoavelmente bem a posição média de cada "lua". Mas o PPC mostra o que
+o número esconde: cada componente Gaussiano é **elíptico**, e uma
+elipse não consegue reproduzir o formato de crescente de uma lua. Os
+dados sintéticos se espalham para fora do arco real (o intervalo em
+$x_1$ passa de $[-1{,}10,\ 2{,}07]$ nos dados reais para
+$[-1{,}61,\ 2{,}54]$ no sintético) e preenchem a região côncava **entre**
+as duas luas — espaço onde os dados reais têm densidade essencialmente
+nula. Nenhuma métrica escalar (log-verossimilhança, Silhueta,
+Davies-Bouldin) captura isso diretamente: todas dependem só da
+distância/densidade agregada, não da forma. O PPC é o teste que sobra
+quando o escore parece bom mas a pergunta é "o modelo entendeu a forma
+do processo gerador, ou só a posição aproximada de cada grupo?"
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Que o Número Esconde
+
+::: {.fragment}
+Log-verossimilhança total: $-684{,}75$ — nada de anormal, sozinho.
+Cobre razoavelmente a posição média de cada lua.
+:::
+
+::: {.fragment .callout-important}
+PPC revela o que o número esconde: componentes **elípticos** não
+reproduzem a forma de crescente. Sintético se espalha além do arco real
+($x_1\in[-1{,}61,2{,}54]$ vs. real $[-1{,}10,2{,}07]$) e preenche a
+região côncava entre as luas — onde os dados reais não têm densidade.
+:::
+
+::: {.fragment .callout-note}
+Nenhuma métrica escalar (log-verossimilhança, Silhueta, DB) captura
+isso — todas dependem de densidade/distância agregada, não de forma. O
+PPC é o teste que sobra quando o escore parece bom mas a forma pode
+estar errada.
+:::
+
+:::
+
+## Pergunta
+
+::: {.callout-tip}
+## Se um GMM tivesse log-verossimilhança de validação ótima E Silhueta ótima num dataset com clusters em forma de lua, isso garantiria que o PPC também passaria?
+
+Releia o exemplo das duas luas: a log-verossimilhança e a Silhueta
+concordaram em "razoavelmente bom" mesmo com a forma errada — pense se
+isso é coincidência do exemplo ou um limite estrutural das duas
+métricas.
+
+- □ Não necessariamente — tanto a log-verossimilhança quanto a Silhueta
+  são agregados que dependem de densidade/distância entre pontos, não
+  da forma geométrica do cluster; um modelo pode obter bons valores
+  agregados e ainda assim gerar dados com formato visivelmente
+  incompatível com o real, como no exemplo das luas.
+- □ No caso-limite em que os dois clusters do formato de lua estão
+  perfeitamente separados (sem sobreposição alguma na fronteira), o PPC
+  de um GMM elíptico necessariamente coincide pixel a pixel com os
+  dados reais.
+- □ Como a Silhueta e a log-verossimilhança de validação já são
+  calculadas em dados nunca vistos no ajuste, elas automaticamente
+  capturam qualquer incompatibilidade de forma entre o modelo gerador e
+  os dados reais.
+- □ A mesma limitação — métricas agregadas escondendo incompatibilidade
+  de forma — motiva, em modelos generativos de imagens, o uso de
+  inspeção visual das amostras geradas além de métricas escalares como
+  FID (*Fréchet Inception Distance*).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Resposta
+
+::: {.callout-tip}
+## Resposta — métricas agregadas vs. forma geométrica
+
+- ✔ Exatamente o limite estrutural exposto pelo exemplo: agregados de
+  densidade/distância não "veem" forma — só o PPC (comparar dados
+  gerados vs. reais diretamente) expõe isso.
+- ✗ Mesmo com separação perfeita entre as luas, a elipse de cada
+  componente Gaussiano ainda preenche a região côncava entre elas onde
+  não há dados reais — a incompatibilidade de forma persiste
+  independente de sobreposição na fronteira.
+- ✗ Validação em dados nunca vistos protege contra sobreajuste, não
+  contra incompatibilidade estrutural de forma — as luas de validação
+  também seriam mal explicadas pela mesma elipse, mas a métrica
+  agregada ainda não denunciaria isso diretamente.
+- ✔ Mesma lógica em modelos generativos de imagem: métricas escalares
+  (FID) podem parecer boas enquanto amostras individuais, inspecionadas
+  visualmente, revelam artefatos que o número não captura.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não — boas métricas agregadas não garantem
+forma correta. O PPC é o único dos testes desta aula que compara forma
+diretamente, e por isso captura falhas que os outros dois (Bloco 3 e
+Bloco 4) estruturalmente não conseguem ver.
 :::
 
 :::
@@ -1657,47 +1872,44 @@ múltiplos reinícios (já usados nesta e na Aula 4) continuam necessários.
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-**Síntese.** O BIC (Bloco 4) e o ELBO (Blocos 5–6) não são duas
-ferramentas independentes — são dois pontos no mesmo espectro. Ambos
-nascem da mesma pergunta ("o modelo, como um todo, é bom?"), e ambos
-lidam com a mesma dificuldade central (uma integral, ou soma, intratável
-sobre o que não é observado — parâmetros no caso do BIC, variáveis
-latentes no caso do EM). O BIC é uma aproximação **pontual e assintótica**
-da evidência (usa só $\theta_{\mathrm{ML}}$ e a curvatura local, válida
-sob premissas específicas de Laplace); o ELBO é uma cota **sempre
-válida**, para qualquer $q$, mesmo quando a posterior não é
-aproximadamente Gaussiana ou a Hessiana não tem posto completo — mais
-geral, ao custo de precisar de uma família de $q$ e de um procedimento
-de otimização. E o ELBO não serve só para *selecionar* modelos: o
-Bloco 6 mostrou que o próprio Algoritmo EM da Aula 4 — usado para
-*ajustar* um GMM com $K$ já fixo — é subida de coordenadas nesse mesmo
-funcional. Seleção e ajuste, que pareciam problemas separados no início
-da aula, são duas faces do mesmo objeto matemático.
-
-**O que fica em aberto.** Todo o Bloco 6 dependeu de uma propriedade
-conveniente do GMM: a posterior $p(\mathbf{Z}\mid\mathbf{X},\theta)$
-(a responsabilidade) tem forma fechada, calculável exatamente via Bayes
-— foi só por isso que o Passo E conseguiu fechar o KL a zero de forma
-exata, a cada iteração. Em modelos mais ricos — com relações não
-lineares entre variável latente e dados observados, por exemplo —,
-mesmo a posterior $p(\mathbf{Z}\mid\mathbf{X},\theta)$, para $\theta$
-fixo, pode ser intratável. O Passo E "exato" deixa de estar disponível,
-e o problema deixa de ser tão simples.
+**Síntese.** Selecionar a estrutura de um modelo não supervisionado —
+$K$, um hiperparâmetro de priori, $\epsilon$/`min_samples` — nunca se
+resolve com uma única régua. O Bloco 1 mostrou a via **analítica**:
+colocar só $\pi$ (não $\mu_k,\Sigma_k$) dentro do tratamento
+variacional, com uma priori de verdade, já devolve ao ELBO a
+propriedade de Occam que o EM clássico não tem — mas essa via troca
+"escolher $K$" por "calibrar hiperparâmetros de priori" (Bloco 2), o
+mesmo tipo de problema em outra forma. As vias
+**empíricas** (Blocos 3–5) não desaparecem por causa disso: para
+clusterização dura, sem verossimilhança nenhuma, são a única opção
+(Silhueta/Davies-Bouldin em validação, Bloco 3); para modelos
+probabilísticos, complementam a via analítica com um teste direto em
+dados novos (verossimilhança preditiva, Bloco 4); e, mesmo quando todas
+as métricas escalares concordam, o *Posterior Predictive Check* (Bloco
+5) continua sendo o único teste que compara a **forma** do processo
+gerador, não só um número agregado. As três vias empíricas, aplicadas
+juntas, formam uma checagem mais robusta do que qualquer uma isolada.
 
 Retomando as quatro perguntas da Abertura, uma frase cada:
 
-1. **Por que a log-verossimilhança de treino falha para escolher $K$?**
-   Porque nunca piora (e pode até divergir) com mais componentes — mede
-   ajuste, não plausibilidade do modelo como um todo.
-2. **Como aproximar a evidência intratável, chegando a um critério
-   calculável?** Aproximação de Laplace em torno de $\theta_{\mathrm{ML}}$,
-   sob prior amplo e Hessiana de posto completo, dá o BIC.
-3. **Existe algo mais geral, que sirva para selecionar e ajustar?** Sim
-   — a decomposição $\ln p(\mathbf{X})=\mathcal{L}(q)+\mathrm{KL}(q\|p)$,
-   válida para qualquer $q$, sem as premissas de Laplace.
-4. **Isso se relaciona com o EM da Aula 4?** Sim — o EM é exatamente
-   subida de coordenadas nesse mesmo $\mathcal{L}(q,\theta)$: Passo E
-   maximiza sobre $q$ (fecha o KL), Passo M maximiza sobre $\theta$.
+1. **Uma priori sobre θ resolve o problema de $K$ sempre crescer?** Só
+   a parte certa de $\theta$ — $\pi$, não $\mu_k,\Sigma_k$ — precisa
+   virar variável do próprio ELBO (não ponto fixo, o caso do EM
+   clássico); o objeto resultante é o ELBO com KL entre posterior e
+   priori conjunta de $\mathbf{Z}$ e $\pi$, cuja penalidade nasce
+   exatamente desse KL.
+2. **Trocar $K$ por hiperparâmetros de priori elimina a subjetividade?**
+   Não — desloca de um limite rígido ($K$) para um contínuo
+   ($\alpha_0$), e o mesmo problema aparece de forma nua no K-Means
+   (sem priori nenhuma) e no DBSCAN ($\epsilon$, `min_samples`).
+3. **Como validar clusterização dura sem rótulo?** Ajustar no treino,
+   medir Silhueta e Davies-Bouldin na validação — duas métricas
+   independentes concordando é evidência de estrutura real.
+4. **E para modelos probabilísticos — e existe algo mais definitivo?**
+   Verossimilhança preditiva em validação generaliza a mesma lógica; o
+   PPC vai além, comparando dados gerados contra reais diretamente,
+   capturando incompatibilidades de forma que nenhuma métrica escalar
+   enxerga.
 
 ::: {.callout-tip}
 ## Ponte para a Aula 6
@@ -1710,12 +1922,15 @@ variável latente categórica por uma variável latente **contínua**: em
 vez de "de qual população este ponto veio?", a pergunta passa a ser
 "que posição, num espaço de dimensão bem menor, resume este ponto sem
 perder o que importa?" — a Análise de Componentes Principais (PCA), sua
-versão probabilística (PPCA, formulada exatamente como um modelo de
-variável latente linear-Gaussiana, no mesmo estilo do GMM) e sua
-contrapartida em rede neural (o autoencoder linear). O ELBO volta a
-aparecer, de forma central, na Aula 7 — quando a relação entre variável
-latente e dados observados deixar de ser linear (o *Variational
-Autoencoder*), e o Passo E exato desta aula não estiver mais disponível.
+versão probabilística (PPCA) e sua contrapartida em rede neural (o
+autoencoder linear). A mesma pergunta de validação desta aula reaparece
+lá sob nova forma: "quantas dimensões latentes são razoáveis?" também
+não tem gabarito, e a mesma lógica treino/validação (Bloco 3–4 desta
+aula) volta a valer. O ELBO construído no Bloco 1 volta a aparecer, de
+forma central, na Aula 7 — quando a relação entre variável latente e
+dados observados deixar de ser linear (o *Variational Autoencoder*) e a
+posterior $p(\mathbf{Z}\mid\mathbf{X})$ deixar de ter forma fechada,
+exigindo justamente a maquinaria de campo médio construída aqui.
 :::
 
 [Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
@@ -1725,72 +1940,63 @@ Autoencoder*), e o Passo E exato desta aula não estiver mais disponível.
 
 ::: {.content-visible when-format="revealjs"}
 
-## Síntese: BIC e ELBO, o Mesmo Espectro
+## Síntese: Nenhuma Régua Sozinha Basta
 
 ::: {.fragment}
-BIC: aproximação **pontual e assintótica** da evidência (Laplace,
-$\theta_{\mathrm{ML}}$ + curvatura, sob premissas específicas).
+Analítica (Bloco 1): só $\pi$ (não $\mu_k,\Sigma_k$) dentro do ELBO,
+com priori, já devolve a propriedade de Occam — mas troca $K$ por
+hiperparâmetros de priori (Bloco 2).
 :::
 
 ::: {.fragment}
-ELBO: cota **sempre válida**, para qualquer $q$ — mais geral, ao custo
-de precisar de uma família de $q$ tratável e otimização.
+Empíricas (Blocos 3–5): única opção para clusterização dura (Silhueta/
+DB); complementam a via analítica para modelos probabilísticos
+(verossimilhança em validação); PPC continua sendo o único teste de
+**forma**.
 :::
 
 ::: {.fragment .callout-note}
-E o ELBO não é só para *selecionar*: o EM da Aula 4 (*ajustar* um GMM
-com $K$ fixo) é subida de coordenadas nesse mesmo funcional. Seleção e
-ajuste = mesmo objeto matemático.
-:::
-
-## O Que Fica em Aberto
-
-::: {.fragment}
-Bloco 6 dependeu de uma propriedade conveniente do GMM: a posterior tem
-forma fechada, calculável exatamente. É só por isso que o Passo E fecha
-o KL a zero de forma exata.
-:::
-
-::: {.fragment}
-Em modelos mais ricos (relação não linear entre variável latente e
-dados), mesmo a posterior, com $\theta$ fixo, pode ser intratável — o
-Passo E exato deixa de estar disponível.
+As três vias empíricas, juntas, formam uma checagem mais robusta que
+qualquer uma isolada.
 :::
 
 ## Retomando as Quatro Perguntas
 
 ::: {.fragment}
-**1.** Verossimilhança de treino nunca piora (pode divergir) com mais
-componentes — mede ajuste, não plausibilidade do modelo como um todo.
+**1.** Priori sobre θ resolve $K=N$ **só na parte certa**: $\pi$
+precisa virar variável do ELBO, não $\mu_k,\Sigma_k$ — a penalidade
+nasce do KL entre posterior e priori conjunta de $\mathbf{Z}$ e $\pi$.
 :::
 
 ::: {.fragment}
-**2.** Aproximação de Laplace em $\theta_{\mathrm{ML}}$ (prior amplo,
-Hessiana posto completo) $\to$ BIC.
+**2.** Trocar $K$ por hiperparâmetros de priori desloca a subjetividade
+(rígido $\to$ contínuo), não a elimina — visível também no K-Means e no
+DBSCAN.
 :::
 
 ::: {.fragment}
-**3.** $\ln p(\mathbf{X})=\mathcal{L}(q)+\mathrm{KL}(q\|p)$, válida para
-qualquer $q$ — sem as premissas de Laplace.
+**3.** Clusterização dura: ajustar no treino, medir Silhueta/DB na
+validação — concordância entre métricas independentes é evidência de
+estrutura real.
 :::
 
 ::: {.fragment}
-**4.** EM = subida de coordenadas nesse mesmo $\mathcal{L}(q,\theta)$:
-Passo E sobre $q$ (fecha o KL), Passo M sobre $\theta$.
+**4.** Modelos probabilísticos: verossimilhança preditiva em validação;
+PPC vai além, comparando dados gerados vs. reais, capturando forma.
 :::
 
 ::: {.callout-tip}
 ## Ponte para a Aula 6
 
 Mudança de eixo: variável latente **categórica** (Aulas 3–5) $\to$
-**contínua** (Aula 6, Parte 2: Redução de Dimensionalidade). PCA, PPCA
-(modelo latente linear-Gaussiano, estilo GMM) e o autoencoder linear.
-ELBO volta na Aula 7 (VAE), quando a relação latente–observado deixar
-de ser linear e o Passo E exato desta aula não estiver mais disponível.
+**contínua** (Aula 6, Parte 2: Redução de Dimensionalidade). PCA, PPCA,
+autoencoder linear — a mesma pergunta de validação ("quantas dimensões
+latentes?") reaparece, mesma lógica treino/validação. ELBO volta na
+Aula 7 (VAE), quando a posterior deixar de ter forma fechada e a
+maquinaria de campo médio desta aula for necessária de novo.
 :::
 
 [Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
 [Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
 
 :::
-
