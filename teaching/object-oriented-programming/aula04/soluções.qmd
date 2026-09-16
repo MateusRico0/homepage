@@ -1,0 +1,231 @@
+---
+title: "Soluções — Decomposição e Responsabilidade"
+subtitle: "Aula 4 — Programação Orientada a Objetos"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+
+::: {.callout-note icon=false}
+## Teste 1 — A Classe Deus (God Class)
+
+- □ É identificada por centralizar lógicas de múltiplos atores (financeiro, infraestrutura, UI) num único arquivo.
+- □ O "Teste do E" ajuda a diagnosticá-la: se a classe faz X E Y, provavelmente tem responsabilidades demais.
+- □ Uma Classe Deus facilita a manutenção, pois toda a lógica fica concentrada num só lugar.
+- □ Testar isoladamente uma responsabilidade de uma Classe Deus costuma exigir efeitos colaterais indesejados (e-mail, banco).
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 1 — A Classe Deus (God Class)
+
+- ✔ Verdadeiro — É a descrição direta do `Pedido` do início da aula, que reúne cálculo (negócio), impostos, formatação, persistência e e-mail — cinco responsabilidades de atores/departamentos diferentes num único arquivo.
+- ✔ Verdadeiro — É a heurística apresentada na aula para detectar violações do SRP — precisar de "E" (ou "OU") para descrever a classe numa frase é o sinal de alerta.
+- ✗ Falso — É o oposto do que a aula demonstra — concentrar tudo aumenta a fragilidade (mudar imposto, banco ou layout do recibo, todos exigem alterar `Pedido`), o acoplamento com infraestrutura e a carga cognitiva; "concentrado" não é sinônimo de "fácil de manter".
+- ✔ Verdadeiro — É um dos quatro problemas listados na aula — testar o cálculo do total de um `Pedido` que também salva no banco e envia e-mail dispara, na prática, esses efeitos colaterais reais.
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — Coesão e Acoplamento
+
+- □ Se duas classes com métodos completamente distintos (sem nenhum atributo em comum) fossem fundidas numa única classe apenas para reduzir o número de arquivos do projeto, essa fusão aumentaria a coesão do sistema.
+- □ No limite em que uma classe `A` depende de tantos detalhes internos de uma classe `B` que qualquer mudança em `B` obriga a reescrever `A`, dizemos que `A` e `B` têm acoplamento muito baixo.
+- □ Numa oficina mecânica organizada em bancadas por especialidade (uma para motor, uma para elétrica, uma para funilaria), cada bancada guardando só as ferramentas da sua especialidade é uma analogia de alta coesão, assim como a caixa de ferramentas só com chaves de fenda desta aula.
+- □ Duas classes podem ter baixo acoplamento entre si mesmo que cada uma, isoladamente, tenha baixíssima coesão.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 2 — Coesão e Acoplamento
+
+- ✗ Falso — Fundir métodos que não compartilham nenhum atributo é exatamente o cenário de LCOM alto (interseção de uso vazia) discutido com `GestorDeUsuario` — a fusão não cria nenhuma relação lógica entre as responsabilidades, apenas empilha duas classes de baixa coesão dentro de uma única caixa.
+- ✗ Falso — Esse cenário extremo é a própria definição operacional de acoplamento muito ALTO — o vínculo entre `A` e `B` é tão forte que `B` não pode evoluir livremente sem quebrar `A`; baixo acoplamento seria o oposto, `A` permanecendo estável mesmo com mudanças internas em `B`.
+- ✔ Verdadeiro — É a mesma estrutura da analogia da aula (caixa só com chaves de fenda = alta coesão) transferida para um novo domínio: cada bancada concentra ferramentas relacionadas à mesma especialidade, sem misturar propósitos diferentes.
+- ✔ Verdadeiro — Coesão é uma propriedade interna de uma única classe (o quanto suas responsabilidades pertencem juntas); acoplamento é uma propriedade da relação entre duas classes. As duas métricas costumam melhorar juntas na prática ao se aplicar o SRP, mas são logicamente independentes — nada impede, em princípio, duas classes de baixa coesão internas e baixo acoplamento mútuo.
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — SRP e o Teste do "E"
+
+- □ Se uma classe tiver apenas um único método público, isso já garante que ela respeita o SRP.
+- □ Se a descrição de uma classe exige a conjunção "E", ela provavelmente viola o SRP.
+- □ Aplicar o SRP significa que uma classe só pode ter um único método público.
+- □ `Pedido` que calcula total, processa pagamento e envia e-mail no mesmo método viola o SRP.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 3 — SRP e o Teste do "E"
+
+- ✗ Falso — O número de métodos públicos não mede razões de mudança — um único método público pode esconder múltiplas responsabilidades misturadas internamente, como o antigo `Pedido.finalizarPedido()`, que num só método fazia cálculo, processamento de pagamento e notificação por e-mail.
+- ✔ Verdadeiro — É o próprio Teste do "E" apresentado na aula como heurística de diagnóstico do SRP.
+- ✗ Falso — SRP fala de razões de mudança, não de contagem de métodos; uma classe coesa pode legitimamente ter vários métodos públicos relacionados (como `Conta.debitar()`/`creditar()`), desde que todos sirvam à mesma responsabilidade e à mesma razão de mudança.
+- ✔ Verdadeiro — É exatamente o exemplo `finalizarPedido()` apresentado como violação — calcular, processar pagamento e notificar são três razões de mudança independentes misturadas no mesmo método.
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — Injeção de Dependência
+
+- □ Se `Pedido` continuasse criando `new CartaoDeCredito()` e `new ServicoEmail()` dentro do próprio construtor, mas guardasse essas instâncias em atributos privados corretamente encapsulados, isso já seria suficiente para obter os ganhos de testabilidade da Injeção de Dependência.
+- □ A injeção via construtor garante que o objeto nunca exista sem suas dependências essenciais.
+- □ A DI aumenta o acoplamento, pois obriga o objeto a conhecer quem o instanciou.
+- □ Sem DI, testar `Pedido.finalizar()` isoladamente, sem efeitos colaterais reais, é muito mais difícil.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 4 — Injeção de Dependência
+
+- ✗ Falso — O ganho de testabilidade vem de quem decide a implementação concreta, não de onde ou como a referência é guardada. Criar as dependências com `new` dentro do próprio construtor continua acoplando `Pedido` a classes concretas específicas e impede substituí-las por mocks no teste — encapsular o atributo não resolve esse problema.
+- ✔ Verdadeiro — É o ganho central apresentado — se o construtor exige `Pagavel` e `ServicoEmail` como parâmetros, é impossível instanciar um `Pedido` sem esses colaboradores.
+- ✗ Falso — A DI reduz o acoplamento com implementações concretas — `Pedido` conhece apenas o contrato `Pagavel`/`ServicoEmail`, não uma classe concreta específica; e o objeto não precisa saber "quem o instanciou", apenas recebe as dependências já prontas.
+- ✔ Verdadeiro — É exatamente o problema que motiva a refatoração — sem DI, testar a lógica de orquestração exigiria cobrar um cartão de verdade ou enviar um e-mail real.
+:::
+
+::: {.callout-note icon=false}
+## Teste 5 — A Teoria do Ator no SRP
+
+- □ Numa fintech em que o mesmo microsserviço calcula o score de crédito (usado pelo time de Risco) e também formata esse score para exibição no app do cliente (usado pelo time de Produto), esse serviço, pela Teoria do Ator, tem apenas uma razão para mudar, pois lida com um único conceito: "score de crédito".
+- □ Misturar lógica solicitada pelo RH e pelo Financeiro na mesma classe é seguro, pois são setores diferentes.
+- □ O conflito de atores é uma fonte comum de "quebras colaterais" em classes com múltiplas razões de mudança.
+- □ No limite em que uma empresa tem um único departamento responsável por todas as decisões de negócio (sem separação entre financeiro, RH, produto etc.), a Teoria do Ator deixaria de fazer qualquer distinção útil entre classes, pois haveria apenas um ator possível para todo o sistema.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 5 — A Teoria do Ator no SRP
+
+- ✗ Falso — Mesma estrutura do exemplo `Funcionario` (CFO vs. RH): "score de crédito" é um conceito, mas dois atores diferentes (Risco e Produto) solicitam mudanças por motivos independentes — um ajusta o modelo de risco, o outro ajusta o layout de exibição. Pela Teoria do Ator, isso são duas razões de mudança, não uma.
+- ✗ Falso — É exatamente o oposto — serem setores diferentes é o que torna a mistura arriscada: uma mudança de layout de relatório solicitada pelo RH força recompilar e re-testar a lógica de folha de pagamento do Financeiro, mesmo sem nenhuma relação de negócio entre as duas.
+- ✔ Verdadeiro — É a consequência prática destacada no exemplo `Funcionario` — misturar as lógicas acopla os ciclos de lançamento de departamentos diferentes.
+- ✔ Verdadeiro — A Teoria do Ator identifica razões de mudança por quem solicita a mudança; se só existe um ator possível na organização inteira, todas as classes compartilhariam, por esse critério, a mesma "razão para mudar" — o poder discriminador da teoria só aparece quando há múltiplos atores reais e distintos, como CFO e RH no exemplo da aula.
+:::
+
+::: {.callout-note icon=false}
+## Teste 6 — A Métrica LCOM
+
+- □ No limite em que todo método de uma classe usa exatamente os mesmos atributos que todos os outros métodos, o LCOM dessa classe seria o mais alto possível.
+- □ Um LCOM alto indica uma classe muito coesa e bem projetada.
+- □ Se metade dos métodos usa o atributo A e a outra metade usa só o atributo B, a classe deveria ser dividida.
+- □ LCOM é uma forma de provar matematicamente que uma classe é, na prática, duas classes disfarçadas.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 6 — A Métrica LCOM
+
+- ✗ Falso — É o oposto — se todo método usa o mesmo conjunto de atributos, a interseção de uso entre os métodos é máxima, então a falta de coesão é mínima: o LCOM seria o mais BAIXO possível, indicando uma classe bem coesa (o antônimo do exemplo `GestorDeUsuario`, em que a interseção de uso era vazia).
+- ✗ Falso — LCOM significa *Lack of Cohesion in Methods* — um valor alto indica FALTA de coesão, não o contrário; é o sinal de que a classe deveria ser dividida, como no exemplo `GestorDeUsuario`.
+- ✔ Verdadeiro — É exatamente o cenário de `GestorDeUsuario` (`nome` usado só por `salvarNome()`, `ipConexao` usado só por `logAcesso()`) — interseção de uso vazia, o código "implorando" para virar duas classes (`RepositorioUsuario` e `AuditoriaAcesso`).
+- ✔ Verdadeiro — É a conclusão apresentada na aula sobre a métrica — uma prova quantitativa de falta de coesão, complementando o julgamento qualitativo do Teste do "E".
+:::
+
+::: {.callout-note icon=false}
+## Teste 7 — O Lado Sombrio do SRP
+
+- □ Num sistema de e-commerce em que adicionar um novo campo obrigatório ("CPF do comprador") ao formulário de checkout exige editar 20 classes de uma linha cada (uma para nome, uma para e-mail, uma para CPF etc.), esse cenário ilustra a Cirurgia de Espingarda, e a solução recomendada pela aula é sempre criar ainda mais classes minúsculas para isolar o novo campo.
+- □ O Modelo Anêmico é uma consequência possível da aplicação fanática e sem pragmatismo do SRP.
+- □ O SRP proíbe que uma classe como `Conta` gerencie seu próprio saldo internamente.
+- □ Como o SRP recomenda alta coesão, uma classe `Conta` que gerencia tanto `debitar()` quanto `creditar()` sobre o mesmo saldo já é, por si só, uma violação leve do SRP, pois tem dois métodos que alteram o mesmo estado.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 7 — O Lado Sombrio do SRP
+
+- ✗ Falso — O cenário descrito é, sim, Cirurgia de Espingarda — mas a solução da aula vai na direção OPOSTA: agrupar o que muda junto e pelos mesmos motivos, consolidando campos relacionados (como os dados do comprador) numa única classe coesa (`DadosComprador`), em vez de fragmentar ainda mais.
+- ✔ Verdadeiro — É um dos dois riscos do "lado sombrio" apresentados na aula — retirar toda a responsabilidade do objeto em nome da separação de responsabilidades reduz a classe a um contêiner passivo.
+- ✗ Falso — É o oposto — a aula argumenta que assegurar a integridade do próprio saldo é a responsabilidade primária de `Conta`; o SRP equilibrado (Modelo Rico) mantém `debitar()`/`creditar()` dentro da própria classe.
+- ✗ Falso — Dois métodos que operam sobre o mesmo atributo, pelo mesmo motivo de negócio (preservar a integridade do saldo), não são duas razões de mudança — são a mesma razão exercida de duas formas. É exatamente o exemplo de "Modelo Rico" equilibrado da aula, o oposto de uma violação.
+:::
+
+::: {.callout-note icon=false}
+## Teste 8 — Associação: Dependência ("Usa um")
+
+- □ Se um método recebesse um objeto como parâmetro e o armazenasse permanentemente num atributo da classe logo na primeira linha do método, essa relação continuaria sendo classificada como Dependência.
+- □ O objeto usado numa dependência costuma ser guardado como atributo de longo prazo.
+- □ Um método de uma API de pagamentos que recebe um objeto `ContextoDeAuditoria` só para registrar um log da chamada atual, sem guardar essa referência para uso posterior, exemplifica o mesmo tipo de vínculo fraco (Dependência) visto em `Carrinho.confereTotal()`.
+- □ `Carrinho.confereTotal(ArrayList<Produto> itens)` recebendo a lista como parâmetro é um exemplo de dependência.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 8 — Associação: Dependência ("Usa um")
+
+- ✗ Falso — Guardar a referência permanentemente como atributo é justamente o que transforma a relação em Agregação (ou Composição) — o traço definidor de Dependência é não persistir a referência para uso futuro, usando o objeto apenas durante a execução do método.
+- ✗ Falso — É o oposto — na Dependência, o objeto normalmente é recebido como parâmetro e não guardado; o vínculo é passageiro, como usar e devolver uma caneta emprestada do balcão.
+- ✔ Verdadeiro — Mesma estrutura transferida para outro domínio: uso temporário de um objeto recebido como parâmetro, sem armazená-lo como atributo — a marca definidora da Dependência.
+- ✔ Verdadeiro — É o próprio exemplo de código da aula — a lista é usada só para conferir o total, sem ser guardada em `this.itens`.
+:::
+
+::: {.callout-note icon=false}
+## Teste 9 — Associação: Agregação ("Tem um")
+
+- □ Se, no exemplo do `Carrinho` e dos `Produto`, destruir o carrinho (`carrinho = null`) também apagasse os `Produto` do catálogo do sistema, essa relação ainda seria corretamente chamada de Agregação.
+- □ Se um `Carrinho` for destruído, os `Produto` que ele referenciava também são destruídos.
+- □ Vários objetos "todo" diferentes podem referenciar o mesmo objeto "parte" simultaneamente.
+- □ É uma forma de posse mais fraca do que a Composição.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 9 — Associação: Agregação ("Tem um")
+
+- ✗ Falso — A marca definidora de Agregação é justamente a parte sobrevivendo à destruição do todo (o `Produto` continua existindo no catálogo); se destruir o `Carrinho` também apagasse os `Produto`, a relação teria as propriedades de Composição, não de Agregação.
+- ✗ Falso — É o oposto — a aula é explícita: "Se o carrinho for destruído, o Smartphone ainda existe no catálogo!"; ciclos de vida independentes são a essência da Agregação.
+- ✔ Verdadeiro — Como a Agregação não implica posse exclusiva, o mesmo `Produto` do catálogo pode estar, ao mesmo tempo, referenciado por vários `Carrinho` de clientes diferentes — diferente da Composição, em que a posse é exclusiva.
+- ✔ Verdadeiro — A escala de força estrutural apresentada na aula vai de Dependência (mais fraca) a Agregação a Composição (mais forte); Agregação permite ciclos de vida independentes, enquanto Composição os atrela.
+:::
+
+::: {.callout-note icon=false}
+## Teste 10 — Associação: Composição ("É parte de")
+
+- □ No limite em que um objeto "parte" de uma Composição pudesse ser compartilhado por dois objetos "todo" diferentes ao mesmo tempo, a relação continuaria sendo, por definição, uma Composição.
+- □ Num sistema de RH em que cada `Funcionario` tem seu próprio `HistoricoDisciplinar`, criado apenas quando o funcionário é contratado e apagado quando o funcionário é desligado do sistema, essa relação seria mais bem classificada como Composição do que como Agregação.
+- □ Um `Documento` e suas `Pagina` são um exemplo clássico de Composição.
+- □ A escolha entre Agregação e Composição é sempre puramente sintática, nunca uma decisão de negócio.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 10 — Associação: Composição ("É parte de")
+
+- ✗ Falso — Posse exclusiva do todo sobre a parte é o traço definidor de Composição; se a parte passasse a ser compartilhada por dois todos, ela deixaria de ter um único proprietário, e a relação teria as propriedades de Agregação, não mais de Composição.
+- ✔ Verdadeiro — Mesma estrutura de ciclo de vida atrelado vista em `Cliente`/`Cartao` (nasce e morre com o todo), aplicada a um domínio novo — `HistoricoDisciplinar` não tem sentido de existir fora do `Funcionario` que o originou.
+- ✔ Verdadeiro — É o exemplo citado na aula para ilustrar Composição — as páginas não têm sentido de existir fora do documento a que pertencem.
+- ✗ Falso — É o oposto do argumento central da aula — a sintaxe de declarar `private Cartao cartao` é idêntica nos dois casos; o que decide é uma regra de domínio de negócio, como o que deve acontecer aos dados do cartão quando a conta do cliente é excluída.
+:::
+
+::: {.callout-note icon=false}
+## Teste 11 — Delegação
+
+- □ Se um método `pagar()` delegasse ao `Cartao` a operação de processar o valor, mas antes disso navegasse por `this.cartao.getBanco().getGerente()` só para registrar um log, essa navegação extra ainda seria uma delegação limpa, sem qualquer violação de Demeter.
+- □ `joao.getCartao().processar(500.0)` é um exemplo correto de delegação.
+- □ `joao.pagar(500.0)`, delegando internamente ao `Cartao`, corrige a violação de Demeter do exemplo anterior.
+- □ A delegação é o mecanismo que torna a composição uma alternativa flexível à herança.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 11 — Delegação
+
+- ✗ Falso — Navegar até `getBanco().getGerente()` atravessa fronteiras de objetos que não são amigos diretos de `Cliente` (nem mesmo de `Cartao`), recriando o naufrágio de código dentro do próprio método — o fato de o método também delegar corretamente a operação principal ao `Cartao` não perdoa essa navegação extra.
+- ✗ Falso — É o oposto — é o exemplo do "naufrágio de código"/violação de Demeter que a aula usa como ponto de partida a ser corrigido, não um exemplo de delegação correta.
+- ✔ Verdadeiro — É a correção apresentada — o chamador passa a falar só com `Cliente` (um amigo direto de si mesmo), que por sua vez delega ao seu próprio `Cartao`.
+- ✔ Verdadeiro — É a síntese apresentada no final do bloco — Associação (ter) somada a Delegação (usar) torna a composição tão poderosa quanto a herança, porém mais flexível.
+:::
+
+::: {.callout-note icon=false}
+## Teste 12 — Tell, Don't Ask e a Síntese da Aula
+
+- □ Num sistema de estoque em que, antes de vender um produto, o código lê `produto.getQuantidade()` e `produto.getQuantidadeMinima()` para decidir por fora se a venda é permitida, esse padrão está alinhado com "Tell, Don't Ask", da mesma forma que `pedido.clientePodePagar()` está.
+- □ Associação, SRP e Delegação são princípios independentes, sem nenhuma relação entre si.
+- □ Um sistema bem decomposto reduz a carga cognitiva ao permitir raciocinar sobre uma responsabilidade por vez.
+- □ Delegar ao especialista certo permite trocar sua implementação sem que o orquestrador precise mudar.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 12 — Tell, Don't Ask e a Síntese da Aula
+
+- ✗ Falso — É o oposto — sondar dois atributos por fora para decidir é exatamente o padrão *Ask* que a aula contrasta com *Tell*; o equivalente alinhado com `pedido.clientePodePagar()` seria um método como `produto.podeVender(quantidade)`, que decide internamente e devolve só a resposta.
+- ✗ Falso — É o oposto da síntese da aula — Associação define a estrutura (quem contém quem), SRP orienta como dividir responsabilidades entre essas estruturas, e Delegação é o comportamento que torna essa divisão funcional; os três se encaixam na mesma arquitetura viva.
+- ✔ Verdadeiro — É um dos benefícios centrais do SRP e da decomposição em especialistas discutidos ao longo da aula — evita a "carga cognitiva alta" citada como problema da Classe Deus.
+- ✔ Verdadeiro — É a mesma lógica de estabilidade de contrato vista com `Pagavel` — trocar `Cartao` por outro meio de pagamento, ou alterar a lógica interna do especialista, não afeta quem apenas delega a ele.
+:::
