@@ -44,6 +44,16 @@ Fontes em `fontes/`: `prml.pdf`, `dlfc.pdf`, `esl.pdf` (mesmos links de
 | $\mathbf{W}$, $\sigma^2$ | Parâmetros da PPCA: matriz de carregamento ($D\times M$) e variância do ruído isotrópico — **não confundir** com o $\mathbf{H}$ genérico da Aula 5 (renomeado de propósito para não colidir com este $\mathbf{W}$) | Aula 6 |
 | $\mathbf{C}=\mathbf{WW}^T+\sigma^2\mathbf{I}$ | Covariância marginal de $\mathbf{x}$ no modelo PPCA | Aula 6 |
 | $M$ (dimensão latente/subespaço) | Dimensão do subespaço/variável latente contínua da PPCA | Aula 6 |
+| $\mathcal{M}_m$ | Estrutura/modelo candidato (ex.: "GMM com $K=m$"), tratado como variável na seleção Bayesiana de modelos | Aula 5.1 |
+| $p(\mathbf{X}\mid\mathcal{M}_m)$ (evidência) | Verossimilhança marginal de $\mathcal{M}_m$, $\int p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)\,\mathrm{d}\mathbf{H}$ — já embute Navalha de Occam antes de qualquer aproximação | Aula 5.1 |
+| $\mathcal{L}_m(q)$ | ELBO da estrutura $\mathcal{M}_m$ — cota inferior tratável para a evidência, usada como *proxy* de ranqueamento | Aula 5.1 |
+| $N_k$ | Contagem esperada de pontos no componente $k$ sob $q(\mathbf{Z})$, $\sum_n\gamma(z_{nk})$ — real, não necessariamente inteira | Aula 5.1 |
+| Normal-Wishart, $\Lambda_k=\Sigma_k^{-1}$, $(m_0,\beta_0,W_0,\nu_0)$ | Priori conjugada sobre $(\mu_k,\Sigma_k)$ no GMM Bayesiano — impede analiticamente o colapso $\Sigma_k\to\mathbf{0}$, via $W_k^{-1}\succeq W_0^{-1}\succ0$ | Aula 5.1 |
+| CAVI (*Coordinate Ascent Variational Inference*) | Resultado geral que otimiza um fator de $q$ por vez, $\ln q_j^\star=\mathbb{E}_{i\ne j}[\ln p(\mathbf{X},\mathbf{H})]+\text{const}$ (citado de PRML §10.1.1, não rederivado) | Aula 5.1 |
+| ELPD (*Expected Log Predictive Density*) | $\mathbb{E}_{\mathbf{x}\sim p_{\text{true}}}[\ln p(\mathbf{x}\mid\mathbf{X}_{\text{train}})]$ — alvo estatístico verdadeiro da validação preditiva | Aula 5.1 |
+| *Double-dipping* / viés de otimismo | Viés de estimar o ELPD usando os próprios dados de treino — reutilizar pontos de ajuste na avaliação | Aula 5.1 |
+| Índice de Dunn | $\min$ distância inter-cluster / $\max$ diâmetro intra-cluster (Dunn, 1974) — geométrico, livre de distribuição, sensível a extremos | Aula 5.1 |
+| PPC quantitativo, MMD, teste *sliced* | Checagem preditiva a posteriori com números: projeções aleatórias + KS (Massey, 1951) e *Maximum Mean Discrepancy* com kernel RBF (Gretton et al., 2012) | Aula 5.1 |
 
 ## Aula 1 — Data Space, Parametric Generative Models, and Anomalies
 
@@ -1056,6 +1066,102 @@ latente categórica → contínua). A Aula 6 (já escrita antes desta
 reescrita, ver seção abaixo) não depende de nenhum resultado específico
 do BIC que foi removido — só do ELBO/decomposição geral, que
 permanece.
+
+## Aula 5.1 — Modelos Variacionais, GMM Bayesiano e Seleção de Modelos
+
+**Estado: aula completa criada do zero, em pasta nova `aula05_1/`,
+2026-09-17.** Não é uma correção da Aula 5 — é uma **segunda versão**,
+mais ambiciosa, do mesmo tema, criada a pedido explícito do usuário
+("Essa aula 5 não ficou boa e criei um novo planejamento... Crie uma
+nova aula, a aula 5.1 só para não apagarmos a atual. Pode criar tudo
+sem a minha confirmação"), com um roteiro detalhado fornecido por ele.
+A Aula 5 original (`aula05/`) foi mantida **intacta**, sem nenhuma
+edição nesta sessão — as duas coexistem lado a lado no
+`index.qmd` da disciplina.
+
+**Diferença central em relação à Aula 5 original.** A Aula 5 original
+dava priori de verdade só a $\pi$ (mantendo $\mu_k,\Sigma_k$ fixos,
+como no EM clássico) — uma simplificação deliberada, pedida
+explicitamente pelo usuário numa sessão anterior. A Aula 5.1 vai mais
+longe: coloca $\mathbf{H}=(\mathbf{Z},\pi,\mu,\Sigma)$ **inteiro**
+dentro do tratamento variacional, com priori Normal-Wishart em
+$(\mu_k,\Sigma_k)$ além da Dirichlet em $\pi$ — o GMM Bayesiano
+completo, tal como o `BayesianGaussianMixture` do scikit-learn de fato
+implementa (a Aula 5 original já avisava, num callout, que a
+implementação "vai além do que foi derivado"; a Aula 5.1 deriva essa
+parte também). Consequência prática: em vez de variar $\alpha_0$ para
+forçar poda (Aula 5 original), a Aula 5.1 fixa $\alpha_0=1$ (neutro)
+e usa a **comparação do ELBO entre diferentes $K$'s** para decidir a
+estrutura — um mecanismo de seleção diferente, mais próximo da prática
+real de comparação de modelos Bayesianos.
+
+**Estrutura:** Abertura (revisão da Aula 4 + Problema Motivador,
+log-verossimilhança monótona em $K$) + 5 Blocos + Fechamento, ~135min
+(aula estendida). Bloco 1 — seleção Bayesiana de modelos em geral
+($p(\mathcal{M}_m\mid\mathbf{X})\propto p(\mathcal{M}_m)p(\mathbf{X}
+\mid\mathcal{M}_m)$, evidência com Occam orgânico, KL/decomposição/
+ELBO derivados do zero — autocontido, não depende da Aula 5 original).
+Bloco 2 — priori Dirichlet sobre $\pi$ (com derivação curta e completa
+de $q^\star(\pi)=\mathrm{Dir}(\alpha_0+N_1,\dots,\alpha_0+N_K)$ via
+CAVI, citado mas não rederivado de PRML §10.1.1) e priori
+Normal-Wishart sobre $(\mu_k,\Sigma_k)$ (mecanismo do não-colapso via
+$W_k^{-1}\succeq W_0^{-1}\succ0$, citada de PRML §10.2.1, com a fórmula
+exata verificável mesmo sem rederivar toda a álgebra variacional).
+Bloco 3 — decomposição do ELBO completo (ajuste $-$ KL, especializando
+a decomposição geral do Bloco 1), numérico: ELBO sobe até $K=2$ e cai
+depois, ao contrário da log-verossimilhança clássica (monótona).
+Bloco 4 — ELPD como alvo estatístico verdadeiro, *double-dipping*,
+estimador de Monte Carlo via validação (com justificativa via Lei dos
+Grandes Números); três razões para o ELBO de treino não bastar (folga
+variacional, má especificação, comparação universal); Silhueta + Índice
+de Dunn (novo nesta aula, Dunn 1974) na validação, com DBSCAN adaptado
+via classificador $k$-NN (sem `predict` nativo do DBSCAN). Bloco 5 —
+PPC quantitativo: projeções aleatórias + teste KS (Massey, 1951,
+*sliced test*) e MMD com kernel RBF (Gretton et al., 2012) — o
+contraexemplo das duas luas mostra que a largura de banda do kernel
+decide que escala de discrepância o MMD enxerga (heurística da mediana
+não rejeita; $4\times$ mais estreita, rejeita claramente).
+
+**Números computados, não fabricados** (Breast Cancer Wisconsin,
+`radius_worst`/`concave points_worst`, mesmos atributos das Aulas 3–5;
+contraexemplo `make_moons`): log-verossimilhança clássica $K=1..10$,
+$-1339{,}45$ a $-1169{,}66$ (monótona); ELBO Bayesiano ($\alpha_0=1$),
+$-174\,522{,}02$ ($K=1$) até máximo $-105\,559{,}38$ em $K=2$, caindo a
+$-123\,818{,}91$ ($K=10$); log-verossimilhança preditiva na validação
+(clássica e Bayesiana), ambas com máximo em $K=2$; Silhueta na
+validação máxima em $K=2$ ($0{,}593$) mas Dunn máximo em $K=5$
+($0{,}0463$) — discordância real, deliberadamente mantida como ponto
+pedagógico (não maquiada); DBSCAN adaptado via $k$-NN
+($\epsilon=0{,}35$): Silhueta $0{,}4591$, Dunn $0{,}0618$; PPC:
+problema-fio sem evidência de diferença (KS máx. $0{,}0738$, $0\%$
+direções significativas; $\mathrm{MMD}^2\approx-0{,}0005$,
+$p\approx0{,}565$), duas luas com diferença clara (KS máx. $0{,}1025$,
+$55\%$ significativas; $\mathrm{MMD}^2=0{,}0032$, $p=0{,}005$ com
+largura de banda $4\times$ mais estreita que a mediana).
+
+**Arquivos criados:** `_00-planejamento.md`, `index.qmd` (~2275
+linhas), `exercicios.qmd` (3 questões discursivas + 8 blocos `Teste N`
+de V/F), `soluções.qmd` (gabarito dos 8 blocos), `_01-respostas.md`
+(discussão das 6 Pausas Ativas — uma a mais que a Aula 5 original,
+por ter 5 blocos de conteúdo em vez de 4). Todos verificados via
+`uv run quarto render` individual (evitando o bug de corrida do
+`preview-watch.py`), sem erros/`NotFound`/`Traceback`/`SyntaxError`.
+
+**Citações fora do padrão usual da disciplina** (mesmo desvio já
+registrado e aceito na Aula 5 original): Bishop, PRML (2006) §3.4,
+§10.1, §10.2 (evidência, CAVI, GMM Bayesiano); Dunn (1974); Gretton et
+al. (2012); Vehtari & Ojanen (2012); Massey (1951) — nenhuma tem PDF em
+`_fontes/`, usadas por conhecimento consolidado, não por trecho
+literal copiado.
+
+**Pendência conhecida:** o `index.qmd` da disciplina foi atualizado
+para listar a Aula 5.1 como entrada nova (ver seção "Etapa 5" abaixo,
+se aplicável, ou o próprio `index.qmd`); a Aula 4 e a Aula 6 **não**
+foram tocadas — seus links/pontes continuam apontando para a Aula 5
+original, não para a 5.1. Isso é intencional por ora (a Aula 5.1
+coexiste, não substitui), mas se um dia a Aula 5 original for
+descontinuada em favor da 5.1, essas referências cruzadas precisarão
+ser atualizadas.
 
 ## Aula 6 — O Mundo Linear: PCA, PPCA e Autoencoders Lineares
 

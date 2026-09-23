@@ -1,0 +1,303 @@
+---
+title: "Exercícios — Aula 5.1: Modelos Variacionais, GMM Bayesiano e Seleção de Modelos"
+subtitle: "Aprendizado Não Supervisionado"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado das questões de Verdadeiro/Falso está em
+[`soluções.qmd`](soluções.qmd). Encontrou um erro numa questão? Corrija
+diretamente neste arquivo e abra um *pull request*.
+:::
+
+## Contexto e notação
+
+Um **Modelo de Mistura Gaussiana** (GMM) explica cada ponto
+$\mathbf{x}_n$ como vindo de uma entre $K$ populações gaussianas, via
+uma variável latente categórica $z_n$, com prior de mistura
+$\pi_k=p(z_{nk}=1)$. O **EM clássico** ajusta
+$\theta=\{\pi_k,\mu_k,\Sigma_k\}$ por máxima verossimilhança, sem
+nenhuma priori sobre $\theta$ — a log-verossimilhança de treino nunca
+piora ao aumentar $K$, tornando-a inútil para escolher $K$.
+
+**Seleção Bayesiana de modelos.** Tratando a estrutura do modelo
+$\mathcal{M}_m$ (ex.: "GMM com $K=m$") como variável,
+$p(\mathcal{M}_m\mid\mathbf{X})\propto p(\mathcal{M}_m)p(\mathbf{X}\mid
+\mathcal{M}_m)$, onde a **evidência**
+$p(\mathbf{X}\mid\mathcal{M}_m)=\int p(\mathbf{X},\mathbf{H}\mid
+\mathcal{M}_m)\,\mathrm{d}\mathbf{H}$ já embute uma Navalha de Occam
+orgânica (modelos complexos espalham massa de probabilidade por um
+espaço maior de $\mathbf{H}$). Como essa integral é intratável, usa-se
+o **ELBO** $\mathcal{L}_m(q)$, uma cota inferior tratável obtida via
+divergência de Kullback-Leibler,
+$\mathrm{KL}(q\|p)=\mathbb{E}_q[\ln\{q/p\}]\ge0$:
+$$
+\ln p(\mathbf{X}\mid\mathcal{M}_m) = \mathcal{L}_m(q) + \mathrm{KL}\big(q(\mathbf{H})\,\|\,p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)\big) .
+$$
+
+**GMM Bayesiano.** Coloca-se $\mathbf{H}=(\mathbf{Z},\pi,\mu,\Sigma)$
+**inteiro** dentro do tratamento variacional (campo médio
+$q(\mathbf{Z})q(\pi)\prod_kq(\mu_k,\Sigma_k)$): uma priori de Dirichlet
+sobre $\pi$ (concentração $\alpha_0$, **fixa e neutra**, ex.
+$\alpha_0=1$) produz posterior $\mathrm{Dir}(\alpha_0+N_1,\dots,
+\alpha_0+N_K)$, com $N_k$ a contagem esperada de pontos no componente
+$k$ — componentes com $N_k\approx0$ são podados; uma priori
+Normal-Wishart sobre $(\mu_k,\Sigma_k)$ garante que a escala posterior
+$W_k^{-1}=W_0^{-1}+N_kS_k+\dots$ nunca esquece o termo $W_0^{-1}$ da
+priori, impedindo analiticamente o colapso $\Sigma_k\to\mathbf{0}$. O
+ELBO resultante se decompõe como
+$$
+\mathcal{L}_m(q) = \underbrace{\mathbb{E}_{q(\mathbf{Z})q(\mu,\Sigma)}\big[\ln p(\mathbf{X}\mid\mathbf{Z},\mu,\Sigma)\big]}_{\text{Ajuste}} - \underbrace{\mathrm{KL}\big(q(\mathbf{Z},\pi,\mu,\Sigma)\,\|\,p(\cdot\mid\mathbf{X})\big)}_{\text{Navalha de Occam}} .
+$$
+Diferente da log-verossimilhança crua, esse ELBO **sobe e depois cai**
+em função de $K$.
+
+**Validação preditiva e geométrica.** O alvo estatístico verdadeiro é a
+**Esperança da Log-Densidade Preditiva** (ELPD),
+$\mathbb{E}_{\mathbf{x}\sim p_{\text{true}}}[\ln p(\mathbf{x}\mid
+\mathbf{X}_{\text{train}})]$ — estimar essa quantidade usando os
+próprios dados de treino produz viés de otimismo (*double-dipping*);
+um conjunto de validação $\mathbf{X}_{\text{val}}$, nunca exposto ao
+ajuste, fornece um estimador de Monte Carlo não-viesado. Como nem todo
+método tem probabilidade (K-Means, DBSCAN), métricas puramente
+geométricas na validação unificam a comparação: o **Coeficiente de
+Silhueta** (Rousseeuw, 1987), $s(i)=\frac{b(i)-a(i)}{\max\{a(i),b(i)\}}$
+($a(i)$ = coesão, $b(i)$ = separação), e o **Índice de Dunn** (Dunn,
+1974), razão entre a menor distância entre clusters diferentes e o
+maior diâmetro interno de qualquer cluster — puramente geométrico,
+sem assumir forma esférica.
+
+**PPC quantitativo.** Amostrando $\mathbf{X}_{\text{sim}}$ do modelo
+ajustado, comparamos contra $\mathbf{X}_{\text{real}}$ via (a)
+projeções sobre múltiplas direções aleatórias, com teste de
+Kolmogorov-Smirnov (Massey, 1951) em cada direção, e (b) *Maximum Mean
+Discrepancy* (MMD; Gretton et al., 2012) com kernel RBF, cuja largura
+de banda determina que escala de discrepância o teste enxerga.
+
+## Questões discursivas
+
+::: {.callout-note icon=false}
+## Questão 1
+
+A evidência $p(\mathbf{X}\mid\mathcal{M}_m)=\int
+p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)\,\mathrm{d}\mathbf{H}$ é
+descrita como contendo uma "Navalha de Occam orgânica", sem precisar
+de nenhum termo de penalidade adicionado à mão. Explique, com suas
+próprias palavras, o argumento geométrico/probabilístico (espalhar vs.
+concentrar massa sobre o espaço de datasets possíveis) por trás dessa
+afirmação, e discuta explicitamente por que esse argumento **não**
+depende de aproximar a evidência por um ELBO — o ELBO resolve um
+problema diferente (qual?).
+:::
+
+::: {.callout-note icon=false}
+## Questão 2
+
+O GMM Bayesiano desta aula usa um $\alpha_0$ **fixo e neutro** para a
+priori de Dirichlet sobre $\pi$, deixando a comparação do ELBO entre
+diferentes $K$'s decidir o tamanho do modelo — diferente de uma
+estratégia alternativa (usada, por exemplo, na versão original da
+Aula 5) que varia $\alpha_0$ com $K$ fixo "de sobra" para forçar
+diferentes graus de poda. Discuta: essas duas estratégias testam
+exatamente a mesma coisa de formas diferentes, ou avaliam perguntas
+estruturalmente distintas? Que vantagem prática (não apenas
+estética) a estratégia desta aula tem quando se quer comparar o GMM
+Bayesiano contra métodos sem probabilidade nenhuma, como o K-Means?
+:::
+
+::: {.callout-note icon=false}
+## Questão 3
+
+Suponha que, para um novo dataset, o ELBO de treino, a
+log-verossimilhança preditiva na validação, a Silhueta e o Índice de
+Dunn concordem todos em $K^\star=3$, mas um PPC quantitativo (projeções
+aleatórias + KS, e MMD com duas larguras de banda diferentes) não
+encontre evidência de discrepância de forma. Isso é suficiente para
+declarar, com confiança total, que "o GMM com $K=3$ captura a
+estrutura geradora verdadeira dos dados"? Justifique apontando
+explicitamente **pelo menos duas** limitações estruturais — não
+apenas numéricas — que continuariam valendo mesmo com essa
+concordância total entre critérios.
+:::
+
+## Questões de Verdadeiro/Falso
+
+::: {.callout-note icon=false}
+## Teste 1 — Seleção Bayesiana de modelos e a evidência
+
+- □ Ao comparar $p(\mathcal{M}_1\mid\mathbf{X})$ e
+  $p(\mathcal{M}_2\mid\mathbf{X})$ via regra de Bayes, o termo
+  $p(\mathbf{X})$ do denominador pode ser ignorado na comparação
+  porque ele não depende de qual estrutura $\mathcal{M}_m$ está sendo
+  avaliada.
+- □ Um modelo com muito mais parâmetros livres do que outro sempre
+  tem evidência $p(\mathbf{X}\mid\mathcal{M}_m)$ maior, porque mais
+  parâmetros dão mais liberdade para explicar qualquer dataset
+  observado.
+- □ A Navalha de Occam embutida na evidência depende de integrar
+  $p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)$ sobre $\mathbf{H}$ — se
+  em vez disso avaliássemos $p(\mathbf{X}\mid\hat{\mathbf{H}}_{\text{ML}},
+  \mathcal{M}_m)$ num único ponto ótimo $\hat{\mathbf{H}}_{\text{ML}}$,
+  essa penalidade de complexidade desapareceria.
+- □ Se $p(\mathcal{M}_1)=p(\mathcal{M}_2)$ (priori uniforme sobre as
+  estruturas), a razão $p(\mathcal{M}_1\mid\mathbf{X})/p(\mathcal{M}_2
+  \mid\mathbf{X})$ é exatamente a razão das evidências
+  $p(\mathbf{X}\mid\mathcal{M}_1)/p(\mathbf{X}\mid\mathcal{M}_2)$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — KL, ELBO e a decomposição da evidência
+
+- □ A divergência $\mathrm{KL}(q\|p)$ é, por definição, simétrica:
+  $\mathrm{KL}(q\|p)=\mathrm{KL}(p\|q)$ para quaisquer distribuições
+  $p,q$.
+- □ Na decomposição $\ln p(\mathbf{X}\mid\mathcal{M}_m)=
+  \mathcal{L}_m(q)+\mathrm{KL}(q\|p(\mathbf{H}\mid\mathbf{X},
+  \mathcal{M}_m))$, a igualdade $\mathcal{L}_m(q)=\ln p(\mathbf{X}\mid
+  \mathcal{M}_m)$ vale exatamente quando $q(\mathbf{H})$ coincide com
+  a posterior verdadeira $p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)$.
+- □ Se, para dois modelos $\mathcal{M}_1,\mathcal{M}_2$, temos
+  $\mathcal{L}_1(q)>\mathcal{L}_2(q)$ usando a mesma família funcional
+  para $q$ em ambos os casos, isso garante matematicamente que
+  $\ln p(\mathbf{X}\mid\mathcal{M}_1)>\ln p(\mathbf{X}\mid
+  \mathcal{M}_2)$, sem exceção.
+- □ A não-negatividade de $\mathrm{KL}(q\|p)$ decorre da convexidade da
+  função $-\ln(\cdot)$ aplicada via desigualdade de Jensen — não é um
+  postulado adicional, é uma consequência demonstrável dessa
+  convexidade.
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — Dirichlet sobre $\pi$ e poda de componentes
+
+- □ Na posterior variacional $q^\star(\pi)=\mathrm{Dir}(\alpha_0+N_1,
+  \dots,\alpha_0+N_K)$, um componente $k$ com $N_k=0$ (nenhum ponto
+  esperado ali) tem concentração posterior igual a $\alpha_0$, a mesma
+  da priori.
+- □ Aumentar $\alpha_0$ (mantendo-o fixo, sem variar por rodada) torna
+  a poda automática de componentes sem suporte nos dados **mais
+  agressiva**, não menos.
+- □ A contagem esperada $N_k=\sum_n\gamma(z_{nk})$ depende da
+  responsabilidade $\gamma(z_{nk})$ calculada sob o fator variacional
+  $q(\mathbf{Z})$, e não é, em geral, um número inteiro.
+- □ Se dois componentes $k$ e $k'$ tiverem exatamente o mesmo $N_k=N_{k'}$,
+  suas concentrações posteriores sob $q^\star(\pi)$ são necessariamente
+  idênticas, para qualquer $\alpha_0$ fixo usado na priori.
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — Normal-Wishart e o colapso da covariância
+
+- □ Na atualização $W_k^{-1}=W_0^{-1}+N_kS_k+\frac{\beta_0N_k}
+  {\beta_0+N_k}(\bar{\mathbf{x}}_k-m_0)(\bar{\mathbf{x}}_k-m_0)^T$, se
+  a covariância amostral local $S_k$ do componente $k$ tender à matriz
+  nula (todos os pontos responsáveis coincidindo), $W_k^{-1}$ ainda
+  assim permanece positiva definida, por causa do termo $W_0^{-1}$.
+- □ Definir $W_0$ como a inversa da covariância **global** dos dados
+  (Empirical Bayes) é uma escolha estruturalmente diferente de
+  simplesmente fixar $\Sigma_k$ a um valor constante para todo
+  componente, como faria um K-Means com covariância esférica idêntica.
+- □ No EM clássico da Aula 4 (sem nenhuma priori sobre $\Sigma_k$), a
+  matriz de covariância de um componente podia, em princípio, colapsar
+  para a matriz nula; no GMM Bayesiano com Normal-Wishart, esse mesmo
+  colapso continua matematicamente possível, só que menos provável.
+- □ O mecanismo que impede o colapso de $\Sigma_k$ (via $W_0^{-1}$ na
+  Normal-Wishart) e o mecanismo que poda componentes supérfluos (via
+  $\alpha_0$ na Dirichlet) são, estruturalmente, o mesmo tipo de
+  argumento: um termo vindo da priori que persiste na atualização
+  posterior, independente do que os dados sugerem no extremo oposto.
+:::
+
+::: {.callout-note icon=false}
+## Teste 5 — Dissecando o ELBO variacional
+
+- □ No termo de ajuste $\mathbb{E}_{q(\mathbf{Z})q(\mu,\Sigma)}[\ln
+  p(\mathbf{X}\mid\mathbf{Z},\mu,\Sigma)]$ da decomposição do ELBO do
+  GMM Bayesiano, a esperança não precisa ser tomada sobre $q(\pi)$
+  porque a densidade de $\mathbf{X}$, dados $\mathbf{Z}$ e
+  $(\mu,\Sigma)$, não depende de $\pi$.
+- □ Se o ELBO de um GMM Bayesiano, calculado com $K=5$, for maior que
+  o calculado com $K=4$ no mesmo dataset, isso garante que $K=5$
+  também produz log-verossimilhança de treino maior que $K=4$.
+- □ O padrão "sobe e depois cai" do ELBO em função de $K$ é uma
+  consequência direta do termo de KL crescer mais rápido que o ganho
+  no termo de ajuste, a partir de algum $K$ em diante.
+- □ Comparar diretamente os valores absolutos do ELBO do GMM Bayesiano
+  com os valores absolutos da log-verossimilhança do EM clássico, no
+  mesmo $K$, é uma forma válida de decidir qual dos dois métodos
+  "explica melhor" os dados.
+:::
+
+::: {.callout-note icon=false}
+## Teste 6 — ELPD, viés de treino e o estimador de Monte Carlo
+
+- □ O viés de otimismo (*double-dipping*) ao estimar o ELPD usando os
+  próprios dados de treino ocorre porque os mesmos pontos que ajustaram
+  o modelo são reutilizados para avaliá-lo.
+- □ O estimador $\widehat{\mathrm{ELPD}}=\frac{1}{N_{\text{val}}}
+  \sum_{n\in\text{val}}\ln p(\mathbf{x}_n\mid\mathbf{X}_{\text{train}})$
+  é não-viesado especificamente porque $\mathbf{X}_{\text{val}}$ é
+  amostrado da mesma população $p_{\text{true}}$ e nunca participou do
+  ajuste do modelo.
+- □ Se um GMM Bayesiano tiver ELBO de treino maximizado em $K=4$, mas a
+  log-verossimilhança preditiva na validação for maximizada em $K=2$,
+  isso é logicamente impossível, já que o ELBO já contém uma
+  penalidade de complexidade.
+- □ O mesmo raciocínio de "avaliar num conjunto nunca usado no ajuste
+  evita viés de otimismo" se aplica igualmente bem a escolher o número
+  de vizinhos $k$ de um classificador $k$-NN supervisionado.
+:::
+
+::: {.callout-note icon=false}
+## Teste 7 — Comparação universal: Silhueta, Dunn e DBSCAN adaptado
+
+- □ O Índice de Dunn, por usar apenas a menor distância entre clusters
+  diferentes e o maior diâmetro interno de qualquer cluster (em vez de
+  médias), tende a ser mais sensível a um único ponto atípico do que a
+  Silhueta.
+- □ A adaptação do DBSCAN para calcular métricas de validação em
+  pontos nunca vistos no ajuste (treinar um classificador $k$-NN nos
+  pontos não marcados como ruído) é necessária porque o DBSCAN, ao
+  contrário do K-Means, não tem um método nativo para atribuir cluster
+  a um ponto novo.
+- □ Se a Silhueta e o Dunn discordarem sobre qual $K$ é melhor para o
+  mesmo conjunto de partições, isso implica necessariamente que pelo
+  menos uma das duas métricas contém um erro de implementação.
+- □ Comparar a Silhueta de um K-Means (validação) diretamente com o
+  ELBO de um GMM Bayesiano (treino) é uma forma de comparação
+  igualmente válida à de comparar a Silhueta do K-Means com a
+  log-verossimilhança preditiva do GMM, ambas na validação.
+:::
+
+::: {.callout-note icon=false}
+## Teste 8 — PPC quantitativo: projeções aleatórias, KS e MMD
+
+- □ Usar múltiplas direções aleatórias para projetar os dados antes do
+  teste de Kolmogorov-Smirnov é necessário porque uma única direção —
+  mesmo a de maior variância — pode, por acaso, não capturar uma
+  diferença que existe claramente na estrutura conjunta dos dados.
+- □ O estimador não-viesado de $\mathrm{MMD}^2$ entre duas amostras
+  pode assumir valores negativos mesmo quando as duas amostras vêm,
+  de fato, de distribuições diferentes — um valor negativo, sozinho,
+  não é suficiente para concluir "mesma distribuição".
+- □ Se o MMD com largura de banda calibrada pela heurística da mediana
+  não rejeitar a hipótese de "mesma distribuição" entre dados reais e
+  sintéticos, isso é evidência definitiva de que o modelo capturou a
+  forma verdadeira dos dados, para qualquer escala de estrutura.
+- □ O mesmo tipo de escolha de escala que afeta o MMD (a largura de
+  banda do kernel RBF) tem um análogo direto na largura de banda $h$
+  de um KDE (Aula 2): ambos controlam que nível de detalhe da
+  distribuição o método consegue enxergar.
+:::

@@ -71,6 +71,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score, davies_bouldin_score
 from sklearn.model_selection import train_test_split
 from sklearn.datasets import make_moons
+from scipy.stats import beta as beta_dist
 
 plt.style.use('seaborn-v0_8-whitegrid')
 plt.rcParams.update({
@@ -95,6 +96,15 @@ def brl(x, nd=2):
     """Formata um número em notação decimal brasileira (vírgula), sem
     depender de chaves literais de LaTeX dentro de f-strings."""
     return f"{x:.{nd}f}".replace(".", ",")
+
+
+def fmt_alpha0(a):
+    """Formata um valor de alpha0 com casas decimais suficientes para
+    não arredondar para zero (0,0001 precisa de 4 casas; 0,001, de 3)."""
+    if a >= 1:
+        return str(int(a))
+    nd = 4 if a < 0.001 else 3
+    return brl(a, nd)
 
 
 # --- Problema-fio: Breast Cancer Wisconsin, mesmos 2 atributos das Aulas 3-4
@@ -129,7 +139,7 @@ loglik_total = np.array(loglik_total)
 
 # --- Bloco 1: BayesianGaussianMixture (priori de Dirichlet, processo de
 # Dirichlet truncado) com n_components=8 "de sobra", variando alpha0
-ALPHA0_GRID = [0.001, 1.0, 100.0]
+ALPHA0_GRID = [0.0001, 0.001, 1.0, 100.0]
 bgm_by_alpha = {}
 for alpha0 in ALPHA0_GRID:
     bgm = BayesianGaussianMixture(
@@ -138,6 +148,18 @@ for alpha0 in ALPHA0_GRID:
         max_iter=500, n_init=3)
     bgm.fit(X_2d)
     bgm_by_alpha[alpha0] = bgm
+
+# Densidade marginal de um único peso pi_k sob a priori de Dirichlet
+# simétrica Dirichlet(alpha0,...,alpha0) com K_bgm componentes: um
+# resultado padrão de distribuição Dirichlet é que cada marginal segue
+# Beta(alpha0, (K_bgm-1)*alpha0) — usado só para ilustrar visualmente o
+# que a priori "acredita" sobre um peso isolado, antes de ver os dados.
+K_bgm = 8
+PI_GRID = np.linspace(1e-3, 1 - 1e-3, 400)
+dirichlet_marginal = {
+    alpha0: beta_dist.pdf(PI_GRID, alpha0, (K_bgm - 1) * alpha0)
+    for alpha0 in ALPHA0_GRID
+}
 
 # --- Blocos 3-4: divisão treino/validação (nunca usada no ajuste)
 X_train, X_val = train_test_split(X_2d, test_size=0.3, random_state=42)
@@ -583,10 +605,53 @@ $p(\mathbf{H})=q(\mathbf{H})$. $\blacksquare$
 
 **A decomposição geral.** Para dados observados $\mathbf{X}$ e
 **qualquer** variável não observada $\mathbf{H}$ (de novo: latente,
-parâmetro, ou os dois), e qualquer $q(\mathbf{H})$ normalizada, a regra
-do produto ($p(\mathbf{X},\mathbf{H})=p(\mathbf{H}\mid\mathbf{X})p(\mathbf{X})$)
-aplicada a $\mathcal{L}(q)=\int q(\mathbf{H})\ln\{p(\mathbf{X},\mathbf{H})/q(\mathbf{H})\}\,\mathrm{d}\mathbf{H}$
-dá, pelos mesmos passos algébricos usados na definição de KL acima,
+parâmetro, ou os dois), e qualquer $q(\mathbf{H})$ normalizada, defina
+$$
+\mathcal{L}(q) := \int q(\mathbf{H})\ln\left\{\frac{p(\mathbf{X},\mathbf{H})}{q(\mathbf{H})}\right\}\mathrm{d}\mathbf{H}.
+$$
+A demonstração de que $\mathcal{L}(q)$ decompõe $\ln p(\mathbf{X})$
+segue os mesmos cinco passos já usados acima para a KL — vale a pena
+refazê-los aqui por extenso, porque toda a aula (EM clássico e a
+alternativa com $\pi$) é essa mesma conta repetida, só trocando quem
+entra em $\mathbf{H}$.
+
+**Passo 1 — regra do produto.** $p(\mathbf{X},\mathbf{H}) =
+p(\mathbf{H}\mid\mathbf{X})\,p(\mathbf{X})$. Substituindo dentro de
+$\mathcal{L}(q)$:
+$$
+\mathcal{L}(q) = \int q(\mathbf{H})\ln\left\{\frac{p(\mathbf{H}\mid\mathbf{X})\,p(\mathbf{X})}{q(\mathbf{H})}\right\}\mathrm{d}\mathbf{H}.
+$$
+
+**Passo 2 — separar o logaritmo do produto em soma.**
+$$
+\ln\left\{\frac{p(\mathbf{H}\mid\mathbf{X})\,p(\mathbf{X})}{q(\mathbf{H})}\right\}
+= \ln p(\mathbf{X}) + \ln\frac{p(\mathbf{H}\mid\mathbf{X})}{q(\mathbf{H})}
+= \ln p(\mathbf{X}) - \ln\frac{q(\mathbf{H})}{p(\mathbf{H}\mid\mathbf{X})} .
+$$
+
+**Passo 3 — voltar à integral e separar em dois termos** (linearidade
+da integral):
+$$
+\mathcal{L}(q) = \int q(\mathbf{H})\ln p(\mathbf{X})\,\mathrm{d}\mathbf{H}
+\;-\; \int q(\mathbf{H})\ln\frac{q(\mathbf{H})}{p(\mathbf{H}\mid\mathbf{X})}\,\mathrm{d}\mathbf{H} .
+$$
+
+**Passo 4 — simplificar o primeiro termo.** $\ln p(\mathbf{X})$ não
+depende de $\mathbf{H}$ (sai da integral), e $\int q(\mathbf{H})\,
+\mathrm{d}\mathbf{H}=1$ ($q$ normalizada):
+$$
+\int q(\mathbf{H})\ln p(\mathbf{X})\,\mathrm{d}\mathbf{H} = \ln p(\mathbf{X})\int q(\mathbf{H})\,\mathrm{d}\mathbf{H} = \ln p(\mathbf{X}) .
+$$
+
+**Passo 5 — reconhecer o segundo termo como KL.** Pela mesma forma de
+esperança usada na definição de KL, com $\mathbf{H}$ no papel de
+variável não observada e $p(\mathbf{H}\mid\mathbf{X})$ no papel de $p$,
+$$
+\int q(\mathbf{H})\ln\frac{q(\mathbf{H})}{p(\mathbf{H}\mid\mathbf{X})}\,\mathrm{d}\mathbf{H} = \mathrm{KL}\big(q(\mathbf{H})\,\|\,p(\mathbf{H}\mid\mathbf{X})\big).
+$$
+Juntando os Passos 4 e 5,
+$\mathcal{L}(q) = \ln p(\mathbf{X}) - \mathrm{KL}(q\|p(\mathbf{H}\mid\mathbf{X}))$,
+ou seja:
 
 ::: {.callout-note icon=false}
 ## Teorema (decomposição da evidência; PRML eq. 10.2, §10.1)
@@ -737,6 +802,29 @@ caso particular dele: otimiza sobre $q(\mathbf{Z})$ e $q(\pi)$
 alternadamente (não sobre $q(\mathbf{Z})$ e um ponto $\pi$), e o
 resultado carrega, de verdade, a penalização de complexidade.
 
+**Onde a priori entra, de fato.** O Passo 1 deixou $p(\mathbf{Z},\pi
+\mid\phi)$ como um bloco só, sem abrir — vale abri-lo, porque é aí que
+a priori $p(\pi)$ literalmente aparece. Pela regra do produto mais uma
+vez,
+$$
+p(\mathbf{Z},\pi\mid\phi) = p(\mathbf{Z}\mid\pi,\phi)\,p(\pi\mid\phi).
+$$
+Dois fatos do modelo simplificam os dois fatores: a atribuição de cada
+ponto a um componente depende só de $\pi$, nunca de $\phi$ (a forma da
+gaussiana não influencia qual componente um ponto "escolhe"), logo
+$p(\mathbf{Z}\mid\pi,\phi)=p(\mathbf{Z}\mid\pi)=\prod_n\pi_{z_n}$; e a
+priori sobre $\pi$ é uma escolha do modelador, feita antes de qualquer
+ajuste e independente de $\phi$, logo $p(\pi\mid\phi)=p(\pi)$. Juntando
+os dois,
+$$
+p(\mathbf{Z},\pi\mid\phi) = p(\pi)\prod_{n} \pi_{z_n}.
+$$
+É exatamente esse objeto que aparece do lado direito da
+$\mathrm{KL}$ do Passo 5 — a priori $p(\pi)$ não se soma à
+$\mathrm{KL}$ depois de pronta: ela já está **dentro** de
+$p(\mathbf{Z},\pi\mid\phi)$, o alvo contra o qual $q(\mathbf{Z},\pi)$ é
+comparado.
+
 **Verificação numérica — poda automática de componentes.** Dando a
 $\pi=(\pi_1,\dots,\pi_K)$ uma priori de Dirichlet com concentração
 $\alpha_0$ — quanto **menor** $\alpha_0$, mais a priori já "acredita"
@@ -749,8 +837,13 @@ também trata $\mu_k,\Sigma_k$ variacionalmente, com prioris
 Normal-Wishart (uma extensão natural do mesmo princípio, que não
 desenvolvemos nesta aula: o mecanismo de poda que importa aqui vem
 inteiramente da priori sobre $\pi$, como o Passo 4 mostrou). Ajustando
-com $K=8$ componentes "de sobra" e três valores de $\alpha_0$, no mesmo
-Breast Cancer Wisconsin:
+com $K=8$ componentes "de sobra" e quatro valores de $\alpha_0$, no
+mesmo Breast Cancer Wisconsin — acompanhados, na linha de cima, da
+densidade marginal de um único peso $\pi_k$ sob a priori de Dirichlet
+simétrica com aquele $\alpha_0$ (um resultado padrão da distribuição
+Dirichlet: cada peso, isolado dos outros, segue uma
+$\mathrm{Beta}(\alpha_0,(K-1)\alpha_0)$) — para ver, antes de qualquer
+ajuste aos dados, o que a priori já "acredita" sobre um peso típico:
 
 :::
 
@@ -765,13 +858,9 @@ os dois). Não simétrica.
 :::
 
 ::: {.fragment .callout-note}
-$\int q(\mathbf{H})f(\mathbf{H})\,\mathrm{d}\mathbf{H} =
-\mathbb{E}_q[f(\mathbf{H})]$ (esperança de $f$ sob $q$), para qualquer
-$f$. Logo, a mesma KL, em notação compacta:
-$$
-\mathrm{KL}(q\|p) = \mathbb{E}_q\!\left[\ln\frac{q(\mathbf{H})}{p(\mathbf{H})}\right]
-$$
-— não é objeto novo, só a notação usada daqui em diante.
+- $\int q(\mathbf{H})f(\mathbf{H})\,\mathrm{d}\mathbf{H} = \mathbb{E}_q[f(\mathbf{H})]$ (esperança de $f$ sob $q$), para qualquer
+$f$. 
+- Logo, a KL pode ser escrita como:$\mathrm{KL}(q\|p) = \mathbb{E}_q\!\left[\ln\frac{q(\mathbf{H})}{p(\mathbf{H})}\right]$.
 :::
 
 ::: {.callout-note .fragment icon=false}
@@ -779,10 +868,50 @@ $$
 :::
 
 ::: {.fragment}
-*Prova.* $-\ln(\cdot)$ convexa $\Rightarrow$ Jensen:
-$-\ln\mathbb{E}_q[X]\le\mathbb{E}_q[-\ln X]$. Com $X=p(\mathbf{H})/q(\mathbf{H})$:
-$\mathrm{KL}(q\|p)\ge-\ln\int p(\mathbf{H})\,\mathrm{d}\mathbf{H}=0$.
-Igualdade sse $p=q$. $\blacksquare$
+*Prova.* \
+$-\ln(\cdot)$ convexa $\Rightarrow$ Jensen: $-\ln\mathbb{E}_q[X]\le\mathbb{E}_q[-\ln X]$. 
+
+Com $X=p(\mathbf{H})/q(\mathbf{H})$: $\mathrm{KL}(q\|p)\ge-\ln\int p(\mathbf{H})\,\mathrm{d}\mathbf{H}=0$.
+:::
+
+::: {.fragment}
+Defina $\mathcal{L}(q):=\int q(\mathbf{H})\ln\{p(\mathbf{X},\mathbf{H})
+/q(\mathbf{H})\}\,\mathrm{d}\mathbf{H}$. Os mesmos cinco passos de
+antes decompõem $\ln p(\mathbf{X})$ — vale repeti-los, porque toda a
+aula é essa conta reaplicada trocando quem entra em $\mathbf{H}$.
+:::
+
+## Decomposição Geral: Passo a Passo
+
+::: {.fragment}
+**Passo 1:** regra do produto,
+$p(\mathbf{X},\mathbf{H})=p(\mathbf{H}\mid\mathbf{X})\,p(\mathbf{X})$
+$\Rightarrow$
+$\mathcal{L}(q)=\int q(\mathbf{H})\ln\{p(\mathbf{H}\mid\mathbf{X})p(\mathbf{X})/q(\mathbf{H})\}\,\mathrm{d}\mathbf{H}$.
+:::
+
+::: {.fragment}
+**Passo 2:** separa o log do produto em soma —
+$\ln\{p(\mathbf{H}\mid\mathbf{X})p(\mathbf{X})/q(\mathbf{H})\}
+= \ln p(\mathbf{X}) - \ln\{q(\mathbf{H})/p(\mathbf{H}\mid\mathbf{X})\}$.
+:::
+
+::: {.fragment}
+**Passo 3:** volta à integral, separa em dois termos:
+$$
+\mathcal{L}(q) = \int q(\mathbf{H})\ln p(\mathbf{X})\,\mathrm{d}\mathbf{H} - \int q(\mathbf{H})\ln\frac{q(\mathbf{H})}{p(\mathbf{H}\mid\mathbf{X})}\,\mathrm{d}\mathbf{H}.
+$$
+:::
+
+::: {.fragment}
+**Passo 4:** primeiro termo — $\ln p(\mathbf{X})$ não depende de
+$\mathbf{H}$, e $\int q(\mathbf{H})\,\mathrm{d}\mathbf{H}=1$
+$\Rightarrow$ esse termo é exatamente $\ln p(\mathbf{X})$.
+:::
+
+::: {.fragment}
+**Passo 5:** segundo termo = $\mathrm{KL}(q\|p(\mathbf{H}\mid\mathbf{X}))$
+(mesma definição de esperança de antes). Logo:
 :::
 
 ::: {.callout-note .fragment icon=false}
@@ -803,9 +932,9 @@ repetir a conta, condicionando em $\theta$ do início ao fim.
 :::
 
 ::: {.fragment}
-$\mathcal{L}(q,\theta):=\int q(\mathbf{Z})\ln\{p(\mathbf{X},\mathbf{Z}
-\mid\theta)/q(\mathbf{Z})\}\,\mathrm{d}\mathbf{Z}$. Regra do produto
-(condicionada): $p(\mathbf{X},\mathbf{Z}\mid\theta)=p(\mathbf{Z}\mid
+- $\mathcal{L}(q,\theta):=\int q(\mathbf{Z})\ln\{p(\mathbf{X},\mathbf{Z}
+\mid\theta)/q(\mathbf{Z})\}\,\mathrm{d}\mathbf{Z}$. 
+- Regra do produto(condicionada): $p(\mathbf{X},\mathbf{Z}\mid\theta)=p(\mathbf{Z}\mid
 \mathbf{X},\theta)p(\mathbf{X}\mid\theta)$ $\Rightarrow$ mesma separação
 de antes, com $\theta$ em toda parte:
 $$
@@ -839,32 +968,70 @@ $$
 ## Passo a Passo da Simplificação
 
 ::: {.fragment}
+Ponto de partida, o mesmo do slide anterior:
+$$
+\mathcal{L}(q,\phi) = \iint q(\mathbf{Z})q(\pi)\ln\frac{p(\mathbf{X},\mathbf{Z},\pi\mid\phi)}{q(\mathbf{Z})q(\pi)}\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi .
+$$
+:::
+
+::: {.fragment}
 **Passo 1:** dado $\mathbf{Z}$ e $\phi$, $\mathbf{X}$ não depende mais
 de $\pi$ ($\pi$ só decide **qual** componente, não a forma dele) —
 $p(\mathbf{X}\mid\mathbf{Z},\pi,\phi)=p(\mathbf{X}\mid\mathbf{Z},\phi)$.
-Produto: $p(\mathbf{X},\mathbf{Z},\pi\mid\phi)=p(\mathbf{X}\mid
-\mathbf{Z},\phi)\,p(\mathbf{Z},\pi\mid\phi)$.
+Regra do produto,
+$p(\mathbf{X},\mathbf{Z},\pi\mid\phi)=p(\mathbf{X}\mid\mathbf{Z},\pi,\phi)\,p(\mathbf{Z},\pi\mid\phi)$,
+e substituindo a igualdade de cima no primeiro fator:
+$$
+p(\mathbf{X},\mathbf{Z},\pi\mid\phi)=p(\mathbf{X}\mid\mathbf{Z},\phi)\,p(\mathbf{Z},\pi\mid\phi) .
+$$
 :::
 
 ::: {.fragment}
-**Passos 2-3:** substitui no log, separa a integral dupla em dois
-termos — mesma mecânica de antes, agora com $\pi$ e $\phi$ no lugar de
-$\theta$.
+**Passo 2:** substitui o resultado do Passo 1 e separa o log do
+produto em soma:
+$$
+\ln\frac{p(\mathbf{X},\mathbf{Z},\pi\mid\phi)}{q(\mathbf{Z})q(\pi)}
+= \ln p(\mathbf{X}\mid\mathbf{Z},\phi) - \ln\frac{q(\mathbf{Z})q(\pi)}{p(\mathbf{Z},\pi\mid\phi)} .
+$$
 :::
 
 ::: {.fragment}
-**Passo 4:** o termo de ajuste não depende de $\pi$
-$\Rightarrow\int q(\pi)\,\mathrm{d}\pi=1$ elimina $\pi$ dele:
+**Passo 3:** volta à integral dupla, separa em dois termos
+(linearidade da integral):
+$$
+\mathcal{L}(q,\phi) = \iint q(\mathbf{Z})q(\pi)\ln p(\mathbf{X}\mid\mathbf{Z},\phi)\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi
+\;-\; \iint q(\mathbf{Z})q(\pi)\ln\frac{q(\mathbf{Z})q(\pi)}{p(\mathbf{Z},\pi\mid\phi)}\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi .
+$$
+:::
+
+## Concluindo: Passos 4 e 5
+
+::: {.fragment}
+Onde o Passo 3 parou:
+$$
+\mathcal{L}(q,\phi) = \iint q(\mathbf{Z})q(\pi)\ln p(\mathbf{X}\mid\mathbf{Z},\phi)\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi
+\;-\; \iint q(\mathbf{Z})q(\pi)\ln\frac{q(\mathbf{Z})q(\pi)}{p(\mathbf{Z},\pi\mid\phi)}\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi .
+$$
+:::
+
+::: {.fragment}
+**Passo 4:** o integrando do primeiro termo não depende de $\pi$
+$\Rightarrow$ integrando primeiro em $\pi$, $\int q(\pi)\,\mathrm{d}\pi=1$
+elimina essa variável por completo:
 $$
 \iint q(\mathbf{Z})q(\pi)\ln p(\mathbf{X}\mid\mathbf{Z},\phi)\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi
-= \mathbb{E}_{q(\mathbf{Z})}[\ln p(\mathbf{X}\mid\mathbf{Z},\phi)]
+= \mathbb{E}_{q(\mathbf{Z})}[\ln p(\mathbf{X}\mid\mathbf{Z},\phi)] .
 $$
-Ganho concreto de isolar só $\pi$: esperança só sobre $\mathbf{Z}$.
+Ganho concreto de isolar só $\pi$: esperança só sobre $\mathbf{Z}$, sem
+precisar de esperança sobre $\pi$ também.
 :::
 
 ::: {.fragment}
-**Passo 5:** segundo termo = $\mathrm{KL}(q(\mathbf{Z},\pi)\|p(\mathbf{Z},\pi\mid\phi))$
-(mesma definição de esperança de KL). Logo:
+**Passo 5:** pela mesma definição de esperança usada na KL, com
+$\mathbf{Z}$ e $\pi$ juntos no papel de variável não observada, o
+segundo termo é exatamente
+$\mathrm{KL}(q(\mathbf{Z},\pi)\|p(\mathbf{Z},\pi\mid\phi))$. Juntando os
+dois passos:
 $$
 \mathcal{L}(q,\phi) = \underbrace{\mathbb{E}_{q(\mathbf{Z})}[\ln p(\mathbf{X}\mid\mathbf{Z},\phi)]}_{\text{ajuste}}
 - \underbrace{\mathrm{KL}(q(\mathbf{Z},\pi)\|p(\mathbf{Z},\pi\mid\phi))}_{\text{Navalha de Occam}}
@@ -878,12 +1045,43 @@ do EM (otimiza $q(\mathbf{Z})$ e $q(\pi)$, não $q(\mathbf{Z})$ e um
 ponto $\pi$).
 :::
 
+## Onde a Priori Entra, de Fato
+
+::: {.fragment}
+O Passo 1 deixou $p(\mathbf{Z},\pi\mid\phi)$ como um bloco só, sem
+abrir — é aí que a priori $p(\pi)$ aparece de verdade. Regra do
+produto de novo:
+$$
+p(\mathbf{Z},\pi\mid\phi) = p(\mathbf{Z}\mid\pi,\phi)\,p(\pi\mid\phi).
+$$
+:::
+
+::: {.fragment}
+- $p(\mathbf{Z}\mid\pi,\phi)=p(\mathbf{Z}\mid\pi)=\prod_n\pi_{z_n}$ —
+  a atribuição de cada ponto a um componente depende só de $\pi$, nunca
+  de $\phi$ (a forma da gaussiana não decide "qual" componente).
+- $p(\pi\mid\phi)=p(\pi)$ — a priori sobre $\pi$ é escolha do
+  modelador, decidida antes de tudo, independente de $\phi$.
+:::
+
+::: {.fragment .callout-important}
+$$
+p(\mathbf{Z},\pi\mid\phi) = p(\pi)\prod_{n} \pi_{z_n} .
+$$
+Esse é exatamente o objeto do lado direito da $\mathrm{KL}$ do Passo 5
+— a priori não se soma depois: já está **dentro** de
+$p(\mathbf{Z},\pi\mid\phi)$, o alvo contra o qual $q(\mathbf{Z},\pi)$ é
+comparado.
+:::
+
 ## Verificação: Poda Automática de Componentes
 
 ::: {.fragment}
 GMM Bayesiano: priori de Dirichlet em $\pi$, concentração $\alpha_0$ —
 menor $\alpha_0$ = crê a priori em menos componentes ativos. $K=8$
-"de sobra", Breast Cancer Wisconsin, três valores de $\alpha_0$:
+"de sobra", Breast Cancer Wisconsin, quatro valores de $\alpha_0$ —
+densidade da priori (linha de cima) e pesos aprendidos (linha de
+baixo):
 :::
 
 ::: {.fragment .callout-important}
@@ -895,21 +1093,31 @@ priori sobre $\pi$.
 
 :::
 
-::: {.fig-resize style="width: 92%; margin: 0 auto;"}
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
 ```{python}
 #| echo: false
 #| fig-align: center
 
-fig, axes = plt.subplots(1, 3, figsize=(11, 3.6), sharey=True)
-for ax, alpha0 in zip(axes, ALPHA0_GRID):
+fig, axes = plt.subplots(2, len(ALPHA0_GRID), figsize=(13.5, 6.6))
+for col, alpha0 in enumerate(ALPHA0_GRID):
+    ax_top = axes[0, col]
+    ax_top.plot(PI_GRID, dirichlet_marginal[alpha0], color=COR_B, linewidth=1.8)
+    ax_top.fill_between(PI_GRID, dirichlet_marginal[alpha0], color=COR_B, alpha=0.15)
+    ax_top.set_title(f"$\\alpha_0={fmt_alpha0(alpha0)}$")
+    ax_top.set_xlim(0, 1)
+    ax_top.set_xlabel("$\\pi_k$")
+    if col == 0:
+        ax_top.set_ylabel("densidade\n(priori, marginal)")
+
+    ax_bot = axes[1, col]
     w = np.sort(bgm_by_alpha[alpha0].weights_)[::-1]
     cores = [COR_A if wi > 0.01 else COR_NEU for wi in w]
-    ax.bar(range(1, len(w) + 1), w, color=cores)
-    ax.set_title(f"$\\alpha_0={brl(alpha0,3) if alpha0<1 else int(alpha0)}$")
-    ax.set_xlabel("componente (ordenado)")
-    ax.set_ylim(0, 0.75)
-axes[0].set_ylabel("peso $\\pi_k$ aprendido")
-fig.suptitle("Pesos de mistura de um GMM Bayesiano com K=8 'de sobra' — poda automática", y=1.03)
+    ax_bot.bar(range(1, len(w) + 1), w, color=cores)
+    ax_bot.set_xlabel("componente (ordenado)")
+    ax_bot.set_ylim(0, 0.75)
+    if col == 0:
+        ax_bot.set_ylabel("peso $\\pi_k$\naprendido (dados)")
+fig.suptitle("Priori de Dirichlet sobre um peso isolado (linha de cima) vs. pesos aprendidos por um GMM Bayesiano com K=8 'de sobra' (linha de baixo)", y=1.02)
 plt.tight_layout()
 plt.show()
 ```
@@ -917,27 +1125,64 @@ plt.show()
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-Com $\alpha_0=0{,}001$ (priori bem concentrada em poucos componentes), o
-ajuste converge para pesos $(0{,}6045,\ 0{,}3955,\ 0,\dots,0)$ — **dois**
-componentes significativos, os outros seis exatamente zerados: a poda é
-automática, sem comparar $\mathcal{L}$ entre rodadas separadas de $K$.
-Com $\alpha_0=1{,}0$, a poda é mais suave: $(0{,}582,\ 0{,}355,\ 0{,}061,
+A linha de cima mostra o que a priori, sozinha, já "acredita" sobre um
+peso $\pi_k$ típico, antes de qualquer dado: com $\alpha_0=0{,}0001$ ou
+$\alpha_0=0{,}001$, a densidade de $\mathrm{Beta}(\alpha_0,7\alpha_0)$
+se concentra quase toda perto de $\pi_k=0$ (com um pouco de massa perto
+de $1$) — a priori já "espera" a maioria dos pesos nulos antes de olhar
+para os dados. Com $\alpha_0=1$, a densidade ainda favorece pesos
+pequenos, mas de forma bem mais suave; com $\alpha_0=100$, ela se
+concentra estreitamente em torno de $1/K=0{,}125$ — a priori "espera"
+os $8$ pesos praticamente iguais, o oposto de esparsidade.
+
+A linha de baixo mostra o que o ajuste aos dados realmente produziu.
+Com $\alpha_0=0{,}0001$ **e** $\alpha_0=0{,}001$, o ajuste converge
+exatamente para os mesmos pesos, $(0{,}6045,\ 0{,}3955,\
+0,\dots,0)$ — **dois** componentes significativos, os outros seis
+exatamente zerados: a poda é automática, sem comparar $\mathcal{L}$
+entre rodadas separadas de $K$. O fato de $\alpha_0=0{,}0001$ (dez
+vezes mais concentrado que $\alpha_0=0{,}001$) não mudar nada revela um
+**patamar**: a poda já satura no que os dados sustentam — apertar ainda
+mais a priori não cria estrutura que os dados não têm. Com
+$\alpha_0=1{,}0$, a poda é mais suave: $(0{,}582,\ 0{,}355,\ 0{,}061,
 \dots)$, um terceiro componente pequeno mas não nulo sobrevive. Com
-$\alpha_0=100$ (priori bem mais permissiva), quatro componentes ficam
-com peso acima de $1\%$ — a priori "deixa" o modelo usar mais
-componentes antes de penalizar. O próprio $\alpha_0$ virou um botão que
-controla quantos componentes "sobrevivem" — o que já antecipa o
-problema do próximo bloco.
+$\alpha_0=100$ (priori bem mais permissiva, como a linha de cima já
+antecipava), quatro componentes ficam com peso acima de $1\%$ — a
+priori "deixa" o modelo usar mais componentes antes de penalizar. O
+próprio $\alpha_0$ virou um botão que controla quantos componentes
+"sobrevivem" — o que já antecipa o problema do próximo bloco.
 
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## O Que os Três Painéis Mostram
+## O Que a Linha de Cima Mostra: a Priori Sozinha
 
 ::: {.fragment}
-$\alpha_0=0{,}001$: pesos $(0{,}6045,\ 0{,}3955,\ 0,\dots)$ — 2
-componentes, resto exatamente zerado.
+$\mathrm{Beta}(\alpha_0,7\alpha_0)$ = densidade marginal de **um** peso
+$\pi_k$ isolado, sob a priori de Dirichlet simétrica com $K=8$ — o que
+o modelo "acredita" antes de ver qualquer dado.
+:::
+
+::: {.fragment}
+$\alpha_0=0{,}0001$ ou $0{,}001$: densidade concentrada perto de
+$\pi_k=0$ (com massa também perto de $1$) — priori já espera a maioria
+dos pesos nulos.
+:::
+
+::: {.fragment}
+$\alpha_0=1$: ainda favorece pesos pequenos, mais suavemente.
+$\alpha_0=100$: concentrada perto de $1/K=0{,}125$ — priori espera
+pesos quase iguais, o oposto de esparsidade.
+:::
+
+## O Que a Linha de Baixo Mostra: o Ajuste aos Dados
+
+::: {.fragment}
+$\alpha_0=0{,}0001$ **e** $\alpha_0=0{,}001$: mesmos pesos,
+$(0{,}6045,\ 0{,}3955,\ 0,\dots)$ — 2 componentes, resto exatamente
+zerado. Apertar a priori $10\times$ mais não muda nada: a poda **satura**
+no que os dados sustentam.
 :::
 
 ::: {.fragment}
@@ -946,8 +1191,9 @@ suave, um 3º componente pequeno sobrevive.
 :::
 
 ::: {.fragment}
-$\alpha_0=100$: 4 componentes com peso $>1\%$ — priori mais permissiva,
-"deixa" o modelo usar mais estrutura antes de penalizar.
+$\alpha_0=100$: 4 componentes com peso $>1\%$ — priori mais permissiva
+(exatamente como a linha de cima antecipava), "deixa" o modelo usar
+mais estrutura antes de penalizar.
 :::
 
 ::: {.fragment .callout-important}
@@ -1229,14 +1475,24 @@ Davies-Bouldin **só na validação**:
 
 ::: {.content-visible when-format="revealjs"}
 
-## Validação sem Rótulo: Redefinição
+## Separando os Dados: Treino e Validação
 
 ::: {.fragment}
-K-Means/DBSCAN não têm verossimilhança — única via é **empírica**.
-Passo preliminar novo: **separar os dados** — sortear uma fração como
-**treino** (ajusta o modelo) e reservar o resto, nunca tocado no
-ajuste, como **validação** (só mede o resultado depois).
+K-Means e DBSCAN não têm log-verossimilhança nem ELBO — a única via de
+validação disponível é **empírica**. Passo preliminar novo nesta
+disciplina: **separar os dados observados em dois subconjuntos
+disjuntos**, sorteados aleatoriamente entre os pontos originais.
 :::
+
+::: {.fragment .callout-note}
+- **Conjunto de treino**: usado só para *ajustar* o modelo — encontrar
+  os centroides do K-Means, ou aplicar as regras de vizinhança do
+  DBSCAN.
+- **Conjunto de validação**: reservado, nunca tocado nesse ajuste —
+  usado só depois, para *medir* a qualidade do resultado.
+:::
+
+## Validação sem Rótulo: Redefinição
 
 ::: {.fragment .callout-important}
 Por quê: métrica calculada nos mesmos pontos que moldaram o modelo
@@ -1279,8 +1535,6 @@ $\sigma_k:=\frac{1}{|C_k|}\sum_{\mathbf{x}\in C_k}\|\mathbf{x}-\mathbf{c}_k\|$
 (distância média dos pontos ao próprio centroide — quão "espalhado" é
 o cluster).
 :::
-
-## Índice de Davies-Bouldin: A Fórmula
 
 ::: {.fragment}
 Davies & Bouldin (1979): similaridade entre dois clusters
@@ -1519,23 +1773,25 @@ Occam analítico.
 **Usando a mesma lógica para calibrar $\alpha_0$ (Bloco 1).** A mesma
 receita — congelar o que foi aprendido no treino, avaliar em validação
 — serve para comparar hiperparâmetros de priori, não só $K$. Reajustando
-o GMM Bayesiano do Bloco 1 **só no treino**, para os três valores de
+o GMM Bayesiano do Bloco 1 **só no treino**, para os quatro valores de
 $\alpha_0$, e avaliando o *score* (proporcional ao ELBO médio por
 amostra) na validação:
 
 | $\alpha_0$ | ELBO total (aprox.) na validação |
 |---:|---:|
+| $0{,}0001$ | $-366{,}57$ |
 | $0{,}001$ | $-366{,}57$ |
 | $1{,}0$ | $-366{,}97$ |
 | $100$ | $-404{,}82$ |
 
-A priori mais concentrada ($\alpha_0=0{,}001$) generaliza melhor que a
-mais permissiva ($\alpha_0=100$) — a mesma conclusão da Silhueta/DB do
-Bloco 3 (poucos componentes bastam para este dataset), agora obtida por
-uma via totalmente diferente (probabilidade em dados novos, não
-geometria). Duas vias independentes concordando é um sinal forte — mas,
-como o próximo bloco mostra, ainda não é garantia de que o modelo
-capturou a estrutura certa.
+As duas prioris mais concentradas ($\alpha_0=0{,}0001$ e
+$\alpha_0=0{,}001$) empatam — o mesmo patamar de saturação já visto no
+Bloco 1 — e generalizam melhor que a mais permissiva ($\alpha_0=100$) —
+a mesma conclusão da Silhueta/DB do Bloco 3 (poucos componentes bastam
+para este dataset), agora obtida por uma via totalmente diferente
+(probabilidade em dados novos, não geometria). Duas vias independentes
+concordando é um sinal forte — mas, como o próximo bloco mostra, ainda
+não é garantia de que o modelo capturou a estrutura certa.
 
 :::
 
@@ -1566,15 +1822,18 @@ validação (ELBO total aprox.):
 
 | $\alpha_0$ | ELBO na validação |
 |---:|---:|
+| $0{,}0001$ | $-366{,}57$ |
 | $0{,}001$ | $-366{,}57$ |
 | $1{,}0$ | $-366{,}97$ |
 | $100$ | $-404{,}82$ |
 :::
 
 ::: {.fragment .callout-important}
-Priori concentrada generaliza melhor que a permissiva — mesma conclusão
-da Silhueta/DB (Bloco 3), por uma via totalmente diferente. Duas vias
-concordando é forte — mas não é garantia final (próximo bloco).
+$\alpha_0=0{,}0001$ e $0{,}001$ empatam — mesmo patamar de saturação do
+Bloco 1. Priori concentrada generaliza melhor que a permissiva — mesma
+conclusão da Silhueta/DB (Bloco 3), por uma via totalmente diferente.
+Duas vias concordando é forte — mas não é garantia final (próximo
+bloco).
 :::
 
 :::

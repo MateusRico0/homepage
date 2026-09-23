@@ -322,6 +322,11 @@ Note que a caixa da pergunta usa `callout-note icon=false` (sem ícone) e a caix
 
 **Desde 2026-09-14, os slides (RevealJS) não repetem mais a seção de Exercícios.** Antes, o bloco de Exercícios era duplicado dentro do `index.qmd` (notas em prosa + os mesmos itens de novo em slides, com resposta revelada no slide seguinte) — essa duplicação é exatamente o tipo de "múltiplas cópias que podem dessincronizar" que motivou tirar os Exercícios do `index.qmd`. Os slides terminam no Fechamento e no link para `exercicios.qmd`/`soluções.qmd` (ver acima); o conteúdo de Exercícios em si — pergunta e (agora publicamente) resposta — existe uma única vez, nesses dois arquivos. Isso vale só para a seção de Exercícios final: as **Pausas Ativas continuam exatamente como antes**, intercaladas nos slides com a resposta revelada no slide seguinte (ver "Pausa Ativa" acima) — não são afetadas por esta mudança.
 
+
+## Avaliações e Provas (Submódulo `evals/`)
+
+Quando o usuário solicitar a criação de questões para **provas** ou **avaliações de disciplina** (diferente dos exercícios de fechamento de aula), estas devem ser criadas e armazenadas exclusivamente no submódulo `evals/`.
+
 ---
 
 ## Para cada aula (repetir o ciclo)
