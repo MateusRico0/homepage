@@ -80,11 +80,12 @@ plt.rcParams.update({
 
 rng = np.random.default_rng(20260913)
 
-# --- Paleta do IC, ordem preferencial (mesma das Aulas 1-5) -----------
-COR_A   = "#0085CA"   # componente 1 / benigno
-COR_B   = "#FF5E00"   # componente 2 / maligno
-COR_LIM = "#E03C31"   # avisos, casos ambíguos
-COR_NEU = "#5D6D7E"   # dados brutos, elementos neutros
+# --- Paleta visual consistente com o curso --------------------------
+COR_AZUL    = "#1B365D"  # Azul institucional
+COR_LARANJA = "#D9531E"  # Laranja de contraste
+COR_VERM    = "#C0392B"  # Vermelho de erro/destaque
+COR_VERDE   = "#27AE60"  # Verde de acerto/probabilidade
+COR_CINZA   = "#7F8C8D"  # Cinza de apoio
 
 
 def brl(x, nd=2):
@@ -162,82 +163,40 @@ principal_cosines = np.linalg.svd(Q_pca.T @ Q_ae, compute_uv=False)
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-## Revisão Cuidadosa: O Que a Aula 5 Deixou Pronto
+## Revisão da Aula 5: O Legado do ELBO
 
-A Aula 5 respondeu uma pergunta diferente sobre o GMM da Aula 4: não
-"como ajustar $\theta$" (resolvida), mas "como saber se a **estrutura**
-do modelo — o número de componentes $K$ — é boa, sem rótulo de
-gabarito?" A resposta central veio da divergência de
-**Kullback-Leibler**, $\mathrm{KL}(q\|p)\ge0$, e da decomposição geral
+- **A Pergunta:** Como validar a estrutura do modelo (ex: número de componentes $K$) sem rótulos?
+- **O Mecanismo:** A divergência de Kullback-Leibler $\mathrm{KL}(q\|p)\ge0$ e a decomposição:
+  $$\ln p(\mathbf{X}) = \mathcal{L}(q) + \mathrm{KL}\big(q\,\|\,p(\mathbf{H}\mid\mathbf{X})\big)$$
+- **O ELBO $\mathcal{L}(q)$:** É a cota inferior da verossimilhança. Maximizar o ELBO é a estratégia universal para lidar com marginais intratáveis.
 
-$$
-\ln p(\mathbf{X}) = \mathcal{L}(q) + \mathrm{KL}\big(q\,\|\,p(\mathbf{H}\mid\mathbf{X})\big),
-$$
+. . .
 
-válida para **qualquer** distribuição $q$ sobre uma variável não
-observada $\mathbf{H}$ (latente, parâmetro, ou os dois) — o **ELBO**,
-$\mathcal{L}(q)$, é sempre uma cota inferior calculável da
-log-verossimilhança. A Aula 5 mostrou que o Algoritmo EM clássico da
-Aula 4 corresponde a manter $\theta$ **fora** desse tratamento (um
-ponto fixo, sem priori) — por isso seu ELBO no ótimo colapsa à
-verossimilhança no melhor ponto, sem nenhuma penalidade de
-complexidade. Colocar $\theta$ **dentro** do tratamento variacional,
-com uma priori de verdade, devolve a penalidade que faltava (a Navalha
-de Occam, via KL) — mas troca "escolher $K$" por "calibrar
-hiperparâmetros de priori", o mesmo tipo de escolha que reaparece, sem
-priori nenhuma, no K-Means e no DBSCAN. Como nem toda escolha de
-estrutura tem uma via analítica disponível, a Aula 5 fechou com três
-formas de validação **empírica**: Silhueta/Davies-Bouldin em dados de
-validação para clusterização dura, verossimilhança preditiva para
-modelos probabilísticos, e *Posterior Predictive Checks* como teste
-definitivo de que o modelo capturou a forma real do processo gerador.
+- **EM vs. Bayesiano:** No EM clássico, $\theta$ é ponto fixo $\to$ sem penalidade de complexidade. No Bayesiano, $\theta$ tem priori $\to$ a KL impõe a Navalha de Occam.
+- **Validação Empírica:** Quando a analítica falha $\to$ Silhueta, Davies-Bouldin ou *Posterior Predictive Checks*.
+- **A Transição de Hoje:** Até agora, a variável latente $z_n$ era **categórica** ("qual população?").
+- **O Novo Eixo:** E se a variável latente for **contínua** $\mathbf{z}\in\mathbb{R}^M$?
 
-Em todo esse percurso — Aulas 3, 4 e 5 —, a variável não observada
-$z_n$ era sempre **categórica**: "a qual das $K$ populações este ponto
-pertence?". Essa é uma pergunta específica, mas não a única forma de
-"informação escondida" que se pode tentar recuperar de dados não
-rotulados.
+:::
 
 ## Ideia Central
 
-O Breast Cancer Wisconsin, usado desde a Aula 3, tem $30$ atributos por
-paciente — impossível de visualizar diretamente (um gráfico de dispersão
-mostra, no máximo, $2$ ou $3$ eixos por vez). Até agora, a disciplina
-lidou com essa alta dimensionalidade de duas formas: ignorando-a
-(usando só $2$ atributos escolhidos à mão, como
-`radius_worst`/`concave points_worst`) ou combatendo-a como um
-problema (a maldição da dimensionalidade, Aula 2). A ideia-ponte desta
-aula é tratar a redução de dimensionalidade como um objetivo **em si
-mesmo**: em vez de perguntar "de qual população este ponto veio?"
-(variável latente categórica), perguntar "que posição, num espaço de
-dimensão bem menor que $30$, resume este paciente sem perder o que
-importa?" — trocando a variável latente categórica por uma variável
-latente **contínua**, $\mathbf{z}\in\mathbb{R}^M$, com $M\ll D$.
+O Breast Cancer Wisconsin, usado desde a Aula 3, tem $30$ atributos por paciente — impossível de visualizar diretamente. Até agora, a disciplina lidou com essa alta dimensionalidade de duas formas: ignorando-a (usando só $2$ atributos escolhidos à mão) ou combatendo-a como um problema (a maldição da dimensionalidade, Aula 2).
+
+A ideia-ponte desta aula é tratar a redução de dimensionalidade como um objetivo **em si mesmo**: em vez de perguntar "de qual população este ponto veio?" (variável latente categórica), perguntaremos "que posição, num espaço de dimensão bem menor que $30$, resume este paciente sem perder o que importa?". Estamos trocando a variável latente categórica por uma variável latente **contínua**, $\mathbf{z}\in\mathbb{R}^M$, com $M\ll D$.
 
 ## Roteiro da Aula
 
-Quatro perguntas organizam esta aula:
+Quatro perguntas organizam nossa jornada hoje:
 
-1. O que significa, formalmente, "resumir sem perder o que importa"? A
-   Análise de Componentes Principais (PCA) responde isso de duas formas
-   equivalentes — quais, e por que coincidem?
-2. Existe uma versão **probabilística** dessa mesma ideia — um modelo
-   gerador de variável latente contínua, no mesmo espírito do GMM da
-   Aula 4, mas linear-Gaussiano? O que ela revela que a PCA clássica,
-   sozinha, não revela?
-3. Uma rede neural rasa, treinada para reconstruir sua própria entrada
-   (um *autoencoder*), resolve um problema completamente diferente da
-   PCA, ou é a mesma coisa disfarçada?
-4. Essas três ferramentas (PCA, PPCA, autoencoder linear) têm alguma
-   limitação em comum — e o que fica fora do alcance delas?
+1. **O que significa, formalmente, "resumir sem perder o que importa"?** A Análise de Componentes Principais (PCA) responde isso de duas formas equivalentes — quais são elas e por que coincidem?
+2. **Existe uma versão probabilística dessa ideia?** Vamos explorar um modelo gerador de variável latente contínua, no mesmo espírito do GMM, mas linear-Gaussiano. O que a PPCA revela que a PCA clássica ignora?
+3. **Um autoencoder raso resolve um problema diferente, ou é a mesma coisa disfarçada?** Veremos como a reconstrução via redes neurais lineares converge para o mesmo subespaço da PCA.
+4. **Qual a limitação fundamental dessas três ferramentas?** O que acontece quando a estrutura dos dados não é um plano, mas uma variedade curva?
 
 ## Problema Motivador
 
-Sem nenhuma fórmula ainda: escolha dois atributos quaisquer do Breast
-Cancer Wisconsin, padronizados, e pergunte-se — se eu só pudesse guardar
-**uma única direção** de projeção para resumir os dois atributos num
-único número por paciente, qual direção eu escolheria, e por quê "essa
-e não outra"?
+Sem fórmulas por enquanto: imagine que você tem dois atributos padronizados do Breast Cancer Wisconsin. Se você fosse forçado a guardar **uma única direção** de projeção para resumir esses dois atributos num único número por paciente, qual direção você escolheria? Por que "essa" e não qualquer outra? O que tornaria essa direção "melhor" que as demais?
 
 :::
 
@@ -276,45 +235,27 @@ sempre **categórica**: "de qual das $K$ populações?"
 
 ## Ideia Central
 
-::: {.fragment}
-Breast Cancer Wisconsin: $30$ atributos — impossível visualizar
-diretamente. Até aqui: ignorada (só $2$ atributos à mão) ou combatida
-(maldição da dimensionalidade, Aula 2).
-:::
+- **O Problema:** Breast Cancer Wisconsin tem $30$ atributos. Impossível de visualizar.
+- **A Abordagem Anterior:** Ignorar (escolher 2 atributos) ou combater (maldição da dimensionalidade).
+- **A Nova Pergunta:** "Que posição, em dimensão $M\ll D$, resume este paciente sem perder o que importa?"
+- **Mudança de Paradigma:** Variável latente categórica $\to$ Variável latente contínua.
 
-::: {.fragment}
-Nova pergunta: não "de qual população veio?" (categórica), mas "que
-posição, em dimensão $M\ll D$, resume este paciente?" — variável
-latente **contínua** $\mathbf{z}\in\mathbb{R}^M$.
-:::
+. . .
 
 ## Roteiro da Aula
 
-::: {.fragment}
-**1.** "Resumir sem perder o que importa": PCA responde de duas formas
-equivalentes — quais, por que coincidem?
-:::
-
-::: {.fragment}
-**2.** Existe versão probabilística (estilo GMM, mas $z$ contínuo,
-linear-Gaussiano)? O que ela revela?
-:::
-
-::: {.fragment}
-**3.** Um autoencoder raso (rede neural) resolve outro problema, ou é a
-mesma coisa disfarçada?
-:::
-
-::: {.fragment}
+**1.** "Resumir sem perder o que importa": PCA responde de duas formas equivalentes — quais, por que coincidem?
+. . .
+**2.** Existe versão probabilística (estilo GMM, mas $z$ contínuo, linear-Gaussiano)? O que ela revela?
+. . .
+**3.** Um autoencoder raso (rede neural) resolve outro problema, ou é a mesma coisa disfarçada?
+. . .
 **4.** Essas três ferramentas têm alguma limitação em comum?
-:::
 
 ## Problema Motivador
 
 ::: {.fragment}
-Sem fórmula ainda: escolha $2$ atributos padronizados do Breast Cancer
-Wisconsin. Se só pudesse guardar **uma direção** de projeção por
-paciente, qual escolheria — e por quê essa e não outra?
+Sem fórmula ainda: escolha $2$ atributos padronizados do Breast Cancer Wisconsin. Se só pudesse guardar **uma direção** de projeção por paciente, qual escolheria — e por quê essa e não outra?
 :::
 
 :::
@@ -397,12 +338,14 @@ juntos.
 
 ## Duas Direções Candidatas
 
-::: {.fragment}
-Mesmo par padronizado (`radius_worst`, `concave points_worst`). Duas
-direções candidatas para resumir num único número: o eixo bruto de
-`radius_worst`, ou a diagonal a $45°$.
-:::
+- Mesmo par padronizado (`radius_worst`, `concave points_worst`).
+- Duas direções candidatas para resumir num único número:
+  - O eixo bruto de `radius_worst`.
+  - A diagonal a $45°$.
 
+. . .
+
+- Qual delas "resume melhor" a variação dos dados?
 :::
 
 ::: {.fig-resize style="width: 62%; margin: 0 auto;"}
@@ -411,13 +354,13 @@ direções candidatas para resumir num único número: o eixo bruto de
 #| fig-align: center
 
 fig, ax = plt.subplots(figsize=(5.6, 5.2))
-ax.scatter(Xc2[:, 0], Xc2[:, 1], s=10, alpha=0.35, color=COR_NEU)
+ax.scatter(Xc2[:, 0], Xc2[:, 1], s=10, alpha=0.35, color=COR_CINZA)
 
 lim = 3.6
-ax.plot([-lim, lim], [0, 0], linestyle=":", color=COR_LIM, linewidth=2,
+ax.plot([-lim, lim], [0, 0], linestyle=":", color=COR_VERM, linewidth=2,
         label=f"eixo bruto (radius_worst): var={brl(Xc2[:,0].var(),2)}")
 ax.plot([-lim * u1_2d[0], lim * u1_2d[0]], [-lim * u1_2d[1], lim * u1_2d[1]],
-        color=COR_A, linewidth=2.4,
+        color=COR_AZUL, linewidth=2.4,
         label=f"direção a 45° (u1): var={brl(eigvals2[0],2)}")
 
 ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
@@ -436,8 +379,9 @@ plt.show()
 A resposta não é uma questão de gosto: projetando os $569$ pacientes
 sobre o eixo bruto de `radius_worst`, a variância dos números resultantes
 é $1{,}00$ (o próprio atributo, já padronizado). Projetando sobre a
-direção a $45°$, a variância sobe para $1{,}79$ — quase o dobro. A
-direção a $45°$ "resume melhor" nesse sentido preciso: um único número
+direção a $45°$, a variância sobe para $1{,}79$ — quase o dobro.
+
+A direção a $45°$ "resume melhor" nesse sentido preciso: um único número
 ao longo dela carrega mais informação sobre como os pacientes variam
 entre si do que um único número ao longo de qualquer eixo bruto isolado.
 Formalizar "resumir melhor" como "maximizar a variância da projeção" é
@@ -452,17 +396,13 @@ atributos.
 
 ## Qual Direção "Resume Melhor"?
 
-::: {.fragment}
-Eixo bruto (`radius_worst`): variância $=1{,}00$. Direção a $45°$:
-variância $=1{,}79$ — quase o dobro.
-:::
+- Eixo bruto (`radius_worst`): variância $=1{,}00$.
+- Direção a $45°$: variância $=1{,}79$ — quase o dobro.
 
-::: {.fragment .callout-note}
-"Resumir melhor" = maximizar a variância da projeção. A direção a
-$45°$ não foi escolhida à mão — é o autovetor de maior autovalor da
-covariância, provado no Bloco 3.
-:::
+. . .
 
+- **Conclusão:** "Resumir melhor" $\equiv$ maximizar a variância da projeção.
+- A direção a $45°$ não foi escolhida à mão — ela é o autovetor de maior autovalor da covariância (provado no Bloco 3).
 :::
 
 # Mecanismo I: Formulação de Máxima Variância
@@ -632,20 +572,20 @@ autovetor de **menor** variância.
 
 fig, ax1 = plt.subplots(figsize=(7.6, 4.4))
 idx = np.arange(1, D + 1)
-ax1.bar(idx, explained * 100, color=COR_A, alpha=0.85, label="variância explicada (%)")
+ax1.bar(idx, explained * 100, color=COR_AZUL, alpha=0.85, label="variância explicada (%)")
 ax1.set_xlabel("componente principal")
-ax1.set_ylabel("variância explicada (%)", color=COR_A)
-ax1.tick_params(axis="y", labelcolor=COR_A)
+ax1.set_ylabel("variância explicada (%)", color=COR_AZUL)
+ax1.tick_params(axis="y", labelcolor=COR_AZUL)
 
 ax2 = ax1.twinx()
-ax2.plot(idx, cum_explained * 100, color=COR_LIM, marker="o", markersize=3,
+ax2.plot(idx, cum_explained * 100, color=COR_VERM, marker="o", markersize=3,
           linewidth=1.6, label="variância acumulada (%)")
-ax2.axhline(cum_explained[1] * 100, color=COR_NEU, linestyle=":", linewidth=1.2)
+ax2.axhline(cum_explained[1] * 100, color=COR_CINZA, linestyle=":", linewidth=1.2)
 ax2.annotate(f"{brl(cum_explained[1]*100,1)}% com M=2",
              xy=(2, cum_explained[1] * 100), xytext=(6, cum_explained[1] * 100 - 12),
-             fontsize=9, color=COR_NEU)
-ax2.set_ylabel("variância acumulada (%)", color=COR_LIM)
-ax2.tick_params(axis="y", labelcolor=COR_LIM)
+             fontsize=9, color=COR_CINZA)
+ax2.set_ylabel("variância acumulada (%)", color=COR_VERM)
+ax2.tick_params(axis="y", labelcolor=COR_VERM)
 ax2.set_ylim(0, 105)
 
 ax1.set_title("Variância explicada por componente, Breast Cancer Wisconsin (D=30)")
@@ -1018,8 +958,8 @@ $$
 onde $\mathbf{W}\in\mathbb{R}^{D\times M}$, $\boldsymbol\mu\in
 \mathbb{R}^D$ e $\sigma^2>0$ são os parâmetros do modelo. Equivalentemente,
 $\mathbf{x}=\mathbf{Wz}+\boldsymbol\mu+\boldsymbol\epsilon$, com
-$\boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\sigma^2\mathbf{I})$
-independente de $\mathbf{z}$.
+$\boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\sigma^2\mathbf{I})
+$ independente de $\mathbf{z}$.
 :::
 
 Compare com a Definição do GMM (Aula 4): lá, $z_n$ era 1-de-$K$
@@ -1178,10 +1118,7 @@ média dos $28$ autovalores descartados. Verificando a covariância
 marginal $\mathbf{C}=\mathbf{WW}^T+\sigma^2I$ (com $\mathbf{R}=I$):
 projetando na direção do primeiro componente retido,
 $\mathbf{u}_1^T\mathbf{Cu}_1=\lambda_1=13{,}2816$ exatamente; projetando
-numa direção **descartada**, $\mathbf{v}^T\mathbf{Cv}=\sigma^2_{
-\mathrm{ML}}=0{,}39382$ — exatamente como a eq. 12.36 prevê: a variância
-ao longo das direções retidas é capturada corretamente, e a variância
-em todas as demais direções é aproximada por um único valor médio.
+numa direção **descartada**, $\mathbf{v}^T\mathbf{Cv}=\sigma^2_{\mathrm{ML}}=0{,}39382$ — exatamente como a eq. 12.36 prevê: a variância ao longo das direções retidas é capturada corretamente, e a variância em todas as demais direções é aproximada por um único valor médio.
 
 **O caso-limite $\sigma^2\to0$: recuperando a PCA clássica.** A
 posterior $p(\mathbf{z}\mid\mathbf{x})$ (via Bayes, forma fechada por
@@ -1502,7 +1439,7 @@ reconstrução já confirma na prática.
 **Uma ressalva importante do próprio DLFC.** A não linearidade, sozinha,
 não escapa dessa limitação: mesmo trocando a ativação linear por uma
 não linear (por exemplo, sigmoide) nessa **mesma** arquitetura rasa
-($D$-$M$-$D$, uma única camada oculta), o mínimo do erro de
+($D$-$M$-$D$, uma única camada oculta), o mínimo global do erro de
 reconstrução ainda corresponde ao mesmo subespaço de PCA (DLFC, p. 565)
 — só arquiteturas mais profundas, com camadas adicionais de unidades não
 lineares, conseguem de fato ultrapassar a limitação linear e realizar
@@ -1629,7 +1566,7 @@ Retomando as quatro perguntas da Abertura, uma frase cada:
    covariância amostral.
 2. **Existe uma versão probabilística?** Sim — a PPCA, um modelo gerador
    linear-Gaussiano de variável latente contínua, cujo MLE recupera a
-   PCA clássica no limite sem ruído ($\sigma^2\to0$).
+   PCA clássica no limite $\sigma^2\to0$.
 3. **O autoencoder resolve outro problema, ou o mesmo disfarçado?** O
    mesmo, provado por redução direta: com ativação linear, o mínimo
    global do autoencoder raso é exatamente o subespaço de PCA.
@@ -1643,7 +1580,7 @@ A Aula 7 ataca exatamente essa limitação, trocando a arquitetura rasa
 do autoencoder linear por camadas adicionais de unidades **não
 lineares** (o *Deep Autoencoder*) — e, mais adiante, generalizando a
 PPCA desta aula ao *Variational Autoencoder* (VAE): a mesma variável
-latente contínua $\mathbf{z}$, agora relacionada a $\mathbf{x}$ por uma
+latente $\mathbf{z}$, agora relacionada a $\mathbf{x}$ por uma
 rede neural não linear em vez de uma transformação linear $\mathbf{W}$.
 Como a posterior $p(\mathbf{z}\mid\mathbf{x})$ deixa de ter forma
 fechada nesse regime não linear (ao contrário da PPCA, Bloco 5), o VAE
@@ -1718,6 +1655,4 @@ $\mathbf{x}$; posterior deixa de ter forma fechada $\Rightarrow$ volta o
 
 [Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
 [Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
-:::
-
 :::

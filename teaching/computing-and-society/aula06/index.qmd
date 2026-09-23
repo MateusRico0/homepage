@@ -1,8 +1,8 @@
 ---
-title: "Aula 6: Arquitetura, Energia e o Custo Material da Infraestrutura Digital"
+title: "Aula 6: Dados, Viés e Discriminação Algorítmica — Da Coleta à LGPD"
 subtitle: "Computação e Sociedade"
 author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
-date: "2026-09-14"
+date: "2026-09-21"
 lang: pt-BR
 format:
   html:
@@ -41,1660 +41,1270 @@ format:
 [Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
 :::
 
-# Da Nuvem Etérea à Materialidade do Concreto
+# Revisão e Introdução: O Proxy Voltou
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-A Aula 5 fechou mostrando que decisões de **método** e de **métrica** —
-que dado medir, que janela de tempo usar, se o usuário sabe que está
-sendo testado — mudam o comportamento do usuário de formas concretas e
-mensuráveis, mesmo quando parecem "só técnicas". A pergunta que ficou
-em aberto na ponte de fechamento daquela aula foi: se decisões de
-método e métrica já custam isso ao comportamento do usuário, o que
-mais uma escolha "só de engenharia" pode custar, sem que ninguém tenha
-"decidido" isso explicitamente?
+## Revisão: o que a Aula 5 deixou plantado
 
-Hoje a resposta muda de escala. Saímos do comportamento do usuário
-individual e vamos para a **materialidade física da própria
-infraestrutura computacional**. A Inteligência Artificial é vendida,
-com frequência, como algo etéreo — um reino puro de lógica existindo
-numa "nuvem" sem peso. Mas por trás dessa camada de abstração
-algorítmica há materialidade concreta: energia, água, minerais, terra.
-E quando essa materialidade precisa ir para algum lugar físico real,
-ela sempre acaba em algum território específico — e nem todo
-território paga o mesmo preço por hospedá-la.
+A Aula 5 apresentou o kit de ferramentas com que uma equipe de produto decide o que construir e como saber se uma mudança "funcionou". Três resultados dela são o ponto de partida de hoje, e vale relembrar cada um com o seu porquê.
+
+**Primeiro: o método é neutro, a métrica não.** Um teste A/B sorteia quem vê cada versão e compara um número entre os grupos; o procedimento estatístico não tem preferência sobre *qual* número é comparado — tempo de leitura, cancelamentos, tarefas concluídas. A escolha da métrica, porém, já decide a favor de quem o produto será otimizado, antes de qualquer teste rodar.
+
+**Segundo: toda métrica é um substituto (*proxy*) do que realmente se quer medir, e um proxy pode medir coisas diferentes para grupos diferentes.** O caso que a Aula 5 usou para mostrar isso vem de Varshney (2022, cap. 10, pp. 133–134): uma seguradora de saúde precisa decidir quais pacientes recebem acompanhamento clínico extra (*care management*), um recurso limitado. A escolha aparentemente óbvia de proxy para "quem precisa de mais cuidado" é o histórico de custo ou de utilização do sistema de saúde — quem usa mais, presumivelmente está mais doente. O problema é que pacientes negros tendem a estar mais doentes do que pacientes brancos *para o mesmo nível de utilização*, por razões estruturais do próprio sistema de saúde. Um algoritmo que usa custo como sinônimo de necessidade subestima, então, a necessidade dos pacientes negros — sem que a raça apareça como variável em lugar nenhum do cálculo.
+
+**Terceiro: consentimento genérico não é consentimento específico.** No caso Kramer, Guillory & Hancock (2014), a Política de Uso de Dados do Facebook foi tratada como consentimento informado para um experimento emocional em quase 700 mil pessoas. A lacuna entre aceitar termos de uso e concordar, de forma específica, em participar de um estudo é uma questão de **poder**: quem coleta escolhe as condições; quem é coletado, na prática, só pode aceitar ou ficar de fora.
+
+## Ideia central: o dado é o resultado de uma cadeia de decisões
+
+Até aqui tratamos o proxy como um exemplo. Hoje ele vira a regra geral: **nenhum dado é um fato bruto da natureza**. Alguém decidiu *o que* medir (o custo do tratamento, não a gravidade da doença), *de quem* (só os membros daquela seguradora), *quando* (naquela estação, naquele ano) e *como limpar* (descartar as linhas incompletas). Cada uma dessas decisões pode carregar viés, e o viés já está no dado antes de qualquer algoritmo tocá-lo. A primeira metade da aula dá nome a cada elo dessa cadeia. A segunda metade pergunta o que o direito brasileiro — a Lei Geral de Proteção de Dados (LGPD, Lei nº 13.709/2018) — exige de quem coleta e usa esse dado, e o que ela deixa de fora.
 
 ::: {.callout-note}
 ## Roteiro de hoje
 
-1. De onde vem, fisicamente, a energia e a água que sustentam a
-   "nuvem" computacional?
-2. O que aconteceu, concretamente, em Eldorado do Sul (RS) quando um
-   projeto de data center reservou 5 GW de energia?
-3. O que é soberania digital, e por que ela é, ela mesma, um conceito
-   contraditório no Sul Global?
-4. O que distingue uma "zona de sacrifício digital" de um "redlining
-   digital"?
-5. O que uma decisão de projeto de sistema computacional pode fazer,
-   de fato, para responder a esse custo material?
+1. Por que a ideia de que "o dado fala por si" é falsa — e o que um dado realmente registra?
+2. Em que ponto da cadeia do dado o viés entra, e como reconhecê-lo antes de treinar qualquer modelo?
+3. O que a LGPD exige de quem coleta e usa dados pessoais, o que ela garante ao titular e o que ela deixa de fora?
+4. Quando um viés é encontrado: corrigir o modelo ou corrigir a coleta?
 :::
 
-Um problema motivador concreto: um artigo recente de pesquisa —
-Nascimento & Raimundo (2026), "*Digital Sovereignty in the Polycrisis:
-Technological Dependency, Invisible Infrastructure, and AI Sacrifice
-Zones in Latin America*" — abre exatamente com essa provocação:
+## Problema motivador: onde o viés entrou?
 
-::: {.callout-important}
-## A IA como tecnologia "sem peso" (Nascimento & Raimundo, 2026, p. 1)
+Dois casos abrem a aula. O primeiro é a seguradora da Aula 5. Ninguém digitou "raça" em nenhuma linha do modelo — e ainda assim o algoritmo trata pacientes negros de forma sistematicamente desfavorável. **Onde, exatamente, o viés entrou?** Hoje respondemos com precisão, elo por elo.
 
-> "A Inteligência Artificial (IA) é frequentemente vendida como uma
-> tecnologia sem peso: um reino etéreo de lógica pura existindo numa
-> 'nuvem' desencarnada. No entanto, sob essa camada de abstração
-> algorítmica há materialidade: a IA é feita de solo, água e energia.
-> Sua existência depende da extração de minerais raros, do consumo
-> massivo de eletricidade, e do uso intensivo de água para o
-> resfriamento de fazendas de servidores." (tradução livre, p. 1)
-:::
+O segundo caso é um sistema de recrutamento da Amazon, relatado pela Reuters em 2018 (Dastin, 2018). A equipe começou a construir, em 2014, um programa para pontuar currículos de candidatos; por volta de 2015 percebeu que a ferramenta não avaliava vagas técnicas de forma neutra em relação ao gênero, e o projeto foi encerrado por volta de 2017. O modelo tinha sido treinado com currículos enviados à empresa ao longo de dez anos — em uma indústria dominada por homens — e aprendeu a penalizar currículos que continham a palavra "women's" (como em "capitã do clube de xadrez feminino"). Ninguém programou o modelo para ser sexista; ele aprendeu, corretamente do ponto de vista estatístico, o padrão histórico das contratações passadas. *(Este caso vem de reportagem, não das duas fontes centrais da aula; ele é citado aqui apenas como narrativa de abertura.)*
 
-**Nota de precisão:** essa última frase se apoia, no artigo original,
-na citação de Kate Crawford (2021), *The Atlas of AI* — livro não lido
-diretamente nesta sessão (não faz parte do acervo desta disciplina). A
-ideia é apresentada aqui como texto de Nascimento & Raimundo (2026),
-não como citação direta de Crawford.
-
-Este artigo — de autoria de **Beatriz Cardoso Nascimento**, aluna de
-graduação deste próprio Instituto de Computação, em coautoria com o
-professor desta disciplina — é o eixo narrativo de toda a aula de
-hoje, não apenas mais uma referência de rodapé. Ele ainda não foi
-publicado em nenhum periódico ou veículo formal (é um manuscrito em
-avaliação); tratamos aqui como um estudo de caso de pesquisa real e
-atual, com um centro nervoso muito concreto: um projeto de data center
-de IA no Rio Grande do Sul.
+Antes de seguir, uma pergunta de sondagem para pensar em voz alta: se o algoritmo não errou na matemática, **de quem foi o erro?**
 
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## Da Nuvem Etérea à Materialidade do Concreto
+## O Proxy Voltou
 
 ::: {.fragment}
-Aula 5: decisões de **método** e **métrica** mudam o comportamento do
-usuário, mesmo parecendo "só técnicas". Ficou em aberto: o que mais uma
-escolha de engenharia pode custar, sem ninguém "decidir" isso
-explicitamente?
+**Aula 5, três resultados:**
 :::
 
 ::: {.fragment}
-**Hoje:** saímos do comportamento do usuário e vamos para a
-**materialidade física** da infraestrutura computacional — energia,
-água, minerais, terra.
+**1.** O teste A/B é neutro; a **métrica** não — ela decide, antes do teste, a favor de quem o produto é otimizado.
 :::
 
+::: {.fragment}
+**2.** Toda métrica é um **proxy** — e pode medir coisas diferentes para grupos diferentes.
 :::
 
-::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+**3.** Consentimento genérico ≠ consentimento específico — é uma questão de **poder** (caso Kramer).
+:::
+
+## A Seguradora, de Novo
+
+::: {.fragment}
+**Problema:** um recurso limitado (*care management*) — quem deve recebê-lo? (Varshney, 2022, cap. 10)
+:::
+
+::: {.fragment}
+**Proxy óbvio:** custo ou utilização do sistema de saúde — quem usa mais, presumivelmente está mais doente.
+:::
+
+::: {.fragment .callout-warning icon=false}
+Pacientes negros tendem a estar **mais doentes para o mesmo nível de utilização**, por razões estruturais do sistema de saúde. O algoritmo subestima a necessidade deles — **sem a raça aparecer em nenhuma variável.**
+:::
+
+::: {.fragment}
+**Hoje:** onde, exatamente, o viés entrou?
+:::
+
+## Ideia Central
+
+::: {.fragment}
+**Nenhum dado é fato bruto.** Alguém decidiu:
+:::
+
+::: {.fragment}
+- **o que** medir (custo do tratamento, não gravidade da doença);
+- **de quem** (só os membros daquela seguradora);
+- **quando** (naquela estação, naquele ano);
+- **como limpar** (descartar as linhas incompletas).
+:::
+
+::: {.fragment .callout-tip icon=false}
+Cada decisão pode carregar viés — e o viés já está no dado **antes** de qualquer algoritmo tocá-lo.
+:::
 
 ## O Roteiro de Hoje
 
 ::: {.fragment}
-1. De onde vem, fisicamente, a energia e a água da "nuvem"?
+1. Por que "o dado fala por si" é falso — o que um dado realmente registra?
 :::
 ::: {.fragment}
-2. O que aconteceu em Eldorado do Sul (RS) quando um data center
-   reservou 5 GW de energia?
+2. Em que ponto da cadeia do dado o viés entra, e como reconhecê-lo **antes** de treinar?
 :::
 ::: {.fragment}
-3. O que é soberania digital — e por que é, ela mesma, contraditória
-   no Sul Global?
+3. O que a **LGPD** exige, garante ao titular — e deixa de fora?
 :::
 ::: {.fragment}
-4. O que distingue "zona de sacrifício digital" de "redlining
-   digital"?
+4. Viés encontrado: corrigir o modelo ou corrigir a coleta?
 :::
+
+## O Segundo Caso: Recrutador da Amazon
+
 ::: {.fragment}
-5. O que um projeto de sistema computacional pode fazer, de fato, em
-   resposta a esse custo material?
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## "A Nuvem" Não Tem Peso?
-
-::: {.fragment .callout-important icon=false title="Nascimento & Raimundo (2026), p. 1"}
-*"A IA é frequentemente vendida como uma tecnologia sem peso... Mas sob
-essa abstração algorítmica há materialidade: a IA é feita de solo,
-água e energia."* (tradução livre)
+**Reuters, 2018 (Dastin):** projeto iniciado em 2014; viés percebido por volta de 2015; encerrado por volta de 2017.
 :::
 
 ::: {.fragment}
-O eixo desta aula: um artigo de pesquisa real, escrito por **Beatriz
-Cardoso Nascimento**, aluna de graduação deste Instituto, com o
-professor desta disciplina — não publicado ainda, mas um caso concreto
-e atual.
-:::
-
-## Pergunta
-:::
-
-::: {.callout-tip}
-## A Nuvem Tem Peso?
-
-Se o custo material da IA (energia, água, minerais) fosse totalmente
-visível e cobrado diretamente de quem se beneficia do serviço — em vez
-de ficar invisível, distribuído em algum território distante —, o que
-provavelmente mudaria primeiro: o comportamento do consumidor, ou onde
-esses projetos são construídos?
-
-**Dica:** pense em quem hoje arca com o custo material de um serviço
-de IA, e em quem hoje se beneficia dele — são, em geral, o mesmo
-grupo?
-
-- □ Se a infraestrutura de nuvem não dependesse de nenhum resfriamento
-  físico de hardware — só de processamento sem geração de calor
-  relevante —, grande parte da pressão por água e energia que
-  caracteriza as zonas de sacrifício digital discutidas nesta aula
-  deixaria de existir.
-- □ No limite em que a energia usada por um data center viesse
-  inteiramente de fontes que não competem com nenhum outro uso local
-  (nem elétrico, nem hídrico) — energia e água "extras", sem custo de
-  oportunidade para ninguém —, a tensão entre soberania digital e
-  custo material discutida nesta aula deixaria de se aplicar a esse
-  caso específico.
-- □ A mesma lógica de "a materialidade de um serviço digital fica
-  invisível para quem só usa a interface" se aplicaria a um usuário de
-  um serviço de streaming de vídeo que nunca pensa nos servidores
-  físicos que armazenam e processam cada vídeo assistido.
-- □ Como a IA depende de energia, água e minerais para existir
-  fisicamente, conclui-se que toda tecnologia digital, sem exceção,
-  produz o mesmo nível de impacto material que um data center de
-  treinamento de IA em larga escala.
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## V/F — A Nuvem Tem Peso? Resposta
-
-::: {.callout-tip icon=false}
-- ✔ Verdadeiro — sem a necessidade física de dissipar calor gerado pelo
-  processamento, boa parte da pressão concreta por água e energia que
-  caracteriza os casos desta aula perderia sua causa material central.
-- ✗ Falso — mesmo nesse cenário ideal hipotético, a tensão nasceria de
-  outros fatores do artigo (quem decide, quem é consultado, que
-  território hospeda a infraestrutura), não só do custo de
-  oportunidade de energia/água; "sem custo de oportunidade" reduz, mas
-  não elimina, toda a tensão discutida.
-- ✔ Verdadeiro — mesma estrutura de invisibilização: a interface de uso
-  não deixa ver a infraestrutura física que a sustenta.
-- ✗ Falso — a aula não afirma equivalência de escala entre todo tipo de
-  tecnologia digital; um data center de treinamento de IA em larga
-  escala tem uma pegada material ordens de grandeza maior que a maioria
-  dos usos cotidianos de computação.
-:::
-
-::: {.fragment}
-**Retomando:** hoje vamos rastrear, concretamente, para onde vai essa
-materialidade — começando pelo vocabulário técnico de TI Verde (Bloco
-2) e depois por um caso real (Bloco 3).
-:::
-
-:::
-
-# A Materialidade Escondida: Energia, Água e Minerais por Trás da Nuvem
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-Antes de chegar ao caso central da aula, vale nomear o vocabulário
-técnico que a própria ementa desta disciplina já previa: a leitura de
-Maciel & Viterbo (2020, Vol. 2, Cap. 14, "Sustentabilidade e
-Computação") descreve a **TI Verde** como o conjunto de práticas para
-reduzir o impacto ambiental do uso de tecnologia:
-
-::: {.callout-important}
-## TI Verde (Maciel & Viterbo, 2020, Cap. 14, p. 182)
-
-> "A TI Verde disponibiliza um conjunto de práticas para tornar mais
-> sustentável e menos prejudicial o uso de tecnologia, propondo para
-> isso, estratégias para compatibilizar o uso de recursos naturais de
-> forma adequada às políticas sustentáveis existentes dentro das
-> organizações. Exemplos práticos de estratégias incluem o uso de
-> recursos tecnológicos que consumam menos energia, o uso de matéria
-> prima e substâncias menos tóxicas nos processos produtivos e o
-> descarte responsável dos produtos por meio da reciclagem e da
-> reutilização de materiais." (Maciel & Viterbo, 2020, Cap. 14, p. 182)
-:::
-
-O ponto central que essa leitura já deixa claro: a produção e a
-manutenção de hardware **já** demandam consumo de água, energia e
-minerais — antes mesmo de qualquer uso do sistema. O livro organiza
-isso numa tabela de diretivas ambientais para soluções de TI (Tabela
-14.1), da qual vale destacar duas linhas específicas:
-
-::: {.callout-note}
-## Consumo de água (Maciel & Viterbo, 2020, Tabela 14.1, p. 193)
-
-> "Contexto: a construção e manutenção de partes de computadores
-> implica em consumo de água. Sustentabilidade: utilizar menos
-> hardware; priorizar fabricantes que utilizem menos água para
-> produção e operação de seus produtos; e, correlacionado, usar
-> softwares mais eficientes energeticamente, isto é, que demandem
-> menos processamento, e por consequência, menos necessidade de
-> **resfriamento por água**." (tradução livre do original em
-> português — trecho já em português na fonte)
-:::
-
-::: {.callout-note}
-## Consumo de energia (Maciel & Viterbo, 2020, Tabela 14.1, p. 194)
-
-> "Contexto: a construção e manutenção de partes de computadores
-> implica em consumo de recursos energéticos. Sustentabilidade:
-> utilizar menos hardware; priorizar fabricantes que atentem para a
-> eficiência de consumo energético na construção e operação de seus
-> produtos [...]; utilizar hardware em que o resfriamento dependa
-> minimamente de combustíveis fósseis; e, correlacionado, usar
-> softwares mais eficientes energeticamente." (Maciel & Viterbo, 2020,
-> Tabela 14.1, p. 194)
-:::
-
-Repare no termo que aparece nas duas diretivas: **resfriamento**. Um
-servidor rodando em carga alta gera calor; esse calor precisa ser
-dissipado, e a forma mais comum e eficiente de dissipá-lo em escala
-industrial é usando água (torres de resfriamento, sistemas de
-refrigeração líquida). É exatamente por isso que "energia limpa" não
-resolve, sozinha, toda a equação de sustentabilidade de um data center
-— o resfriamento é, ele mesmo, um segundo eixo de consumo de recurso
-natural, independente da fonte de energia usada. É exatamente esse
-resfriamento, em escala industrial, que está no centro do caso que
-vamos analisar agora, no Bloco 3.
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## A Materialidade Escondida
-
-::: {.fragment}
-**TI Verde** (Maciel & Viterbo, 2020, Cap. 14): conjunto de práticas
-para reduzir o impacto ambiental do uso de tecnologia.
-:::
-
-::: {.fragment .callout-important icon=false title="Maciel & Viterbo (2020), p. 182"}
-*"Exemplos práticos: uso de recursos que consumam menos energia,
-matéria-prima menos tóxica, descarte responsável por reciclagem e
-reutilização."* (tradução livre)
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Duas Diretivas da Tabela 14.1: Água e Energia
-
-::: {.fragment .callout-note icon=false title="Água, p. 193"}
-*"Utilizar menos hardware; priorizar fabricantes que usem menos água
-[...] menos necessidade de **resfriamento por água**."* (tradução
-livre)
-:::
-
-::: {.fragment .callout-note icon=false title="Energia, p. 194"}
-*"Utilizar hardware em que o resfriamento dependa minimamente de
-combustíveis fósseis [...]."* (tradução livre)
-:::
-
-::: {.fragment}
-O termo comum às duas: **resfriamento**. É o segundo eixo de consumo
-de recurso natural de um data center — independente da fonte de
-energia usada.
-:::
-
-## Pergunta
-:::
-
-::: {.callout-tip}
-## O Preço Escondido do Resfriamento
-
-Um data center anuncia que "roda 100% em energia limpa" (solar/eólica).
-Isso resolve completamente a tensão de recursos que a Tabela 14.1
-aponta?
-
-**Dica:** pense em quantas dimensões de recurso a tabela lista, além de
-energia — água, minerais, reciclabilidade.
-
-- □ Se toda a energia usada por um data center viesse de fontes
-  renováveis, mas o resfriamento de seus servidores ainda dependesse de
-  grandes volumes de água retirados de mananciais locais, a diretiva de
-  "Consumo de Água" da Tabela 14.1 continuaria sendo violada da mesma
-  forma.
-- □ No limite em que um hardware nunca precisasse ser substituído
-  (vida útil infinita, sem obsolescência), a diretiva de
-  "Reciclabilidade do Produto" da Tabela 14.1 perderia parte de sua
-  urgência prática, mesmo continuando válida em princípio.
-- □ A mesma lógica de "energia limpa não resolve sozinha o consumo de
-  água para resfriamento" se aplicaria a uma mineradora de criptomoeda
-  que anuncia usar só energia hidrelétrica, mas mantém seus servidores
-  refrigerados por um sistema que consome água de um rio local.
-- □ Como a Tabela 14.1 lista "utilizar menos hardware" como parte da
-  sustentabilidade em quase toda diretiva, conclui-se que a única forma
-  de tornar um data center sustentável é reduzir drasticamente sua
-  capacidade de processamento, tornando-o inviável para IA em larga
-  escala.
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## V/F — O Preço do Resfriamento: Resposta
-
-::: {.callout-tip icon=false}
-- ✔ Verdadeiro — energia limpa resolve o eixo energético, mas a
-  diretiva de água é sobre um recurso distinto (consumo hídrico de
-  resfriamento), que persiste independentemente da fonte de energia.
-- ✔ Verdadeiro — sem geração de resíduo eletrônico ao final da vida
-  útil, a diretiva específica de reciclabilidade perde parte de sua
-  urgência prática para esse hardware hipotético, mesmo continuando
-  válida como princípio geral.
-- ✔ Verdadeiro — mesma estrutura: uma fonte de energia "limpa" não
-  elimina, sozinha, o consumo de outro recurso natural (água) usado no
-  resfriamento.
-- ✗ Falso — a tabela lista várias estratégias além de reduzir hardware
-  (eficiência energética de software, escolha de fabricante, matérias-
-  primas recicláveis); reduzir capacidade de processamento não é a
-  única saída que ela aponta.
-:::
-
-::: {.fragment}
-**Retomando:** essa mesma dinâmica de resfriamento intensivo é
-exatamente o que está no centro do caso real que vamos analisar agora.
-:::
-
-:::
-
-# Caso Central: Scala AI City e a Tekoa Pekuruty (Eldorado do Sul)
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-O artigo de Nascimento & Raimundo (2026) ancora seu argumento teórico
-num caso real, brasileiro e atual: o projeto **Scala AI City**, em
-**Eldorado do Sul**, no Rio Grande do Sul.
-
-::: {.callout-important}
-## O caso Scala AI City (Nascimento & Raimundo, 2026, p. 4)
-
-> "Contradições materiais da computação. A Coalizão LEAF não é um
-> fenômeno isolado, mas parte de uma reconfiguração sistêmica de
-> territórios latino-americanos em zonas de sacrifício digital, onde
-> custos metabólicos são externalizados para a periferia. Em Eldorado
-> do Sul, a Scala AI City captura uma reserva massiva de 5 GW de
-> energia, apesar da instabilidade elétrica da região e de sua
-> vulnerabilidade a desastres climáticos, incluindo as enchentes de
-> 2024, marginalizando os Mbyá-Guarani da Tekoa Pekuruty e priorizando
-> o resfriamento de servidores sobre direitos territoriais ancestrais."
-> (tradução livre, p. 4)
-:::
-
-Vale desembrulhar cada elemento factual dessa frase, porque cada um
-carrega peso próprio:
-
-- **5 GW de reserva de energia.** Para dar a escala: essa é uma
-  ordem de grandeza comparável à demanda elétrica de uma região
-  metropolitana inteira — reservada para um único empreendimento de
-  infraestrutura digital.
-- **Instabilidade elétrica regional.** A rede elétrica do Rio Grande
-  do Sul já convivia, antes do projeto, com histórico de instabilidade
-  — ou seja, a reserva não entra numa rede com folga confortável, ela
-  compete por capacidade já escassa.
-- **As enchentes de 2024.** O Rio Grande do Sul sofreu, em 2024,
-  enchentes catastróficas e amplamente documentadas — o mesmo tipo de
-  evento climático extremo que a "policrise global" do Bloco 4 associa
-  diretamente à instabilidade energética. Construir uma reserva
-  energética massiva justamente numa região com esse histórico recente
-  de vulnerabilidade climática é, no mínimo, uma escolha de risco que
-  o artigo trata como sintomática, não acidental.
-- **A Tekoa Pekuruty.** É uma comunidade Mbyá-Guarani situada na região
-  afetada pelo projeto. O artigo é direto ao afirmar que o
-  empreendimento prioriza o resfriamento de servidores sobre os
-  direitos territoriais ancestrais dessa comunidade — não como um
-  efeito colateral incidental, mas como o mecanismo central do que o
-  artigo chama de **zona de sacrifício digital** (Bloco 4 formaliza
-  esse termo).
-
-A Figura abaixo resume essa cadeia: uma decisão de arquitetura de
-sistema (onde hospedar, quanta energia reservar) se desdobra em dois
-efeitos materiais concretos — pressão sobre uma rede elétrica já
-instável, e resfriamento intensivo com alta demanda de água — que
-convergem sobre o mesmo território e a mesma comunidade.
-
-::: {.fig-resize style="width: 100%; margin: 0 auto;"}
-```{.tikz}
-\definecolor{popfill}{RGB}{219,234,254}
-\definecolor{popborder}{RGB}{0,133,202}
-\definecolor{badfill}{RGB}{253,224,220}
-\definecolor{badborder}{RGB}{224,60,49}
-
-\begin{tikzpicture}[
-  popbox/.style={rectangle, rounded corners, fill=popfill, draw=popborder, line width=1.2pt, text=black, minimum width=3.4cm, minimum height=1.7cm, align=center, font=\scriptsize},
-  badbox/.style={rectangle, rounded corners, fill=badfill, draw=badborder, line width=1.2pt, text=black, minimum width=3.4cm, minimum height=1.7cm, align=center, font=\scriptsize},
-  arr/.style={draw=black!60, thick, ->}
-]
-
-\node[popbox] (D) at (0,0) {Demanda por cômputo\\ para treinar IA em\\ larga escala};
-\node[popbox] (A) at (4.6,0) {Decisão de arquitetura:\\ onde hospedar, quanta\\ energia reservar};
-\node[badbox] (E) at (9.4,1.6) {Reserva de 5 GW numa\\ rede elétrica regional\\ já instável};
-\node[badbox] (R) at (9.4,-1.6) {Resfriamento intensivo:\\ alta demanda de água};
-\node[badbox, minimum height=2.1cm] (T) at (14.2,0) {Tekoa Pekuruty\\ (Mbyá-Guarani): direitos\\ territoriais ancestrais\\ marginalizados};
-
-\draw[arr] (D) -- (A);
-\draw[arr] (A) -- (E);
-\draw[arr] (A) -- (R);
-\draw[arr] (E) -- (T);
-\draw[arr] (R) -- (T);
-
-\end{tikzpicture}
-```
-:::
-
-Nenhum documento público do projeto declara, em nenhuma linha, "vamos
-priorizar o resfriamento sobre os direitos da Tekoa Pekuruty" — essa
-decisão nunca aparece formulada de forma explícita. O que a existe é
-uma sequência de decisões de arquitetura (onde hospedar, quanta
-energia reservar) tomadas sem que a comunidade estivesse "na sala" —
-o mesmo mecanismo de ausência de interessado já visto na Aula 4 (mapa
-de papéis) e na Aula 1 (mapa de atores), agora aplicado a uma escala
-territorial, não organizacional.
-
-Vale registrar também, como ponto de precisão metodológica, que o
-próprio artigo de Nascimento & Raimundo (2026) inclui, em sua seção
-final, uma **Declaração de Considerações Éticas** em que as autoras
-explicitam sua posicionalidade como pesquisadoras de uma universidade
-pública latino-americana, reconhecendo não pertencer às comunidades
-indígenas e quilombolas discutidas, e descrevendo o compromisso de
-"analisar os mecanismos estruturais que produzem sua invisibilidade",
-sem falar *por* essas comunidades. É um modelo interessante de boa
-prática de transparência de pesquisa — vale como referência para
-qualquer trabalho futuro de vocês que trate de populações vulneráveis,
-mesmo fora do tema desta aula.
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Caso Central: Scala AI City
-
-::: {.fragment .callout-important icon=false title="Nascimento & Raimundo (2026), p. 4"}
-*"Em Eldorado do Sul, a Scala AI City captura uma reserva massiva de 5
-GW de energia, apesar da instabilidade elétrica da região e de sua
-vulnerabilidade a desastres climáticos, incluindo as enchentes de
-2024, marginalizando os Mbyá-Guarani da Tekoa Pekuruty e priorizando o
-resfriamento de servidores sobre direitos territoriais ancestrais."*
-(tradução livre)
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Desembrulhando Cada Elemento
-
-::: {.fragment}
-**5 GW** — ordem de grandeza comparável à demanda de uma região
-metropolitana inteira, reservada para um único empreendimento.
-:::
-::: {.fragment}
-**Instabilidade elétrica regional** — a reserva compete por
-capacidade já escassa, não entra numa rede com folga.
-:::
-::: {.fragment}
-**Enchentes de 2024** — o mesmo Rio Grande do Sul, atingido por
-desastre climático catastrófico recente e documentado.
-:::
-::: {.fragment}
-**Tekoa Pekuruty** — comunidade Mbyá-Guarani cujos direitos
-territoriais ancestrais são marginalizados pelo projeto.
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Da Decisão de Arquitetura ao Custo Territorial
-
-::: {.fig-resize style="width: 100%; margin: 0 auto;"}
-```{.tikz}
-\definecolor{popfill}{RGB}{219,234,254}
-\definecolor{popborder}{RGB}{0,133,202}
-\definecolor{badfill}{RGB}{253,224,220}
-\definecolor{badborder}{RGB}{224,60,49}
-
-\begin{tikzpicture}[
-  popbox/.style={rectangle, rounded corners, fill=popfill, draw=popborder, line width=1.1pt, text=black, minimum width=2.6cm, minimum height=1.3cm, align=center, font=\tiny},
-  badbox/.style={rectangle, rounded corners, fill=badfill, draw=badborder, line width=1.1pt, text=black, minimum width=2.6cm, minimum height=1.3cm, align=center, font=\tiny},
-  arr/.style={draw=black!60, thick, ->}
-]
-
-\node[popbox] (D) at (0,0) {Demanda por\\ cômputo de IA};
-\node[popbox] (A) at (3.4,0) {Decisão de\\ arquitetura};
-\node[badbox] (E) at (6.8,1.2) {Reserva de 5 GW\\ (rede instável)};
-\node[badbox] (R) at (6.8,-1.2) {Resfriamento\\ intensivo};
-\node[badbox, minimum height=1.6cm] (T) at (10.4,0) {Tekoa Pekuruty:\\ direitos\\ marginalizados};
-
-\draw[arr] (D) -- (A);
-\draw[arr] (A) -- (E);
-\draw[arr] (A) -- (R);
-\draw[arr] (E) -- (T);
-\draw[arr] (R) -- (T);
-
-\end{tikzpicture}
-```
-:::
-
-::: {.fragment .callout-tip icon=false}
-Nenhum documento diz "priorizamos resfriamento sobre direitos" — o
-resultado emerge de decisões de arquitetura tomadas sem a comunidade
-"na sala" (mesmo mecanismo de ausência de interessado das Aulas 1 e 4).
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Uma Nota de Autoria e um Modelo de Boa Prática
-
-::: {.fragment}
-O artigo é de **Beatriz Cardoso Nascimento**, aluna de graduação deste
-Instituto, com o professor desta disciplina — pesquisa real, em
-avaliação.
-:::
-
-::: {.fragment .callout-note icon=false title="Nascimento & Raimundo (2026), Considerações Éticas, p. 5"}
-As autoras reconhecem sua posicionalidade como pesquisadoras que não
-pertencem às comunidades indígenas/quilombolas discutidas, comprometendo-se
-a "analisar os mecanismos estruturais" sem falar por essas comunidades
-— um modelo de transparência de pesquisa.
-:::
-
-## Pergunta
-:::
-
-::: {.callout-tip}
-## Quem Decidiu Isso, Exatamente?
-
-No caso Scala AI City, nenhum documento público diz "vamos priorizar o
-resfriamento de servidores sobre os direitos da Tekoa Pekuruty" — a
-decisão nunca aparece formulada dessa forma explícita. Como, então,
-esse resultado acontece?
-
-**Dica:** pense na estrutura já vista na Aula 4 (mapa de papéis) —
-quem decide uma reserva de energia, e quem seria o interessado que
-normalmente não está na sala.
-
-- □ Se a Scala AI City tivesse sido construída numa região sem nenhum
-  histórico de instabilidade elétrica e sem nenhuma comunidade indígena
-  residente no entorno, o mecanismo de "zona de sacrifício digital"
-  descrito pelo artigo de Nascimento & Raimundo (2026) não teria as
-  mesmas duas evidências concretas de custo territorial que o caso
-  real apresenta.
-- □ No limite em que a reserva de energia de um data center fosse
-  pequena o suficiente para não competir, de forma alguma, com o
-  consumo elétrico da própria região onde está instalado, um dos dois
-  problemas centrais do caso Eldorado do Sul (pressão sobre uma rede
-  elétrica já instável) deixaria de se aplicar a esse caso hipotético.
-- □ A mesma lógica de "um projeto de infraestrutura digital de larga
-  escala reserva um recurso crítico numa região vulnerável, à custa de
-  uma comunidade local" se aplicaria a um novo cabo de fibra óptica
-  submarino que reserva a única faixa costeira apta a ancoragem numa
-  comunidade pesqueira tradicional, sem consultá-la previamente.
-- □ Como o artigo descreve a Scala AI City como um projeto que
-  prioriza resfriamento de servidores sobre direitos territoriais,
-  conclui-se que qualquer expansão de infraestrutura de data center na
-  América Latina, sem exceção, produz necessariamente o mesmo padrão
-  de marginalização de comunidades indígenas.
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## V/F — Quem Decidiu Isso? Resposta
-
-::: {.callout-tip icon=false}
-- ✔ Verdadeiro — os dois fatores de risco específicos citados pelo
-  artigo (instabilidade elétrica regional e comunidade indígena
-  afetada) são parte do que dá concretude empírica ao caso; sem eles,
-  faltariam exatamente essas duas evidências.
-- ✔ Verdadeiro — a pressão sobre a rede elétrica é consequência direta
-  da magnitude da reserva relativa à capacidade local; sem
-  competição por capacidade, esse problema específico não se
-  manifestaria.
-- ✔ Verdadeiro — mesma estrutura: infraestrutura crítica reservando
-  recurso escasso numa região vulnerável, à custa de uma comunidade
-  tradicional não consultada, só que em outro tipo de infraestrutura
-  (cabo submarino em vez de data center).
-- ✗ Falso — o artigo usa a Scala AI City como um exemplo documentado,
-  não como prova de uma regra universal sem exceção; generalizar de um
-  caso para "toda expansão, sem exceção" é o mesmo erro de
-  generalização indevida já discutido em aulas anteriores.
-:::
-
-::: {.fragment}
-**Retomando:** o próximo bloco nomeia formalmente o mecanismo que esse
-caso ilustra — soberania digital, policrise e zona de sacrifício
-digital.
-:::
-
-:::
-
-# Arcabouço Teórico: Soberania Digital, Policrise e Zonas de Sacrifício Digital
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-O caso Scala AI City não é um incidente isolado — o artigo de
-Nascimento & Raimundo (2026) o lê através de um arcabouço teórico
-específico, que vale nomear com precisão.
-
-**Soberania digital.** O termo é, segundo o próprio artigo, "um sítio
-de intensa contestação conceitual" — mas pode ser entendido, de forma
-ampla, como a capacidade de um Estado de exercer autoridade sobre sua
-arquitetura digital:
-
-::: {.callout-important}
-## Soberania digital: quatro dimensões (Nascimento & Raimundo, 2026, pp. 1–2)
-
-> "[A soberania digital] pode ser amplamente entendida como a
-> capacidade de um Estado de exercer autoridade sobre sua arquitetura
-> digital, governar fluxos de dados dentro de sua jurisdição, e
-> implementar modelos de governança alinhados com seus próprios
-> interesses legais, culturais e estratégicos. Essa busca por autonomia
-> abrange pelo menos quatro dimensões críticas — soberania
-> **infraestrutural**, de **dados**, **regulatória** e **epistêmica** —
-> indispensáveis para que uma nação conduza seu próprio destino
-> digital." (tradução livre, pp. 1–2)
-:::
-
-Note que essas quatro dimensões podem avançar de forma **desigual**
-entre si: um país pode ter leis de proteção de dados rigorosas
-(soberania regulatória forte) e, ao mesmo tempo, depender inteiramente
-de servidores estrangeiros para hospedar os próprios dados que essas
-leis protegem (soberania infraestrutural fraca). É exatamente essa
-tensão que o artigo chama de paradoxo:
-
-::: {.callout-warning}
-## O paradoxo da soberania digital (Nascimento & Raimundo, 2026, p. 2)
-
-> "No contexto da policrise global, a busca por essa soberania é,
-> frequentemente, paradoxal: os requisitos materiais da expansão da IA
-> forçam, com frequência, uma escolha entre autonomia doméstica e a
-> atração urgente de capital tecnológico estrangeiro. [...] Nesse
-> contexto, a busca por soberania digital se torna contraditória, já
-> que alcançar autonomia infraestrutural frequentemente exige atrair
-> capital estrangeiro e acomodar os interesses de corporações
-> transnacionais." (tradução livre, p. 2)
-:::
-
-**Policrise global.** O segundo conceito nomeia por que esse paradoxo
-não é acidental: as crises que afetam o planeta hoje não são
-independentes entre si, são causalmente entrelaçadas:
-
-::: {.callout-important}
-## Policrise global (Nascimento & Raimundo, 2026, p. 1)
-
-> "O conceito de policrise global descreve a ocorrência de crises
-> através de múltiplos sistemas globais que se tornam causalmente
-> entrelaçadas de formas que degradam significativamente as
-> perspectivas da humanidade. No contexto da IA, isso pode significar
-> alimentar o consumismo por meio de algoritmos de recomendação,
-> desenvolver vigilância e armas autônomas, e se embutir em
-> infraestruturas de alta intensidade de carbono." (tradução livre,
-> p. 1)
-:::
-
-A crise climática (enchentes de 2024 no RS), a crise energética
-(instabilidade da rede elétrica regional) e a crise social
-(marginalização da Tekoa Pekuruty) não são três problemas separados no
-caso Scala AI City — são a mesma policrise se manifestando em três
-frentes entrelaçadas, todas convergindo sobre a mesma decisão de
-arquitetura de infraestrutura.
-
-**Zonas de sacrifício digital.** É o terceiro conceito, e o mais
-diretamente aplicável ao caso: a definição formal que o artigo propõe,
-contrastada explicitamente com um conceito vizinho e mais conhecido,
-**redlining digital**:
-
-::: {.callout-important}
-## Zona de sacrifício digital vs. redlining digital (Nascimento & Raimundo, 2026, p. 3)
-
-> "Definimos zonas de sacrifício digital na América Latina como
-> territórios onde a destruição ambiental e o esgotamento de recursos
-> são tratados como o preço necessário para a integração tecnológica,
-> por um julgamento político e econômico sobre sua descartabilidade.
-> Diferente do conceito usual de redlining digital — que foca na
-> segregação e na negação de serviços —, zonas de sacrifício digital
-> são caracterizadas por **inclusão predatória**. Nessa lógica, o
-> território é 'incluído' no mapa global da IA não como beneficiário
-> do progresso digital, mas como sítio de extração de recursos e de
-> desperdício metabólico." (tradução livre, p. 3)
-:::
-
-A distinção importa porque ela evita uma confusão fácil: redlining
-digital é sobre **exclusão** — um bairro, uma região, é deixado de
-fora de um serviço ou investimento digital (o exemplo clássico é a
-recusa de banda larga de qualidade em bairros pobres). Zona de
-sacrifício digital é o **oposto estrutural**: o território não é
-excluído, é ativamente **incluído** — recebe investimento, aparece em
-relatórios de expansão tecnológica — mas como local de extração de
-recurso, não como beneficiário. A Tekoa Pekuruty não foi "deixada de
-fora" da Scala AI City: o projeto está literalmente ao seu redor,
-consumindo os recursos de sua região — só que sem que a comunidade
-receba nenhum benefício proporcional, e sem que seus direitos
-territoriais sejam respeitados no processo.
-
-::: {.fig-resize style="width: 100%; margin: 0 auto;"}
-```{.tikz}
-\definecolor{kitfill}{RGB}{219,234,254}
-\definecolor{kitborder}{RGB}{0,133,202}
-\definecolor{badfill}{RGB}{253,224,220}
-\definecolor{badborder}{RGB}{224,60,49}
-
-\begin{tikzpicture}[
-  kitbox/.style={rectangle, rounded corners, fill=kitfill, draw=kitborder, line width=1.2pt, text=black, minimum width=5cm, minimum height=2cm, align=center, font=\scriptsize},
-  badbox/.style={rectangle, rounded corners, fill=badfill, draw=badborder, line width=1.2pt, text=black, minimum width=5.4cm, minimum height=2.4cm, align=center, font=\scriptsize},
-  arr/.style={draw=black!60, thick, ->}
-]
-
-\node[kitbox] (K) at (0,0) {Expansão de\\ infraestrutura de IA\\ chega a um território};
-
-\node[badbox] (RL) at (7,2.3) {Redlining Digital:\\ o território é excluído\\ do serviço/investimento\\ (segregação, negação)};
-\node[badbox] (SZ) at (7,-2.3) {Zona de Sacrifício Digital:\\ o território é "incluído"\\ como sítio de extração\\ (inclusão predatória)};
-
-\draw[arr] (K) -- (RL);
-\draw[arr] (K) -- (SZ);
-
-\end{tikzpicture}
-```
-:::
-
-Por fim, o artigo nomeia a IA como um "acelerador metabólico": ela ao
-mesmo tempo otimiza e acelera processos extrativos (por exemplo,
-algoritmos de recomendação que fomentam consumismo) e demanda, para
-sua própria existência física, uma escala de eletricidade e água sem
-precedentes — as duas faces da mesma moeda material.
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Soberania Digital: Quatro Dimensões
-
-::: {.fragment .callout-important icon=false title="Nascimento & Raimundo (2026), pp. 1–2"}
-*"Capacidade de um Estado de exercer autoridade sobre sua arquitetura
-digital [...]. Pelo menos quatro dimensões: **infraestrutural**, de
-**dados**, **regulatória** e **epistêmica**."* (tradução livre)
-:::
-
-::: {.fragment}
-As quatro dimensões podem avançar **desigualmente**: leis de dados
-rígidas (regulatória forte) + servidores 100% estrangeiros
-(infraestrutural fraca) é perfeitamente possível.
-:::
-
-::: {.fragment .callout-warning icon=false title="O paradoxo — Nascimento & Raimundo (2026), p. 2"}
-*"A busca por soberania digital se torna contraditória, já que
-alcançar autonomia infraestrutural frequentemente exige atrair capital
-estrangeiro e acomodar interesses de corporações transnacionais."*
-(tradução livre)
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Policrise Global
-
-::: {.fragment .callout-important icon=false title="Nascimento & Raimundo (2026), p. 1"}
-*"Crises através de múltiplos sistemas globais que se tornam
-causalmente entrelaçadas de formas que degradam significativamente as
-perspectivas da humanidade."* (tradução livre)
-:::
-
-::: {.fragment}
-Clima (enchentes 2024) + energia (rede instável) + social
-(marginalização da Tekoa Pekuruty) não são três problemas separados no
-caso Scala AI City — é a mesma policrise em três frentes.
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Zona de Sacrifício Digital: a Definição
-
-::: {.fragment .callout-important icon=false title="Nascimento & Raimundo (2026), p. 3"}
-*"Territórios onde a destruição ambiental [...] é tratada como o preço
-necessário para a integração tecnológica [...]. Diferente do redlining
-digital — que foca em segregação e negação de serviços —, zonas de
-sacrifício digital são caracterizadas por **inclusão predatória**."*
-(tradução livre)
-:::
-
-::: {.fragment}
-A distinção em uma frase: redlining exclui; zona de sacrifício
-**inclui predatoriamente** — o território "entra no mapa" como sítio
-de extração, não como beneficiário.
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Redlining vs. Sacrifício: o Garfo
-
-::: {.fig-resize style="width: 100%; margin: 0 auto;"}
-```{.tikz}
-\definecolor{kitfill}{RGB}{219,234,254}
-\definecolor{kitborder}{RGB}{0,133,202}
-\definecolor{badfill}{RGB}{253,224,220}
-\definecolor{badborder}{RGB}{224,60,49}
-
-\begin{tikzpicture}[
-  kitbox/.style={rectangle, rounded corners, fill=kitfill, draw=kitborder, line width=1.1pt, text=black, minimum width=3.6cm, minimum height=1.6cm, align=center, font=\tiny},
-  badbox/.style={rectangle, rounded corners, fill=badfill, draw=badborder, line width=1.1pt, text=black, minimum width=4cm, minimum height=1.9cm, align=center, font=\tiny},
-  arr/.style={draw=black!60, thick, ->}
-]
-
-\node[kitbox] (K) at (0,0) {Expansão de\\ infraestrutura de IA};
-
-\node[badbox] (RL) at (5.2,1.7) {Redlining Digital:\\ exclusão do serviço};
-\node[badbox] (SZ) at (5.2,-1.7) {Zona de Sacrifício:\\ inclusão predatória};
-
-\draw[arr] (K) -- (RL);
-\draw[arr] (K) -- (SZ);
-
-\end{tikzpicture}
-```
-:::
-
-::: {.fragment .callout-tip icon=false}
-A Tekoa Pekuruty não foi excluída da Scala AI City — o projeto está ao
-redor dela, consumindo os recursos da região, sem benefício
-proporcional. Isso é inclusão predatória, não redlining.
-:::
-
-::: {.fragment}
-A IA como "acelerador metabólico": otimiza processos extrativos **e**
-demanda, para existir fisicamente, escala sem precedentes de energia e
-água.
-:::
-
-## Pergunta
-:::
-
-::: {.callout-tip}
-## Inclusão Predatória: Inclusão de Verdade?
-
-Se um território é oficialmente "incluído" no mapa global de
-infraestrutura de IA — recebe investimento, é mencionado em relatórios
-de expansão tecnológica — isso já garante que ele se beneficia dessa
-inclusão?
-
-**Dica:** volte à distinção entre redlining digital (exclusão) e zona
-de sacrifício digital (inclusão predatória).
-
-- □ Se um Estado conseguisse atrair investimento em infraestrutura de
-  IA sem precisar acomodar nenhum interesse de capital transnacional
-  nem externalizar nenhum custo ambiental ou social, o paradoxo da
-  soberania digital descrito no artigo de Nascimento & Raimundo (2026)
-  não se aplicaria a esse caso.
-- □ No limite em que um território fosse formalmente excluído de
-  qualquer investimento ou serviço digital, sem nenhuma presença de
-  infraestrutura de IA nele, esse território se qualificaria, pela
-  definição do artigo, como uma zona de sacrifício digital.
-- □ A mesma lógica de "duas dimensões distintas de soberania digital
-  podem estar em tensão" se aplicaria a um país que consegue soberania
-  regulatória forte (leis rígidas de proteção de dados) mas continua
-  dependente de infraestrutura de nuvem estrangeira para hospedar esses
-  mesmos dados, evidenciando fraca soberania infraestrutural apesar da
-  soberania regulatória.
-- □ Como a soberania digital exige controle sobre arquitetura, dados,
-  regulação e epistemologia, conclui-se que um país só pode ser
-  considerado "digitalmente soberano" se tiver as quatro dimensões
-  plenamente realizadas ao mesmo tempo, sem nenhum grau intermediário
-  possível.
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## V/F — Inclusão Predatória: Resposta
-
-::: {.callout-tip icon=false}
-- ✔ Verdadeiro — sem nenhuma acomodação de interesse estrangeiro nem
-  externalização de custo, faltaria exatamente o mecanismo que o artigo
-  descreve como paradoxal.
-- ✗ Falso — exclusão total, sem nenhuma presença de infraestrutura, é
-  exatamente a definição de redlining digital, não de zona de
-  sacrifício digital, que exige inclusão (ainda que predatória).
-- ✔ Verdadeiro — é o mesmo tipo de desequilíbrio entre dimensões de
-  soberania digital, só que entre regulatória e infraestrutural em vez
-  de outro par.
-- ✗ Falso — o artigo não afirma que soberania digital é um estado
-  binário "tudo ou nada"; trata as quatro dimensões como graduais e
-  potencialmente desiguais entre si, não como um pacote que só existe
-  completo.
-:::
-
-::: {.fragment}
-**Retomando:** o próximo bloco amplia o olhar para outros países da
-América Latina, mostrando que o padrão de Eldorado do Sul não é
-isolado.
-:::
-
-:::
-
-# Ampliando o Olhar: Querétaro, Módulo Penco e o Greenwashing do Pará
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-O artigo de Nascimento & Raimundo (2026) não se limita ao caso
-brasileiro — usa dois casos adicionais, em países diferentes, para
-mostrar que o mesmo padrão estrutural se repete com recursos
-diferentes:
-
-::: {.callout-important}
-## Querétaro e Módulo Penco (Nascimento & Raimundo, 2026, p. 4)
-
-> "Essa lógica de priorização de recursos se repete em Querétaro,
-> México, onde centros de dados corporativos prosperam em meio a uma
-> severa fragilidade hídrica e elétrica, enquanto comunidades locais
-> enfrentaram um aumento de 151% nos apagões entre 2014 e 2023. Mais
-> ao sul, o 'Módulo Penco', no Chile, mira sítios de resistência
-> histórica Mapuche para extração de terras raras destinadas a
-> hardware de IA — um projeto rejeitado por 99% da população local em
-> consultas públicas." (tradução livre, p. 4)
-:::
-
-Em Querétaro, o recurso em disputa é **água e eletricidade**, no mesmo
-padrão de Eldorado do Sul (embora sem o componente de comunidade
-indígena específica citado no caso brasileiro). No Módulo Penco, o
-recurso é outro — **terras raras**, minerais necessários para fabricar
-o próprio hardware que roda os modelos de IA (não a energia para
-operá-los) — mas o mecanismo estrutural é idêntico: um recurso crítico
-para a cadeia de suprimentos de IA sendo extraído de um território com
-resistência histórica documentada (Mapuche), com rejeição popular
-esmagadora (99%) sendo, aparentemente, insuficiente para impedir o
-projeto.
-
-Um segundo eixo do artigo trata de um mecanismo relacionado, mas
-distinto: não a extração direta de recurso, e sim a **narrativa** que
-disfarça essa extração como solução ambiental — o que o artigo chama
-de **colonialismo verde**, ilustrado pelo caso da Coalizão LEAF no
-Pará:
-
-::: {.callout-warning}
-## O caso LEAF/Pará (Nascimento & Raimundo, 2026, p. 3)
-
-> "Um exemplo saliente é o envolvimento de corporações de tecnologia
-> na Coalizão LEAF (*Lowering Emissions by Accelerating Forest
-> Finance*), uma iniciativa público-privada que financia a proteção de
-> florestas tropicais por meio da compra de créditos de carbono
-> jurisdicionais de grandes projetos REDD+ liderados pelo Estado. Em
-> 2024, o governo do Pará assinou um acordo de R$ 1 bilhão para vender
-> créditos de carbono à coalizão **sem consulta** às comunidades
-> indígenas e quilombolas residentes nos territórios afetados. Essa
-> omissão contraria diretamente os pilares normativos do Consentimento
-> Livre, Prévio e Informado (CLPI) estabelecidos pela Convenção 169 da
-> OIT." (tradução livre, p. 3)
-:::
-
-::: {.callout-warning}
-## Narrativa vs. política real (Nascimento & Raimundo, 2026, p. 3)
-
-> "Embora narrativas oficiais tenham enquadrado o acordo como uma
-> vitória para a conservação, as políticas reais revelam uma agenda
-> alinhada aos interesses corporativos. Essa dinâmica operacionaliza o
-> **colonialismo verde**: a Amazônia é reposicionada como um ativo
-> financeiro para compensar as pegadas de carbono de corporações do
-> Norte Global. À medida que a infraestrutura de Big Tech se expande
-> por meio de data centers de alta intensidade energética no Norte
-> Global — aumentando exponencialmente as emissões de combustíveis
-> fósseis —, essas corporações optam por comprar créditos de carbono
-> em vez de reduzir seu impacto material na fonte." (tradução livre, p.
-> 3)
-:::
-
-O mecanismo do greenwashing, aqui, é preciso: em vez de reduzir a
-própria emissão de carbono na origem (nos seus próprios data centers,
-por exemplo), uma corporação **compra** o direito de compensar essa
-emissão — financiando a proteção de uma floresta distante, sob um
-acordo que, no caso do Pará, foi negociado sem consultar quem vive
-naquela floresta. A narrativa de "conservação" e "sustentabilidade" faz
-o papel de encobrir, não de resolver, a mesma lógica de externalização
-de custo territorial já vista nos outros três casos.
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Ampliando o Olhar: Querétaro e Módulo Penco
-
-::: {.fragment .callout-important icon=false title="Nascimento & Raimundo (2026), p. 4"}
-*"Querétaro, México: centros de dados prosperam em meio a fragilidade
-hídrica/elétrica; aumento de 151% nos apagões (2014–2023). 'Módulo
-Penco', Chile: terras raras em sítio de resistência Mapuche, rejeitado
-por 99% em consulta pública."* (tradução livre)
-:::
-
-::: {.fragment}
-Recurso diferente em cada caso (água/eletricidade vs. terras raras),
-mesmo mecanismo estrutural: recurso crítico para IA extraído de
-território com resistência local documentada.
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## O Caso LEAF/Pará: Colonialismo Verde
-
-::: {.fragment .callout-warning icon=false title="Nascimento & Raimundo (2026), p. 3"}
-*"Em 2024, o governo do Pará assinou um acordo de R$ 1 bilhão para
-vender créditos de carbono [...] sem consulta às comunidades indígenas
-e quilombolas [...] — contrariando o CLPI da Convenção 169 da OIT."*
-(tradução livre)
-:::
-
-::: {.fragment .callout-warning icon=false title="Nascimento & Raimundo (2026), p. 3"}
-*"Colonialismo verde: a Amazônia reposicionada como ativo financeiro
-[...]. Corporações optam por comprar créditos de carbono em vez de
-reduzir seu impacto material na fonte."* (tradução livre)
-:::
-
-::: {.fragment}
-O mecanismo: em vez de reduzir emissão na origem, comprar o direito de
-compensá-la — financiando proteção florestal sem consultar quem vive
-nela. A narrativa "verde" encobre, não resolve, a externalização de
-custo.
-:::
-
-## Pergunta
-:::
-
-::: {.callout-tip}
-## Um Acordo "Verde" Sem Quem Vive na Terra
-
-A Coalizão LEAF apresenta o acordo do Pará como vitória de
-conservação. O que, no próprio texto do artigo, mostra que essa
-narrativa e a política real divergem?
-
-**Dica:** pense em quem foi consultado, e quem não foi, no acordo de
-R$ 1 bilhão.
-
-- □ Se o governo do Pará tivesse realizado consulta livre, prévia e
-  informada às comunidades indígenas e quilombolas antes de assinar o
-  acordo com a Coalizão LEAF, a violação específica da Convenção 169
-  da OIT apontada pelo artigo não teria ocorrido da mesma forma.
-- □ No limite em que uma empresa do Norte Global reduzisse suas
-  próprias emissões a zero na fonte, sem nunca precisar comprar nenhum
-  crédito de carbono, o mecanismo de colonialismo verde descrito no
-  caso LEAF/Pará perderia a função específica que o artigo atribui à
-  compra de créditos (compensar, em vez de reduzir, o impacto na
-  fonte).
-- □ A mesma lógica de "uma narrativa de sustentabilidade usada para
-  obscurecer, em vez de resolver, uma externalização de custo
-  ambiental" se aplicaria a uma empresa de tecnologia que anuncia
-  neutralidade de carbono comprando compensações florestais distantes,
-  enquanto seus próprios data centers seguem aumentando o consumo real
-  de energia fóssil na origem.
-- □ Como o acordo da Coalizão LEAF foi assinado sem consulta às
-  comunidades afetadas, conclui-se que todo mecanismo de crédito de
-  carbono florestal é, por definição, um instrumento de colonialismo
-  verde, independentemente de como cada acordo específico for
-  negociado.
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## V/F — Um Acordo "Verde": Resposta
-
-::: {.callout-tip icon=false}
-- ✔ Verdadeiro — consulta livre, prévia e informada é exatamente o que
-  faltou e o que a Convenção 169 exige; supridas, a violação específica
-  apontada pelo artigo não teria ocorrido da mesma forma.
-- ✔ Verdadeiro — a função específica da compra de créditos, segundo o
-  artigo, é compensar em vez de reduzir na fonte; sem emissão nenhuma
-  para compensar, essa função específica desaparece nesse cenário.
-- ✔ Verdadeiro — mesma estrutura de greenwashing: usar compensação
-  distante para mascarar, em vez de resolver, o aumento real de impacto
-  na origem.
-- ✗ Falso — o artigo não afirma que todo crédito de carbono é
-  necessariamente colonialismo verde; o problema apontado é a falta
-  de consulta e a captura corporativa desse caso específico, não o
-  mecanismo de crédito de carbono em si, que poderia, em tese, ser
-  negociado com consulta genuína.
-:::
-
-::: {.fragment}
-**Retomando:** três casos, três recursos diferentes (energia/água,
-terras raras, floresta/carbono), um mesmo padrão estrutural. O próximo
-bloco volta ao vocabulário técnico de projeto que poderia responder a
-esse padrão.
-:::
-
-:::
-
-# Da Crítica ao Projeto: Ciclo de Vida e TI Verde
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-Os Blocos 3 a 5 mostraram o padrão de custo material e territorial da
-infraestrutura de IA na prática. Este bloco volta às duas leituras de
-base já previstas na ementa desta disciplina — Van de Poel & Royakkers
-(2011) e Maciel & Viterbo (2020) — para nomear o vocabulário técnico
-que uma equipe de engenharia responsável usaria para **projetar**
-levando esse custo em conta, mesmo sabendo (Bloco 6 termina reforçando
-isso) que vocabulário técnico sozinho não teria evitado o problema
-central do caso Scala AI City.
-
-A definição mais citada de desenvolvimento sustentável vem do relatório
-Brundtland, de 1987:
-
-::: {.callout-note}
-## A definição de Brundtland (Van de Poel & Royakkers, 2011, Cap. 10, p. 283)
-
-> "Desenvolvimento sustentável é o desenvolvimento que atende às
-> necessidades do presente sem comprometer a capacidade das gerações
-> futuras de atender às suas próprias necessidades. Contém em si dois
-> conceitos-chave: o conceito de 'necessidades', em particular as
-> necessidades essenciais dos mais pobres do mundo, às quais se deve
-> dar prioridade absoluta; e a ideia de limitações impostas pelo estado
-> da tecnologia e da organização social sobre a capacidade do ambiente
-> de atender às necessidades presentes e futuras." (tradução livre, p.
-> 283, definição original da Comissão Mundial sobre Meio Ambiente e
-> Desenvolvimento, 1987)
-:::
-
-Essa definição fundamenta duas formas de justiça, que Van de Poel &
-Royakkers (2011) distinguem com cuidado — e que se aplicam
-diretamente ao caso Scala AI City:
-
-::: {.callout-note}
-## Justiça intergeracional, intrageracional e o poluidor-pagador (Van de Poel & Royakkers, 2011, Cap. 10, p. 284)
-
-> "O coração do desenvolvimento sustentável está em dois tipos de
-> justiça. O primeiro tipo de justiça se refere à divisão de recursos
-> entre a nossa própria geração e as gerações futuras: justiça
-> **intergeracional**. [...] Além disso, o desenvolvimento sustentável
-> exige uma divisão justa de recursos dentro da nossa própria geração
-> (compare o Primeiro e o Terceiro Mundo): justiça
-> **intrageracional**." (tradução livre, p. 284)
->
-> "Essencialmente, isso é uma extensão do princípio do
-> poluidor-pagador, ou a noção de que 'quem quebra algo também deve
-> consertá-lo'. O ponto de partida é que o dano ao ambiente deve ser
-> reparado pela parte responsável pelo dano." (tradução livre, p. 284)
-:::
-
-O caso Scala AI City é, ao mesmo tempo, um problema de justiça
-**intrageracional** (o custo material recai sobre a Tekoa Pekuruty,
-não sobre quem usa os serviços de IA treinados nesse data center — uma
-divisão desigual de custo *dentro* da mesma geração) e um problema de
-princípio do poluidor-pagador (quem reserva a energia e a água não é,
-necessariamente, quem repara o dano causado à rede elétrica regional
-ou ao território).
-
-A segunda ferramenta técnica é a **análise de ciclo de vida**, que
-responde diretamente à competência de "ciclo de vida do lixo
-eletrônico" já prevista na ementa desta disciplina:
-
-::: {.callout-important}
-## Análise de ciclo de vida (Van de Poel & Royakkers, 2011, Cap. 10, p. 293)
-
-> "O ponto de partida da análise de ciclo de vida é que você precisa
-> ser capaz de comparar o impacto ambiental que seu projeto causa com
-> projetos alternativos, a fim de alcançar um projeto sustentável. Isso
-> pode ser feito mapeando o impacto ambiental ao longo de todo o ciclo
-> de extração, refino, produção, uso e descarte." (tradução livre, p.
-> 293)
->
-> "Análise de ciclo de vida: uma análise que mapeia o impacto ambiental
-> de um produto ao longo de todo o ciclo de produção, uso e descarte."
-> (tradução livre, p. 293, definição em destaque do próprio livro)
-:::
-
-O ponto central dessa ferramenta é que medir só a fase de **uso** de um
-sistema computacional (quanta energia ele consome enquanto está
-rodando) esconde o impacto ambiental das outras duas fases —
-**produção** (extração de minerais, manufatura de hardware) e
-**descarte** (o que a leitura de Maciel & Viterbo, 2020, Cap. 14, chama
-de obsolescência programada e "e-waste", resíduo eletrônico). A Tabela
-14.1 daquele capítulo, já citada no Bloco 2, cobre exatamente essas três
-fases numa única lista de diretivas — a linha de "Reciclabilidade do
-Produto", por exemplo:
-
-::: {.callout-note}
-## Reciclabilidade do produto (Maciel & Viterbo, 2020, Tabela 14.1, p. 195)
-
-> "Contexto: a construção e manutenção de partes de computadores e
-> produção de software demanda o uso [de] recursos, que pode ser
-> reciclável (reutilizado), ou não. Sustentabilidade: utilizar menos
-> hardware; e priorizar fabricantes que atentem para uso de
-> matérias-primas recicláveis na produção. Também priorizar sistemas de
-> software flexíveis que atendam a diferentes contextos de uso,
-> minimizando a necessidade de atualizações constantes." (Maciel &
-> Viterbo, 2020, Tabela 14.1, p. 195)
-:::
-
-O mesmo capítulo propõe ainda uma distinção útil sobre o que "software
-verde" pode significar:
-
-::: {.callout-note}
-## Verde Por Software vs. Verde No Software (Maciel & Viterbo, 2020, Cap. 14, p. 187)
-
-> "Verde Por Software - Aqueles desenvolvidos para domínios que
-> trabalham para preservar a sustentabilidade no meio ambiente, ou
-> seja, sistemas de software que servem como ferramentas para apoiar os
-> objetivos de sustentabilidade; Verde No Software - Como tornar o
-> software mais sustentável, resultando em um produto de software que
-> os autores consideram 'ambientalmente amigável'." (Maciel & Viterbo,
-> 2020, Cap. 14, p. 187)
-:::
-
-Um sistema de IA que otimiza o despacho de energia renovável numa rede
-elétrica é "Verde Por Software"; um sistema de IA cujo próprio
-treinamento é otimizado para consumir menos energia é "Verde No
-Software" — as duas coisas são úteis, mas nenhuma das duas, sozinha,
-teria evitado o problema central do caso Scala AI City, que não é uma
-falha de eficiência técnica. É um problema de **quem decide** e **quem
-é consultado** — exatamente o gancho para a síntese do próximo bloco.
-
-::: {.fig-resize style="width: 100%; margin: 0 auto;"}
-```{.tikz}
-\definecolor{popfill}{RGB}{219,234,254}
-\definecolor{popborder}{RGB}{0,133,202}
-\definecolor{okfill}{RGB}{224,242,241}
-\definecolor{okborder}{RGB}{17,122,101}
-\definecolor{badfill}{RGB}{253,224,220}
-\definecolor{badborder}{RGB}{224,60,49}
-
-\begin{tikzpicture}[
-  popbox/.style={rectangle, rounded corners, fill=popfill, draw=popborder, line width=1.2pt, text=black, minimum width=2.8cm, minimum height=1.4cm, align=center, font=\scriptsize},
-  okbox/.style={rectangle, rounded corners, fill=okfill, draw=okborder, line width=1.2pt, text=black, minimum width=2.8cm, minimum height=1.4cm, align=center, font=\scriptsize},
-  badbox/.style={rectangle, rounded corners, fill=badfill, draw=badborder, line width=1.2pt, text=black, minimum width=3.2cm, minimum height=1.6cm, align=center, font=\scriptsize},
-  arr/.style={draw=black!60, thick, ->}
-]
-
-\node[popbox] (X) at (0,0) {Extração de\\ matéria-prima};
-\node[popbox] (P) at (4,0) {Produção\\ de hardware};
-\node[okbox] (U) at (8,0) {Uso: operação,\\ consumo de energia};
-\node[badbox] (D) at (12.2,0) {Descarte};
-\node[badbox] (W) at (12.2,-2.4) {Resíduo eletrônico\\ (e-waste) sem\\ reciclagem};
-
-\draw[arr] (X) -- (P);
-\draw[arr] (P) -- (U);
-\draw[arr] (U) -- (D);
-\draw[arr] (D) -- (W);
-\draw[arr, dashed] (D) to[bend left=35] node[midway, above, font=\scriptsize] {reciclagem} (X);
-
-\end{tikzpicture}
-```
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Da Crítica ao Projeto
-
-::: {.fragment}
-Voltamos às duas leituras-base da ementa: Van de Poel & Royakkers
-(2011) e Maciel & Viterbo (2020) — vocabulário técnico de projeto, para
-responder ao padrão dos Blocos 3–5.
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## A Definição de Brundtland
-
-::: {.fragment .callout-note icon=false title="Van de Poel & Royakkers (2011), p. 283"}
-*"Desenvolvimento que atende às necessidades do presente sem
-comprometer a capacidade das gerações futuras de atender às próprias
-necessidades."* (tradução livre)
-:::
-
-::: {.fragment}
-Duas ideias-chave na própria definição: as necessidades essenciais dos
-mais pobres do mundo (prioridade absoluta) e os limites que a
-tecnologia e a organização social impõem à capacidade do ambiente.
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Duas Justiças e o Poluidor-Pagador
-
-::: {.fragment .callout-note icon=false title="p. 284"}
-**Intergeracional:** divisão de recursos entre gerações. **Intrageracional:**
-divisão de recursos dentro da mesma geração (ex.: Primeiro vs. Terceiro Mundo).
-:::
-
-::: {.fragment .callout-tip icon=false}
-Scala AI City é, ao mesmo tempo, um problema de justiça
-**intrageracional** (custo recai sobre a Tekoa Pekuruty, não sobre
-quem usa o serviço) e do princípio do **poluidor-pagador**.
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Análise de Ciclo de Vida
-
-::: {.fragment .callout-important icon=false title="Van de Poel & Royakkers (2011), p. 293"}
-*"Uma análise que mapeia o impacto ambiental de um produto ao longo de
-todo o ciclo de **produção, uso e descarte**."* (tradução livre)
-:::
-
-::: {.fragment}
-Medir só a fase de **uso** esconde o impacto de **produção**
-(extração/manufatura) e **descarte** (e-waste).
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## O Ciclo de Vida de um Sistema Computacional
-
-::: {.fig-resize style="width: 100%; margin: 0 auto;"}
-```{.tikz}
-\definecolor{popfill}{RGB}{219,234,254}
-\definecolor{popborder}{RGB}{0,133,202}
-\definecolor{okfill}{RGB}{224,242,241}
-\definecolor{okborder}{RGB}{17,122,101}
-\definecolor{badfill}{RGB}{253,224,220}
-\definecolor{badborder}{RGB}{224,60,49}
-
-\begin{tikzpicture}[
-  popbox/.style={rectangle, rounded corners, fill=popfill, draw=popborder, line width=1.1pt, text=black, minimum width=2.2cm, minimum height=1.1cm, align=center, font=\tiny},
-  okbox/.style={rectangle, rounded corners, fill=okfill, draw=okborder, line width=1.1pt, text=black, minimum width=2.2cm, minimum height=1.1cm, align=center, font=\tiny},
-  badbox/.style={rectangle, rounded corners, fill=badfill, draw=badborder, line width=1.1pt, text=black, minimum width=2.6cm, minimum height=1.3cm, align=center, font=\tiny},
-  arr/.style={draw=black!60, thick, ->}
-]
-
-\node[popbox] (X) at (0,0) {Extração};
-\node[popbox] (P) at (3,0) {Produção};
-\node[okbox] (U) at (6,0) {Uso};
-\node[badbox] (D) at (9.2,0) {Descarte};
-\node[badbox] (W) at (9.2,-1.9) {e-waste sem\\ reciclagem};
-
-\draw[arr] (X) -- (P);
-\draw[arr] (P) -- (U);
-\draw[arr] (U) -- (D);
-\draw[arr] (D) -- (W);
-\draw[arr, dashed] (D) to[bend left=35] node[midway, above, font=\tiny] {reciclagem} (X);
-
-\end{tikzpicture}
-```
-:::
-
-::: {.fragment .callout-tip icon=false}
-Cada seta é uma fase que a Tabela 14.1 (Bloco 2) já cobre com
-diretivas próprias — a seta tracejada de volta (reciclagem) é
-precisamente o que falta quando um sistema termina em e-waste, em vez
-de matéria-prima reaproveitada.
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Verde Por Software vs. Verde No Software
-
-::: {.fragment .callout-note icon=false title="Maciel & Viterbo (2020), p. 187"}
-**Verde Por Software:** sistemas que promovem sustentabilidade.
-**Verde No Software:** tornar o próprio software mais sustentável.
+**Treino:** currículos enviados à empresa ao longo de **dez anos** — numa indústria dominada por homens.
 :::
 
 ::: {.fragment .callout-warning icon=false}
-Nenhuma das duas, sozinha, teria evitado o caso Scala AI City — o
-problema não é falha de eficiência técnica, é **quem decide** e
-**quem é consultado**.
-:::
-
-## Pergunta
-:::
-
-::: {.callout-tip}
-## O Ciclo Que Ninguém Vê Até o Fim
-
-Se uma empresa mede sua "pegada de carbono" apenas pela fase de uso de
-seus servidores (a energia elétrica que eles consomem enquanto
-rodam), o que a análise de ciclo de vida diria que está faltando nessa
-contabilidade?
-
-**Dica:** pensar nas fases que vêm antes e depois do "uso": extração/
-produção, e descarte.
-
-- □ Se toda a energia elétrica usada na fase de operação de um data
-  center viesse de fontes renováveis com impacto ambiental desprezível,
-  a análise de ciclo de vida completa desse data center ainda poderia
-  revelar impacto ambiental significativo nas fases de produção e
-  descarte do hardware.
-- □ No limite em que um hardware pudesse ser produzido, usado e
-  descartado sem nenhuma extração de matéria-prima nova (100% de
-  materiais reciclados, indefinidamente), a fase de "extração" na
-  análise de ciclo de vida perderia, para esse hardware específico,
-  parte de seu impacto ambiental característico.
-- □ A mesma lógica de "medir só a fase de uso esconde o impacto de
-  produção e descarte" se aplicaria a uma fabricante de smartphones que
-  anuncia baixo consumo de energia durante o uso do aparelho, sem nunca
-  divulgar o impacto ambiental da mineração dos metais usados em sua
-  bateria.
-- □ Como a TI Verde promove tanto "Verde Por Software" (sistemas que
-  promovem sustentabilidade) quanto "Verde No Software" (tornar o
-  próprio software mais sustentável), conclui-se que qualquer sistema
-  que se enquadre em uma dessas duas categorias está, automaticamente,
-  isento de qualquer impacto ambiental relevante.
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## V/F — O Ciclo Que Ninguém Vê: Resposta
-
-::: {.callout-tip icon=false}
-- ✔ Verdadeiro — a análise de ciclo de vida cobre produção e descarte
-  além do uso; energia limpa na operação não apaga o impacto das
-  outras duas fases.
-- ✔ Verdadeiro — sem extração de matéria-prima nova, essa fase
-  específica perderia o impacto ambiental que normalmente lhe é
-  atribuído, para esse hardware hipotético.
-- ✔ Verdadeiro — mesma estrutura: medir só uma fase (uso) esconde o
-  impacto de outra fase (produção/mineração).
-- ✗ Falso — pertencer a uma das duas categorias de TI Verde não isenta
-  um sistema de impacto ambiental; as categorias descrevem uma
-  orientação de projeto, não uma garantia de impacto zero.
+O modelo passou a penalizar currículos com a palavra "*women's*" (ex.: "capitã do clube de xadrez feminino"). **Ninguém o programou para ser sexista** — ele aprendeu o padrão histórico das contratações passadas.
 :::
 
 ::: {.fragment}
-**Retomando:** o próximo bloco sintetiza tudo isso numa ética
-territorial — o que significa levar o território a sério, não só como
-jurisdição legal.
+*Caso de reportagem (não das fontes centrais da aula), usado só como abertura.* Se a matemática não errou, **de quem foi o erro?**
 :::
 
 :::
 
-# Síntese: Rumo a uma Ética Territorial
+# De Onde Vem o Dado?
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-Os Blocos 2 a 6 mostraram um padrão que se repete: vocabulário técnico
-de sustentabilidade (TI Verde, ciclo de vida) existe e é útil, mas
-sozinho não resolve o problema central que os Blocos 3 a 5
-documentaram — porque esse problema não é de eficiência técnica, é de
-**quem decide** e **quem é consultado** sobre um território. O artigo
-de Nascimento & Raimundo (2026) propõe um conceito de síntese para
-essa lacuna: **ética territorial**.
+Para localizar o viés, precisamos primeiro saber *o que é* o dado que entra no modelo. Varshney (2022, cap. 4) organiza essa pergunta em duas dimensões: a **modalidade** do dado (que forma ele tem) e a **fonte** do dado (de onde e para que ele veio). Ele acompanha, ao longo do capítulo, um caso-fio: a organização (fictícia) *Unconditionally*, que distribui transferências de renda a famílias muito pobres na África Oriental e quer construir um modelo para identificar as famílias mais pobres — a partir de imagens de satélite, registros do censo nacional, pesquisas domiciliares, registros de chamadas de celular, transações de dinheiro móvel e redes sociais.
+
+## Modalidades: a forma do dado
+
+Uma **modalidade** é "uma categoria de dado definida por como ele é recebido, representado e entendido" (Varshney, 2022, cap. 4, p. 42, tradução livre). A taxonomia do livro divide o dado em **estruturado** (tabelas estáticas, séries temporais, fluxos de eventos, grafos) e **semiestruturado** (sinais como imagem, áudio e vídeo; sequências como linguagem natural, sequências biológicas e código-fonte). No caso da Unconditionally, a pesquisa domiciliar é uma tabela estática; as transações de dinheiro móvel são um fluxo de eventos (cada cliente gera um evento no seu próprio ritmo, sem relógio comum); as imagens de satélite são sinais; as postagens de redes sociais são texto.
+
+A diferença entre as duas grandes famílias importa para *onde* auditar:
 
 ::: {.callout-important}
-## Ética territorial (Nascimento & Raimundo, 2026, p. 4)
+## Onde auditar (Varshney, 2022, cap. 4, p. 43)
 
-> "Confrontar os custos metabólicos da IA exige uma ética territorial,
-> entendida como um conglomerado de princípios que regulam o
-> comportamento das relações entre sujeitos e o território. No
-> contexto latino-americano, esse arcabouço exige que o território seja
-> tratado não como uma jurisdição legal passiva, mas como uma entidade
-> multidimensional que une o ecossistema físico a espaços
-> culturalmente apropriados. [...] Alcançar a soberania digital,
-> portanto, depende de uma ética territorial que se recuse a deixar a
-> expansão computacional apagar as epistemologias diversas e as
-> realidades vividas dos plurais Sules." (tradução livre, p. 4)
+> "Quaisquer vieses presentes nos conjuntos de dados de fundo, muito grandes, são herdados por modelos ajustados a um conjunto de dados específico do problema, por causa do aprendizado de representações originalmente opaco e incontrolável que leva ao modelo de fundação. Assim, com dados semiestruturados, é importante avaliar não apenas o conjunto de dados específico do problema, mas também o conjunto de dados de fundo. Com conjuntos de dados estruturados, é mais crítico analisar a preparação dos dados e a engenharia de atributos." (tradução livre, p. 43)
 :::
 
-A frase central para reter: território **não é** só uma linha num
-mapa administrativo (uma jurisdição legal) — é um espaço físico e
-cultural, onde ecossistema e modo de vida estão entrelaçados. Tratar um
-território só como jurisdição (uma "área disponível" para reservar
-energia, extrair mineral, hospedar servidor) é exatamente o movimento
-que permite tratar sua degradação como um "preço aceitável" — a
-mecânica central de toda zona de sacrifício digital discutida nesta
-aula.
+Em português direto: numa tabela, o risco está principalmente no que a equipe *fez* com os dados (limpou, agregou, transformou). Numa imagem ou num texto tratados por um modelo pré-treinado, parte do viés vem embutida de fora — do enorme conjunto de dados em que o modelo-base foi treinado, que a equipe nunca viu. E há um aviso que vale para os dois casos: uma tabela pode parecer "oficial, imaculada e sem falhas à primeira vista, por causa de sua estrutura organizada", mas "pode esconder todo tipo de suposições falsas, erros, omissões e vieses" (Varshney, 2022, cap. 4, p. 42, tradução livre).
 
-Daí um checklist prático de síntese, sintetizando os Blocos 2 a 6, para
-avaliar qualquer decisão de infraestrutura digital:
+## Fontes: para que este dado foi criado?
 
-1. **Quem paga o custo material?** Energia, água, minerais, terra — a
-   pergunta do Bloco 2/6: quem arca com o consumo desses recursos, e
-   quem se beneficia do serviço final?
-2. **Quem foi consultado, e como?** O padrão de "inclusão predatória"
-   do Bloco 4 e o CLPI do Bloco 5 mostram que "incluído no mapa" não é
-   o mesmo que "consultado sobre os termos dessa inclusão".
-3. **Que narrativa de sustentabilidade está em jogo, e para proteger o
-   quê?** O caso LEAF/Pará (Bloco 5) mostra que uma narrativa "verde"
-   pode encobrir, em vez de resolver, a mesma externalização de custo.
-4. **O vocabulário técnico de projeto (ciclo de vida, TI Verde) foi
-   usado, e em que estágio da decisão?** Ferramentas de projeto
-   ajudam, mas — como o Bloco 6 fechou — não substituem a pergunta de
-   quem decide e quem é consultado.
+A segunda dimensão é a **proveniência**. Varshney (2022, cap. 4, §4.2) distingue cinco categorias, cada uma com o seu risco típico:
 
-Esse checklist não substitui julgamento caso a caso — mas dá uma
-pergunta concreta para cada situação, evitando tanto o extremo de
-tratar toda infraestrutura digital como neutra quanto o extremo de
-tratar toda expansão tecnológica como necessariamente predatória.
+| Fonte | O que é | Exemplo na Unconditionally | Risco típico |
+|---|---|---|---|
+| **Coletado com propósito** | Pesquisas, censos, experimentos desenhados para a pergunta | Censo nacional do Quênia | Não resposta e manipulação de dados; aparência de dado "limpo" |
+| **Administrativo** | Registro das operações rotineiras de uma organização, criado por razões não estatísticas | Registros de chamadas; transações de dinheiro móvel | O rótulo desejado não existe: só há um *proxy* dele; resquícios de preconceito histórico |
+| **Social** | Dado sobre pessoas ou criado por pessoas (postagens, redes de amizade, buscas) | Postagens em redes sociais | Participação desigual entre populações; gírias, dialetos e vieses no texto |
+| **Crowdsourcing** | Trabalhadores contratados por plataforma para rotular dados | Rotulagem de tipos de telhado em imagens de satélite | Rotuladores sem contexto; salários baixos; tentativas de burlar o sistema |
+| **Aumento de dados** | Transformações ou geração sintética para ampliar o conjunto | (não aplicável ao caso) | Subjetividade do desenvolvedor; colapso de modo em geradores |
 
+### Os riscos de cada fonte, em detalhe
+
+A coluna "risco típico" da tabela é curta de propósito. Cada célula resume um mecanismo específico, descrito por Varshney (2022, cap. 4, §4.2, pp. 44–46). Vale abri-los um a um.
+
+**Coletado com propósito: o risco de baixar a guarda.** Censos, pesquisas e experimentos são desenhados para responder à pergunta estatística, e por isso têm "o verniz de serem bem desenhados e com viés mínimo" (Varshney, 2022, p. 44, tradução livre). Mas o livro aponta dois problemas concretos. O primeiro é a **não resposta e a manipulação**: se a Unconditionally usar o censo nacional do Quênia como fonte de atributos ou de rótulos, pode sofrer com pessoas que não responderam (e quem deixa de responder raramente é um sorteio aleatório da população) e com manipulação maliciosa dos números. O segundo, nos dados vindos de experimentos científicos, é a **falta de confiança na própria prática científica**: o uso da análise de dados para encontrar padrões que são apresentados seletivamente como estatisticamente significativos (*p-hacking* e o "problema da gaveta", em que resultados que não deram certo nunca são publicados), a falta de reprodutibilidade e a fraude declarada. O risco típico, portanto, é duplo: os problemas existem, e a aparência de dado "limpo" faz a equipe deixar de procurá-los.
+
+**Administrativo: o rótulo que não existe.** Como é o registro das operações de uma organização, sujeito a auditoria, o dado administrativo costuma estar "bastante correto" (p. 44). O risco está em outro lugar, e são quatro. (i) **Só há proxy do rótulo:** a especificação do problema pede um rótulo (a necessidade de cuidado), e a base só tem colunas que são proxies dele (o custo do atendimento); o livro insiste que esse descompasso pode ser "devastador para certos indivíduos e grupos, mesmo que seja um proxy decente em média". (ii) **Granularidade diferente:** o registro pode estar em uma unidade diferente da que o problema exige (números de telefone individuais em registros de chamadas, quando o problema é sobre a atividade de todo um domicílio). (iii) **Silos:** dados administrativos de equipes diferentes da mesma organização são difíceis de integrar. (iv) **Traços de preconceito histórico:** o dado registra decisões passadas e, com elas, o que havia de injusto nelas.
+
+**Social: dado feito para outra coisa, e nem todos participam.** Postagens, redes de amizade e buscas são criadas "para comunicar, buscar emprego e manter amizades" (p. 45, tradução livre), não para responder a um problema de predição; por isso a qualidade, a precisão e a confiabilidade tendem a ser menores do que as do dado administrativo. O texto pode conter gírias, dialetos não padronizados, erros de escrita e os vieses de quem escreve, e o conteúdo informativo de cada ponto individual pode ser baixo. Há ainda um viés de amostragem estrutural: "nem toda população participa das plataformas sociais na mesma medida", de modo que populações marginalizadas podem ser invisíveis. Uma organização que procura as famílias mais pobres a partir de redes sociais corre o risco de só enxergar quem tem acesso à rede.
+
+**Crowdsourcing: quem rotula, e com que incentivo e contexto.** O aprendizado supervisionado precisa de rótulos, e dado sem rótulo é muito mais fácil de obter; o *crowdsourcing* preenche a lacuna contratando pessoas para rotular. O livro lista quatro riscos: (i) o incentivo é frequentemente **monetário**, e os trabalhadores às vezes se comunicam fora da plataforma para **burlar o sistema**, o que também enviesa os rótulos; (ii) os **salários** podem ser baixos, o que levanta uma preocupação ética à parte da qualidade do dado; (iii) os trabalhadores podem **não conhecer a tarefa nem o contexto social** (o caso dos telhados, na próxima seção, é o exemplo); (iv) uma **tarefa mal desenhada** produz dado ruim, mesmo com mecanismos de controle de qualidade da plataforma. Em projetos de impacto social, os trabalhadores podem ser mais qualificados e intrinsecamente motivados, mas ainda podem desconhecer o contexto ou ter vieses próprios.
+
+**Aumento de dados: a subjetividade de quem aumenta.** Quando faltam dados, é comum ampliá-los sem coletar mais: girar, espelhar ou deformar imagens, trocar palavras por sinônimos. Essas transformações são heurísticas, e "introduzem algum nível de subjetividade [do desenvolvedor], o que pode gerar certos vieses" (p. 45, tradução livre). A outra via é treinar um gerador de dados a partir do conjunto original. O risco específico é o **colapso de modo** (*mode collapse*): o gerador produz amostras de uma só parte da distribuição dos dados, e o conjunto resultante fica com vieses graves, porque deixou de ser tão diverso quanto o original (p. 46).
+
+A tese mais importante dessa seção é a seguinte:
+
+::: {.callout-important}
+## A maior parte do dado é reaproveitada (Varshney, 2022, cap. 4, p. 44)
+
+> "Você pode pensar que a maior parte do dado usado para criar sistemas de aprendizado de máquina é coletada de forma expressa e cuidadosa para o propósito do problema, mas estaria enganado. Na verdade, a maior parte do dado usada em sistemas de aprendizado de máquina é reaproveitada." (tradução livre, p. 44)
 :::
 
-::: {.content-visible when-format="revealjs"}
+Se o dado é reaproveitado, ele foi feito para *outra* pergunta — e o descompasso entre a pergunta original e a pergunta do modelo é onde o viés costuma morar. Varshney descreve esse descompasso para o dado administrativo:
 
-## Rumo a uma Ética Territorial
+::: {.callout-important}
+## O descompasso do dado administrativo (Varshney, 2022, cap. 4, p. 44)
 
-::: {.fragment}
-Vocabulário técnico de sustentabilidade (TI Verde, ciclo de vida) é
-útil, mas sozinho não resolve o problema dos Blocos 3–5: não é
-eficiência técnica, é **quem decide** e **quem é consultado**.
+> "O mais importante a ter em mente sobre dado administrativo é que ele pode não corresponder exatamente ao problema preditivo que você quer resolver. A especificação do problema de aprendizado de máquina pode pedir um certo rótulo, mas o dado administrativo pode conter colunas que só podem ser proxies desse rótulo desejado. Esse descompasso pode ser devastador para certos indivíduos e grupos, mesmo que seja um proxy decente em média." (tradução livre, p. 44)
 :::
 
-::: {.fragment .callout-important icon=false title="Nascimento & Raimundo (2026), p. 4"}
-*"Ética territorial: [...] o território tratado não como jurisdição
-legal passiva, mas como entidade multidimensional que une ecossistema
-físico a espaços culturalmente apropriados."* (tradução livre)
-:::
+Aqui está, portanto, a resposta geral ao caso da seguradora: o registro de sinistros é dado *administrativo* — foi criado para a seguradora reembolsar prestadores de serviço, não para medir a gravidade de uma doença. O modelo pediu um rótulo ("quem precisa de cuidado") que o dado só oferece por meio de um proxy ("quanto foi gasto"). E o proxy é "decente em média" — o que esconde que, para um grupo específico, ele é sistematicamente pior.
 
-::: {.fragment}
-Tratar território **só** como jurisdição legal (área disponível para
-reservar energia, extrair mineral) é o que permite tratar sua
-degradação como "preço aceitável" — mecânica central de toda zona de
-sacrifício digital.
-:::
+Os dados sociais e os de *crowdsourcing* têm seus próprios pontos cegos. Nos dados sociais, "não é toda população que participa das plataformas sociais na mesma medida. Em particular, populações marginalizadas podem ser invisíveis em alguns tipos de dado social" (Varshney, 2022, cap. 4, p. 45, tradução livre). No *crowdsourcing*, quem rotula pode não ter o contexto da tarefa; o livro dá um exemplo que voltaremos a usar no Bloco 1.
 
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## Um Checklist Territorial (1 e 2)
+## Modalidades: a Forma do Dado
 
 ::: {.fragment}
-**1. Quem paga o custo material?** Energia, água, minerais, terra —
-quem arca, e quem se beneficia do serviço final?
+**Modalidade** = "categoria de dado definida por como ele é recebido, representado e entendido" (Varshney, 2022, p. 42).
 :::
 
 ::: {.fragment}
-**2. Quem foi consultado, e como?** "Incluído no mapa" não é o mesmo
-que "consultado sobre os termos da inclusão".
-:::
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Um Checklist Territorial (3 e 4)
-
-::: {.fragment}
-**3. Que narrativa de sustentabilidade está em jogo, e para proteger o
-quê?** O caso LEAF/Pará mostra que "verde" pode encobrir, não
-resolver.
+- **Estruturado:** tabelas estáticas, séries temporais, fluxos de eventos, grafos.
+- **Semiestruturado:** sinais (imagem, áudio, vídeo) e sequências (texto, biológicas, código).
 :::
 
 ::: {.fragment}
-**4. O vocabulário técnico de projeto foi usado, e em que estágio da
-decisão?** Ferramentas ajudam, mas não substituem a pergunta de quem
-decide.
+**Caso-fio do livro — *Unconditionally* (fictícia):** distribui transferências de renda na África Oriental e quer achar as famílias mais pobres. Fontes candidatas: satélite, censo, pesquisa domiciliar, registros de celular, dinheiro móvel, redes sociais.
+:::
+
+## Onde Auditar
+
+::: {.fragment}
+**Dado estruturado** (tabela): o risco está no que a equipe **fez** — limpeza, agregação, engenharia de atributos.
+:::
+
+::: {.fragment}
+**Dado semiestruturado** (imagem, texto): parte do viés vem **embutida** do conjunto de fundo do modelo pré-treinado, que a equipe nunca viu. Avaliar os dois conjuntos.
+:::
+
+::: {.fragment .callout-warning icon=false}
+Uma tabela pode parecer "oficial e imaculada", mas "pode esconder todo tipo de suposições falsas, erros, omissões e vieses" (Varshney, 2022, p. 42).
+:::
+
+## Fontes: Para Que Este Dado Foi Criado?
+
+| Fonte | Risco típico |
+|---|---|
+| **Coletado com propósito** (censo, pesquisa) | Não resposta, manipulação; aparência de "limpo" |
+| **Administrativo** (registros operacionais) | Só existe *proxy* do rótulo; preconceito histórico |
+| **Social** (postagens, redes) | Participação desigual; dialetos e gírias |
+| **Crowdsourcing** (rotuladores contratados) | Falta de contexto; incentivo monetário |
+| **Aumento de dados** | Subjetividade; colapso de modo |
+
+## Riscos das Fontes em Detalhe (1/2)
+
+::: {.fragment}
+**Coletado com propósito:** parece "bem desenhado e com viés mínimo" — e por isso a equipe baixa a guarda. Riscos reais: **não resposta** (quem não responde não é sorteio aleatório) e **manipulação** (ex.: censo do Quênia); nos experimentos científicos, *p-hacking*, o "problema da gaveta" (resultados que falham não são publicados), falta de reprodutibilidade e fraude.
+:::
+
+::: {.fragment}
+**Administrativo:** em geral "bastante correto" (sujeito a auditoria) — o risco está em outro lugar: (i) só existe **proxy** do rótulo desejado (custo ≠ necessidade de cuidado), "devastador para certos grupos, mesmo que decente em média"; (ii) **granularidade** diferente (telefone individual × domicílio); (iii) **silos** entre equipes; (iv) **preconceito histórico** registrado nas decisões passadas.
+:::
+
+::: {.fragment}
+**Social:** criado "para comunicar, buscar emprego e manter amizades" — qualidade e confiabilidade menores. Gírias, dialetos, erros de escrita; pouco conteúdo informativo por ponto; e **nem toda população participa** das plataformas na mesma medida: marginalizados podem ficar **invisíveis**.
+:::
+
+## Riscos das Fontes em Detalhe (2/2)
+
+::: {.fragment}
+**Crowdsourcing:** (i) incentivo **monetário** — trabalhadores se comunicam fora da plataforma e tentam **burlar** o sistema; (ii) **salários baixos** — problema ético à parte; (iii) falta de **contexto** da tarefa (o caso dos telhados); (iv) **tarefa mal desenhada** gera dado ruim, mesmo com controle de qualidade. Mesmo quem é intrinsecamente motivado pode desconhecer o contexto ou ter vieses próprios.
+:::
+
+::: {.fragment}
+**Aumento de dados:** girar, espelhar, deformar imagens ou trocar palavras por sinônimos são **heurísticas** — "introduzem algum nível de subjetividade, o que pode gerar certos vieses". Com **geradores** de dados: o **colapso de modo** (*mode collapse*) produz amostras de só uma parte da distribuição e deixa o conjunto com vieses graves.
+:::
+
+::: {.fragment .callout-tip icon=false}
+Em todas as fontes o risco é a **distância entre o que o dado registra e o que o modelo precisa** — só muda *onde* ela nasce: na resposta, no propósito, na participação, no rotulador ou na transformação.
+:::
+
+## A Maior Parte do Dado é Reaproveitada
+
+::: {.fragment .callout-important icon=false}
+"A maior parte do dado usada em sistemas de aprendizado de máquina é **reaproveitada**." (Varshney, 2022, p. 44, tradução livre)
+:::
+
+::: {.fragment}
+Dado reaproveitado foi feito para **outra pergunta** — e o descompasso entre a pergunta original e a do modelo é onde o viés mora.
+:::
+
+::: {.fragment}
+**Dado administrativo:** "pode conter colunas que só podem ser proxies desse rótulo desejado. Esse descompasso pode ser devastador para certos indivíduos e grupos, **mesmo que seja um proxy decente em média**."
+:::
+
+::: {.fragment .callout-tip icon=false}
+A seguradora: o registro de sinistros foi criado para **reembolsar** prestadores — não para medir gravidade de doença.
 :::
 
 ## Pergunta
 :::
 
 ::: {.callout-tip}
-## Um Checklist Territorial
+## Para que este dado foi criado?
 
-Escolha um projeto de infraestrutura digital que você conhece (real ou
-hipotético — pode ser um data center, um cabo submarino, uma mina de
-minerais para hardware). Aplicando o checklist desta síntese, você
-consegue dizer, com alguma confiança, quem paga o custo material desse
-projeto e quem foi consultado sobre ele?
+Uma equipe de ciência de dados de um banco quer prever o risco de inadimplência de clientes que nunca tiveram crédito. Ela tem à mão um enorme volume de dados de uso de um aplicativo de entregas do mesmo grupo empresarial: horários de pedido, endereços, valor médio, cancelamentos. Antes de olhar para qualquer algoritmo, que perguntas a equipe deveria fazer sobre esse conjunto de dados — e por que "temos muito dado" não responde nenhuma delas?
 
-**Dica:** pense especificamente na diferença entre "quem se beneficia
-do serviço final" e "quem arca com o custo físico de produzi-lo".
+**Dica:** pense em *para que* esse dado foi criado e em *quem* aparece (e quem não aparece) nele.
 
-- □ Se um projeto de data center publicasse, antes da construção, um
-  relatório de impacto que incluísse consulta livre, prévia e
-  informada às comunidades locais afetadas, esse projeto atenderia a
-  uma das exigências centrais da ética territorial discutida nesta
-  aula, mesmo que ainda pudesse ser criticado por outros motivos.
-- □ No limite em que um território fosse tratado exclusivamente como
-  jurisdição legal — sem nenhuma consideração por vínculo cultural,
-  ecológico ou ancestral de quem nele vive —, esse tratamento seria
-  exatamente o oposto do que a ética territorial do artigo de
-  Nascimento & Raimundo (2026) propõe.
-- □ A mesma lógica do checklist desta síntese (quem paga o custo
-  material, quem foi consultado, que narrativa de sustentabilidade está
-  em jogo) se aplicaria à avaliação de um novo cabo de fibra óptica
-  internacional, verificando se comunidades costeiras ao longo de sua
-  rota foram consultadas antes da instalação.
-- □ Como a ética territorial defende que o território seja tratado
-  como algo além de jurisdição legal passiva, conclui-se que nenhum
-  projeto de infraestrutura digital deveria, em hipótese alguma, ser
-  construído em território ocupado por comunidades tradicionais,
-  independentemente de consulta ou compensação.
+- □ Se o aplicativo de entregas fosse usado em proporção igual por todas as faixas de renda, o descompasso entre "dado de uso do aplicativo" e "capacidade de pagar um crédito" deixaria de ser um problema de proxy.
+- □ No limite em que o banco tivesse dados de bilhões de pedidos de entrega, o risco de o conjunto não representar bem clientes que nunca usam o aplicativo desapareceria, porque o volume compensa a falta de cobertura.
+- □ O mesmo raciocínio se aplicaria a um modelo de triagem de currículos treinado sobre o histórico de contratações de uma empresa: o histórico foi criado para registrar quem foi contratado, não para medir quem seria bom no cargo.
+- □ Como a maior parte do dado usado em aprendizado de máquina é reaproveitada, conclui-se que todo modelo treinado com dado reaproveitado é necessariamente enviesado a ponto de ser inutilizável.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## V/F — Um Checklist Territorial: Resposta
+## V/F — Para Que Este Dado Foi Criado? Resposta
 
 ::: {.callout-tip icon=false}
-- ✔ Verdadeiro — consulta prévia documentada atende a uma das quatro
-  perguntas do checklist, mesmo que outras dimensões (custo material,
-  narrativa) ainda mereçam escrutínio.
-- ✔ Verdadeiro — é exatamente o oposto da ética territorial proposta,
-  que exige tratar o território como algo além de jurisdição legal.
-- ✔ Verdadeiro — aplicação direta do checklist a outro tipo de
-  infraestrutura digital (cabo submarino em vez de data center).
-- ✗ Falso — a ética territorial não proíbe categoricamente qualquer
-  projeto em território tradicional; exige consulta genuína e divisão
-  justa do benefício/custo, não uma proibição absoluta e incondicional.
+- ✗ Falso — mesmo com uso igual entre faixas de renda, o dado de entregas continuaria sendo *proxy* de capacidade de pagamento; o descompasso é de propósito, não só de cobertura.
+- ✗ Falso — volume não corrige cobertura: bilhões de pedidos ainda deixam de fora quem nunca usa o aplicativo. Mais dados do mesmo viés reforçam o viés.
+- ✔ Verdadeiro — mesmo mecanismo: o histórico de contratações é dado administrativo, criado para outro fim (registrar decisões), usado como proxy de "qualidade do candidato".
+- ✗ Falso — o livro não conclui que o dado reaproveitado seja inutilizável, e sim que é preciso avaliar o propósito original e os vieses típicos antes de usá-lo.
 :::
 
 ::: {.fragment}
-**Retomando:** o próximo bloco fecha a aula retomando as cinco
-perguntas do roteiro inicial.
+**Retomando:** a pergunta "para que este dado foi criado?" é o primeiro item de qualquer auditoria — a próxima seção a torna sistemática.
+:::
+
+:::
+
+# Anatomia do Viés: Quatro Espaços, Três Validades, Cinco Vieses
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+A pergunta "onde o viés entrou?" só tem resposta útil se o dado tiver um mapa. O modelo de Varshney (2022, cap. 4, §4.3) é esse mapa: em vez de uma lista solta de "tipos de viés", ele descreve o **caminho que o dado percorre** — do que se quer medir até o que entra no algoritmo — e mostra qual viés aparece em cada trecho do caminho, e qual tipo de validade ele ameaça.
+
+## O mapa: quatro espaços e três passagens
+
+O livro imagina quatro "espaços" em que uma versão do dado existe (Varshney, 2022, cap. 4, pp. 46–47):
+
+- **Espaço do construto:** "um espaço abstrato, não observado e teórico, no qual não há vieses" (tradução livre, p. 47). É o que *queríamos* medir, no mundo ideal: a necessidade real de cuidado de cada paciente, a real situação de pobreza de cada família.
+- **Espaço observado:** o que de fato conseguimos medir — os atributos e rótulos concretos (o custo do tratamento, o tipo de telhado visto no satélite). A passagem do construto para o observado é a **medição**.
+- **Espaço bruto:** a amostra concreta que coletamos de uma população específica no espaço observado. A passagem é a **amostragem**.
+- **Espaço preparado:** o dado final, depois de limpeza, agregação e transformações, que treina e testa o modelo. A passagem é a **preparação**.
+
+A legenda da Figura 4.3 do livro resume a associação entre passagens, vieses e validades:
+
+::: {.callout-important}
+## Passagens, vieses e validades (Varshney, 2022, cap. 4, Fig. 4.3, p. 46)
+
+> "O processo de medição contém viés social, que ameaça a validade de construto. O processo de amostragem contém viés de representação e viés temporal, que ameaçam a validade externa. O processo de preparação de dados contém viés de preparação de dados e envenenamento de dados, que ameaçam a validade interna." (tradução livre, p. 46)
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Os Quatro Espaços
+
+::: {.fragment}
+O viés não "entra" num ponto único — o dado **percorre um caminho**, e cada trecho tem o seu viés (Varshney, 2022, §4.3).
+:::
+
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{spfill}{RGB}{219,234,254}
+\definecolor{spborder}{RGB}{0,133,202}
+\definecolor{bsfill}{RGB}{253,224,220}
+\definecolor{bsborder}{RGB}{224,60,49}
+\definecolor{procfill}{RGB}{255,236,214}
+\definecolor{procborder}{RGB}{217,83,30}
+
+\begin{tikzpicture}[
+  space/.style={rectangle, rounded corners=6pt, fill=spfill, draw=spborder, line width=1.2pt, text=black, minimum width=3.3cm, minimum height=1.7cm, align=center, font=\scriptsize},
+  bias/.style={rectangle, rounded corners=4pt, fill=bsfill, draw=bsborder, line width=1pt, text=black, text width=3.5cm, minimum height=1.5cm, align=center, font=\scriptsize},
+  proc/.style={font=\scriptsize\bfseries, text=procborder},
+  arr/.style={draw=black!65, thick, ->, >=stealth}
+]
+
+\node[space] (C) at (0,0) {\textbf{Construto}\\ (ideal, sem viés)};
+\node[space] (O) at (5.6,0) {\textbf{Observado}\\ (atributos e rótulos\\ medidos)};
+\node[space] (R) at (11.2,0) {\textbf{Bruto}\\ (amostra coletada\\ de uma população)};
+\node[space] (P) at (16.8,0) {\textbf{Preparado}\\ (dado de treino\\ e teste)};
+
+\draw[arr] (C) -- node[above, proc] {medição} (O);
+\draw[arr] (O) -- node[above, proc] {amostragem} (R);
+\draw[arr] (R) -- node[above, proc] {preparação} (P);
+
+\node[bias] (B1) at (2.8,-2.6) {\textbf{Viés social}\\ ameaça a validade\\ \textbf{de construto}};
+\node[bias] (B2) at (8.4,-2.6) {\textbf{Viés de representação}\\ e \textbf{temporal}: ameaçam a\\ validade \textbf{externa}};
+\node[bias] (B3) at (14.0,-2.6) {\textbf{Viés de preparação}\\ e \textbf{envenenamento}:\\ ameaçam a validade \textbf{interna}};
+
+\draw[arr, draw=bsborder!70] (B1.north) -- (2.8,-0.3);
+\draw[arr, draw=bsborder!70] (B2.north) -- (8.4,-0.3);
+\draw[arr, draw=bsborder!70] (B3.north) -- (14.0,-0.3);
+
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+**Espaço do construto:** o que queríamos medir, no mundo ideal — "um espaço abstrato, não observado e teórico, no qual não há vieses".
+:::
+
+::: {.fragment}
+**Três passagens, cada uma com o seu viés:** medição → social; amostragem → representação e temporal; preparação → preparação e envenenamento.
+:::
+
+## Três Validades
+
+::: {.fragment}
+**Validade de construto:** o dado mede **o que deveria** medir?
+:::
+
+::: {.fragment}
+**Validade externa:** a análise de uma população **generaliza** para outras?
+:::
+
+::: {.fragment}
+**Validade interna:** houve **erro no processamento** dos dados?
+:::
+
+::: {.fragment .callout-tip icon=false}
+Um viés não é "uma coisa ruim qualquer": ele é uma ameaça a **uma** validade específica — e isso diz onde procurar e como corrigir.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## As três validades
+
+Antes dos vieses, os critérios que eles ameaçam. O livro define três (Varshney, 2022, cap. 4, p. 47):
+
+::: {.callout-important}
+## As três validades (Varshney, 2022, cap. 4, p. 47)
+
+> "Há três tipos principais de validade: (1) validade de construto, (2) validade externa e (3) validade interna. Validade de construto é se o dado realmente mede o que deveria medir. Validade externa é se analisar dados de uma dada população generaliza para outras populações. Validade interna é se há algum erro no processamento dos dados." (tradução livre, p. 47)
+:::
+
+A utilidade do modelo é separar tipos de falha que, na conversa cotidiana, são todos chamados de "dado enviesado". Um dado com validade de construto ruim *mede a coisa errada* (custo em vez de necessidade). Um dado com validade externa ruim *mede a coisa certa na população errada* (dados de um país usados em outro). Um dado com validade interna ruim *mede a coisa certa na população certa, mas foi estragado no caminho* (linhas descartadas, unidades misturadas). Cada uma pede uma correção diferente.
+
+## Os cinco vieses, um por um
+
+Varshney (2022, cap. 4, §4.3) observa que há muitas categorizações de viés e, "por simplicidade", foca em cinco. Cada subseção abaixo apresenta um, com o caso do próprio livro.
+
+### Viés social (ameaça a validade de construto)
+
+O primeiro viés entra na **medição**: no salto do construto para o observado, quase sempre há um julgamento humano.
+
+::: {.callout-important}
+## Viés social (Varshney, 2022, cap. 4, §4.3.1, p. 47)
+
+> "Seja especialistas cuja tomada de decisão está sendo automatizada, sejam trabalhadores de *crowdsourcing*, o julgamento das pessoas está envolvido ao passar dos rótulos do espaço do construto para os rótulos do espaço observado. Esses julgamentos humanos estão sujeitos a vieses cognitivos humanos, que podem levar a vieses sociais implícitos (associar estereótipos a categorias de pessoas sem consciência) que produzem desvantagens sistemáticas para indivíduos e grupos não privilegiados." (tradução livre, p. 47)
+:::
+
+O viés social não está só nos rótulos; está também nos **atributos**. O livro dá o exemplo de um teste de aptidão cujas questões dependem de conhecimento cultural específico que nem todos os candidatos têm — o atributo "nota no teste" deixa de representar bem a aptidão real e, "na maior parte das vezes, esse conhecimento tácito favorece grupos privilegiados" (tradução livre, p. 47). E há o caso-fio da Unconditionally:
+
+::: {.callout-note}
+## O caso dos telhados (Varshney, 2022, cap. 4, §4.3.1, p. 47)
+
+> "Os trabalhadores de *crowdsourcing* tinham marcado e rotulado não só o telhado da casa principal de um conjunto residencial, mas também estruturas separadas da mesma família, como uma cozinha independente e alojamentos independentes para os jovens homens. Eles não tinham ideia de que é assim que as casas são organizadas nessa parte do mundo. O viés, se não fosse detectado, teria levado a inferências incorretas de pobreza." (tradução livre, p. 47)
+:::
+
+O que o caso mostra é sutil: os rotuladores não eram maldosos, e o satélite não errou. O erro está no **construto** — "o que é uma casa" — que os rotuladores traduziram, sem perceber, pelo seu próprio contexto cultural. O recrutador da Amazon, na abertura, tem a mesma estrutura: o "rótulo" era a decisão passada de contratar ou não contratar, um julgamento humano acumulado ao longo de dez anos numa indústria desigual — de modo que o modelo aprendeu a reproduzir esses julgamentos, não a medir a competência.
+
+### Viés de representação (ameaça a validade externa)
+
+O segundo viés entra na **amostragem**: a amostra que temos não representa a população sobre a qual queremos decidir.
+
+::: {.callout-important}
+## Viés de representação (Varshney, 2022, cap. 4, §4.3.2, p. 48)
+
+> "Um exemplo específico de viés de seleção é grupos não privilegiados serem sub-representados ou sobre-representados no conjunto de dados, o que leva os modelos de aprendizado de máquina a ignorar as características especiais deles para satisfazer uma métrica de desempenho média, ou a focar demais neles, levando a desvantagem sistemática. Ao avaliar um dos conjuntos de dados de telefonia móvel da Unconditionally, os engenheiros de dados descobriram que os idosos estavam sub-representados porque a posse de celular era menor nessa subpopulação." (tradução livre, p. 48)
+>
+> "Representatividade não é apenas uma questão de presença e ausência de pontos de dados, mas um conceito mais amplo que inclui, entre outros, diferenças sistemáticas na qualidade dos dados." (tradução livre, p. 48)
+:::
+
+Duas ideias importantes na citação. A primeira: o modelo otimiza uma **métrica média**, e um grupo pequeno no conjunto de dados pesa pouco nessa média — o modelo "ignora suas características especiais" porque isso quase não custa em desempenho global. A segunda: representatividade não é só *quantos* pontos há de cada grupo, mas também *quão bons* são esses pontos. O livro cita ainda que o censo nacional pode ter contado menos pessoas em alguns condados porque a autoridade estatística não alocou recenseadores suficientes — o que é uma falta de cobertura *e* uma diferença de qualidade.
+
+### Viés temporal (ameaça a validade externa)
+
+O terceiro viés também entra na amostragem, mas na dimensão do **tempo**: o mundo muda depois que o dado é coletado.
+
+::: {.callout-important}
+## Viés temporal (Varshney, 2022, cap. 4, §4.3.3, p. 48)
+
+> "Deslocamento de covariáveis (*covariate shift*) refere-se à distribuição dos atributos, deslocamento da probabilidade a priori (*prior probability shift*) refere-se à distribuição dos rótulos, e deriva de conceito (*concept drift*) refere-se à distribuição condicional dos rótulos dado os atributos." (tradução livre, p. 48)
+:::
+
+O exemplo do livro é simples: algumas localidades foram fotografadas por satélite na estação chuvosa e outras na estação seca — as imagens dos mesmos telhados têm aparência diferente, e um modelo treinado com uma mistura de estações pode confundir a estação com a pobreza. O mesmo vale para um modelo de crédito treinado antes de uma crise econômica e aplicado depois: a distribuição dos clientes (covariáveis), a proporção de inadimplentes (probabilidade a priori) e a relação entre renda e inadimplência (conceito) podem ter mudado, cada uma separadamente.
+
+### Viés de preparação (ameaça a validade interna)
+
+O quarto viés entra depois que o dado já foi coletado: na **preparação**, escolhas aparentemente técnicas de limpeza podem introduzir viés novo.
+
+::: {.callout-important}
+## Viés de preparação (Varshney, 2022, cap. 4, §4.3.4, p. 48)
+
+> "Por exemplo, os engenheiros de dados da sua equipe precisam fazer algo com linhas que contêm valores ausentes. Se seguirem a prática comum de descartar essas linhas e a ausência estiver correlacionada com um atributo sensível, como um atributo de dívida ausente com mais frequência para certos grupos religiosos, eles introduziram um novo viés." (tradução livre, p. 48)
+>
+> "Um viés às vezes negligenciado é o uso de proxies nos rótulos. Por exemplo, prisões são um proxy problemático para cometer crimes. Pessoas inocentes às vezes são presas e mais prisões acontecem onde há mais presença policial (e a polícia é distribuída de forma desigual). A utilização de serviços de saúde é um proxy problemático para o estado de saúde de um indivíduo porque os grupos utilizam os sistemas de saúde de forma desigual." (tradução livre, p. 48)
+:::
+
+O exemplo de descartar linhas mostra por que o viés de preparação é traiçoeiro: descartar linhas incompletas é uma prática padrão, considerada "higiene de dados", e ninguém a associa a discriminação. Mas se a ausência do dado não for aleatória — se depender do grupo —, o descarte remove desproporcionalmente esse grupo do conjunto de treino. E o segundo parágrafo da citação mostra que o proxy da Aula 5 (utilização de saúde) é, no vocabulário deste modelo, um problema de *preparação de rótulos* (quando a equipe define o rótulo de treino) além de um problema de *medição*.
+
+### Envenenamento de dados (ameaça a validade interna)
+
+O quinto é diferente dos outros: é **intencional**.
+
+::: {.callout-important}
+## Envenenamento (Varshney, 2022, cap. 4, §4.3.5, p. 49)
+
+> "Por exemplo, alguém tentando fraudar a Unconditionally pode introduzir imagens de satélite de residências ao lado de rios sempre rotuladas como pobreza severa, para enganar o seu modelo e levá-lo a dar mais transferências de renda a comunidades ribeirinhas." (tradução livre, p. 49)
+:::
+
+Um agente mal-intencionado injeta ou altera pontos de dados para degradar o modelo ou plantar uma "porta dos fundos". Os quatro vieses anteriores nascem de decisões legítimas (ou descuidadas); este nasce de um adversário. O livro observa que a maior parte dos outros vieses pode ser implementada de propósito para degradar um sistema (Varshney, 2022, cap. 4, p. 49).
+
+## Resumo: os cinco vieses num quadro
+
+| Viés | Passagem | Validade ameaçada | Exemplo do livro |
+|---|---|---|---|
+| **Social** | Medição (construto → observado) | Construto | Telhados de cozinhas e alojamentos contados como casas |
+| **Representação** | Amostragem (observado → bruto) | Externa | Idosos sub-representados por menor posse de celular |
+| **Temporal** | Amostragem (observado → bruto) | Externa | Satélite na estação chuvosa × seca |
+| **Preparação** | Preparação (bruto → preparado) | Interna | Descartar linhas quando a ausência correlaciona com religião; prisões como proxy de crime |
+| **Envenenamento** | Preparação (bruto → preparado) | Interna | Imagens ribeirinhas sempre rotuladas "pobreza severa" |
+
+## A seguradora dissecada
+
+Estamos agora em condições de responder à pergunta da abertura: **onde, exatamente, o viés entrou no caso da seguradora?** Varshney (2022, cap. 10, §10.2, pp. 132–134) percorre o caso usando o mesmo mapa. O ponto de partida do livro é que "o que os dados de treino são é a sociedade": a epígrafe de M. C. Hammer que abre a seção diz que, "se os humanos não se comportassem como nos comportamos, não haveria dado de comportamento para corrigir. O dado de treino é a sociedade" (tradução livre, p. 132).
+
+::: {.callout-important}
+## Onde o viés entrou nos dados de sinistros (Varshney, 2022, cap. 10, §10.2, p. 133)
+
+> "Embora seja direcionalmente verdadeiro que maior utilização do sistema de saúde implica um paciente mais doente, isso não é verdade ao comparar pacientes entre populações como brancos e negros. Negros tendem a estar mais doentes para um mesmo nível de utilização, devido a questões estruturais do sistema de saúde. O mesmo vale ao olhar custo de saúde em vez de utilização." (tradução livre, p. 133)
+>
+> "O viés de representação entra nos dados de sinistros porque eles vêm apenas dos próprios membros da Sospital. Essa população pode, por exemplo, sub-representar negros se a Sospital oferece seus planos comerciais principalmente em condados com maior população branca." (tradução livre, p. 133)
+:::
+
+Em cada passagem do mapa, o caso tem um elo:
+
+1. **Medição (viés social).** O construto é a *necessidade real de cuidado*; o observado é *utilização e custo*. Como pessoas negras estão mais doentes para o mesmo nível de utilização, o observado mede coisas diferentes para grupos diferentes. O livro acrescenta que os próprios códigos de diagnóstico e tratamento carregam viés — pessoas negras são tratadas com menos frequência por dor nos Estados Unidos, por falsas crenças de profissionais de saúde — e que o rótulo humano de seleção passada para o programa está sujeito a preconceito de quem decidiu (Varshney, 2022, cap. 10, p. 133).
+2. **Amostragem (viés de representação).** Os dados vêm só de membros da própria seguradora, que pode ter planos concentrados em regiões de população majoritariamente branca.
+3. **Preparação (viés de preparação).** Se não há rótulos humanos passados, a equipe pode definir o rótulo por um limite de custo ou utilização — e o livro adverte que isso faria com que pessoas negras fossem selecionadas menos vezes para o mesmo grau de doença (Varshney, 2022, cap. 10, p. 133). Também a engenharia de atributos importa: combinar todos os tipos de utilização em um único atributo produz viés racial indesejado, enquanto manter separadas as noites de internação hospitalar e as visitas frequentes à emergência mantém o viés baixo (Varshney, 2022, cap. 10, p. 134, citando Singh, 2021).
+
+O que o mapa mostra é que **não há um único "erro do algoritmo"**: há pelo menos três passagens, cada uma com um viés diferente, cada uma corrigível em um ponto diferente da cadeia — e nenhuma delas envolve digitar "raça" em uma coluna.
+
+## Extensão nossa: o laço de retroalimentação
+
+Uma consequência que o livro não desenha, mas que decorre do seu argumento sobre prisões como proxy de crime, é o **laço de retroalimentação**. Se o rótulo de treino é "onde houve prisões", e "mais prisões acontecem onde há mais presença policial" (Varshney, 2022, cap. 4, p. 48), então um modelo que prevê "onde haverá crime" está, na prática, prevendo onde a polícia costuma estar. Se a polícia é enviada para onde o modelo aponta, gera-se mais prisões ali, que viram novos dados que "confirmam" o modelo.
+
+::: {.callout-warning}
+## Extensão nossa, não do livro
+
+O livro afirma o problema do proxy (prisões ≠ crimes). O **laço** abaixo — modelo → patrulha → prisões → novos dados → modelo — é uma extensão nossa desse argumento, não uma descrição feita por Varshney.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Os Cinco Vieses num Quadro
+
+| Viés | Passagem | Validade | Exemplo do livro |
+|---|---|---|---|
+| **Social** | Medição | Construto | Cozinhas e alojamentos contados como casas |
+| **Representação** | Amostragem | Externa | Idosos sub-representados (menos celular) |
+| **Temporal** | Amostragem | Externa | Satélite na estação chuvosa × seca |
+| **Preparação** | Preparação | Interna | Descartar linhas; prisões como proxy |
+| **Envenenamento** | Preparação | Interna | Ribeirinhos sempre "pobreza severa" |
+
+## Viés Social e de Representação
+
+::: {.fragment}
+**Social (medição):** o julgamento humano ao passar do construto para o observado — rótulos de especialistas ou de *crowdworkers*, e também os **atributos** (teste de aptidão que exige conhecimento cultural tácito, "que favorece grupos privilegiados").
+:::
+
+::: {.fragment .callout-warning icon=false}
+**Telhados:** rotuladores contaram cozinha e alojamentos como casas — não sabiam como as casas são organizadas ali. O erro estava no **construto** ("o que é uma casa"), não no satélite. Sem detecção, levaria a inferir pobreza errada.
+:::
+
+::: {.fragment}
+**Representação (amostragem):** idosos sub-representados por menor posse de celular; censo com menos recenseadores em alguns condados. O modelo otimiza uma **média** — um grupo pequeno pesa pouco nela. Representatividade inclui **qualidade** dos dados, não só quantidade.
+:::
+
+## Viés Temporal e de Preparação
+
+::: {.fragment}
+**Temporal:** o mundo muda depois da coleta — *covariate shift* (distribuição dos atributos), *prior probability shift* (dos rótulos) e *concept drift* (rótulos dados os atributos). Ex.: satélite na chuva × seca; crédito treinado antes de uma crise.
+:::
+
+::: {.fragment}
+**Preparação:** descartar linhas com valor ausente é "higiene" — mas se a ausência **correlaciona com o grupo**, remove o grupo do treino (ex.: dívida ausente com mais frequência para certos grupos religiosos).
+:::
+
+::: {.fragment .callout-warning icon=false}
+**Proxy no rótulo:** "prisões são um proxy problemático para cometer crimes... mais prisões acontecem onde há mais presença policial (e a polícia é distribuída de forma desigual)". Idem utilização de saúde.
+:::
+
+::: {.fragment}
+**Envenenamento:** o único **intencional** — imagens ribeirinhas sempre rotuladas "pobreza severa" para desviar transferências. Os outros nascem de decisões legítimas ou descuidadas.
+:::
+
+## A Seguradora, Dissecada
+
+::: {.fragment}
+**1. Medição (social):** construto = *necessidade real de cuidado*; observado = *utilização e custo*. Pessoas negras estão **mais doentes para o mesmo nível de utilização** — o proxy mede coisas diferentes para grupos diferentes. Códigos de tratamento e rótulos humanos passados também carregam viés.
+:::
+
+::: {.fragment}
+**2. Amostragem (representação):** dados só de membros da própria seguradora — planos talvez concentrados em regiões de população majoritariamente branca.
+:::
+
+::: {.fragment}
+**3. Preparação:** rótulo por limite de custo → seleciona pessoas negras menos vezes para o mesmo grau de doença. **Engenharia de atributos:** agregar todos os tipos de utilização piora o viés; separar noites de internação e emergência mantém o viés baixo (Singh, 2021, via Varshney, p. 134).
+:::
+
+::: {.fragment .callout-tip icon=false}
+Não há "um erro do algoritmo": são **três passagens**, três vieses, três pontos de correção — e nenhuma envolve digitar "raça".
+:::
+
+## O Laço de Retroalimentação (Extensão Nossa)
+
+::: {.fragment}
+Se o rótulo é "onde houve prisões" e "mais prisões acontecem onde há mais presença policial" (Varshney, p. 48), um modelo que prevê "onde haverá crime" prevê, na prática, **onde a polícia costuma estar**.
+:::
+
+:::
+
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{lfill}{RGB}{253,224,220}
+\definecolor{lborder}{RGB}{224,60,49}
+\definecolor{lbfill}{RGB}{219,234,254}
+\definecolor{lbborder}{RGB}{0,133,202}
+
+\begin{tikzpicture}[
+  node/.style={rectangle, rounded corners=6pt, fill=lbfill, draw=lbborder, line width=1.2pt, text=black, minimum width=3.4cm, minimum height=1.4cm, align=center, font=\scriptsize},
+  arr/.style={draw=lborder, thick, ->, >=stealth}
+]
+
+\node[node] (A) at (0,3.2) {Dados históricos\\ (prisões registradas)};
+\node[node] (B) at (5.4,3.2) {Modelo prevê\\ ``crime'' no bairro X};
+\node[node] (C) at (5.4,0) {Mais patrulha\\ no bairro X};
+\node[node] (D) at (0,0) {Mais prisões\\ registradas no bairro X};
+
+\draw[arr] (A) -- (B);
+\draw[arr] (B) -- (C);
+\draw[arr] (C) -- (D);
+\draw[arr] (D) -- (A);
+
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O laço faz o proxy se **autoconfirmar**: o modelo não prevê crime, prevê onde as prisões serão registradas — e, ao agir sobre essa previsão, produz os dados que "provam" que ele estava certo. Isso explica por que o viés de um rótulo-proxy, uma vez posto em produção, tende a crescer em vez de se diluir.
+
+## Voltando ao modelo dos quatro espaços
+
+A epígrafe de Hammer que Varshney usa é, nesse sentido, o resumo do bloco: o dado de treino é a sociedade. Isso não quer dizer que nada se pode fazer — quer dizer que a tarefa de quem constrói o sistema é *localizar em qual passagem* o viés entrou, porque a correção depende da passagem: um viés de representação pede coleta melhor; um viés de preparação pede refazer a limpeza; um viés social pede repensar o rótulo ou o construto. A última seção da aula volta a esse ponto.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+O laço faz o proxy **se autoconfirmar**: o modelo prevê onde as prisões serão registradas e, ao agir sobre isso, produz os dados que "provam" que estava certo. O viés de um rótulo-proxy tende a **crescer** em produção, não a se diluir.
+:::
+
+::: {.fragment .callout-tip icon=false}
+"O dado de treino é a sociedade" (M. C. Hammer, epígrafe de Varshney, cap. 10). Tarefa de quem constrói: localizar **em qual passagem** o viés entrou — a correção depende disso.
+:::
+
+## Pergunta
+:::
+
+::: {.callout-tip}
+## Sem raça e sem gênero: livre de viés?
+
+Um banco remove as colunas "raça" e "gênero" do conjunto de dados de crédito e treina o modelo com o restante (renda, CEP, ocupação, histórico de pagamentos). A equipe declara que o modelo está "livre de viés". Usando o mapa dos quatro espaços, o que essa afirmação deixa de examinar?
+
+**Dica:** pense em quais passagens (medição, amostragem, preparação) a remoção de colunas afeta — e em quais ela não toca.
+
+- □ Se, além de remover as colunas, o banco garantisse rótulos de adimplência baseados apenas no comportamento real de pagamento (sem nenhuma decisão humana prévia de concessão), ainda restaria risco de viés de representação caso clientes de certas regiões estivessem sub-representados na base.
+- □ No limite em que a base contivesse toda a população, sem nenhuma ausência, o modelo estaria protegido contra viés social nos rótulos, porque a completude da base elimina a influência de julgamentos humanos passados.
+- □ Numa rede neural de classificação de imagens médicas, pré-treinada num grande banco de fotos coletadas da internet, remover os metadados de raça do conjunto de ajuste fino garante que os vieses do conjunto de fundo não sejam herdados pelo modelo.
+- □ Como remover colunas é uma etapa de preparação de dados, ela só pode reduzir o viés de preparação; nunca pode introduzir um.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## V/F — Sem Raça e Sem Gênero: Resposta
+
+::: {.callout-tip icon=false}
+- ✔ Verdadeiro — remover colunas não toca na **amostragem**: quem está sub-representado na base continua sub-representado.
+- ✗ Falso — completude de cobertura não elimina viés **social** nos rótulos: decisões humanas passadas de concessão continuam refletindo preconceito, mesmo numa base completa.
+- ✗ Falso — o viés vem do **conjunto de fundo** do modelo pré-treinado (Varshney, p. 43); mexer no conjunto de ajuste fino não o alcança.
+- ✗ Falso — descartar linhas ou colunas pode **introduzir** viés de preparação (ex.: descartar linhas com dado ausente correlacionado ao grupo) — e remover o atributo ainda impede de medir se há disparidade.
+:::
+
+::: {.fragment}
+**Retomando:** "cegueira de atributo" atua, no máximo, sobre uma passagem — e o proxy, a amostra e o rótulo continuam lá. Remover o atributo é, no máximo, uma peça da correção.
+:::
+
+:::
+
+# Poder, Consentimento e Privacidade
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Até aqui a pergunta foi: *o dado que temos é bom?* Varshney (2022, cap. 5) abre uma pergunta anterior: **é certo usar este dado?** A primeira metade da aula tratou de vieses que enfraquecem a validade do modelo. Esta parte trata de algo diferente: mesmo um dado perfeitamente válido pode ser usado de modo ilegítimo, se foi obtido sem o consentimento de quem ele descreve.
+
+## O caso TraceBridge
+
+O livro discute um aplicativo fictício, o *TraceBridge*, criado para apoiar o retorno ao escritório depois de uma pandemia. Ele reúne rastros de localização, medições de saúde, dados sociais (redes sociais internas, convites de calendário) e dados administrativos (organogramas, planejamento de espaço) para fazer **rastreamento digital de contatos**: descobrir quais interações entre uma pessoa infectada e as demais podem ter espalhado a doença. As decisões de desenho dos autores são o material de crítica:
+
+- o app **não informa** os funcionários de que acessa redes sociais internas, convites de calendário e dados administrativos;
+- a liderança da organização tem **controle total** sobre os dados;
+- todos os dados pessoais identificáveis ficam **centralizados, sem criptografia** ou outras salvaguardas;
+- quando uma infecção é detectada, a **identidade** da pessoa infectada é transmitida à gestão e a todos os contatos inferidos.
+
+## Consentimento, poder e privacidade são três problemas diferentes
+
+Varshney separa três eixos que costumam ser confundidos:
+
+::: {.callout-important}
+## Consentimento e poder (Varshney, 2022, cap. 5, §5.1, p. 52)
+
+> "O empregador detém todo o poder na implantação do aplicativo, porque pode exigir seu uso como condição de emprego, sem nenhuma oportunidade de o funcionário dar consentimento. Os funcionários também não têm oportunidade de dar consentimento informado ao uso de partes específicas de seus dados." (tradução livre, p. 52)
+:::
+
+- **Consentimento:** houve concordância informada, específica, para *este* uso? No TraceBridge, não: o app não avisa e o uso é obrigatório. (Note a relação com a Aula 5: o caso Kramer tratava aceitar os Termos de Uso como consentimento; aqui é pior, porque a "aceitação" é uma condição do emprego.)
+- **Poder:** quem decide o que acontece com o dado depois? O empregador poderia usá-lo para rastrear pausas e reuniões, e até vender os dados; os funcionários não têm poder algum sobre o dado.
+- **Privacidade:** a capacidade de uma pessoa reter informação sobre si mesma. O livro a descreve como "considerada um direito humano essencial em muitos sistemas de valores e arcabouços legais" (tradução livre, p. 52); o TraceBridge a sacrifica ao expor nome e situação de saúde.
+
+E há uma passagem sobre a natureza do dado em si:
+
+::: {.callout-important}
+## Dado é poder (Varshney, 2022, cap. 5, §5.1, pp. 52–53)
+
+> "Em um sentido amplo, o dado é uma commodity valiosa. Ele revela muito sobre o comportamento humano em nível bruto, mas também sobre o comportamento de pessoas individuais. Assim como outros recursos naturais, pode ser extraído dos vulneráveis sem seu consentimento e, além disso, ser explorado para sua subjugação. [...] Em suma, dado é poder." (tradução livre, pp. 52–53)
+:::
+
+Por que isso acontece com tanta frequência? Varshney (2022, cap. 5, p. 53) responde que o dado usado em aprendizado de máquina costuma estar "cheio de questões de poder e consentimento" porque é reaproveitado de outros usos ou é o chamado ***data exhaust***: os subprodutos das atividades digitais das pessoas. Um exemplo do livro: muitos conjuntos de imagens em larga escala usados para treinar modelos de visão computacional são raspados da internet sem consentimento explícito de quem postou as imagens. A causa, segundo o livro, é quase sempre "projetistas de sistemas tomando atalhos para reunir grandes conjuntos de dados e mostrar valor rapidamente, sem dar atenção a poder e consentimento". A conclusão é categórica:
+
+::: {.callout-important}
+## Sem consentimento, não prosseguir (Varshney, 2022, cap. 5, §5.1, p. 53)
+
+> "Em resumo, proprietários de problemas e cientistas de dados não deveriam ter nenhum cálculo para ponderar questões de poder, consentimento e privacidade contra conveniências na coleta de dados. Para o quarto atributo de confiança (propósito alinhado), sistemas de aprendizado de máquina confiáveis exigem que o dado seja usado de forma consensual, especialmente daqueles que possam estar sujeitos a exploração. Sem meio-termo!" (tradução livre, p. 53)
+:::
+
+Compare a firmeza dessa frase com a lógica de custo-benefício típica de um projeto de produto ("o modelo melhora 2% com o dado extra"): Varshney recusa a troca — a coleta sem consentimento não entra na balança.
+
+## Remover o nome não protege a privacidade
+
+Mesmo com consentimento, resta o cuidado com o que se faz com o dado. Varshney (2022, cap. 5, p. 54) lembra que remover identificadores (nome, CPF, matrícula) "não é a solução inteira": variáveis como gênero, data de nascimento e código postal, os **quase-identificadores**, que não identificam ninguém sozinhos mas permitem reidentificar uma pessoa quando ligados entre si. Anonimizar de verdade é mais difícil do que apagar uma coluna, e proteger o dado também pode ser feito controlando quem o acessa e para quê. O livro é enfático sobre o ponto que importa aqui: todas as formas de proteger a privacidade devem ser avaliadas "em conjunto com como o dado vai ser usado" (p. 58, tradução livre). Na LGPD, o art. 12 traz o critério legal para o que conta como dado anonimizado (seção seguinte).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Consentimento, Poder e Privacidade
+
+::: {.fragment}
+Até aqui: *o dado que temos é bom?* Agora (Varshney, cap. 5): **é certo usar este dado?**
+:::
+
+::: {.fragment}
+**Caso TraceBridge (fictício):** app de rastreamento de contatos no retorno ao escritório — localização, saúde, redes sociais internas, calendário, organograma.
+:::
+
+::: {.fragment .callout-warning icon=false}
+O app **não avisa** o que acessa; a liderança tem **controle total**; dados **centralizados e sem criptografia**; a **identidade** do infectado vai à gestão e a todos os contatos.
+:::
+
+## Três Eixos Diferentes
+
+::: {.fragment}
+**Consentimento:** houve concordância **informada e específica** para *este* uso? No caso: não — o uso é condição de emprego.
+:::
+
+::: {.fragment}
+**Poder:** quem decide o destino do dado? O empregador pode rastrear pausas e até vender — "sem oportunidade de o funcionário dar consentimento" (Varshney, p. 52).
+:::
+
+::: {.fragment}
+**Privacidade:** capacidade de reter informação sobre si — "considerada um direito humano essencial em muitos sistemas de valores e arcabouços legais".
+:::
+
+::: {.fragment .callout-important icon=false}
+"Em suma, **dado é poder.**" Pode ser "extraído dos vulneráveis sem seu consentimento e ... explorado para sua subjugação" (p. 53).
+:::
+
+## Sem Consentimento, Não Prosseguir
+
+::: {.fragment}
+***Data exhaust*:** subproduto das atividades digitais das pessoas — reaproveitado sem pedir. Ex.: imagens raspadas da internet, sem consentimento explícito, para treinar visão computacional.
+:::
+
+::: {.fragment}
+Causa: "projetistas tomando atalhos para reunir grandes conjuntos de dados e mostrar valor rapidamente".
+:::
+
+::: {.fragment .callout-important icon=false}
+"Proprietários de problemas e cientistas de dados **não deveriam ter nenhum cálculo** para ponderar poder, consentimento e privacidade contra conveniências na coleta de dados... Sem meio-termo!" (p. 53)
+:::
+
+::: {.fragment}
+Note: Varshney **recusa a troca** ("o modelo melhora 2% com o dado extra") — a coleta sem consentimento não entra na balança.
+:::
+
+## Remover o Nome Não Protege
+
+::: {.fragment}
+Remover **identificadores** (nome, CPF, matrícula) "não é a solução inteira" (Varshney, p. 54): **quase-identificadores** — gênero, data de nascimento, código postal — permitem **reidentificar** quando ligados entre si.
+:::
+
+::: {.fragment}
+Proteger a privacidade também é controlar **quem acessa** o dado e **para quê** — sempre "em conjunto com como o dado vai ser usado" (p. 58). A LGPD dá o critério legal de dado anonimizado no **art. 12** (seção seguinte).
+:::
+
+## Pergunta
+:::
+
+::: {.callout-tip}
+## Consentimento e poder no local de trabalho
+
+Uma empresa lança um aplicativo de bem-estar que coleta localização e batimentos cardíacos dos funcionários. O uso é obrigatório para quem quiser participar do plano de saúde corporativo, e a empresa se reserva o direito de usar os dados "para fins de gestão". Esse consentimento é legítimo? Que perguntas a equipe deveria fazer antes de coletar?
+
+**Dica:** separe três eixos — o consentimento (foi informado e específico?), o poder (quem decide o destino do dado?) e a privacidade (o que é exposto, e a quem?).
+
+- □ Se o uso do aplicativo fosse voluntário, sem nenhuma consequência para quem recusa, e a finalidade fosse limitada e informada, os principais problemas de consentimento e de poder apontados no caso do TraceBridge seriam atenuados.
+- □ No limite em que o empregador tenha o poder de desligar quem recusar o aplicativo, o "consentimento" dos funcionários passa a ser indistinguível de uma exigência: eles só podem aceitar.
+- □ Um conjunto de imagens raspado de páginas públicas da internet e usado para treinar um modelo de visão computacional dispensa preocupação com consentimento, porque as imagens já estavam publicamente acessíveis.
+- □ Como dado é poder, o problema de poder só existe quando a empresa vende os dados a terceiros; se os dados ficarem dentro da empresa, não há assimetria relevante entre empregador e funcionário.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## V/F — Consentimento e Poder no Trabalho: Resposta
+
+::: {.callout-tip icon=false}
+- ✔ Verdadeiro — sem coerção e com finalidade informada e limitada, cai a assimetria que tornava o consentimento vazio no TraceBridge.
+- ✔ Verdadeiro — sob ameaça de desligamento não há escolha: o consentimento vira exigência (Varshney, p. 52).
+- ✗ Falso — estar acessível não é consentimento explícito; o livro trata a raspagem sem consentimento como problemática (p. 53).
+- ✗ Falso — o poder já está no uso interno: o empregador pode rastrear pausas e reuniões sem vender nada (p. 52).
+:::
+
+::: {.fragment}
+**Retomando:** privacidade é técnica **e** política — quem consente e quem tem poder. A LGPD, a seguir, trata as duas.
+:::
+
+:::
+
+# A Moldura Legal: LGPD Artigo por Artigo
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Os blocos anteriores descreveram o que pode dar errado com o dado e com o seu uso. Este bloco lê o que o direito brasileiro diz sobre isso, no **texto** da Lei nº 13.709/2018, a Lei Geral de Proteção de Dados Pessoais (LGPD), na versão compilada do Planalto (consultada em 21/09/2026). O texto compilado mostra lado a lado as redações originais e as alterações posteriores, o que importa quando chegarmos ao art. 20. Primeiro, o alcance da lei; depois, os **princípios**, que são o núcleo do bloco; por fim, os cinco pontos que mais pesam para quem constrói sistemas de decisão.
+
+::: {.callout-warning}
+## Um aviso de leitura
+
+Esta aula lê o **texto** da lei. Como ela é *aplicada* (jurisprudência, regulamentos e orientações da ANPD, a autoridade nacional) está fora do escopo e das fontes. Onde a leitura é nossa e não o que a letra diz, o texto avisa.
+:::
+
+## Alcance da lei (arts. 1º a 5º)
+
+A lei protege "os direitos fundamentais de liberdade e de privacidade e o livre desenvolvimento da personalidade da pessoa natural" (art. 1º), e seus fundamentos incluem a **autodeterminação informativa**, os direitos humanos e a dignidade, mas também o desenvolvimento econômico e a inovação (art. 2º): é um equilíbrio, não uma proibição. Seu objeto é o **tratamento** de dados pessoais, definido de forma amplíssima como "toda operação realizada com dados pessoais", da coleta à eliminação, passando por "classificação", "processamento" e "avaliação" (art. 5º, X). Treinar um modelo com dados pessoais é tratamento; pontuar um cliente com ele também.
+
+Três definições do art. 5º sustentam o resto. **Dado pessoal** é a informação relacionada a pessoa natural "identificada ou **identificável**" (I); "identificável" é o conceito de quase-identificador (gênero, data de nascimento, CEP) em linguagem jurídica: o dado não precisa trazer o nome, basta permitir chegar à pessoa. **Dado pessoal sensível** é o dado sobre origem racial ou étnica, convicção religiosa, opinião política, filiação sindical ou a organização religiosa, filosófica ou política, saúde, vida sexual, dado genético ou biométrico (II); a lista não inclui gênero, idade, deficiência nem classe social, embora sejam protegidos em outras leis, de modo que a lista de dados sensíveis não coincide com a de atributos protegidos por outras leis. **Consentimento** é "manifestação livre, informada e inequívoca pela qual o titular concorda com o tratamento de seus dados pessoais para uma finalidade determinada" (XII).
+
+O que fica **fora**:
+
+::: {.callout-important}
+## O que a LGPD não se aplica (LGPD, art. 4º)
+
+> "Art. 4º Esta Lei não se aplica ao tratamento de dados pessoais: [...] III - realizado para fins exclusivos de: a) segurança pública; b) defesa nacional; c) segurança do Estado; ou d) atividades de investigação e repressão de infrações penais; [...]
+>
+> § 1º O tratamento de dados pessoais previsto no inciso III será regido por legislação específica, que deverá prever medidas proporcionais e estritamente necessárias ao atendimento do interesse público, observados o devido processo legal, os princípios gerais de proteção e os direitos do titular previstos nesta Lei."
+:::
+
+**Policiamento preditivo e reconhecimento facial para segurança pública ficam fora da LGPD**: o laço de retroalimentação do policiamento preditivo vive nesse território, que a lei remete a "legislação específica", com os princípios gerais e os direitos do titular como piso. O art. 4º, II, *b*, exclui também o tratamento para fins exclusivamente acadêmicos, mas mantém os arts. 7º e 11.
+
+## Os princípios (art. 6º)
+
+O art. 6º é o coração da lei: toda atividade de tratamento "deverá observar a boa-fé e os seguintes princípios".
+
+::: {.callout-important}
+## Princípios (LGPD, art. 6º)
+
+> "I - finalidade: realização do tratamento para propósitos legítimos, específicos, explícitos e informados ao titular, sem possibilidade de tratamento posterior de forma incompatível com essas finalidades;
+>
+> II - adequação: compatibilidade do tratamento com as finalidades informadas ao titular, de acordo com o contexto do tratamento;
+>
+> III - necessidade: limitação do tratamento ao mínimo necessário para a realização de suas finalidades, com abrangência dos dados pertinentes, proporcionais e não excessivos em relação às finalidades do tratamento de dados;
+>
+> IV - livre acesso: garantia, aos titulares, de consulta facilitada e gratuita sobre a forma e a duração do tratamento, bem como sobre a integralidade de seus dados pessoais;
+>
+> V - qualidade dos dados: garantia, aos titulares, de exatidão, clareza, relevância e atualização dos dados, de acordo com a necessidade e para o cumprimento da finalidade de seu tratamento;
+>
+> VI - transparência: garantia, aos titulares, de informações claras, precisas e facilmente acessíveis sobre a realização do tratamento e os respectivos agentes de tratamento, observados os segredos comercial e industrial;
+>
+> VII - segurança: utilização de medidas técnicas e administrativas aptas a proteger os dados pessoais de acessos não autorizados e de situações acidentais ou ilícitas de destruição, perda, alteração, comunicação ou difusão;
+>
+> VIII - prevenção: adoção de medidas para prevenir a ocorrência de danos em virtude do tratamento de dados pessoais;
+>
+> IX - não discriminação: impossibilidade de realização do tratamento para fins discriminatórios ilícitos ou abusivos;
+>
+> X - responsabilização e prestação de contas: demonstração, pelo agente, da adoção de medidas eficazes e capazes de comprovar a observância e o cumprimento das normas de proteção de dados pessoais e, inclusive, da eficácia dessas medidas."
+:::
+
+Aqui as duas metades da aula se encontram: cada princípio confronta um dos problemas que o modelo dos quatro espaços apontou. A tabela é **nossa síntese**, não uma interpretação oficial (a lei não fala em "viés"):
+
+| Princípio | O que exige, em termos de dado e de modelo | Problema do Bloco 1 que ele confronta |
+|---|---|---|
+| **I. Finalidade** | Usar o dado só para o propósito informado; sem reaproveitamento incompatível | **Dado reaproveitado**: descompasso entre a pergunta original do dado e a do modelo |
+| **II. Adequação** | O uso concreto deve fazer sentido no contexto informado | **Validade de construto**: usar um dado (entregas, sinistros) para medir outra coisa (crédito, gravidade) |
+| **III. Necessidade** | Coletar o mínimo pertinente e proporcional | **Proxies**: menos atributos, menos proxies e quase-identificadores |
+| **IV. Livre acesso** | O titular consulta, de graça, como e por quanto tempo seus dados são tratados | **Auditabilidade** pelo próprio titular: ponto de partida para achar dado errado |
+| **V. Qualidade dos dados** | Exatidão, relevância e atualização | **Viés social** (exatidão), **representação** (relevância) e **temporal** (atualização) |
+| **VI. Transparência** | Informação clara sobre o tratamento, ressalvados os segredos comercial e industrial | **Auditabilidade**: sem saber dados e critérios não há como detectar viés, mas o segredo é ressalvado |
+| **VII. Segurança** | Proteger contra acesso e alteração indevidos | **Envenenamento**: alteração maliciosa do dado |
+| **VIII. Prevenção** | Adotar medidas para prevenir danos | **Auditoria antes do treino**: o roteiro de Varshney (seção final) |
+| **IX. Não discriminação** | Vedado tratar "para fins discriminatórios ilícitos ou abusivos" | **O resultado final**, com a ressalva abaixo |
+| **X. Responsabilização** | Demonstrar as medidas e a sua eficácia | **Documentar a auditoria**: provar que o roteiro foi seguido |
+
+::: {.callout-note}
+## Uma leitura crítica do inciso IX
+
+O princípio veda o tratamento "**para fins** discriminatórios ilícitos ou abusivos". A palavra "fins" aponta para a **finalidade**. A discriminação indireta (o proxy que reconstrói o grupo, como no caso da seguradora) costuma acontecer *sem* que ninguém tenha o fim de discriminar; se cabe no inciso IX é questão de interpretação (o adjetivo "abusivos" pode ajudar), não algo que a letra resolve sozinha. *(Leitura nossa; a extensão do inciso é debatida na doutrina, que não está nas fontes desta aula.)*
+:::
+
+## O que mais pesa depois dos princípios
+
+**Consentimento e bases legais (arts. 7º a 9º).** O consentimento é só a primeira das dez bases legais do art. 7º; há também obrigação legal, contrato, legítimo interesse e "a proteção do crédito" (X), relevante para análise de crédito. Mas a dispensa do consentimento não dispensa os princípios: "não desobriga os agentes de tratamento das demais obrigações previstas nesta Lei, especialmente da observância dos princípios gerais e da garantia dos direitos do titular" (art. 7º, § 6º). Quando o consentimento é a base, a lei o cerca de exigências que respondem às falhas do TraceBridge e do caso Kramer: o ônus de provar que foi válido é do controlador (art. 8º, § 2º); "as autorizações genéricas ... serão nulas" (§ 4º), que é a diferença entre aceitar Termos de Uso e concordar com uma finalidade determinada; e é **nulo** o consentimento obtido com informações de "conteúdo enganoso ou abusivo" (art. 9º, § 1º), que retoma os *dark patterns* da Aula 4.
+
+**Dados sensíveis (art. 11).** A regra é o consentimento "de forma específica e destacada, para finalidades específicas" (I). Dois parágrafos interessam: o § 1º estende o regime a "qualquer tratamento de dados pessoais que **revele** dados pessoais sensíveis e que possa causar dano ao titular", plausível gancho legal para os proxies *(leitura nossa: a lei não menciona inferência estatística)*; e o § 5º veda às operadoras de planos de saúde o uso de dados de saúde "para a prática de seleção de riscos na contratação ... assim como na contratação e exclusão de beneficiários". Este último **não** é o caso da Sospital, que aloca cuidado entre membros atuais, mas mostra que o legislador viu o risco central do caso: usar dado de saúde para selecionar pessoas de modo desvantajoso.
+
+**Anonimização (art. 12).** Dado anonimizado não é dado pessoal, "salvo quando o processo de anonimização ... for revertido ... ou quando, com esforços razoáveis, puder ser revertido". Uma base sem nome, mas com CEP, data de nascimento e sexo que permitem reidentificar, continua sendo dado pessoal. O § 1º faz o "razoável" depender de custo e tempo com as tecnologias disponíveis, então uma anonimização segura hoje pode deixar de sê-lo. O § 2º inclui os dados usados para formar o **perfil comportamental** de uma pessoa identificada.
+
+**Decisão automatizada (arts. 19, II, e 20).** É o dispositivo mais próximo do nosso tema, e o texto compilado permite ver como foi reescrito:
+
+::: {.callout-important}
+## A redação original do art. 20 (Lei nº 13.709/2018, conforme o texto compilado)
+
+> "Art. 20. O titular dos dados tem direito a solicitar revisão, **por pessoa natural**, de decisões tomadas unicamente com base em tratamento automatizado de dados pessoais que afetem seus interesses, inclusive de decisões destinadas a definir o seu perfil pessoal, profissional, de consumo e de crédito ou os aspectos de sua personalidade."
+:::
+
+::: {.callout-important}
+## A redação vigente do art. 20 (dada pela Lei nº 13.853/2019)
+
+> "Art. 20. O titular dos dados tem direito a solicitar a revisão de decisões tomadas unicamente com base em tratamento automatizado de dados pessoais que afetem seus interesses, incluídas as decisões destinadas a definir o seu perfil pessoal, profissional, de consumo e de crédito ou os aspectos de sua personalidade.
+>
+> § 1º O controlador deverá fornecer, sempre que solicitadas, informações claras e adequadas a respeito dos critérios e dos procedimentos utilizados para a decisão automatizada, observados os segredos comercial e industrial.
+>
+> § 2º Em caso de não oferecimento de informações de que trata o § 1º deste artigo baseado na observância de segredo comercial e industrial, a autoridade nacional poderá realizar auditoria para verificação de aspectos discriminatórios em tratamento automatizado de dados pessoais.
+>
+> § 3º (VETADO)."
+:::
+
+A Medida Provisória nº 869/2018 já retirou "por pessoa natural", e a Lei nº 13.853/2019 manteve a redação sem a expressão. O conteúdo do § 3º vetado não consta do PDF. *(Pelo que se conhece da mensagem de veto, que não consultamos, ele previa revisão por pessoa natural; confirme antes de citar.)* Pela letra vigente, o titular tem direito à **revisão**, mas o texto **não diz que ela deve ser humana**. Além disso, o art. 19, II, dá direito a uma declaração que indique a **origem dos dados** e os **critérios utilizados**, em até 15 dias, o que ajuda a investigar de onde veio o viés. O art. 20 tem **quatro limites**:
+
+1. **"Unicamente".** Uma decisão em que um analista pondera o modelo junto com outros elementos não se enquadra literalmente, o que cria incentivo a pôr um humano "no circuito" mesmo quando o peso real é do modelo.
+2. **A revisão não precisa ser humana.**
+3. **O segredo comercial e industrial é ressalvado** (§ 1º).
+4. **A lei não define "discriminatório".** O § 2º dá à ANPD o poder de auditar "aspectos discriminatórios", mas não diz o que conta como tal, questão que uma aula seguinte retoma.
+
+O contrapeso é o § 2º: se o segredo é invocado, a ANPD "poderá realizar auditoria", e o titular pode peticionar à autoridade (art. 18, § 1º); o segredo não é um muro final. *(Explicabilidade técnica: Aula 8.)*
+
+**Responsabilização (arts. 38, 42, 52 e 55-J).** A ANPD pode determinar um **relatório de impacto** (art. 38), documento que descreve os processos de tratamento que "podem gerar riscos às liberdades civis e aos direitos fundamentais" e as medidas de mitigação, onde caberia o roteiro de auditoria da seção final. Quem causa dano "patrimonial, moral, individual ou coletivo" deve repará-lo (art. 42), e o juiz pode **inverter o ônus da prova** a favor do titular quando a alegação for verossímil, houver hipossuficiência ou a prova for excessivamente onerosa (§ 2º), decisivo quando só o controlador conhece os critérios. As sanções incluem multa de até 2% do faturamento no Brasil, limitada a R$ 50 milhões por infração (art. 52), aplicadas pela ANPD com contraditório e ampla defesa (art. 55-J, IV); a adoção de política de boas práticas e governança é critério na dosimetria (art. 52, § 1º, IX).
+
+## O que a LGPD não cobre
+
+1. **Segurança pública e investigação criminal** ficam fora (art. 4º, III).
+2. **Não define discriminação** nem escolhe um padrão de justiça.
+3. **A decisão precisa ser "unicamente" automatizada** para o art. 20 incidir, e a revisão não precisa ser humana.
+4. **O segredo comercial é ressalvado** em vários dispositivos, com o contrapeso da auditoria do art. 20, § 2º.
+5. **Dado anonimizado sai da lei** (art. 12), e um conjunto anonimizado ainda pode treinar um modelo que discrimina grupos, porque isso não depende de identificar indivíduos. *(Leitura nossa.)*
+
+O ponto 5 mostra por que privacidade e discriminação são problemas distintos. A LGPD é, antes de tudo, uma lei de **proteção de dados pessoais**: usá-la contra a discriminação algorítmica é possível (finalidade, qualidade, não discriminação, art. 20), mas parcial.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## LGPD: Alcance
+
+::: {.fragment}
+**Lei nº 13.709/2018** (texto compilado). Objeto: o **tratamento** de dados pessoais — "toda operação" (coleta, classificação, processamento, avaliação...). Treinar e aplicar um modelo com dados pessoais é tratamento.
+:::
+
+::: {.fragment}
+**Fundamentos:** privacidade, **autodeterminação informativa**, dignidade — **e** inovação. Equilíbrio, não proibição.
+:::
+
+::: {.fragment}
+**Dado pessoal:** pessoa "identificada ou **identificável**" (quase-identificador). **Dado sensível:** raça/etnia, religião, opinião política, filiação sindical, saúde, vida sexual, genético, biométrico — *não* inclui gênero, idade, deficiência. **Consentimento:** "livre, informado e inequívoco ... para uma finalidade determinada".
+:::
+
+::: {.fragment .callout-warning icon=false}
+**Fora da lei (art. 4º, III):** segurança pública, defesa, investigação criminal — "legislação específica". O laço do policiamento preditivo vive aí. *Leitura do **texto**; a aplicação está fora das fontes da aula.*
+:::
+
+## Os Princípios (art. 6º) — I a V
+
+::: {.fragment}
+**I. Finalidade** — propósitos legítimos, específicos, explícitos e informados; sem uso posterior incompatível.
+:::
+::: {.fragment}
+**II. Adequação** — compatível com as finalidades informadas, no contexto.
+:::
+::: {.fragment}
+**III. Necessidade** — o mínimo necessário; dados pertinentes, proporcionais, não excessivos.
+:::
+::: {.fragment}
+**IV. Livre acesso** — consulta facilitada e gratuita sobre forma, duração e integralidade dos dados.
+:::
+::: {.fragment}
+**V. Qualidade** — exatidão, clareza, relevância e **atualização**.
+:::
+
+## Os Princípios (art. 6º) — VI a X
+
+::: {.fragment}
+**VI. Transparência** — informação clara, "observados os segredos comercial e industrial".
+:::
+::: {.fragment}
+**VII. Segurança** — proteção contra acesso não autorizado e contra "alteração", perda ou destruição.
+:::
+::: {.fragment}
+**VIII. Prevenção** — medidas para prevenir danos.
+:::
+::: {.fragment}
+**IX. Não discriminação** — vedado tratar "para fins discriminatórios ilícitos ou abusivos".
+:::
+::: {.fragment}
+**X. Responsabilização** — demonstrar medidas eficazes **e sua eficácia**.
+:::
+
+## Princípios × Vieses (Síntese Nossa)
+
+| Princípio | Problema do Bloco 1 |
+|---|---|
+| **I. Finalidade** | Dado **reaproveitado** — descompasso de propósito |
+| **II. Adequação** | **Validade de construto** — dado usado para medir outra coisa |
+| **III. Necessidade** | Menos atributos → menos **proxies** |
+| **IV. Livre acesso** | **Auditabilidade** pelo próprio titular |
+| **V. Qualidade** | **Social** (exatidão), **representação** (relevância), **temporal** (atualização) |
+| **VI. Transparência** | **Auditabilidade** — mas o segredo é ressalvado |
+| **VII. Segurança** | **Envenenamento** — alteração maliciosa |
+| **VIII. Prevenção** | **Auditoria antes do treino** |
+| **IX. Não discriminação** | O **resultado final** — ver nota |
+| **X. Responsabilização** | **Documentar** a auditoria |
+
+::: {.fragment .callout-warning icon=false}
+**Leitura crítica do IX:** veda tratar "para **fins** discriminatórios". A discriminação **indireta** (proxy) costuma acontecer *sem* esse fim — se cabe no IX é questão de interpretação. *(Leitura nossa.)*
+:::
+
+## Consentimento e Dados Sensíveis
+
+::: {.fragment}
+**Consentimento é 1 de 10 bases legais** (art. 7º; inclui "proteção do crédito"). Mas a dispensa **não dispensa os princípios** (§ 6º).
+:::
+
+::: {.fragment}
+**Quando é a base:** ônus da prova do **controlador** (art. 8º, § 2º); "autorizações **genéricas** ... **nulas**" (§ 4º) — Kramer; **nulo** se a informação é "**enganosa ou abusiva**" (art. 9º, § 1º) — *dark patterns*.
+:::
+
+::: {.fragment}
+**Art. 11, § 1º:** o regime dos sensíveis vale para tratamento que "**revele**" dado sensível e possa causar dano — gancho plausível para **proxies** *(leitura nossa)*. **§ 5º:** planos de saúde não podem usar dado de saúde para **seleção de riscos** na contratação e exclusão — **não** é o caso da Sospital (aloca cuidado entre atuais), mas mostra que o legislador viu o risco.
+:::
+
+::: {.fragment}
+**Art. 12:** anonimizado ≠ pessoal, **salvo** se reversível "com esforços razoáveis" — base só sem nome, mas com CEP, nascimento e sexo, continua **dado pessoal**. Razoável depende de **custo e tempo**, com as tecnologias disponíveis. **§ 2º:** perfil comportamental pode ser dado pessoal.
+:::
+
+## Art. 20: Decisão Automatizada
+
+::: {.fragment .callout-important icon=false}
+**Original (2018):** revisão "**por pessoa natural**" de decisões "unicamente" automatizadas que afetem interesses, "inclusive ... perfil pessoal, profissional, de consumo e de crédito".
+:::
+
+::: {.fragment .callout-important icon=false}
+**Vigente (Lei 13.853/2019):** direito de "solicitar a **revisão**" — **sem** "por pessoa natural". **§ 1º:** informações "claras e adequadas" sobre "**critérios e procedimentos**", ressalvado o segredo. **§ 2º:** se o segredo é invocado, a ANPD "**poderá realizar auditoria**" de "aspectos discriminatórios". **§ 3º:** (VETADO).
+:::
+
+::: {.fragment}
+A MP 869/2018 já tirou "por pessoa natural". O conteúdo do § 3º vetado **não consta do PDF** *(pelo que se conhece do veto, previa revisão por pessoa natural; confirmar antes de citar)*. **Art. 19, II:** declaração com **origem dos dados** e **critérios** em até 15 dias.
+:::
+
+## Art. 20: Quatro Limites
+
+::: {.fragment}
+**1. "Unicamente":** analista que pondera o modelo com outros elementos fica fora — incentivo a pôr um humano "no circuito".
+:::
+::: {.fragment}
+**2. A revisão não precisa ser humana** (redação vigente).
+:::
+::: {.fragment}
+**3. O segredo comercial e industrial é ressalvado** (§ 1º).
+:::
+::: {.fragment}
+**4. "Discriminatório" não é definido** — a lei dá o poder de auditar, não o padrão de igualdade.
+:::
+
+::: {.fragment .callout-tip icon=false}
+**Contrapeso:** o segredo não é muro final — o titular pode **peticionar à ANPD** (art. 18, § 1º) e a ANPD pode **auditar** (§ 2º). *(Explicabilidade técnica: Aula 8.)*
+:::
+
+## Responsabilização e Limites da Lei
+
+::: {.fragment}
+**Relatório de impacto (art. 38):** processos que "podem gerar riscos às liberdades civis" e mitigações — onde caberia o roteiro de auditoria. **Art. 42:** dano "patrimonial, moral, individual ou **coletivo**" ⇒ reparação; o juiz pode **inverter o ônus da prova** (§ 2º). **Art. 52:** multa de até **2% do faturamento** (limite **R$ 50 mi** por infração); **ANPD** fiscaliza e sanciona (art. 55-J).
+:::
+
+::: {.fragment}
+**O que a lei não cobre:** segurança pública e investigação criminal; a **definição** de discriminação; decisões só em parte automatizadas; o segredo é ressalvado (contrapeso: auditoria); e **dado anonimizado sai da lei**, mas ainda pode treinar modelo que discrimina **grupos** *(leitura nossa)*.
+:::
+
+::: {.fragment .callout-tip icon=false}
+A LGPD é lei de **proteção de dados pessoais**: usá-la contra a discriminação algorítmica é possível, mas **parcial**.
+:::
+
+## Pergunta
+:::
+
+::: {.callout-tip}
+## O empréstimo negado
+
+Um banco nega um empréstimo a um cliente com base unicamente em um modelo automatizado de risco de crédito. O cliente escreve ao banco pedindo uma explicação. (a) O que o art. 20 exige que o banco forneça? (b) A resposta "o modelo de aprendizado profundo decidiu que você é um risco" é suficiente? (c) Se o banco alegar segredo comercial, o cliente fica sem recurso? (d) O que a lei **não** garante ao cliente?
+
+**Dica:** releia o § 1º e o § 2º do art. 20 separadamente — um trata do que o controlador deve dar; o outro, do que acontece se ele não der.
+
+- □ Pela letra do art. 20, o direito de revisão se refere a decisões tomadas "unicamente" com base em tratamento automatizado; uma decisão em que um analista humano pondera o score do modelo junto com outros elementos não se enquadra literalmente nessa hipótese.
+- □ No limite em que o banco invoque segredo comercial para se recusar a fornecer qualquer informação sobre os critérios do modelo, a lei deixa o titular sem nenhum recurso, pois o segredo é ressalvado no próprio texto do art. 20, § 1º.
+- □ Uma empresa que recusa automaticamente candidaturas com base em um classificador de currículos toma uma decisão automatizada que se enquadra na hipótese do art. 20, porque o texto menciona expressamente decisões destinadas a definir o "perfil profissional" da pessoa.
+- □ Como o art. 20, § 1º, exige informações sobre "critérios e procedimentos", o banco cumpre a lei ao entregar o código-fonte e os pesos do modelo, mesmo que o cliente não consiga compreendê-los, pois a informação foi disponibilizada.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## V/F — O Empréstimo Negado: Resposta
+
+::: {.callout-tip icon=false}
+- ✔ Verdadeiro — a letra fala em decisão "**unicamente**" automatizada; o humano que pondera o score com outros elementos fica fora da hipótese literal.
+- ✗ Falso — o segredo é ressalvado, mas o § 2º dá à **ANPD** o poder de auditar aspectos discriminatórios quando o segredo é invocado, e o titular pode **peticionar** à autoridade (art. 18, § 1º).
+- ✔ Verdadeiro — o art. 20 cita expressamente decisões "destinadas a definir o seu perfil pessoal, **profissional**, de consumo e de crédito".
+- ✗ Falso — o § 1º pede informações "**claras e adequadas**"; entregar código e pesos incompreensíveis descreve a ferramenta, não o critério.
+:::
+
+::: {.fragment}
+**Retomando:** o banco deve informar **critérios e procedimentos** de forma clara (§ 1º), pode ressalvar o segredo, mas a **ANPD pode auditar** (§ 2º). A lei **não** garante revisão humana, definição de "discriminatório", nem cobertura de decisões só em parte automatizadas.
+:::
+
+:::
+
+# Corrigir o Modelo ou Corrigir a Coleta?
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Com o mapa dos vieses e o texto da lei em mãos, resta a pergunta prática: quando uma equipe encontra um viés, **onde** ela age? Para Varshney (2022, cap. 4), a ordem importa e a primeira ação é anterior ao modelo.
+
+## Auditar antes de treinar
+
+::: {.callout-important}
+## Auditar antes de treinar (Varshney, 2022, cap. 4, p. 41)
+
+> "Avaliar conjuntos de dados quanto a vieses é crítico para a confiabilidade e é o foco principal do capítulo. Quanto melhor o trabalho feito nesta etapa, menos correção e mitigação de danos precisa ser feita em etapas posteriores do ciclo de vida. A avaliação de vieses deve incluir a contribuição de indivíduos afetados pelo sistema de aprendizado de máquina planejado. Se todo o dado relevante possível for considerado enviesado demais, uma conversa com o proprietário do problema e outras partes interessadas sobre se o projeto deve sequer prosseguir é indispensável." (tradução livre, p. 41)
+:::
+
+Três ideias: **a ordem** (corrigir cedo custa menos do que mitigar tarde); **quem participa** (os afetados, não só a equipe técnica); e **o ponto de parada** (a resposta pode ser *não construir*, o que conecta com o Ciclo Ético da Aula 2). O livro acrescenta que "não existe um conjunto de dados completamente sem viés" (p. 50): o objetivo da auditoria não é a pureza, é conhecer os vieses que restam e decidir se, com eles, o uso é aceitável.
+
+## O que se corrige onde
+
+O livro afirma o princípio geral: "alguns vieses podem ser superados coletando dados melhores ou refazendo melhor as etapas de preparação"; outros "vão passar e contribuir para a incerteza epistêmica na fase de modelagem" (Varshney, 2022, p. 49, tradução livre). Usando o modelo dos quatro espaços, a tabela abaixo organiza onde cada viés costuma ser atacado (**síntese nossa**):
+
+| Viés | Onde agir | Que ação |
+|---|---|---|
+| **Social** | Medição | Repensar o rótulo e o atributo; incluir um painel diverso de informantes |
+| **Representação** | Amostragem | Coletar dados melhores da subpopulação ausente; avaliar qualidade, não só quantidade |
+| **Temporal** | Amostragem | Atualizar os dados; monitorar os três tipos de deslocamento depois da implantação |
+| **Preparação** | Preparação | Refazer a limpeza; revisar rótulo-proxy e engenharia de atributos |
+| **Envenenamento** | Preparação | Controlar quem acessa e altera o dado |
+
+O que vaza dessas correções vira incerteza que o modelo tem de tratar, assunto que o livro deixa para partes posteriores. Por isso a resposta à quarta pergunta do roteiro é: **a coleta primeiro; o modelo trata o resto**. *Como medir a disparidade que sobra, e como atuar sobre ela no modelo, é tema de uma das aulas seguintes.*
+
+## O roteiro de auditoria
+
+Juntando as duas metades da aula, um roteiro para levar a qualquer projeto que use dados. Os itens 2 a 6 seguem o checklist de Varshney (2022, p. 49); os demais vêm da LGPD e do cap. 5.
+
+| # | Pergunta | Origem |
+|---|---|---|
+| 1 | **Para que este dado foi criado**, e o novo uso é compatível com o propósito informado? | Varshney p. 44; LGPD art. 6º, I e II |
+| 2 | **Mede o que deveria?** Há julgamento humano nos rótulos ou atributos? | Viés social; art. 6º, V |
+| 3 | **Representa quem será afetado?** | Viés de representação |
+| 4 | **Ainda vale?** O mundo mudou desde a coleta? | Viés temporal; art. 6º, V |
+| 5 | **A preparação introduziu viés?** Linhas descartadas, rótulos-proxy, atributos agregados? | Viés de preparação |
+| 6 | **Alguém alterou o dado?** | Envenenamento; art. 6º, VII |
+| 7 | **Há base legal válida e o dado é o mínimo necessário?** | LGPD arts. 6º, III, e 7º–9º; Varshney cap. 5 |
+| 8 | **O dado é sensível ou revela dado sensível?** | LGPD art. 11, incl. § 1º |
+| 9 | **Se um titular pedir origem e critérios, sei responder?** | LGPD arts. 19, II, e 20 |
+| 10 | **Se todo o dado relevante é enviesado demais, devemos prosseguir?** | Varshney p. 41 |
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Auditar Antes de Treinar
+
+::: {.fragment .callout-important icon=false}
+"Quanto melhor o trabalho feito nesta etapa, **menos correção e mitigação de danos** depois. A avaliação deve incluir **indivíduos afetados**. Se todo o dado relevante for enviesado demais, a conversa é **se o projeto deve sequer prosseguir**." (Varshney, 2022, p. 41)
+:::
+
+::: {.fragment}
+**Ordem:** corrigir cedo custa menos. **Quem participa:** os afetados. **Ponto de parada:** a resposta pode ser *não construir* (Ciclo Ético, Aula 2). E "não existe conjunto de dados completamente sem viés" (p. 50): o objetivo é **conhecer** os vieses que restam.
+:::
+
+## O Que se Corrige Onde (Síntese Nossa)
+
+| Viés | Onde agir | Ação |
+|---|---|---|
+| **Social** | Medição | Repensar rótulo e atributo; painel diverso de informantes |
+| **Representação** | Amostragem | Coletar dados melhores; qualidade, não só quantidade |
+| **Temporal** | Amostragem | Atualizar; monitorar os *shifts* |
+| **Preparação** | Preparação | Refazer a limpeza; revisar rótulo-proxy |
+| **Envenenamento** | Preparação | Controlar acesso e alteração |
+
+::: {.fragment .callout-tip icon=false}
+**A coleta primeiro; o modelo trata o resto** — "alguns vieses vão passar" (p. 49). *Como medir e atuar sobre o que sobra: aula seguinte.*
+:::
+
+## O Roteiro de Auditoria
+
+::: {.fragment}
+**1.** Para que o dado foi criado; o novo uso é compatível? *(art. 6º, I–II)*  **2.** Mede o que deveria? *(social; art. 6º, V)*  **3.** Representa quem será afetado?
+:::
+::: {.fragment}
+**4.** Ainda vale? *(temporal)*  **5.** A preparação introduziu viés?  **6.** Alguém alterou o dado? *(art. 6º, VII)*
+:::
+::: {.fragment}
+**7.** Base legal válida e dado mínimo necessário? *(arts. 6º, III; 7º–9º)*  **8.** É sensível ou **revela** sensível? *(art. 11, § 1º)*  **9.** Sei responder origem e critérios? *(arts. 19, II; 20)*
+:::
+::: {.fragment .callout-tip icon=false}
+**10.** Se todo o dado relevante é enviesado demais, **devemos prosseguir?** *(Varshney, p. 41)*
+:::
+
+## Pergunta
+:::
+
+::: {.callout-tip}
+## Corrigir o modelo ou corrigir a coleta?
+
+Uma equipe descobre que o seu modelo de triagem de crédito tem desempenho muito pior para clientes de uma região, porque a base de treino quase não tem clientes dali. Ela propõe "ajustar o modelo" para compensar. Por que vale perguntar primeiro sobre a coleta? E o que fazer se, mesmo depois de melhorar a coleta, o dado continuar enviesado demais para o uso pretendido?
+
+**Dica:** relacione o problema a uma passagem do modelo dos quatro espaços e pergunte onde essa passagem pode ser refeita.
+
+- □ Se o problema for de viés de representação, coletar dados adicionais da região sub-representada ataca a causa na passagem de amostragem, enquanto um ajuste feito só no modelo trata o sintoma sem alterar o que os dados registram.
+- □ No limite em que nenhum dado disponível seja considerado válido para o problema (todo dado relevante é enviesado demais), a recomendação de Varshney é ajustar o modelo até compensar, porque sempre é possível corrigir o viés depois da implantação.
+- □ Num sistema de recomendação em que o rótulo de treino é o clique do usuário, mas o usuário só vê o que o sistema já recomendou, corrigir apenas o modelo não altera o fato de que o rótulo é afetado pelo próprio sistema.
+- □ Se os dados foram obtidos sem consentimento, a decisão sobre prosseguir com o projeto depende apenas de o modelo treinado com eles apresentar bom desempenho.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## V/F — Corrigir o Modelo ou a Coleta? Resposta
+
+::: {.callout-tip icon=false}
+- ✔ Verdadeiro — representação é um problema da **amostragem**: mais dados da região corrigem a origem; ajustar o modelo compensa o sintoma.
+- ✗ Falso — Varshney diz o contrário: se todo dado relevante é enviesado demais, a conversa é **se o projeto deve prosseguir**.
+- ✔ Verdadeiro — é o laço do policiamento preditivo (extensão nossa): o rótulo depende do que o sistema já mostrou.
+- ✗ Falso — "sem consentimento, não prosseguir" (Varshney, p. 53); a LGPD exige base legal válida (arts. 7º–9º). Bom desempenho não legitima a obtenção do dado.
 :::
 
 :::
@@ -1703,60 +1313,16 @@ perguntas do roteiro inicial.
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-Voltamos ao roteiro que abriu a aula, uma frase de resposta para cada
-pergunta:
+Uma frase de resposta para cada pergunta do roteiro:
 
-1. **De onde vem, fisicamente, a energia e a água da "nuvem"?** Da
-   construção e operação de hardware físico — energia para processar e
-   resfriar, água para resfriar, minerais para fabricar — nunca de um
-   espaço "etéreo" e sem peso (Bloco 2).
-2. **O que aconteceu em Eldorado do Sul?** A Scala AI City reservou 5
-   GW de energia numa região com rede elétrica instável e histórico
-   recente de enchentes catastróficas, marginalizando a comunidade
-   Mbyá-Guarani da Tekoa Pekuruty (Bloco 3).
-3. **O que é soberania digital, e por que é contraditória no Sul
-   Global?** A capacidade de um Estado controlar sua arquitetura
-   digital, em quatro dimensões (infraestrutural, de dados, regulatória,
-   epistêmica) — contraditória porque alcançar autonomia
-   infraestrutural frequentemente exige atrair o mesmo capital
-   estrangeiro que a soberania buscaria limitar (Bloco 4).
-4. **O que distingue zona de sacrifício digital de redlining
-   digital?** Redlining é exclusão do serviço; zona de sacrifício é
-   inclusão predatória — o território recebe investimento, mas como
-   sítio de extração, não como beneficiário (Bloco 4, com Querétaro,
-   Módulo Penco e o greenwashing do Pará como variações do mesmo padrão
-   no Bloco 5).
-5. **O que um projeto de sistema computacional pode fazer em
-   resposta?** Ferramentas técnicas (análise de ciclo de vida, TI
-   Verde) ajudam, mas não substituem uma ética territorial que trate o
-   território como algo além de jurisdição legal, com consulta
-   genuína a quem nele vive (Blocos 6–7).
+1. **Por que "o dado fala por si" é falso?** Porque o dado é o resultado de uma cadeia de decisões (o que medir, de quem, quando, como limpar), e cada uma pode carregar viés. "O dado de treino é a sociedade" (Varshney, 2022, cap. 10, p. 132).
+2. **Onde o viés entra?** Em três passagens: **medição** (social, validade de construto), **amostragem** (representação e temporal, validade externa) e **preparação** (preparação e envenenamento, validade interna). A "cegueira de atributo" não resolve, porque o proxy traz a informação de volta.
+3. **O que a LGPD exige, garante e deixa de fora?** Exige princípios e base legal; garante ao titular acesso, correção, informação sobre critérios e revisão de decisões unicamente automatizadas; deixa de fora a segurança pública, não define "discriminatório" e ressalva o segredo, com o contrapeso da auditoria da ANPD.
+4. **Corrigir o modelo ou a coleta?** A coleta primeiro; o modelo trata o resto; e, se todo o dado relevante é enviesado demais, a pergunta é se o projeto deve prosseguir.
 
-O que fica em aberto: hoje vimos que o custo material da IA é
-distribuído de forma desigual e sistematicamente invisibilizado por
-narrativas de progresso tecnológico e de sustentabilidade — um sistema
-aparentemente neutro e técnico (uma reserva de energia, um acordo de
-crédito de carbono) esconde uma desigualdade estrutural que ninguém
-precisou "decidir" explicitamente impor. Essa mesma lógica se estende,
-na Aula 7, para **dentro do próprio algoritmo**: os dados que treinam
-um sistema de IA carregam uma história de viés e desigualdade que,
-sem auditoria, produz discriminação automatizada da mesma forma
-silenciosa e sem decisão explícita — só que, em vez de energia e água,
-o recurso em jogo passa a ser dado histórico.
+**Em aberto:** *como medir* a disparidade que o dado enviesado produz e *como atuar* no modelo (uma das aulas seguintes); a explicabilidade técnica de decisões automatizadas (Aula 8); e a lacuna da segurança pública.
 
-::: {.callout-important}
-## Conclusão do artigo (Nascimento & Raimundo, 2026, p. 4)
-
-> "Este artigo argumentou que a expansão da infraestrutura de IA na
-> América Latina está longe de ser um avanço tecnológico etéreo,
-> representando, em vez disso, uma reconfiguração material da
-> dependência colonial dentro da policrise global. [...] Este trabalho
-> convida a um diálogo mais amplo sobre uma ética territorial que
-> confronte a crise climática e afirme o direito de geografias
-> marginalizadas de recusar a inclusão predatória, garantindo que a
-> soberania digital no Sul Global não resulte no apagamento ecológico e
-> epistêmico de seus territórios." (tradução livre, p. 4)
-:::
+**Ponte para a Aula 7.** Toda a cadeia que percorremos (coletar, rotular, limpar, guardar, reprocessar, auditar) exige computação, e computação exige energia e materiais. Cada escolha parece "só técnica", mas tem um custo material que ninguém, em geral, decidiu explicitamente pagar. A Aula 7 pergunta qual é a arquitetura e o custo energético e ambiental da infraestrutura que sustenta tudo isso.
 
 [Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
 [Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
@@ -1765,115 +1331,32 @@ o recurso em jogo passa a ser dado histórico.
 
 ::: {.content-visible when-format="revealjs"}
 
-## Retomando o Roteiro — Perguntas 1 e 2
+## Retomando o Roteiro
 
 ::: {.fragment}
-**1. De onde vem a energia e a água?** Da construção e operação de
-hardware físico — nunca de um espaço "sem peso".
+**1. "O dado fala por si"?** Falso: é o resultado de uma **cadeia de decisões**, cada uma podendo carregar viés.
 :::
+::: {.fragment}
+**2. Onde o viés entra?** **Medição** (social), **amostragem** (representação, temporal), **preparação** (preparação, envenenamento). Tirar a coluna não basta: o **proxy** traz a informação de volta.
+:::
+::: {.fragment}
+**3. LGPD?** **Exige** princípios e base legal; **garante** acesso, correção, critérios e revisão; **deixa de fora** segurança pública e a definição de "discriminatório" (contrapeso: auditoria da ANPD).
+:::
+::: {.fragment}
+**4. Modelo ou coleta?** **Coleta primeiro**; o modelo trata o resto; às vezes a resposta é **não prosseguir**.
+:::
+::: {.fragment .callout-tip icon=false}
+**Em aberto:** *como medir* a disparidade e *como atuar* no modelo (aula seguinte); explicabilidade técnica (Aula 8).
+:::
+
+## Ponte para a Aula 7
 
 ::: {.fragment}
-**2. Eldorado do Sul?** Scala AI City: 5 GW numa rede instável, com
-histórico de enchentes, marginalizando a Tekoa Pekuruty.
-:::
-
-## Retomando o Roteiro — Perguntas 3 e 4
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-::: {.fragment}
-**3. Soberania digital?** Quatro dimensões — contraditória porque
-autonomia infraestrutural exige, com frequência, capital estrangeiro.
-:::
-
-::: {.fragment}
-**4. Sacrifício vs. redlining?** Redlining exclui; sacrifício inclui
-predatoriamente — território como sítio de extração, não beneficiário.
-:::
-
-## Retomando o Roteiro — Pergunta 5
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-::: {.fragment}
-**5. O que um projeto pode fazer?** Ferramentas técnicas ajudam, mas
-não substituem ética territorial e consulta genuína.
+Coletar, rotular, limpar, guardar, reprocessar, auditar: tudo exige **computação**, e computação exige **energia e materiais** — um custo que ninguém decidiu explicitamente pagar.
 :::
 
 ::: {.fragment .callout-tip icon=false}
-Custo material da IA é distribuído desigualmente e invisibilizado por
-narrativas de progresso — hoje vimos como e por quê.
-:::
-
-## Pergunta
-:::
-
-::: {.callout-tip}
-## O Que Mais Está Escondido Atrás da Tela?
-
-Assim como o custo material de um data center fica invisível até
-alguém escrutinar, o que você imagina que também pode estar
-"escondido" dentro dos próprios dados que treinam um sistema de IA,
-mesmo sem ninguém ter decidido explicitamente colocar isso ali?
-
-**Dica:** pensar em como os dados históricos carregam decisões e
-desigualdades passadas, sem que ninguém precise "programá-las" de
-propósito.
-
-- □ Se toda a energia e água usada por data centers de IA viessem de
-  fontes com impacto ambiental e social desprezível, e nenhuma
-  comunidade tivesse seus direitos territoriais afetados, o argumento
-  central desta aula sobre "zonas de sacrifício digital" perderia sua
-  base empírica de aplicação, mesmo que o conceito continuasse fazendo
-  sentido em teoria.
-- □ No limite em que toda decisão de arquitetura de sistema fosse
-  tomada considerando explicitamente seu custo material e territorial
-  completo, a categoria de "custo que ninguém decidiu explicitamente
-  impor" discutida nesta aula deixaria de descrever esse tipo de
-  decisão.
-- □ A mesma lógica estrutural desta aula — um sistema aparentemente
-  neutro e técnico esconde uma consequência real que ninguém precisou
-  "decidir" explicitamente — se estenderia ao argumento da Aula 7 de
-  que dados históricos usados para treinar um algoritmo podem carregar
-  viés discriminatório sem que nenhum engenheiro tenha programado esse
-  viés de propósito.
-- □ Como esta aula mostrou que a materialidade da infraestrutura de IA
-  produz custo territorial real, conclui-se que a única forma
-  responsável de lidar com esse custo é interromper por completo o
-  desenvolvimento de infraestrutura de IA, sem nenhuma alternativa
-  intermediária de projeto ou governança.
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## V/F — Síntese Final: Resposta
-
-::: {.callout-tip icon=false}
-- ✔ Verdadeiro — sem custo material real recaindo sobre nenhuma
-  comunidade, faltaria a base empírica que sustenta o argumento
-  aplicado a esse caso, mesmo que o conceito de zona de sacrifício
-  digital continuasse coerente em teoria.
-- ✔ Verdadeiro — se o custo já fosse sempre considerado explicitamente
-  na decisão, deixaria de ser, por definição, um custo "que ninguém
-  decidiu explicitamente impor".
-- ✔ Verdadeiro — é exatamente a ponte para a Aula 7: um sistema
-  aparentemente neutro (arquitetura de infraestrutura, ou um pipeline
-  de dados) esconde uma consequência real não decidida explicitamente.
-- ✗ Falso — a aula não conclui que a única saída responsável é
-  interromper todo desenvolvimento de infraestrutura de IA; a síntese
-  do Bloco 7 propõe justamente alternativas intermediárias (consulta
-  genuína, ética territorial, ferramentas de projeto), não abandono
-  total.
-:::
-
-::: {.fragment}
-**Ponte para a Aula 7:** se o custo material da infraestrutura já fica
-invisível até ser escrutinado, os próprios dados que alimentam um
-sistema de IA também carregam uma história de viés que produz
-discriminação automatizada sem que ninguém precise "programá-la" de
-propósito. É por aí que a Aula 7 continua a Parte 2 do curso.
+**Aula 7:** a arquitetura e o custo energético e ambiental da infraestrutura por trás da cadeia do dado.
 :::
 
 [Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}

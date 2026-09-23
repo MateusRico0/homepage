@@ -1183,3 +1183,37 @@ navegação perto do Fechamento.
   da raiz do repositório, sem erros; confirmados
   `_site/teaching/supervised-learning/aulaNN/{exercicios,soluções}.html`
   para as 6 aulas.
+
+---
+
+## Aula 6 — Regressão Logística e Modelos Lineares Generalizados (GLMs) (2026-09-21)
+
+Construída de forma completa e autocontida seguindo o padrão atual do `CLAUDE.md`:
+
+- **Planejamento (`_00-plano-aula.md`):** Estratégia A (*Outside-In*), 6 blocos (~130 min). Fontes obrigatórias com trecho literal em inglês: PRML §4.3.1–§4.3.3 e §4.3.6 (Bishop, 2006, pp. 204–209 e 212–213) e ESL §4.4 (Hastie et al., 2009, pp. 119–124).
+- **Conteúdo da Aula (`aula06/index.qmd`):**
+  - Saída dupla: HTML (`notas.html`) e RevealJS (`slides.html`).
+  - Dataset real do HuggingFace Hub: **Adult Census Income** (`scikit-learn/adult-census-income`), prevendo renda $>50\text{K}$ a partir de idade e horas de trabalho semanais ($N = 32\,561$).
+  - Problema motivador mostrando o fracasso analítico de OLS em classificação binária (extrapolação fora de $[0, 1]$, heterocedasticidade severa e distorção por pontos convictos).
+  - Dedução do modelo logit a partir das chances (*odds*) e propriedades analíticas da sigmoide ($\sigma(-a) = 1-\sigma(a)$, $\sigma'(a) = \sigma(a)(1-\sigma(a))$).
+  - Construção da verossimilhança de Bernoulli e dedução da perda de Entropia Cruzada Binária ($-\ln L$).
+  - Derivação analítica detalhada do vetor gradiente $\nabla E(\mathbf{w}) = \sum_n (\mu_n - y_n)\mathbf{x}_n = X^T(\boldsymbol\mu - \mathbf{y})$, evidenciando o cancelamento da derivada da sigmoide.
+  - Prova de estrita convexidade da Hessiana $H = X^T R X$ com $R_{nn} = \mu_n(1-\mu_n) > 0$.
+  - Dedução do algoritmo IRLS (Iteratively Reweighted Least Squares) via Newton-Raphson com demonstração prática convergindo em 6 iterações ($\mathbf{w} \approx [-4{,}9134, 0{,}0431, 0{,}0478]$) e interpretação via razão de chances.
+  - Arcabouço unificador dos GLMs (Nelder & Wedderburn, 1972) e o Teorema da Ligação Canônica (PRML §4.3.6) com diagrama TikZ unificador.
+  - Análise da patologia de separabilidade linear perfeita ($\|\mathbf{w}\| \to \infty$) e ponte para a regularização (Aula 7).
+- **Pausas Ativas:** 5 pausas intercaladas com perguntas provocadoras e testes de V/F com glifos `□`/`✔`/`✗`. Soluções completas com discussão docente registradas em `aula06/_02-respostas-pausas.md`.
+- **Exercícios e Soluções Públicas:**
+  - `aula06/exercicios.qmd`: 3 questões discursivas conceituais e 8 blocos de V/F (32 itens autocontidos numerados `Teste 1` a `Teste 8`), gerados pelas 4 heurísticas (Contrafactual, Limite, Transferência de domínio e Falsa dicotomia).
+  - `aula06/soluções.qmd`: gabarito público estruturado com pares `callout-note` (pergunta) e `callout-tip` (resposta com justificativa detalhada e apontamento da falha conceitual).
+- **Dicionário de Notações Atualizado:**
+  - $\mu_n = \sigma(\mathbf{w}^T\mathbf{x}_n) = p(C_1\mid\mathbf{x}_n)$: probabilidade a posteriori da classe positiva (Aula 6).
+  - $a = \mathbf{w}^T\mathbf{x}$: ativação linear (Aula 6).
+  - $\sigma(a) = \frac{1}{1 + e^{-a}}$: função sigmoide logística (Aula 6).
+  - $E(\mathbf{w}) = -\sum_n [y_n \ln \mu_n + (1-y_n)\ln(1-\mu_n)]$: erro de Entropia Cruzada Binária (Aula 6).
+  - $R \in \mathbb{R}^{N \times N}$: matriz diagonal de pesos locais $R_{nn} = \mu_n(1-\mu_n)$ no IRLS (Aula 6).
+  - $\eta = g(\mu)$: parâmetro natural canônico e função de ligação em GLMs (Aula 6).
+- **Validação e Publicação:**
+  - Renderização Quarto concluída com sucesso para `notas.html`, `slides.html`, `exercicios.html` e `soluções.html`.
+  - Confirmação de ausência de `<input type="checkbox">` real nos HTMLs.
+  - Entrada da Lesson 6 atualizada com link direto no `index.qmd` da disciplina e renderizada com sucesso.

@@ -752,3 +752,16 @@ sem checkpoints intermediários.
 ## Aulas 7–16
 
 Não iniciadas.
+
+## Aula 6 (renumerada): Data, Bias, and Algorithmic Discrimination — reescrita (2026-09-21)
+
+Reescrita completa a pedido do usuário ("a aula está bem superficial"), com autorização explícita para ir direto ao `index.qmd`, exercícios e soluções depois de aprovar o plano.
+
+- **Fontes centrais:** Varshney (2022), caps. 4 e 5 e §§10.1–10.2; LGPD (Lei 13.709/2018, texto compilado, `_fontes/.../L13709.pdf`). Paginação de Varshney conferida pelo **cabeçalho de página** do PDF (o sumário do livro está deslocado em alguns capítulos). Trechos literais em `aula06/_00-plano-aula.md`.
+- **Escopo (decisão do usuário):** sem métricas de fairness e sem estratégias de mitigação algorítmica (ficam para aula seguinte); sem GDPR; Amazon como caso de abertura só para a narrativa (fonte secundária, Reuters 2018, sem trecho literal); laço de retroalimentação do policiamento preditivo mantido, marcado como **extensão nossa**; Gender Shades e caso Phulo removidos.
+- **Esqueleto:** quatro espaços (construto, observado, bruto, preparado) × três validades × cinco vieses (Varshney cap. 4); seguradora da Aula 5 dissecada; proxies × quase-identificadores (ponte nossa); LGPD lida artigo por artigo, com tabela **princípios do art. 6º × vieses** (síntese nossa) e o histórico de redação do art. 20 (original "por pessoa natural"; § 3º vetado — conteúdo do veto **não** está no PDF, sinalizado).
+- **Arquivos:** `index.qmd` (notas + slides, 2 diagramas TikZ, 5 Pausas Ativas), `exercicios.qmd` (3 discursivas + 8 blocos de V/F), `soluções.qmd` (8 blocos), `_02-respostas-pausas.md`. `../index.qmd`: leitura recomendada da Lesson 6 trocada por Varshney caps. 4, 5, §§10.1–10.2 + LGPD.
+- **Dicionário de notações (novo):** *espaço do construto/observado/bruto/preparado*; *validade de construto/externa/interna*; *viés social/de representação/temporal/de preparação/envenenamento* (Varshney cap. 4, Aula 6); *quase-identificador*, *k-anonimato* (Aula 6); *controlador/titular/ANPD* (LGPD, Aula 6).
+- **Pendências:** (1) `aula05/index.qmd` ainda chama a próxima aula de "Aula 6" e a descreve como arquitetura/custo material (agora é a Aula 7); (2) o render de projeto (`quarto render`) falha em etapa final de plumbing (`site_libs`/`publications`), não no conteúdo — notas e slides desta aula geram normalmente.
+
+- **Revisões pós-entrega (2026-09-21):** k-anonimato/anonimização técnica e a seção de Proxies/Atributos Protegidos removidos a pedido; LGPD reestruturada com foco nos princípios do art. 6º; final da aula encurtado (~20% menos texto). Teste 5 de `exercicios.qmd` (proxies) mantido, é autocontido.

@@ -1,0 +1,175 @@
+---
+title: "Soluções dos Exercícios — Regressão Logística e GLMs"
+subtitle: "Aula 6 — Classificação Paramétrica, Entropia Cruzada e a Família Exponencial"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss]
+    toc: true
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+
+## Questões de Verdadeiro/Falso
+
+::: {.callout-note icon=false}
+## Teste 1 — Limites do Modelo de Probabilidade Linear (Mínimos Quadrados em Classificação)
+
+- □ Se uma observação com rótulo $y_n = 1$ estiver muito distante da fronteira de decisão e a reta de regressão linear previr um valor contínuo $\hat{y}_n = 1{,}50$, o resíduo quadrático resultante $(1 - 1{,}50)^2 = 0{,}25$ penaliza a função de custo OLS, induzindo uma rotação indesejada na fronteira de decisão mesmo sendo uma previsão correta e convicta.
+- □ No limite em que o tamanho amostral $N \to \infty$, o ajuste por mínimos quadrados ordinários sobre alvos $y_n \in \{0, 1\}$ garante que todas as previsões da reta permaneçam estritamente confinadas ao intervalo $[0, 1]$, pois a lei dos grandes números elimina os erros de extrapolação.
+- □ Em um sistema de diagnóstico clínico que utiliza regressão linear sobre desfechos binários (doença presente ou ausente), a variância dos resíduos é inerentemente heterocedástica, pois a variância teórica de uma variável binária com média $\mu(\mathbf{x})$ é dada por $\mu(\mathbf{x})(1 - \mu(\mathbf{x}))$, violando a premissa de homocedasticidade de Gauss-Markov.
+- □ Se aplicarmos uma função degrau simples que atribui a classe $1$ sempre que a reta linear for maior que $0{,}5$, os parâmetros ótimos obtidos por mínimos quadrados coincidem exatamente com os parâmetros obtidos por máxima verossimilhança de Bernoulli.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 1 — Limites do Modelo de Probabilidade Linear
+
+- ✔ **Verdadeiro** — [Contrafactual]: Em mínimos quadrados, o erro é simétrico em relação ao alvo; valores previstos maiores que 1 geram resíduos não-nulos e aumentam a perda, forçando a reta a mudar de inclinação e prejudicando a classificação perto da fronteira.
+- ✗ **Falso** — [Caso Limite]: A lei dos grandes números garante convergência dos coeficientes estimados aos seus valores populacionais, mas não altera a natureza geométrica do hiperplano, que continua extrapolando para valores $<0$ e $>1$ nas caudas de $\mathbf{x}$.
+- ✔ **Verdadeiro** — [Transferência de Domínio]: Para variáveis binárias, a variância condicional é $\text{Var}(Y\mid\mathbf{x}) = \mu(\mathbf{x})(1-\mu(\mathbf{x}))$, variando sistematicamente com $\mathbf{x}$. OLS sobre alvos binários é intrinsecamente heterocedástico.
+- ✗ **Falso** — [Falsa Equivalência]: A função degrau discretiza a decisão após o ajuste, mas a função objetivo minimizada no treino continua sendo a perda quadrática (ruído gaussiano), e não a verossimilhança da distribuição de Bernoulli.
+:::
+
+---
+
+::: {.callout-note icon=false}
+## Teste 2 — A Função Sigmoide Logística e a Razão de Chances
+
+- □ Se a ativação linear for nula ($a = \mathbf{w}^T\mathbf{x} = 0$), a probabilidade prevista pela sigmoide é exatamente $0{,}50$, o que define a fronteira geométrica de decisão de classe como um hiperplano no espaço original dos atributos.
+- □ No caso limite em que a ativação linear tende a $+\infty$, a derivada da função sigmoide $\sigma'(a) = \sigma(a)(1 - \sigma(a))$ atinge seu valor máximo absoluto, tornando os gradientes em regiões de alta certeza extremamente grandes e acelerando o aprendizado.
+- □ Em um estudo epidemiológico modelado por regressão logística, se o coeficiente associado ao consumo diário de sódio ($x_1$) for $\hat{w}_1 = \ln(2) \approx 0{,}693$, isso significa que para cada unidade a mais de sódio consumida, as chances (*odds*) de desenvolver hipertensão são multiplicadas por 2, mantendo as demais variáveis constantes.
+- □ A propriedade de simetria $\sigma(-a) = 1 - \sigma(a)$ implica que se invertermos as convenções dos rótulos (trocando a classe $1$ pela classe $0$ e vice-versa), o novo vetor de parâmetros ótimos terá exatamente a mesma direção e os mesmos sinais do vetor original.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 2 — A Função Sigmoide Logística e a Razão de Chances
+
+- ✔ **Verdadeiro** — [Caso Limite]: Como $\sigma(0) = \frac{1}{1+e^0} = 0{,}5$, a fronteira onde $p=0{,}5$ é exatamente a equação linear $\mathbf{w}^T\mathbf{x} = 0$, que descreve um hiperplano $(D-1)$-dimensional.
+- ✗ **Falso** — [Caso Limite]: Conforme $a \to +\infty$, $\sigma(a) \to 1$ e portanto $\sigma'(a) = \sigma(a)(1-\sigma(a)) \to 1 \cdot (1-1) = 0$. A derivada satura e tende a zero, e não ao valor máximo (que ocorre em $a=0$, onde $\sigma'(0) = 0{,}25$).
+- ✔ **Verdadeiro** — [Transferência de Domínio]: Pelo modelo de log-odds $\ln(\text{odds}) = \dots + w_1 x_1$, o aumento de uma unidade em $x_1$ multiplica as chances por $\exp(w_1) = \exp(\ln 2) = 2$.
+- ✗ **Falso** — [Contrafactual]: Inverter as classes $y_n \to 1 - y_n$ equivale a modelar $\ln(p(C_0)/p(C_1)) = -\mathbf{w}^T\mathbf{x}$, o que inverte rigorosamente o sinal de todos os coeficientes ($\mathbf{w}_{\text{novo}} = -\mathbf{w}_{\text{original}}$).
+:::
+
+---
+
+::: {.callout-note icon=false}
+## Teste 3 — Verossimilhança de Bernoulli e Perda de Entropia Cruzada
+
+- □ Se o modelo previr $\mu_n = 0{,}001$ para uma observação cujo rótulo verdadeiro é $y_n = 1$, a perda pontual atribuída a esse indivíduo é de $-\ln(0{,}001) \approx 6{,}91$ nats, crescendo assintoticamente para $+\infty$ conforme $\mu_n \to 0$.
+- □ No caso de uma amostra com $N$ pontos em que todas as observações pertencem exclusivamente à classe $1$ ($y_n = 1$ para todo $n$), a função de perda de entropia cruzada se reduz a $-\sum_{n=1}^N \ln \mu_n$, sendo minimizada quando a ativação linear $\mathbf{w}^T\mathbf{x}_n \to +\infty$.
+- □ Em um modelo de triagem de crédito com severo desbalanceamento de classes, a perda de entropia cruzada binária clássica atribui automaticamente um peso $50$ vezes maior aos erros da classe minoritária para compensar sua baixa frequência empírica.
+- □ A função de erro de entropia cruzada binária é matematicamente equivalente à minimização da divergência de Kullback-Leibler entre a distribuição empírica dos dados e a distribuição paramétrica de Bernoulli prevista pelo modelo.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 3 — Verossimilhança de Bernoulli e Perda de Entropia Cruzada
+
+- ✔ **Verdadeiro** — [Caso Limite]: Quando $y_n = 1$, a perda é $-\ln(\mu_n)$. Conforme $\mu_n \to 0$, $-\ln(\mu_n) \to +\infty$, penalizando infinitamente previsões convictas e errôneas.
+- ✔ **Verdadeiro** — [Caso Limite]: Substituindo $y_n = 1$ em todos os termos, o segundo termo da soma $(1-y_n)\ln(1-\mu_n)$ anula-se identicamente; para minimizar $-\sum \ln \mu_n$, devemos maximizar $\mu_n \to 1$, o que exige $\mathbf{w}^T\mathbf{x}_n \to +\infty$.
+- ✗ **Falso** — [Falsa Equivalência]: A entropia cruzada padrão trata cada observação com peso unitário igual; a compensação de desbalanceamento exige pesos amostrais externos na função de perda ou ponderação na teoria da decisão.
+- ✔ **Verdadeiro** — [Transferência de Domínio]: Minimizar a entropia cruzada $\mathbb{E}_{p}[-\ln q]$ difere da divergência de Kullback-Leibler $D_{\text{KL}}(p \parallel q) = \mathbb{E}_{p}[\ln p - \ln q]$ apenas pela entropia empírica de $p$, que é constante em relação aos parâmetros $\mathbf{w}$.
+:::
+
+---
+
+::: {.callout-note icon=false}
+## Teste 4 — Gradiente e Propriedades de Convexidade
+
+- □ Se para uma observação particular a probabilidade prevista for exatamente igual ao rótulo observado ($\mu_n = y_n = 1$ ou $\mu_n = y_n = 0$), a contribuição desse ponto específico para o vetor gradiente global é estritamente nula.
+- □ Se a matriz de projeto $X \in \mathbb{R}^{N \times D}$ tiver posto coluna completo e todas as probabilidades previstas estiverem no intervalo aberto $0 < \mu_n < 1$, a forma quadrática $\mathbf{v}^T H \mathbf{v}$ é estritamente positiva para qualquer $\mathbf{v} \ne \mathbf{0}$, assegurando que a função de perda não possui mínimos locais.
+- □ Em um cenário de classificação em alta dimensão onde o número de atributos $D$ é estritamente maior que o número de observações $N$ ($D > N$), a matriz Hessiana $H = X^T R X \in \mathbb{R}^{D \times D}$ é estritamente definida positiva e admite inversão analítica sem necessidade de regularização.
+- □ Como a função sigmoide é estritamente crescente, igualar o gradiente da entropia cruzada a zero ($\nabla E(\mathbf{w}) = \mathbf{0}$) resulta em um sistema de equações lineares cuja solução fechada pode ser calculada diretamente por inversão matricial em uma única etapa.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 4 — Gradiente e Propriedades de Convexidade
+
+- ✔ **Verdadeiro** — [Caso Limite]: O gradiente de uma observação é $(\mu_n - y_n)\mathbf{x}_n$. Quando $\mu_n - y_n = 0$, a contribuição para a derivada é o vetor nulo.
+- ✔ **Verdadeiro** — [Caso Limite]: $\mathbf{v}^T H \mathbf{v} = (X\mathbf{v})^T R (X\mathbf{v}) = \sum_n R_{nn} (X\mathbf{v})_n^2$. Com $R_{nn} > 0$ e posto coluna completo, $X\mathbf{v} \ne \mathbf{0}$ para $\mathbf{v} \ne \mathbf{0}$, garantindo convexidade estrita e ausência de mínimos locais.
+- ✗ **Falso** — [Contrafactual]: Se $D > N$, o posto da matriz $X^T R X$ é no máximo $N < D$. A Hessiana é apenas semidefinida positiva e possui autovalores nulos, tornando-se singular e inviabilizando a inversão direta.
+- ✗ **Falso** — [Falsa Equivalência]: Embora a sigmoide seja monótona, ela é não-linear; os parâmetros $\mathbf{w}$ aparecem no expoente da função, tornando a condição $\nabla E(\mathbf{w}) = \mathbf{0}$ um sistema transcendental não-linear sem solução fechada.
+:::
+
+---
+
+::: {.callout-note icon=false}
+## Teste 5 — O Método de Newton-Raphson e o Algoritmo IRLS
+
+- □ A cada iteração do IRLS, os pesos atribuídos às observações na matriz diagonal $R$ são maiores para os pontos situados próximos à fronteira de decisão (onde $\mu_n \approx 0{,}5$) do que para os pontos situados distantes da fronteira (onde $\mu_n \to 0$ ou $\mu_n \to 1$).
+- □ Se multiplicarmos uma coluna de atributos de $X$ por uma constante positiva $c > 0$, o algoritmo de Newton-Raphson requer exatamente o mesmo número de iterações para convergir, pois a direção de Newton é invariante a transformações afins lineares dos atributos.
+- □ Em um problema de roteamento de redes que utiliza regressão logística para prever congestionamento, se a inicialização dos pesos for $\mathbf{w}^{(0)} = \mathbf{0}$, a matriz $R$ inicial tem todos os elementos diagonais idênticos a $0{,}25$, fazendo com que o primeiro passo do IRLS coincida com uma regressão por mínimos quadrados ordinários reescalada.
+- □ O algoritmo IRLS possui taxa de convergência puramente linear, exigindo centenas de iterações para atingir precisão de seis casas decimais mesmo em problemas com pequeno número de parâmetros.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 5 — O Método de Newton-Raphson e o Algoritmo IRLS
+
+- ✔ **Verdadeiro** — [Transferência de Domínio]: $R_{nn} = \mu_n(1-\mu_n)$ atinge seu máximo $0{,}25$ em $\mu_n = 0{,}5$ (pontos incertos perto da fronteira) e decai quadraticamente a zero para pontos muito convictos ($\mu_n \to 0$ ou $1$).
+- ✔ **Verdadeiro** — [Contrafactual]: O método de Newton usa a curvatura de segunda ordem $H^{-1}\nabla E$; transformações afins $X \to X A$ cancelam-se mutuamente entre o gradiente e a inversa da Hessiana, mantendo a invariância do passo.
+- ✔ **Verdadeiro** — [Caso Limite]: Em $\mathbf{w}=\mathbf{0}$, $\mu_n = \sigma(0) = 0{,}5$, logo $R = 0{,}25 I$. O passo de atualização torna-se $(0{,}25 X^T X)^{-1} X^T (0{,}25 \mathbf{z}) = (X^T X)^{-1} X^T \mathbf{z}$, que é analiticamente um passo de Mínimos Quadrados Ordinários.
+- ✗ **Falso** — [Falsa Equivalência]: O método de Newton-Raphson possui taxa de convergência quadrática na vizinhança do ótimo ($\|e_{t+1}\| \le C \|e_t\|^2$), atingindo precisão extrema em tipicamente 5 a 8 iterações.
+:::
+
+---
+
+::: {.callout-note icon=false}
+## Teste 6 — Modelos Lineares Generalizados (GLMs) e a Família Exponencial
+
+- □ A função de ligação canônica é definida como aquela que iguala o parâmetro natural canônico $\eta$ diretamente à combinação linear dos atributos: $\eta = \mathbf{w}^T\mathbf{x}$.
+- □ No caso da distribuição Gaussiana com variância conhecida e fixa $\sigma^2$, o parâmetro natural é $\eta = \mu$, o que faz com que a função de ligação canônica seja a identidade, recuperando a Regressão Linear por Mínimos Quadrados Ordinários como um caso particular de GLM.
+- □ Em um modelo de Regressão de Poisson para contagem de acessos a um servidor ($Y \in \{0, 1, 2, \dots\}$), a função de ligação canônica é a função logit, produzindo um preditor linear idêntico ao da regressão logística.
+- □ O Teorema da Ligação Canônica garante que para qualquer distribuição da Família Exponencial, desde que adotada a ligação canônica, o gradiente do negativo da log-verossimilhança assume universalmente a forma $X^T(\boldsymbol\mu - \mathbf{y})$.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 6 — Modelos Lineares Generalizados (GLMs) e a Família Exponencial
+
+- ✔ **Verdadeiro** — [Caso Limite]: Por definição de Nelder & Wedderburn (1972) e PRML §4.3.6, a ligação canônica ocorre quando o parâmetro natural canônico coincide com a ativação linear: $\eta = \mathbf{w}^T\mathbf{x}$.
+- ✔ **Verdadeiro** — [Transferência de Domínio]: Para a Gaussiana homocedástica, $\eta = \mu/\sigma^2 \propto \mu$, logo a ligação canônica é $\eta = \mu$, unificando a regressão linear da Aula 5 ao espectro dos GLMs.
+- ✗ **Falso** — [Falsa Equivalência]: A distribuição de Poisson possui suporte em inteiros não-negativos; sua ligação canônica é a função logarítmica $\eta = \ln \mu$ (e ativação exponencial $\mu = e^{\mathbf{w}^T\mathbf{x}}$), e não a logit.
+- ✔ **Verdadeiro** — [Caso Limite]: Como demonstrado analiticamente em PRML §4.3.6, a derivada da cumilante $b'(\eta)$ cancela a derivada da ligação canônica, produzindo universalmente o gradiente residual $\nabla E = X^T(\boldsymbol\mu - \mathbf{y})$.
+:::
+
+---
+
+::: {.callout-note icon=false}
+## Teste 7 — A Patologia da Separação Linear Perfeita no MLE
+
+- □ Se multiplicarmos o vetor separador $\mathbf{w}^*$ por um escalar $k \to +\infty$, a probabilidade prevista $\mu_n$ para cada ponto de treino da classe $1$ converge para $1{,}0$, e a função de perda de entropia cruzada converge para zero absoluto.
+- □ No limite de separação perfeita, como a perda é minimizada apenas quando $\|\mathbf{w}\| \to \infty$, o estimador de máxima verossimilhança padrão não atinge um ponto de mínimo finito no espaço $\mathbb{R}^D$, gerando instabilidade numérica por saturação da matriz Hessiana.
+- □ Em um conjunto de dados perfeitamente separável, a fronteira geométrica de decisão onde a probabilidade prevista é $p = 0{,}5$ deixa de existir no espaço de entrada, pois a função sigmoide colapsa em uma constante.
+- □ A ocorrência de separabilidade perfeita no treinamento assegura que o modelo de máxima verossimilhança terá generalização ótima e variância nula em novos dados de teste futuros.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 7 — A Patologia da Separação Linear Perfeita no MLE
+
+- ✔ **Verdadeiro** — [Caso Limite]: Como $\sigma(k a) \to 1$ para $a > 0$ e $\sigma(k a) \to 0$ para $a < 0$, todos os termos $-[y_n \ln \mu_n + (1-y_n)\ln(1-\mu_n)]$ tendem a zero quando $k \to \infty$.
+- ✔ **Verdadeiro** — [Caso Limite]: O infímo da perda ocorre no infinito assintótico; nenhum ponto finito em $\mathbb{R}^D$ anula o gradiente, e as probabilidades saturam em 0 ou 1, zerando a matriz $R$ e colapsando o IRLS.
+- ✗ **Falso** — [Contrafactual]: O conjunto de pontos onde $\mathbf{w}^T\mathbf{x} = 0$ é exatamente o mesmo hiperplano geométrico que $(k\mathbf{w})^T\mathbf{x} = 0$. A fronteira continua existindo, mas a transição em torno dela vira uma descontinuidade degrau.
+- ✗ **Falso** — [Falsa Equivalência]: Separabilidade perfeita no treino frequentemente reflete overfitting em amostras pequenas. O modelo torna-se superconfiante e prevê probabilidades extremas (0 ou 1) que geram perdas catastróficas em pontos de teste ligeiramente ruidosos.
+:::
+
+---
+
+::: {.callout-note icon=false}
+## Teste 8 — Generalização Multiclasse e a Função Softmax
+
+- □ A função Softmax é a generalização multivariada natural da função sigmoide logística, garantindo que as probabilidades estimadas para as $K$ classes sejam estritamente positivas e somem exatamente $1{,}0$ para qualquer vetor de entrada $\mathbf{x}$.
+- □ Se adicionarmos um vetor constante arbitrário $\mathbf{c}$ a todos os vetores de pesos $\mathbf{w}_k$ ($\mathbf{w}_k' = \mathbf{w}_k + \mathbf{c}$ para todo $k=1,\dots,K$), as probabilidades previstas pela função Softmax para todas as classes permanecem rigorosamente inalteradas.
+- □ No limite em que a diferença de ativação entre uma classe particular e as demais tende a $+\infty$, a saída da Softmax aproxima-se de uma função degrau *arg max* determinística que atribui probabilidade $1{,}0$ à classe vencedora.
+- □ Como existem $K$ classes, as fronteiras de decisão par a par que separam duas classes quaisquer $k$ e $j$ no espaço dos atributos são curvas hiperbólicas não-lineares de segunda ordem.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 8 — Generalização Multiclasse e a Função Softmax
+
+- ✔ **Verdadeiro** — [Caso Limite]: Por construção, $\sum_{k=1}^K \frac{e^{a_k}}{\sum_j e^{a_j}} = 1$ e $e^{a_k} > 0$ para qualquer $a_k \in \mathbb{R}$, preservando a validade de uma distribuição categórica de probabilidades.
+- ✔ **Verdadeiro** — [Contrafactual]: $\frac{e^{(\mathbf{w}_k + \mathbf{c})^T\mathbf{x}}}{\sum_j e^{(\mathbf{w}_j + \mathbf{c})^T\mathbf{x}}} = \frac{e^{\mathbf{w}_k^T\mathbf{x}} e^{\mathbf{c}^T\mathbf{x}}}{\sum_j e^{\mathbf{w}_j^T\mathbf{x}} e^{\mathbf{c}^T\mathbf{x}}} = \frac{e^{\mathbf{w}_k^T\mathbf{x}}}{\sum_j e^{\mathbf{w}_j^T\mathbf{x}}}$. O fator $e^{\mathbf{c}^T\mathbf{x}}$ cancela-se identicamente no numerador e denominador.
+- ✔ **Verdadeiro** — [Caso Limite]: A função Softmax atua como uma aproximação suave e diferenciável do operador *arg max*; quando uma ativação domina as outras, sua probabilidade colapsa para 1.
+- ✗ **Falso** — [Falsa Equivalência]: A fronteira de decisão entre as classes $k$ e $j$ é o conjunto onde $p(C_k\mid\mathbf{x}) = p(C_j\mid\mathbf{x})$, o que equivale a $\mathbf{w}_k^T\mathbf{x} = \mathbf{w}_j^T\mathbf{x} \iff (\mathbf{w}_k - \mathbf{w}_j)^T\mathbf{x} = 0$, que é uma equação linear descrevendo um hiperplano reto no espaço dos atributos.
+:::

@@ -1,0 +1,1053 @@
+---
+title: "Regressão Logística e Modelos Lineares Generalizados (GLMs)"
+subtitle: "Aula 6 — Classificação Paramétrica, Entropia Cruzada e a Família Exponencial"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-09-21"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    fig-width: 6
+    fig-height: 3.5
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+jupyter: homepage
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from scipy import stats, optimize
+from sklearn.linear_model import LogisticRegression
+
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()  # evita o aviso "unauthenticated requests"
+from datasets import disable_progress_bar
+disable_progress_bar()  # evita a barra de progresso do download
+from datasets import load_dataset
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({
+    "figure.dpi": 130,
+    "font.size": 11,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "legend.frameon": True,
+    "legend.framealpha": 0.9,
+})
+
+rng = np.random.default_rng(20260921)
+
+# --- Paleta visual consistente com o curso --------------------------
+COR_AZUL    = "#1B365D"  # Azul institucional
+COR_LARANJA = "#D9531E"  # Laranja de contraste
+COR_VERM    = "#C0392B"  # Vermelho de erro/destaque
+COR_VERDE   = "#27AE60"  # Verde de acerto/probabilidade
+COR_CINZA   = "#7F8C8D"  # Cinza de apoio
+
+# Geração de dataset sintético para ilustração pedagógica
+# Criamos dois clusters bem definidos para evidenciar a falha do OLS e o sucesso da Logística
+X_synth = np.vstack([
+    rng.normal(loc=[20, 30], scale=[5, 5], size=(400, 2)),
+    rng.normal(loc=[50, 50], scale=[5, 5], size=(400, 2))
+])
+y_synth = np.array([0]*400 + [1]*400)
+
+df_adult = pd.DataFrame(X_synth, columns=["age", "hours.per.week"])
+df_adult["y"] = y_synth
+```
+
+# Revisão e Introdução
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Na Aula 5, estabelecemos a base paramétrica do aprendizado supervisionado contínuo: sob a suposição de ruído aditivo gaussiano homocedástico $\epsilon \sim \mathcal{N}(0, \sigma^2)$, o modelo estatístico assume que o alvo $Y$ condicionado às características $\mathbf{x}$ segue uma distribuição normal com média linear $Y \mid X=\mathbf{x} \sim \mathcal{N}(\mathbf{w}^T\mathbf{x}, \sigma^2)$. Provamos analiticamente que maximizar a log-verossimilhança conjunta sob independência equivale rigorosamente a minimizar a soma dos quadrados dos resíduos (RSS). O estimador de Mínimos Quadrados Ordinários (OLS) é, portanto, o estimador de Máxima Verossimilhança (MLE) do hiperplano ótimo: $\hat{\mathbf{w}} = (X^T X)^{-1}X^T \mathbf{y}$.
+
+Hoje avançamos da regressão contínua para a **classificação paramétrica**. O objetivo agora é prever um rótulo categórico binário $y \in \{0, 1\}$. No entanto, em vez de aplicar um corte rígido determinístico ou utilizar modelos não-paramétricos como árvores de decisão (Aula 3), nosso propósito é estimar a probabilidade a posteriori de classe $p(C_1 \mid \mathbf{x}) = \mathbb{E}[Y \mid \mathbf{x}]$ mantendo a simplicidade e a interpretabilidade de uma combinação linear dos atributos.
+
+O obstáculo imediato é conceitual: um hiperplano linear $\mathbf{w}^T\mathbf{x}$ projeta valores ao longo de toda a reta real $(-\infty, +\infty)$, enquanto probabilidades requerem estritamente o intervalo unitário $[0, 1]$. Tentar ajustar uma reta de regressão linear diretamente aos rótulos $0$ e $1$ gera probabilidades espúrias (negativas ou maiores que $1$) e sofre de sensibilidade extrema a observações distantes da fronteira. A solução estatisticamente principled consiste em trocar a distribuição de ruído gaussiana pela distribuição de **Bernoulli**, e mapear a combinação linear para o intervalo de probabilidades através de uma função de ativação estritamente monotônica: a **função sigmoide logística**.
+
+Hoje responderemos a quatro perguntas centrais:
+
+1. **Por que a regressão linear falha** ao ser aplicada a problemas de classificação com rótulos binários?
+2. **Como a distribuição de Bernoulli induz a perda de Entropia Cruzada** a partir do princípio da Máxima Verossimilhança?
+3. **Por que a regressão logística não possui solução fechada**, mas pode ser resolvida de maneira exata e eficiente por Newton-Raphson via Mínimos Quadrados Ponderados Iterativos (IRLS)?
+4. **Qual é o arcabouço unificador dos Modelos Lineares Generalizados (GLMs)** que conecta regressão linear, regressão logística e redes neurais numa mesma família estatística?
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Revisão da Aula 5: Da Reta ao Máximo de Verossimilhança
+
+- **Modelo Normal:** $Y \mid X=\mathbf{x} \sim \mathcal{N}(\mathbf{w}^T\mathbf{x}, \sigma^2)$ supõe resposta contínua e ruído simétrico homocedástico.
+- **Teorema Fundamental:** Sob ruído gaussiano, maximizar a verossimilhança equivale analiticamente a minimizar resíduos quadráticos:
+  $$\hat{\mathbf{w}}_{\text{MLE}} = \arg\max \ln p(\mathbf{y}\mid X, \mathbf{w}) = \arg\min \| \mathbf{y} - X\mathbf{w} \|^2 = \hat{\mathbf{w}}_{\text{OLS}}$$
+- **Solução Fechada:** Obtida diretamente pelas equações normais: $\hat{\mathbf{w}} = (X^T X)^{-1}X^T \mathbf{y}$.
+
+. . .
+
+- **A Transição de Hoje:** Como prever alvos discretos $y \in \{0, 1\}$ preservando o rigor de verossimilhança e a estrutura linear?
+- **O Desafio:** Probabilidades pertencem ao intervalo fechado $[0, 1]$, mas combinações lineares cobrem toda a reta real $(-\infty, +\infty)$.
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### O Problema Motivador: Tentando Usar Mínimos Quadrados em Classificação
+
+Para constatar concretamente o fracasso de Mínimos Quadrados em classificação binária, examinamos o dataset real **Adult Census Income**. Nosso alvo $y$ indica se uma pessoa ganha mais de 50 mil dólares ao ano ($y=1$) ou não ($y=0$). Se ajustarmos uma regressão linear comum $y = w_0 + w_1 \cdot \text{idade}$, obtemos a reta da figura abaixo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Mínimos Quadrados em Rótulos 0 e 1
+
+- Ajustar uma reta de regressão diretamente sobre rótulos $y \in \{0, 1\}$ gera deformações estruturais graves:
+- **Previsões Fora do Intervalo:** Para idades jovens ou avançadas, a reta extrapola para valores sem sentido físico ou probabilístico.
+- **Distorção por Outliers:** Observações com $y=1$ distantes da fronteira puxam a inclinação da reta, deteriorando a decisão.
+:::
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+# Subamostra representativa para ilustração
+sub_idx = rng.choice(len(df_adult), size=800, replace=False)
+df_sub = df_adult.iloc[sub_idx].copy()
+
+# Ajuste linear comum
+p_lin = np.polyfit(df_adult["age"], df_adult["y"], 1)
+x_grid = np.linspace(15, 90, 300)
+y_lin = np.polyval(p_lin, x_grid)
+
+# Ajuste logístico
+clf_age = LogisticRegression()
+clf_age.fit(df_adult[["age"]], df_adult["y"])
+y_log = clf_age.predict_proba(x_grid.reshape(-1, 1))[:, 1]
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
+
+# Painel 1: Regressao Linear
+jitter = rng.normal(0, 0.03, size=len(df_sub))
+ax1.scatter(df_sub["age"], df_sub["y"] + jitter, alpha=0.25, color=COR_AZUL, s=18, label="Indivíduos (0 ou 1)")
+ax1.plot(x_grid, y_lin, color=COR_VERM, lw=2.5, label=f"Reta OLS: {p_lin[1]:.2f} + {p_lin[0]:.4f}x")
+ax1.axhline(0, color="black", ls="--", alpha=0.5)
+ax1.axhline(1, color="black", ls="--", alpha=0.5)
+ax1.axhline(0.5, color=COR_CINZA, ls=":", alpha=0.7, label="Limiar p=0.5")
+ax1.set_title("Regressão Linear: Extrapolação e Risco")
+ax1.set_xlabel("Idade (anos)")
+ax1.set_ylabel("Valor Previsto / Probabilidade")
+ax1.legend(loc="upper left")
+ax1.set_ylim(-0.2, 1.2)
+
+# Painel 2: Regressao Logistica
+ax2.scatter(df_sub["age"], df_sub["y"] + jitter, alpha=0.25, color=COR_AZUL, s=18, label="Indivíduos (0 ou 1)")
+ax2.plot(x_grid, y_log, color=COR_VERDE, lw=2.5, label="Sigmoide Logística")
+ax2.axhline(0, color="black", ls="--", alpha=0.5)
+ax2.axhline(1, color="black", ls="--", alpha=0.5)
+ax2.axhline(0.5, color=COR_CINZA, ls=":", alpha=0.7, label="Limiar p=0.5")
+ax2.set_title("Regressão Logística: Probabilidade Estrita [0, 1]")
+ax2.set_xlabel("Idade (anos)")
+ax2.legend(loc="upper left")
+
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A inspeção visual revela duas falhas capitais na reta linear:
+
+1. **Violação das leis de probabilidade:** Para indivíduos muito jovens (por exemplo, abaixo de 10 anos na extrapolação matemática da reta), a reta prevê valores negativos. Em amostras com grande dispersão, valores superiores a $1{,}0$ ocorrem rotineiramente.
+2. **Penalização assimétrica irracional:** Um indivíduo de 75 anos que ganha $>50\text{K}$ tem rótulo $y=1$. A reta OLS prevê cerca de $0{,}51$. No entanto, se tivéssemos um ponto extremo com $y=1$ e valor previsto $1{,}30$, o resíduo seria $1 - 1{,}30 = -0{,}30$, e o quadrado desse erro penalizaria a reta, forçando-a a mudar de inclinação simplesmente porque um ponto foi "correto demais". Mínimos quadrados penaliza previsões com erro quadrático mesmo quando elas apontam com extrema convicção para o lado correto da fronteira.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Quatro Perguntas de Hoje
+
+1. **Por que Mínimos Quadrados falha em classificação?** Quais são as inconsistências estatísticas e analíticas de ajustar uma reta a dados binários?
+. . .
+2. **Como a distribuição de Bernoulli governa a classificação?** De onde surge a perda de Entropia Cruzada Binária?
+. . .
+3. **Como otimizar a perda sem solução analítica fechada?** Por que a perda é estritamente convexa e como o algoritmo IRLS atinge convergência quadrática?
+. . .
+4. **O que é o arcabouço unificador dos GLMs?** Como funções de ligação canônica conectam regressão linear, regressão logística e modelos exponenciais?
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Pausa Ativa 1 — Regressão Linear Aplicada a Rótulos Binários
+
+A reta de mínimos quadrados ajustada sobre dados $y \in \{0, 1\}$ é frequentemente chamada de "Modelo de Probabilidade Linear" na econometria. Pense sobre os pressupostos estatísticos do erro $e_i = y_i - \hat{y}_i$.
+
+- □ Se a variável de resposta $y_i$ assume exclusivamente os valores $0$ ou $1$, os resíduos da regressão linear $e_i = y_i - \mathbf{w}^T\mathbf{x}_i$ não podem ter distribuição gaussiana, pois assumem apenas dois valores condicionais discretos para cada $\mathbf{x}_i$.
+- □ Como a variância da distribuição de Bernoulli é dada por $\mu(1 - \mu)$, a variância do termo de ruído em dados binários depende diretamente de $\mathbf{x}_i$, violando a suposição de homocedasticidade exigida pelo Teorema de Gauss-Markov.
+- □ A inclusão de um atributo extremo perfeitamente classificado (um indivíduo de idade avançada que ganha muito acima de 50 mil) não afeta a inclinação da reta de regressão linear, pois seu resíduo é interpretado pelo modelo como acerto perfeito.
+- □ Mapear os valores contínuos da reta linear através de uma função que simplesmente trunca previsões menores que $0$ em $0$ e maiores que $1$ em $1$ recupera a equivalência com a Máxima Verossimilhança de Bernoulli.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Pausa Ativa 1 — Limites do Modelo Linear em Classificação
+
+Pense sobre o comportamento do resíduo e da variância ao forçar uma reta contínua sobre alvos binários.
+
+- □ Se $y_i \in \{0, 1\}$, os resíduos $e_i = y_i - \mathbf{w}^T\mathbf{x}_i$ nunca podem ser gaussianos, pois assumem apenas dois valores condicionais para cada ponto.
+- □ A variância de uma resposta binária é $\mu(1-\mu)$, o que implica heterocedasticidade intrínseca dependente de $\mathbf{x}_i$.
+- □ Outliers perfeitamente classificados não distorcem a reta de regressão linear.
+- □ Truncar a saída da reta no intervalo $[0, 1]$ resolve a inconsistência e recupera o estimador de Máxima Verossimilhança.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Pausa Ativa 1 — Resolução
+
+- ✔ Os resíduos são binomiais/Bernoulli pontuais; assumem apenas $1 - \mathbf{w}^T\mathbf{x}_i$ ou $-\mathbf{w}^T\mathbf{x}_i$, jamais gerando uma densidade gaussiana contínua.
+- ✔ Como a variância depende da probabilidade média local $\mu(\mathbf{x})$, a variabilidade dos erros muda ponto a ponto (heterocedasticidade severa).
+- ✗ Falso. O resíduo quadrático penaliza previsões distantes do valor 1 (por exemplo, $\hat{y}=1{,}4$ gera erro $0{,}16$), rotacionando a reta e empurrando a fronteira de decisão erroneamente.
+- ✗ Falso. A simples truncagem não gera uma distribuição probabilística coerente nem restaura a função de verossimilhança apropriada.
+:::
+:::
+
+# Intuição — A Transformação Sigmoide e a Razão de Chances
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para construir um modelo estatístico consistente, precisamos manter duas propriedades desejáveis:
+
+1. **A simplicidade de representação:** Queremos continuar operando com uma combinação linear de atributos $a(\mathbf{x}) = \mathbf{w}^T\mathbf{x} = w_0 + w_1 x_1 + \dots + w_D x_D$, chamada de **ativação linear**;
+2. **A validade probabilística:** Queremos que o modelo produza uma probabilidade $\mu(\mathbf{x}) = p(C_1 \mid \mathbf{x}) \in (0, 1)$.
+
+A conexão entre a reta real e o intervalo $(0, 1)$ emerge naturalmente da ideia de **chances** (*odds*). Em probabilidade, as chances a favor de um evento são definidas pela razão entre a probabilidade de ocorrência e a probabilidade de não-ocorrência:
+$$\text{odds} = \frac{p}{1 - p}$$
+
+Se $p = 0{,}8$, as chances são de $4$ para $1$ ($\text{odds} = 4$). Se $p = 0{,}2$, as chances são de $0{,}25$. Enquanto $p$ varia no intervalo $(0, 1)$, as chances variam em $(0, +\infty)$. Se tomarmos o logaritmo natural das chances — quantidade conhecida em estatística como **logit**:
+$$a = \text{logit}(p) = \ln \left( \frac{p}{1 - p} \right)$$
+constatamos que o logit varia livremente em todo o domínio real $(-\infty, +\infty)$. Se $p \to 0$, $\ln(p/(1-p)) \to -\infty$; se $p \to 1$, $\ln(p/(1-p)) \to +\infty$; e se $p = 0{,}5$, as chances são unitárias e o logit é exatamente $\ln(1) = 0$.
+
+A hipótese fundacional da Regressão Logística é postular que **o logaritmo das chances é uma função linear das características**:
+$$\ln \left( \frac{\mu(\mathbf{x})}{1 - \mu(\mathbf{x})} \right) = \mathbf{w}^T\mathbf{x}$$
+
+Para obter a probabilidade $\mu(\mathbf{x})$ a partir da ativação linear $a = \mathbf{w}^T\mathbf{x}$, basta inverter a função logit:
+$$\frac{\mu}{1 - \mu} = e^a \implies \mu = e^a(1 - \mu) \implies \mu(1 + e^a) = e^a \implies \mu = \frac{e^a}{1 + e^a} = \frac{1}{1 + e^{-a}}$$
+
+Essa função inversa é a célebre **função sigmoide logística** (ou sigmoide padrão):
+$$\sigma(a) \equiv \frac{1}{1 + e^{-a}}$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Das Chances (*Odds*) à Função Sigmoide
+
+- **Chances (*Odds*):** Razão entre a probabilidade do evento e seu complemento:
+  $$\text{odds} = \frac{p}{1 - p} \in (0, +\infty)$$
+- **Logit (Log-Odds):** Logaritmo natural das chances, variando em toda a reta real:
+  $$a = \text{logit}(p) = \ln\left(\frac{p}{1-p}\right) \in (-\infty, +\infty)$$
+
+. . .
+
+- **Postulado Linear:** Assumimos que o log-odds é modelado como uma combinação linear de atributos:
+  $$\ln\left(\frac{\mu(\mathbf{x})}{1 - \mu(\mathbf{x})}\right) = \mathbf{w}^T\mathbf{x}$$
+- **A Inversão:** Isolando $\mu(\mathbf{x})$ chegamos à **função sigmoide logística**:
+  $$\mu(\mathbf{x}) = \sigma(\mathbf{w}^T\mathbf{x}) = \frac{1}{1 + e^{-\mathbf{w}^T\mathbf{x}}}$$
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### Propriedades Analíticas da Sigmoide
+
+A função sigmoide possui duas propriedades analíticas cruciais que simplificam enormemente a matemática da regressão logística e de redes neurais:
+
+1. **Simetria:**
+   $$\sigma(-a) = \frac{1}{1 + e^a} = \frac{e^{-a}}{e^{-a}(1 + e^a)} = \frac{e^{-a}}{1 + e^{-a}} = 1 - \frac{1}{1 + e^{-a}} = 1 - \sigma(a)$$
+   Isso garante que $p(C_0 \mid \mathbf{x}) = 1 - \sigma(\mathbf{w}^T\mathbf{x}) = \sigma(-\mathbf{w}^T\mathbf{x})$, conferindo tratamento estritamente simétrico a ambas as classes.
+
+2. **Derivada Notável:**
+   A derivada de $\sigma(a)$ em relação a $a$ expressa-se elegantemente em termos da própria função:
+   $$\frac{d\sigma}{da} = \frac{d}{da}(1 + e^{-a})^{-1} = -(1 + e^{-a})^{-2}(-e^{-a}) = \frac{1}{1 + e^{-a}} \cdot \frac{e^{-a}}{1 + e^{-a}} = \sigma(a)(1 - \sigma(a))$$
+   Essa identidade é a responsável direta pelo cancelamento algébrico que recupera a elegância do gradiente no ajuste por máxima verossimilhança.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Propriedades Matemáticas da Sigmoide (1)
+
+- **Simetria Reflexiva:**
+  $$\sigma(-a) = 1 - \sigma(a)$$
+  Garante que a probabilidade da classe complementar seja simplesmente $\sigma(-\mathbf{w}^T\mathbf{x})$.
+
+. . .
+
+- **Derivada Notável:**
+  $$\frac{d\sigma(a)}{da} = \sigma(a)(1 - \sigma(a))$$
+  - O valor máximo da derivada ocorre em $a=0$ (onde $\sigma(0)=0{,}5$ e $\sigma'(0) = 0{,}25$).
+  - Para $|a| \gg 0$, a derivada tende exponencialmente a zero (saturação).
+
+## Propriedades Matemáticas da Sigmoide (2)
+
+- **Fronteira de Decisão:**
+  $$\sigma(\mathbf{w}^T\mathbf{x}) = 0{,}5 \iff \mathbf{w}^T\mathbf{x} = 0$$
+  A fronteira que separa as decisões de classe no espaço de entrada é sempre um hiperplano linear.
+:::
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+a_grid = np.linspace(-6, 6, 300)
+sig = 1.0 / (1.0 + np.exp(-a_grid))
+dsig = sig * (1.0 - sig)
+
+fig, ax = plt.subplots(figsize=(8, 3.8))
+ax.plot(a_grid, sig, color=COR_AZUL, lw=2.5, label=r"Sigmoide $\sigma(a) = \frac{1}{1 + e^{-a}}$")
+ax.plot(a_grid, dsig, color=COR_LARANJA, lw=2.0, ls="--", label=r"Derivada $\sigma'(a) = \sigma(a)(1 - \sigma(a))$")
+ax.axhline(0.5, color=COR_CINZA, ls=":", alpha=0.7)
+ax.axvline(0, color="black", ls=":", alpha=0.5)
+ax.set_title("A Sigmoide Logística e sua Derivada Notável")
+ax.set_xlabel(r"Ativação Linear $a = \mathbf{w}^T\mathbf{x}$")
+ax.set_ylabel("Valor")
+ax.set_ylim(-0.05, 1.05)
+ax.legend(loc="center left")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+# A Verossimilhança de Bernoulli e a Entropia Cruzada
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Tendo estabelecido que a saída do modelo $\mu_n = \sigma(\mathbf{w}^T\mathbf{x}_n)$ representa a probabilidade condicional $p(y_n = 1 \mid \mathbf{x}_n, \mathbf{w})$, procedemos agora ao desenvolvimento formal do estimador pelo princípio da **Máxima Verossimilhança**, seguindo a formulação do PRML (§4.3.2).
+
+### Premissas Formais do Modelo
+
+1. **Rótulos Binários:** As variáveis de resposta observadas são binárias: $y_n \in \{0, 1\}$ para $n = 1, \dots, N$.
+2. **Independência Amostral:** Condicionado aos atributos $\mathbf{x}_n$ e aos pesos $\mathbf{w}$, as observações são estatisticamente independentes.
+3. **Distribuição Condicional de Bernoulli:** Para cada observação individual, a probabilidade condicional segue estritamente a lei de Bernoulli:
+   $$Y_n \mid \mathbf{x}_n, \mathbf{w} \sim \text{Bernoulli}(\mu_n), \quad \text{onde } \mu_n = \sigma(\mathbf{w}^T\mathbf{x}_n)$$
+
+Sob a distribuição de Bernoulli, a função de massa de probabilidade de uma única observação $y_n$ pode ser escrita de forma algébrica compacta e unificada:
+$$p(y_n \mid \mathbf{w}) = \mu_n^{y_n} (1 - \mu_n)^{1 - y_n}$$
+Observe a elegância dessa expressão: quando $y_n = 1$, o segundo termo se anula $(1-\mu_n)^0 = 1$ e obtemos $\mu_n$; quando $y_n = 0$, o primeiro termo se anula e resta $1 - \mu_n$.
+
+### Construção da Verossimilhança Conjunta
+
+Como as observações são assumidas condicionalmente independentes, a função de verossimilhança conjunta de todo o conjunto de dados $\mathcal{D} = \{(\mathbf{x}_n, y_n)\}_{n=1}^N$ é o produtório das probabilidades individuais:
+$$p(\mathbf{y} \mid X, \mathbf{w}) = \prod_{n=1}^N p(y_n \mid \mathbf{w}) = \prod_{n=1}^N \mu_n^{y_n} (1 - \mu_n)^{1 - y_n}$$
+
+Aplicando o logaritmo natural para obter a log-verossimilhança $\ln L(\mathbf{w})$:
+$$\ln p(\mathbf{y} \mid X, \mathbf{w}) = \sum_{n=1}^N \left[ y_n \ln \mu_n + (1 - y_n) \ln(1 - \mu_n) \right]$$
+
+### A Perda de Entropia Cruzada Negativa
+
+Em aprendizado de máquina e otimização, convenciona-se formular problemas computacionais como a **minimização** de uma função de perda (ou erro) $E(\mathbf{w})$. Tomando o negativo da log-verossimilhança (NLL — *Negative Log-Likelihood*), definimos a **função de erro de Entropia Cruzada Binária** (*Binary Cross-Entropy*):
+$$E(\mathbf{w}) = -\ln p(\mathbf{y} \mid X, \mathbf{w}) = -\sum_{n=1}^N \left[ y_n \ln \mu_n + (1 - y_n) \ln(1 - \mu_n) \right]$$
+
+Esta função possui uma interpretação imediata à luz da Teoria da Informação (estudada na Aula 3): ela mede a divergência de Kullback-Leibler entre a distribuição empírica dos dados $p(y_n)$ e a distribuição prevista pelo modelo $q(y_n) = \mu_n$. Se o modelo prevê $\mu_n = 0{,}99$ para um ponto com $y_n = 1$, a perda é ínfima ($-\ln(0{,}99) \approx 0{,}01$). Se o modelo comete um erro catastrófico prevendo $\mu_n \to 0$ para um ponto cujo rótulo é $y_n = 1$, a perda explode para $-\ln(\mu_n) \to +\infty$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Verossimilhança de Bernoulli
+
+- **Premissa Fundamental:** Cada rótulo segue uma distribuição de Bernoulli condicional:
+  $$p(y_n \mid \mathbf{w}) = \mu_n^{y_n} (1 - \mu_n)^{1 - y_n}, \quad \text{onde } \mu_n = \sigma(\mathbf{w}^T\mathbf{x}_n)$$
+- **Verossimilhança Conjunta (sob independência):**
+  $$p(\mathbf{y} \mid X, \mathbf{w}) = \prod_{n=1}^N \mu_n^{y_n} (1 - \mu_n)^{1 - y_n}$$
+
+. . .
+
+- **Log-Verossimilhança:**
+  $$\ln p(\mathbf{y} \mid X, \mathbf{w}) = \sum_{n=1}^N \left[ y_n \ln \mu_n + (1 - y_n) \ln(1 - \mu_n) \right]$$
+- **Função de Perda de Entropia Cruzada ($E(\mathbf{w}) = -\ln L$, penaliza infinitamente o erro):**
+  $$E(\mathbf{w}) = -\sum_{n=1}^N \left[ y_n \ln \mu_n + (1 - y_n) \ln(1 - \mu_n) \right]$$.
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Pausa Ativa 2 — A Verossimilhança de Bernoulli e a Entropia Cruzada
+
+Considere a função de perda $E(\mathbf{w}) = -\sum_{n=1}^N [y_n \ln \mu_n + (1 - y_n)\ln(1 - \mu_n)]$, onde $\mu_n = \sigma(\mathbf{w}^T\mathbf{x}_n)$.
+
+- □ Se multiplicarmos todos os rótulos $y_n$ por uma constante arbitrária $c > 0$, a perda de entropia cruzada continua sendo uma log-verossimilhança estritamente válida para uma distribuição de probabilidade normalizada.
+- □ No caso de uma amostra com desbalanceamento severo (exemplo: 99% dos dados pertencem à classe $0$), o preditor ingênuo $\mu_n = 0{,}01$ constante para todos os pontos atinge perda finita e baixa, mas reflete apenas a entropia da priori de classe.
+- □ Em um sistema de detecção de fraudes financeiras onde falsos negativos custam 50 vezes mais que falsos positivos, a minimização direta da perda de entropia cruzada clássica ajusta automaticamente os pesos para refletir essa assimetria de custo de decisão.
+- □ A perda de entropia cruzada binária é estritamente equivalente à soma dos erros quadráticos quando $\mu_n$ se aproxima de $0{,}5$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Pausa Ativa 2 — Entropia Cruzada e Propriedades
+
+Analise o comportamento probabilístico da perda de entropia cruzada.
+
+- □ Escalar rótulos binários por uma constante $c \ne 1$ preserva a validade de verossimilhança probabilística.
+- □ Com desbalanceamento severo (ex: 99% zeros), o modelo ingênuo $\mu_n = 0{,}01$ obtém perda baixa sem aprender correlação com $\mathbf{x}$.
+- □ A entropia cruzada padrão incorpora nativamente matrizes de custo assimétrico entre erros Tipo I e Tipo II.
+- □ A entropia cruzada é matematicamente idêntica à soma de resíduos quadráticos em torno de $\mu = 0{,}5$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Pausa Ativa 2 — Resolução
+
+- ✗ Falso. A distribuição de Bernoulli só existe e normaliza para $y \in \{0, 1\}$; trocar os rótulos quebra a soma unitária do espaço amostral.
+- ✔ A perda reflete $-\ln(0{,}99) \approx 0{,}01$ nats por ponto; o modelo atinge erro pequeno apenas reproduzindo a priori de classe, sem discernir atributos.
+- ✗ Falso. A verossimilhança pura estima as probabilidades verdadeiras $p(C_1\mid\mathbf{x})$; custos assimétricos exigem teoria da decisão na escolha do limiar ou verossimilhança ponderada.
+- ✗ Falso. Uma aproximação de Taylor de segunda ordem em torno de $\mu=0{,}5$ lembra um termo quadrático, mas as perdas permanecem analiticamente distintas em todo o domínio.
+:::
+:::
+
+# Otimização: Gradiente, Convexidade e IRLS
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Na Aula 5, encontramos o ponto de mínimo igualando o gradiente de $\text{RSS}(\mathbf{w})$ a zero, obtendo uma equação linear fechada. Veremos agora por que isso não é possível em Regressão Logística, como calcular o gradiente de forma analítica e por que a geometria da função de erro garante convergência robusta.
+
+### Derivação do Gradiente Passo a Passo
+
+Queremos calcular o vetor gradiente $\nabla E(\mathbf{w}) = \frac{\partial E}{\partial \mathbf{w}}$. A função de erro para um único ponto $n$ é:
+$$E_n(\mathbf{w}) = -\left[ y_n \ln \mu_n + (1 - y_n) \ln(1 - \mu_n) \right]$$
+onde $\mu_n = \sigma(a_n)$ e a ativação linear é $a_n = \mathbf{w}^T\mathbf{x}_n$. Pela regra da cadeia multivariada:
+$$\frac{\partial E_n}{\partial \mathbf{w}} = \frac{\partial E_n}{\partial \mu_n} \cdot \frac{\partial \mu_n}{\partial a_n} \cdot \frac{\partial a_n}{\partial \mathbf{w}}$$
+
+Calculamos cada termo separadamente:
+
+1. **Derivada da perda em relação à probabilidade $\mu_n$:**
+   $$\frac{\partial E_n}{\partial \mu_n} = -\left[ \frac{y_n}{\mu_n} - \frac{1 - y_n}{1 - \mu_n} \right] = -\frac{y_n(1 - \mu_n) - (1 - y_n)\mu_n}{\mu_n(1 - \mu_n)} = \frac{\mu_n - y_n}{\mu_n(1 - \mu_n)}$$
+
+2. **Derivada da probabilidade em relação à ativação $a_n$ (derivada da sigmoide):**
+   $$\frac{\partial \mu_n}{\partial a_n} = \mu_n(1 - \mu_n)$$
+
+3. **Derivada da ativação em relação ao vetor de pesos $\mathbf{w}$:**
+   $$\frac{\partial a_n}{\partial \mathbf{w}} = \frac{\partial}{\partial \mathbf{w}}(\mathbf{w}^T\mathbf{x}_n) = \mathbf{x}_n$$
+
+Multiplicando os três termos:
+$$\frac{\partial E_n}{\partial \mathbf{w}} = \left( \frac{\mu_n - y_n}{\mu_n(1 - \mu_n)} \right) \cdot \Big( \mu_n(1 - \mu_n) \Big) \cdot \mathbf{x}_n = (\mu_n - y_n)\mathbf{x}_n$$
+
+Somando sobre todas as $N$ observações, obtemos o gradiente total:
+$$\nabla E(\mathbf{w}) = \sum_{n=1}^N (\mu_n - y_n)\mathbf{x}_n = X^T(\boldsymbol\mu - \mathbf{y})$$
+
+### O Método da Descida de Gradiente (Gradient Descent)
+
+Como a função de perda $E(\mathbf{w})$ é estritamente convexa, podemos encontrar o mínimo global movendo-nos na direção oposta ao gradiente. A atualização básica é:
+$$\mathbf{w}^{(\text{novo})} = \mathbf{w}^{(\text{antigo})} - \eta \nabla E(\mathbf{w}) = \mathbf{w}^{(\text{antigo})} - \eta X^T(\boldsymbol\mu - \mathbf{y})$$
+onde $\eta$ é a taxa de aprendizado (*learning rate*). 
+
+A descida de gradiente é computacionalmente barata por iteração ($O(ND)$), mas sua convergência é linear e extremamente sensível à escala dos atributos. Se as características tiverem ordens de magnitude diferentes, a superfície de erro torna-se um "vale" estreito e alongado, fazendo com que o gradiente oscile violentamente sem progredir eficientemente para o centro.
+
+### A Ausência de Solução Fechada e a Hessiana Convexa
+
+Apesar da simplicidade do gradiente, a condição de otimalidade $\nabla E(\mathbf{w}) = \mathbf{0}$ não possui solução analítica fechada porque $\mathbf{w}$ está "preso" dentro da função sigmoide transcendental. Para acelerar a convergência e eliminar a dependência de $\eta$, utilizamos a curvatura da função através da **matriz Hessiana** $H = \nabla^2 E(\mathbf{w})$:
+$$H = \sum_{n=1}^N \mu_n(1 - \mu_n)\mathbf{x}_n \mathbf{x}_n^T = X^T R X$$
+onde $R$ é uma matriz diagonal de variâncias locais. Como $H$ é estritamente definida positiva, a função é estritamente convexa, garantindo um único mínimo global.
+
+### O Algoritmo IRLS (Iteratively Reweighted Least Squares)
+
+O método de **Newton-Raphson** utiliza a Hessiana para corrigir a direção e o tamanho do passo, resultando em convergência quadrática:
+$$\mathbf{w}^{(\text{novo})} = \mathbf{w}^{(\text{antigo})} - H^{-1} \nabla E(\mathbf{w}) = (X^T R X)^{-1} X^T R \mathbf{z}$$
+onde $\mathbf{z}$ são as variáveis de resposta ajustadas. Este procedimento é formalmente idêntico a resolver sucessivos problemas de Mínimos Quadrados Ponderados (WLS), daí o nome **IRLS**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Otimização: Do Gradiente ao Newton
+
+- **Descida de Gradiente (GD):**
+  $$\mathbf{w}^{(\text{novo})} = \mathbf{w}^{(\text{antigo})} - \eta X^T(\boldsymbol\mu - \mathbf{y})$$
+  - Custo baixo por iteração $O(ND)$.
+  - Convergência linear; sensível à escala dos atributos (exige padronização).
+
+. . .
+
+- **O Problema:** Não há solução fechada (como no OLS) pois $\mathbf{w}$ está dentro da sigmoide. Precisamos de métodos iterativos.
+
+- **Método de Newton (IRLS):**
+  $$\mathbf{w}^{(\text{novo})} = \mathbf{w}^{(\text{antigo})} - H^{-1} \nabla E(\mathbf{w})$$
+  - Usa a curvatura (Hessiana $H = X^T R X$).
+  - Convergência **quadrática** (muito mais rápida).
+  - Invariante à escala dos atributos.
+  - Custo maior por iteração $O(ND^2 + D^3)$.
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### Demonstração Prática de Convergência do IRLS em Adult Census Income
+
+Aplicamos agora o algoritmo IRLS implementado do zero para estimar os coeficientes de renda ($>50\text{K}$) no dataset real Adult Census Income a partir da idade e das horas de trabalho semanais ($N = 32\,561$ indivíduos). O código abaixo imprime a evolução da norma do gradiente e da perda a cada iteração.
+:::
+
+```{python}
+#| echo: true
+#| fig-align: center
+
+# Matriz de projeto: intercepto, idade, horas trabalhadas semanais
+X_mat = np.column_stack([np.ones(len(df_adult)), df_adult["age"].values, df_adult["hours.per.week"].values])
+y_vec = df_adult["y"].values
+
+# Inicializacao em zeros
+w_irls = np.zeros(3)
+tabela_convergencia = []
+
+for it in range(8):
+    a = X_mat @ w_irls
+    mu = 1.0 / (1.0 + np.exp(-a))
+    
+    # Negative Log-Likelihood (NLL)
+    eps = 1e-15
+    mu_clipped = np.clip(mu, eps, 1.0 - eps)
+    nll = -np.sum(y_vec * np.log(mu_clipped) + (1.0 - y_vec) * np.log(1.0 - mu_clipped))
+    
+    # Gradiente e Hessiana
+    grad = X_mat.T @ (mu - y_vec)
+    R_diag = mu * (1.0 - mu)
+    Hess = (X_mat.T * R_diag) @ X_mat
+    
+    norma_grad = np.linalg.norm(grad)
+    tabela_convergencia.append((it, w_irls.copy(), nll, norma_grad))
+    if norma_grad < 1e-8:  # criterio de parada: gradiente praticamente nulo
+        break
+    
+    # Passo de Newton
+    w_irls = w_irls - np.linalg.solve(Hess, grad)
+
+# Tabela dos passos
+df_conv = pd.DataFrame([
+    {
+        "Iteração": it,
+        "Intercepto": f"{w[0]:.4f}",
+        "w_idade": f"{w[1]:.4f}",
+        "w_horas": f"{w[2]:.4f}",
+        "NLL (Perda)": f"{nll:.2f}",
+        "Norma Gradiente": f"{gnorm:.2e}"
+    }
+    for it, w, nll, gnorm in tabela_convergencia
+])
+df_conv
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A velocidade de convergência **do método de Newton** é impressionante: iniciando de $\mathbf{w} = \mathbf{0}$, após 4 atualizações o vetor de coeficientes já atinge estabilidade em quatro casas decimais ($\mathbf{w} \approx [-4{,}9134, 0{,}0431, 0{,}0478]$), e após 6 atualizações a norma do gradiente despenca para a ordem de $10^{-10}$. Isso se deve à convergência quadrática: perto do ótimo, o número de casas decimais corretas aproximadamente dobra a cada passo (na tabela, a norma do gradiente cai de $\approx 2\cdot 10^{-1}$ para $\approx 2\cdot 10^{-7}$ e depois para $\approx 3\cdot 10^{-10}$). Essa velocidade **não é uma propriedade do problema, e sim do método** — a seção seguinte mostra que a descida de gradiente, aplicada à mesma função de perda, é muito mais lenta.
+
+A interpretação prática dos coeficientes é direta via **razão de chances**:
+- O coeficiente da idade é $\hat{w}_1 \approx 0{,}0431$. O termo $e^{0{,}0431} \approx 1{,}044$ indica que, mantendo as horas de trabalho constantes, cada ano adicional de vida multiplica as chances de ganhar $>50\text{K}$ por aproximadamente $1{,}044$ (um aumento de cerca de $4{,}4\%$ nas chances).
+- O coeficiente de horas semanais é $\hat{w}_2 \approx 0{,}0478$. O termo $e^{0{,}0478} \approx 1{,}049$ indica que cada hora semanal adicional trabalhada aumenta as chances de alta renda em cerca de $4{,}9\%$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resultados do IRLS no Adult Census Income
+
+- **Convergência de Newton (quadrática):** após 4 atualizações os coeficientes já estão estáveis em 4 casas decimais; após 6, a norma do gradiente é da ordem de $10^{-10}$.
+- **Atenção:** essa velocidade é propriedade do **método de Newton**, não do problema — a descida de gradiente na mesma perda é bem mais lenta (comparação a seguir).
+- **Vetor de Pesos Ajustado:**
+  $$\hat{\mathbf{w}} = [-4{,}9134, \; 0{,}0431 (\text{idade}), \; 0{,}0478 (\text{horas/sem})]^T$$
+
+. . .
+
+- **Interpretação via Razão de Chances ($\exp(w_j)$):**
+  - **Idade:** $e^{0{,}0431} \approx 1{,}044 \implies$ Cada ano a mais de idade eleva as chances de renda $>50\text{K}$ em $+4{,}4\%$.
+  - **Horas Trabalhadas:** $e^{0{,}0478} \approx 1{,}049 \implies$ Cada hora semanal adicional eleva as chances em $+4{,}9\%$.
+
+## Exemplo de Fronteira de Decisão
+
+**Fronteira $p=0{,}5$:** Definida por $-4{,}9134 + 0{,}0431 \cdot \text{idade} + 0{,}0478 \cdot \text{horas} = 0$.
+:::
+
+::: {.fig-resize style="width: 75%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+# Grid 2D de contorno de probabilidades
+age_seq = np.linspace(18, 80, 200)
+hrs_seq = np.linspace(10, 80, 200)
+A_grid, H_grid = np.meshgrid(age_seq, hrs_seq)
+Z_logits = w_irls[0] + w_irls[1] * A_grid + w_irls[2] * H_grid
+Z_probs = 1.0 / (1.0 + np.exp(-Z_logits))
+
+fig, ax = plt.subplots(figsize=(8, 5))
+cp = ax.contourf(A_grid, H_grid, Z_probs, levels=np.linspace(0, 1, 11), cmap="RdYlBu_r", alpha=0.85)
+cbar = fig.colorbar(cp, ax=ax)
+cbar.set_label("Probabilidade Prevista P(Renda > 50K)")
+
+# Linha de decisao p=0.5
+cs = ax.contour(A_grid, H_grid, Z_probs, levels=[0.5], colors=["black"], linewidths=[2.5])
+ax.clabel(cs, fmt="p = 0.5 (Fronteira)", inline=True, fontsize=11)
+
+# Amostra de pontos reais
+ax.scatter(df_sub[df_sub["y"]==0]["age"], df_sub[df_sub["y"]==0]["hours.per.week"], 
+           alpha=0.3, color=COR_AZUL, s=15, label="<=50K")
+ax.scatter(df_sub[df_sub["y"]==1]["age"], df_sub[df_sub["y"]==1]["hours.per.week"], 
+           alpha=0.4, color=COR_VERM, s=20, label=">50K")
+
+ax.set_title("Superfície de Probabilidades e Fronteira Linear no Espaço dos Atributos")
+ax.set_xlabel("Idade (anos)")
+ax.set_ylabel("Horas Trabalhadas por Semana")
+ax.set_xlim(18, 80)
+ax.set_ylim(10, 80)
+ax.legend(loc="upper left")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### E se usássemos apenas a descida de gradiente?
+
+A convergência em 6 passos acima é mérito do método de Newton, que usa a curvatura (a Hessiana $H = X^T R X$) para corrigir a direção e o tamanho do passo. A **descida de gradiente** usa só o gradiente:
+$$\mathbf{w}^{(\text{novo})} = \mathbf{w}^{(\text{antigo})} - \eta\, X^T(\boldsymbol\mu - \mathbf{y}).$$
+Como a perda é convexa e o gradiente é Lipschitz-contínuo com constante $L = \lambda_{\max}(X^T X)/4$ (a derivada da sigmoide é no máximo $1/4$; **esta constante é uma dedução nossa, não citada de uma fonte**), o passo fixo $\eta = 1/L$ garante descida monótona da perda. A comparação abaixo usa esse passo em dois cenários: com os atributos **brutos** (idade em anos e horas por semana, escalas muito diferentes do intercepto) e com os atributos **padronizados** (média zero e desvio-padrão um). Em ambos, o critério de comparação é a norma do gradiente a cada iteração, a mesma medida da tabela do IRLS.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Newton vs. Descida de Gradiente
+
+- **Descida de gradiente (GD):** $\mathbf{w}^{(\text{novo})} = \mathbf{w}^{(\text{antigo})} - \eta\, X^T(\boldsymbol\mu - \mathbf{y})$ — usa só o gradiente, sem a curvatura $H$.
+- **Passo fixo $\eta = 1/L$**, com $L = \lambda_{\max}(X^T X)/4$ (a sigmoide tem derivada $\le 1/4$; dedução nossa) garante descida monótona da perda.
+- **Dois cenários:** atributos **brutos** (escalas muito diferentes) e **padronizados** (média 0, desvio-padrão 1).
+- **Medida de comparação:** norma do gradiente por iteração, a mesma da tabela do IRLS.
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: true
+#| fig-align: center
+
+def sigmoide(a):
+    return 0.5 * (1.0 + np.tanh(a / 2.0))  # sigmoide estavel numericamente
+
+def descida_gradiente(X, y, n_iter):
+    L = np.linalg.eigvalsh(X.T @ X)[-1] / 4.0   # constante de Lipschitz do gradiente
+    w = np.zeros(X.shape[1])
+    normas = []
+    for _ in range(n_iter):
+        grad = X.T @ (sigmoide(X @ w) - y)
+        normas.append(np.linalg.norm(grad))
+        w = w - grad / L                          # passo fixo eta = 1/L
+    return np.array(normas)
+
+# Atributos padronizados (o intercepto permanece como coluna de uns)
+X_pad = X_mat.copy()
+X_pad[:, 1:] = (X_mat[:, 1:] - X_mat[:, 1:].mean(axis=0)) / X_mat[:, 1:].std(axis=0)
+
+n_iter_gd = 200
+normas_gd_bruto = descida_gradiente(X_mat, y_vec, n_iter_gd)
+normas_gd_pad = descida_gradiente(X_pad, y_vec, n_iter_gd)
+normas_newton = [gnorm for _, _, _, gnorm in tabela_convergencia]
+
+def iteracoes_ate(normas, tol):
+    idx = np.flatnonzero(np.asarray(normas) < tol)
+    return int(idx[0]) if idx.size else f"> {len(normas) - 1}"
+
+comparacao = pd.DataFrame({
+    "Método": ["Newton (IRLS)", "GD, atributos padronizados", "GD, atributos brutos"],
+    "Iterações até ‖∇‖ < 1e-4": [iteracoes_ate(n, 1e-4) for n in (normas_newton, normas_gd_pad, normas_gd_bruto)],
+    "Iterações até ‖∇‖ < 1e-8": [iteracoes_ate(n, 1e-8) for n in (normas_newton, normas_gd_pad, normas_gd_bruto)],
+    f"‖∇‖ após {n_iter_gd} iterações": [
+        f"{normas_newton[-1]:.1e} (parou em {len(normas_newton) - 1})",
+        f"{normas_gd_pad[-1]:.1e}",
+        f"{normas_gd_bruto[-1]:.1e}",
+    ],
+})
+display(comparacao.set_index("Método"))
+
+fig, ax = plt.subplots(figsize=(8, 4.5))
+ax.semilogy(range(len(normas_newton)), normas_newton, "o-", color=COR_AZUL, lw=2.2, label="Newton (IRLS)")
+ax.semilogy(range(n_iter_gd), normas_gd_pad, "-", color=COR_LARANJA, lw=2.2, label="GD, atributos padronizados")
+ax.semilogy(range(n_iter_gd), normas_gd_bruto, "-", color=COR_VERM, lw=2.2, label="GD, atributos brutos")
+ax.set_xlabel("Iteração")
+ax.set_ylabel(r"Norma do gradiente $\|\nabla E(\mathbf{w})\|$")
+ax.set_title("Convergência: Newton vs. Descida de Gradiente (Adult Census)")
+ax.set_xlim(-1, 100)
+ax.legend()
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Três observações a partir da tabela e da figura:
+
+1. **Newton precisa de muito menos iterações.** Com os atributos padronizados, a descida de gradiente precisa de dezenas de iterações para atingir a mesma precisão que o IRLS alcança em poucas. O comportamento é qualitativamente diferente: a curva de Newton cai cada vez mais abruptamente (convergência quadrática), enquanto a da descida de gradiente decai em ritmo constante em escala logarítmica (convergência linear).
+2. **A descida de gradiente é sensível à escala dos atributos.** Com os atributos brutos, a Hessiana é muito mal condicionada (o autovalor máximo é dominado pelas horas e pela idade, enquanto o intercepto tem curvatura pequena); o passo $1/L$ obrigado pelo maior autovalor torna o progresso na direção de baixa curvatura quase nulo, e a norma do gradiente estagna em um patamar alto mesmo após centenas de iterações.
+3. **Newton é invariante à escala dos atributos.** Reescalar as colunas de $X$ muda $\nabla E$ e $H$ de forma compensada em $H^{-1}\nabla E$, então o IRLS converge no mesmo número de passos com os atributos brutos ou padronizados (esta é uma propriedade conhecida do método de Newton para transformações afins dos parâmetros).
+
+O preço do método de Newton é o custo por iteração: formar e resolver o sistema com $H = X^T R X \in \mathbb{R}^{D\times D}$ custa $O(ND^2 + D^3)$, contra $O(ND)$ da descida de gradiente. Para poucos atributos, como aqui ($D = 3$), Newton vence com folga; para $D$ muito grande, a descida de gradiente (e suas variantes estocásticas) torna-se a escolha prática.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resultado: Newton vs. Descida de Gradiente
+
+- **Newton:** convergência **quadrática**; a curva de $\|\nabla E\|$ cai cada vez mais abruptamente, e poucos passos bastam.
+- **GD padronizado:** convergência **linear**; a norma do gradiente decai em ritmo constante em escala logarítmica, exigindo dezenas de iterações para a mesma precisão.
+- **GD com atributos brutos:** Hessiana mal condicionada; o passo $1/L$ (imposto pelo maior autovalor) quase não avança na direção de baixa curvatura, e a norma estagna em patamar alto.
+
+. . .
+
+- **Newton é invariante à escala dos atributos;** GD não é.
+- **Custo por iteração:** Newton $O(ND^2 + D^3)$ contra GD $O(ND)$. Com $D = 3$, Newton vence; com $D$ muito grande, GD (e variantes estocásticas) é a escolha prática.
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Pausa Ativa 3 — Otimização Convexa, Hessiana e o Algoritmo IRLS
+
+Considere as propriedades da matriz Hessiana $H = X^T R X$ e a atualização do método de Newton-Raphson.
+
+- □ Se um conjunto de dados possuir atributos com escalas numéricas drasticamente diferentes (exemplo: renda anual em centavos e idade em anos), a matriz Hessiana terá um número de condição elevado, mas o método de Newton-Raphson padrão converge para o mesmo mínimo global com o mesmo número de passos de uma descida de gradiente comum.
+- □ No caso limite em que todos os pontos estão previstos com extrema convicção ($\mu_n \to 0$ ou $\mu_n \to 1$), a matriz diagonal $R$ tende à matriz nula, e a matriz Hessiana torna-se singular, desacelerando os passos de Newton-Raphson por saturação.
+- □ Como a perda é estritamente convexa, a escolha do ponto inicial $\mathbf{w}^{(0)}$ no algoritmo IRLS não influencia o ponto de chegada final, desde que o passo numérico permaneça estável.
+- □ O algoritmo IRLS converge em uma única iteração para qualquer problema de classificação binária, assim como as equações normais resolvem a regressão linear em uma única etapa.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Pausa Ativa 3 — Dinâmica de Otimização e Hessiana
+
+Reflita sobre as propriedades numéricas da matriz $H = X^T R X$ e da atualização de Newton.
+
+- □ Atributos em escalas desiguais degradam Newton-Raphson na mesma proporção que afetam o Gradient Descent.
+- □ Quando todas as probabilidades se aproximam de $0$ ou $1$, a matriz $R$ tende a zero, induzindo instabilidade numérica na inversão de $H$.
+- □ Pela estrita convexidade da função de erro, qualquer inicialização razoável atinge o mesmo ponto de ótimo global único.
+- □ O IRLS converge em exatamente uma iteração, de forma idêntica às equações normais OLS da Aula 5.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Pausa Ativa 3 — Resolução
+
+- ✗ Falso. O método de Newton é invariante a transformações afins lineares dos atributos; o uso da Hessiana corrige automaticamente a curvatura e as escalas desiguais, ao contrário do Gradient Descent.
+- ✔ À medida que $\mu_n \to 0$ ou $1$, o produto $\mu_n(1-\mu_n) \to 0$; $R$ satura e a Hessiana aproxima-se da singularidade (fenômeno ligado à separabilidade perfeita).
+- ✔ Correto. Por ser uma função estritamente convexa em $\mathbb{R}^D$, há apenas uma bacia de atração e um único minimizador global.
+- ✗ Falso. OLS é uma função puramente quadrática cuja derivada é linear (resolvida em um passo). Na logística, $R$ depende de $\mathbf{w}$, exigindo iterações sucessivas.
+:::
+:::
+
+# O Arcabouço dos Modelos Lineares Generalizados (GLMs)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Chegamos a um dos momentos de maior beleza unificadora da disciplina: constatar que a **Regressão Linear** da Aula 5 e a **Regressão Logística** da Aula 6 não são modelos desconexos, mas sim casos particulares de uma mesma família estatística: os **Modelos Lineares Generalizados** (*Generalized Linear Models* — GLMs), formalizados pioneiramente por Nelder & Wedderburn (1972) e sintetizados no PRML (§4.3.6).
+
+### A Família Exponencial Unidimensional
+
+Uma distribuição condicional para a variável de resposta $y$ pertence à **Família Exponencial** se sua função de densidade (ou massa) pode ser escrita na forma:
+$$p(y \mid \eta, s) = h(y, s) \exp \left( \frac{\eta y - b(\eta)}{s} \right)$$
+onde:
+- $\eta$ é o **parâmetro natural** (ou canônico);
+- $s$ é um parâmetro de dispersão conhecido (ou de escala);
+- $b(\eta)$ é a função cumilante, estritamente convexa, que assegura que a distribuição normalize para $1$;
+- $h(y, s)$ é a medida base de suporte.
+
+A média condicional $\mathbb{E}[y \mid \eta] \equiv \mu$ é obtida diretamente diferenciando $b(\eta)$:
+$$\mu = b'(\eta)$$
+Como $b(\eta)$ é estritamente convexa, $b'(\eta)$ é estritamente monotônica e inversível. Existe, portanto, uma relação biunívoca entre o parâmetro natural $\eta$ e a esperança $\mu$: $\eta = \psi(\mu)$.
+
+### As Três Peças de um GLM
+
+Um Modelo Linear Generalizado é especificado por três componentes:
+
+1. **Componente Aleatório:** Uma distribuição de resposta pertencente à Família Exponencial;
+2. **Componente Sistemático:** Uma combinação linear de atributos $a(\mathbf{x}) = \mathbf{w}^T\mathbf{x}$;
+3. **Função de Ligação (*Link Function*):** Uma função estritamente monotônica $g(\cdot)$ que liga a média condicional à combinação linear:
+   $$\eta = g(\mu) = \mathbf{w}^T\mathbf{x}$$
+   A inversa da função de ligação é a **função de ativação** $f = g^{-1}$, de modo que $\mu = f(\mathbf{w}^T\mathbf{x})$.
+
+Quando a função de ligação escolhida é a que relaciona diretamente a média ao parâmetro natural canônico ($\eta = \psi(\mu)$), ela é denominada **função de ligação canônica** (*canonical link*).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Unificação dos Modelos Lineares Generalizados (GLMs)
+
+- **A Família Exponencial:**
+  $$p(y \mid \eta) = h(y) \exp(\eta y - b(\eta))$$
+  - $\eta$: parâmetro natural; $b(\eta)$: função cumilante; $\mu = \mathbb{E}[y] = b'(\eta)$.
+- **Estrutura de um GLM:**
+  1. **Distribuição da Resposta:** Bernoulli, Normal, Poisson, Gama, Categórica.
+  2. **Preditor Linear:** $a = \mathbf{w}^T\mathbf{x}$.
+  3. **Função de Ligação:** $\eta = g(\mu) = \mathbf{w}^T\mathbf{x}$ (ou $\mu = g^{-1}(\mathbf{w}^T\mathbf{x})$).
+
+## GLMs Comuns e Suas Funções de Ligação Canônica
+
+| Distribuição | Alvo $y$ | Ligação Canônica $g(\mu)$ | Ativação $\mu = f(a)$ | Modelo Resultante |
+|---|---|---|---|---|
+| **Gaussiana** | $\mathbb{R}$ contínuo | Identidade: $\mu$ | Identidade: $a$ | **Regressão Linear (OLS)** |
+| **Bernoulli** | $\{0, 1\}$ binário | Logit: $\ln\frac{\mu}{1-\mu}$ | Sigmoide: $\frac{1}{1+e^{-a}}$ | **Regressão Logística** |
+| **Poisson** | $\{0, 1, 2, \dots\}$ contagem | Logaritmo: $\ln \mu$ | Exponencial: $e^a$ | **Regressão de Poisson** |
+| **Categórica** | $\{1, \dots, K\}$ multiclasse | Log-odds relativo | Softmax: $\frac{e^{a_k}}{\sum e^{a_j}}$ | **Regressão Softmax** |
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### O Teorema da Ligação Canônica (PRML §4.3.6)
+
+Por que a escolha da ligação canônica é tão privilegiada em aprendizado de máquina e estatística?
+
+**Teorema:** Se assumirmos uma distribuição de resposta da Família Exponencial e adotarmos a função de ligação canônica $\eta_n = \mathbf{w}^T\mathbf{x}_n$, o gradiente do negativo da log-verossimilhança assume **universalmente a mesma forma elegante**:
+$$\nabla E(\mathbf{w}) = \sum_{n=1}^N (\mu_n - y_n)\mathbf{x}_n = X^T(\boldsymbol\mu - \mathbf{y})$$
+onde $\mu_n = \mathbb{E}[Y_n \mid \mathbf{x}_n, \mathbf{w}]$.
+
+*Demonstração:*
+A log-verossimilhança de uma observação sob a ligação canônica $\eta_n = \mathbf{w}^T\mathbf{x}_n$ é:
+$$\ln p(y_n \mid \mathbf{w}) = \frac{\mathbf{w}^T\mathbf{x}_n y_n - b(\mathbf{w}^T\mathbf{x}_n)}{s} + \ln h(y_n, s)$$
+Diferenciando o erro $E_n = -\ln p(y_n \mid \mathbf{w})$ diretamente em relação a $\mathbf{w}$:
+$$\nabla E_n(\mathbf{w}) = -\frac{1}{s} \left( \mathbf{x}_n y_n - b'(\mathbf{w}^T\mathbf{x}_n)\mathbf{x}_n \right) = \frac{1}{s} \left( b'(\eta_n) - y_n \right)\mathbf{x}_n$$
+Como $\mu_n = b'(\eta_n)$ por definição, e tomando $s=1$ (caso padrão de Bernoulli):
+$$\nabla E_n(\mathbf{w}) = (\mu_n - y_n)\mathbf{x}_n$$
+
+Esse resultado é extraordinário: quer você esteja ajustando uma reta OLS com ruído normal, uma regressão logística para detecção de fraudes ou uma contagem de acessos via Poisson, **o vetor de atualização do gradiente é sempre o erro residual $(\mu_n - y_n)$ projetado sobre a base de atributos $\mathbf{x}_n$**!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Teorema da Ligação Canônica
+
+- **O Teorema:** Para **qualquer** distribuição da Família Exponencial com ligação canônica $\eta = \mathbf{w}^T\mathbf{x}$, a derivada da perda é sempre:
+  $$\nabla E(\mathbf{w}) = \sum_{n=1}^N (\mu_n - y_n)\mathbf{x}_n = X^T(\boldsymbol\mu - \mathbf{y})$$
+- **Significado Teórico:** O cancelamento algébrico visto na Regressão Logística não foi um acidente fortuito! É uma propriedade universal da Família Exponencial.
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### Diagrama Unificador: O Espectro Paramétrico Linear
+
+O fluxograma abaixo sintetiza visualmente como a Família Exponencial se ramifica conforme a natureza da variável de resposta $Y$:
+:::
+
+::: {.fig-resize style="width: 40%; margin: 0 auto;"}
+```{.tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning}
+\begin{tikzpicture}[
+    node distance=1.2cm and 1.0cm,
+    block/.style={rectangle, draw=black!80, fill=black!5, very thick, minimum width=2.5cm, minimum height=1.0cm, align=center, font=\small\sffamily},
+    model/.style={rectangle, draw=blue!80, fill=blue!10, very thick, minimum width=2.8cm, minimum height=1.0cm, align=center, font=\small\bfseries\sffamily},
+    link/.style={diamond, draw=orange!80, fill=orange!15, aspect=2, font=\footnotesize\sffamily, align=center},
+    arrow/.style={-{Latex[length=3mm]}, thick}
+]
+
+\node[block] (fam) {Família Exponencial\\$p(y|\eta) = h(y)\exp(\eta y - b(\eta))$};
+
+\node[block, below left=1.2cm and 1.8cm of fam] (gauss) {Gaussiana\\$y \in \mathbb{R}$};
+\node[block, below=1.2cm of fam] (bern) {Bernoulli\\$y \in \{0, 1\}$};
+\node[block, below right=1.2cm and 1.8cm of fam] (cat) {Categórica\\$y \in \{1,\dots,K\}$};
+
+\node[link, below=0.8cm of gauss] (link_id) {Identidade\\$\eta = \mu$};
+\node[link, below=0.8cm of bern] (link_log) {Logit\\$\eta = \ln\frac{\mu}{1-\mu}$};
+\node[link, below=0.8cm of cat] (link_soft) {Softmax\\$\eta_k = \ln\frac{\mu_k}{\mu_K}$};
+
+\node[model, below=0.8cm of link_id] (mod_ols) {Regressão Linear\\(Aula 5)};
+\node[model, below=0.8cm of link_log] (mod_log) {Regressão Logística\\(Aula 6)};
+\node[model, below=0.8cm of link_soft] (mod_soft) {Softmax / Redes\\(Aula 12)};
+
+\draw[arrow] (fam) -- (gauss);
+\draw[arrow] (fam) -- (bern);
+\draw[arrow] (fam) -- (cat);
+
+\draw[arrow] (gauss) -- (link_id);
+\draw[arrow] (bern) -- (link_log);
+\draw[arrow] (cat) -- (link_soft);
+
+\draw[arrow] (link_id) -- (mod_ols);
+\draw[arrow] (link_log) -- (mod_log);
+\draw[arrow] (link_soft) -- (mod_soft);
+
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Pausa Ativa 4 — Modelos Lineares Generalizados e a Ligação Canônica
+
+Pense sobre as implicações de utilizar ou violar a ligação canônica em modelos lineares generalizados.
+
+- □ Se utilizarmos a distribuição de Bernoulli com a função de ligação *probit* ($\Phi^{-1}(\mu) = \mathbf{w}^T\mathbf{x}$, derivada da função de distribuição acumulada gaussiana) em vez da ligação *logit*, o gradiente da perda deixa de ter a forma simplificada $(\mu_n - y_n)\mathbf{x}_n$, pois a derivada normal não cancela exatamente o denominador da perda.
+- □ No modelo linear gaussiano clássico da Aula 5, a função de ligação canônica é a função identidade, o que faz com que a ativação linear $a = \mathbf{w}^T\mathbf{x}$ seja diretamente a média condicional $\mu$.
+- □ Em um modelo de Regressão de Poisson com ligação canônica $\eta = \ln \mu = \mathbf{w}^T\mathbf{x}$ para contagem de sinistros de seguro, o vetor gradiente da perda assume uma estrutura matemática diferente do vetor gradiente da regressão logística.
+- □ Qualquer função de ativação que mapeie $\mathbb{R} \to [0, 1]$ (por exemplo, uma função linear por partes truncada) pode ser classificada como uma ligação canônica para a distribuição de Bernoulli.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Pausa Ativa 4 — GLMs e Ligações Canônicas
+
+Considere o impacto da escolha da função de ligação nas propriedades analíticas do modelo.
+
+- □ Na regressão *probit*, o gradiente perde a simplificação $(\mu_n - y_n)\mathbf{x}_n$ porque a derivada normal não cancela o denominador da Bernoulli.
+- □ Na regressão linear gaussiana, a ligação canônica é a função identidade.
+- □ O gradiente do modelo de Poisson com ligação logarítmica canônica difere estruturalmente da forma $X^T(\boldsymbol\mu - \mathbf{y})$.
+- □ Qualquer mapeamento arbitrário de $\mathbb{R}$ em $[0, 1]$ constitui uma ligação canônica.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Pausa Ativa 4 — Resolução
+
+- ✔ Correto. Apenas a ligação canônica (*logit*) produz o cancelamento exato. O modelo *probit* introduz o fator $\phi(a)/[\Phi(a)(1-\Phi(a))]$ no gradiente.
+- ✔ Correto. Para a Gaussiana com variância fixa, $\eta = \mu$, logo $g(\mu) = \mu$ (ligação identidade).
+- ✗ Falso. Por ser ligação canônica da Família Exponencial, o gradiente da Poisson é exatamente $X^T(\boldsymbol\mu - \mathbf{y})$, com $\mu_n = \exp(\mathbf{w}^T\mathbf{x}_n)$.
+- ✗ Falso. A ligação canônica é fixada unicamente pela estrutura da distribuição natural ($\eta = \psi(\mu)$); truncagens ad-hoc não são canônicas.
+:::
+:::
+
+# Síntese, Limitações e Fechamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### A Patologia da Separação Perfeita
+
+Apesar de suas propriedades estatísticas impecáveis, a estimativa de Máxima Verossimilhança na Regressão Logística sofre de uma vulnerabilidade crítica: a **separabilidade linear perfeita** (PRML §4.3.2, p. 206).
+
+Considere um conjunto de dados onde existe um hiperplano $\mathbf{w}^T\mathbf{x} = 0$ capaz de separar com 100% de acurácia as classes $0$ e $1$, tal que $\mathbf{w}^T\mathbf{x}_n > 0$ para todos os pontos da classe $1$ e $\mathbf{w}^T\mathbf{x}_n < 0$ para a classe $0$.
+
+Nesse cenário, se multiplicarmos o vetor de pesos por um fator escalar arbitrário $k > 1$ ($k\mathbf{w}$), a fronteira geométrica de decisão não se altera. Entretanto, a ativação linear $k\mathbf{w}^T\mathbf{x}_n$ cresce em magnitude. Conforme $k \to +\infty$:
+$$\sigma(k\mathbf{w}^T\mathbf{x}_n) \to 1 \quad (\forall n \in C_1), \qquad \sigma(k\mathbf{w}^T\mathbf{x}_n) \to 0 \quad (\forall n \in C_0)$$
+
+A verossimilhança atinge o valor máximo teórico $p(\mathbf{y} \mid X, \mathbf{w}) \to 1$, o que significa que o erro de entropia cruzada cai para zero absoluto:
+$$E(k\mathbf{w}) \to 0 \quad \text{quando } k \to +\infty$$
+
+**O Paradoxo do MLE:** Para minimizar a perda em dados perfeitamente separáveis, o otimizador conduz a norma dos pesos ao infinito: $\|\mathbf{w}\| \to \infty$. A função sigmoide colapsa numa função degrau de Heaviside infinitamente íngreme. Isso causa três problemas graves:
+1. **Instabilidade numérica:** A matriz Hessiana satura ($R \to \mathbf{0}$) e algoritmos de inversão de matriz explodem;
+2. **Confiança excessiva:** O modelo prevê probabilidades degeneradas ($0{,}0000$ ou $1{,}0000$), sendo incapaz de expressar dúvida em novos pontos;
+3. **Multiplicidade de soluções:** Qualquer um dos infinitos hiperplanos que separam os dados atinge perda zero no infinito; o MLE não possui critério para preferir o hiperplano de margem máxima.
+
+A cura estatística para essa patologia é o abandono da verossimilhança pura em favor da abordagem Bayesiana e da **regularização** ($L_2$ e $L_1$), assunto que iniciaremos na Aula 7 com a estimativa MAP (Máximo a Posteriori).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Patologia da Separação Perfeita no MLE
+
+- **Cenário:** Existe um hiperplano que separa perfeitamente as classes de treino.
+- **Divergência dos Pesos:** Multiplicar $\mathbf{w}$ por $k \to \infty$ empurra todas as probabilidades para $0$ e $1$, fazendo a entropia cruzada tender a zero:
+  $$\|\mathbf{w}\| \to \infty, \quad E(\mathbf{w}) \to 0$$
+
+. . .
+
+- **Consequências Severas:**
+  - A sigmoide vira uma função degrau rígida (Heaviside).
+  - O modelo perde a calibração probabilística e exibe superconfiança injustificada.
+  - O algoritmo IRLS falha por saturação numérica da Hessiana.
+- **A Solução:** Imposição de uma distribuição a priori sobre os pesos $\mathbf{w} \sim \mathcal{N}(\mathbf{0}, \tau^2 I)$ $\implies$ **Regularização Ridge / MAP (Aula 7)**.
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### Retomando as Perguntas de Abertura
+
+1. **Por que a regressão linear falha ao ser aplicada a problemas de classificação?**
+   Porque a reta linear extrapola fora de $[0, 1]$, sofre de heterocedasticidade severa e penaliza assimetricamente observações corretas distantes da fronteira.
+2. **Como a distribuição de Bernoulli induz a perda de Entropia Cruzada?**
+   Ao expressar a probabilidade condicional conjunta de alvos binários independentes sob a lei de Bernoulli e tomar o negativo do logaritmo, a função que emerge naturalmente é a perda logarítmica de entropia cruzada.
+3. **Por que a regressão logística não possui solução fechada e como o IRLS a resolve?**
+   Porque a não-linearidade da sigmoide prende os parâmetros em termos transcendentais no gradiente; no entanto, a Hessiana $X^T R X$ é estritamente definida positiva, permitindo que o algoritmo de Newton-Raphson convirja quadraticamente interpretado como mínimos quadrados ponderados iterativos.
+4. **Qual é o arcabouço unificador dos Modelos Lineares Generalizados (GLMs)?**
+   É a Família Exponencial governada por funções de ligação canônicas, que garante que tanto para modelos gaussianos, binários ou de contagem, o gradiente da perda é universalmente o produto entre o resíduo e a base de atributos: $X^T(\boldsymbol\mu - \mathbf{y})$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as Quatro Perguntas
+
+1. **Falha da Regressão Linear:** Extrapola fora de $[0, 1]$, sofre de heterocedasticidade severa e distorce fronteiras por penalizar acertos convictos.
+2. **Entropia Cruzada:** É rigorosamente o negativo da log-verossimilhança induzido pela distribuição condicional de Bernoulli.
+3. **Resolução via IRLS:** A ausência de solução fechada é contornada pela convexidade estrita da Hessiana $X^T R X$, resolvida com convergência quadrática via Newton-Raphson.
+4. **Unificação dos GLMs:** A Família Exponencial com ligação canônica demonstra que OLS e Regressão Logística compartilham o mesmo mecanismo de gradiente: $X^T(\boldsymbol\mu - \mathbf{y})$.
+
+. . .
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Pausa Ativa 5 — Separação Perfeita e a Transição para Regularização
+
+Pense sobre o comportamento assintótico de estimadores estatísticos quando a fronteira de separação empírica é livre de erros.
+
+- □ Se um conjunto de dados for perfeitamente separável no espaço original, a inclusão de funções de base polinomiais não-lineares de ordem superior elimina a patologia da divergência dos pesos no MLE.
+- □ No limite de separação perfeita, a probabilidade prevista para qualquer ponto de treino converge para $0$ ou $1$, mas a fronteira de decisão $p=0{,}5$ permanece geometricamente bem definida no espaço de entrada.
+- □ A divergência dos pesos sob separabilidade perfeita ocorre porque a regressão logística possui mínimos locais que prendem o algoritmo IRLS em valores infinitos.
+- □ A penalização $L_2$ (Ridge), ao adicionar o termo $\frac{\lambda}{2}\|\mathbf{w}\|^2$ à perda de entropia cruzada, garante que a Hessiana resultante seja sempre estritamente positiva e limita a magnitude dos coeficientes, mesmo em dados perfeitamente separáveis.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Pausa Ativa 5 — Separação Perfeita e Regularização
+
+Considere o impacto de dados linearmente separáveis na norma dos parâmetros $\|\mathbf{w}\|$.
+
+- □ Aumentar a complexidade do espaço de atributos elimina a separabilidade perfeita.
+- □ Sob separação perfeita com $\|\mathbf{w}\|\to\infty$, a fronteira de decisão $p=0{,}5$ continua existindo como hiperplano bem definido.
+- □ Os pesos divergem porque o problema se torna não-convexo e atinge mínimos locais.
+- □ A penalização $L_2$ impede a divergência de $\|\mathbf{w}\|$ adicionando curvatura estrita à perda.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Pausa Ativa 5 — Resolução
+
+- ✗ Falso. Adicionar mais atributos ou bases polinomiais apenas facilita a separabilidade perfeita, agravando a patologia do MLE.
+- ✔ Correto. A fronteira $\mathbf{w}^T\mathbf{x} = 0$ é invariante à escala positiva $k\mathbf{w}$; ela permanece como hiperplano fixo, mas a transição da sigmoide torna-se infinitamente abrupta.
+- ✗ Falso. O problema continua estritamente convexo; o mínimo simplesmente não é atingível em nenhum ponto finito de $\mathbb{R}^D$ (está no infinito).
+- ✔ Correto. A regularização $L_2$ atua como uma mola de retenção com Hessiana $X^T R X + \lambda I$, garantindo mínimo global estritamente finito.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### Próximos Passos
+
+Aprofunde o domínio prático e formal resolvendo as questões conceituais e os testes de diagnóstico em:
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
