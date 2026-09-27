@@ -1,0 +1,412 @@
+---
+title: "Aula 7: Convexidade e a Matriz Hessiana"
+subtitle: "Álgebra Linear e Otimização para Aprendizado de Máquina"
+author: "Prof. Marcos Medeiros Raimundo"
+date: "2026-09-20"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    code-fold: false
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    fig-width: 8
+    fig-height: 4.5
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    theme: [simple, ../../lesson-theme.scss]
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    fig-width: 8
+    fig-height: 4.5
+jupyter: homepage
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar
+disable_progress_bar()
+from datasets import load_dataset
+
+plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+plt.rcParams.update({"figure.dpi": 120, "font.size": 11})
+
+COR_A   = "#0085CA"
+COR_B   = "#FF5E00"
+COR_C   = "#E03C31"
+COR_NEU = "#5D6D7E"
+
+_housing = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+COLS = ["MedInc", "HouseAge", "AveRooms", "AveBedrms"]
+X = _housing[COLS].to_numpy()
+y = _housing["MedHouseVal"].to_numpy()
+
+def perda(beta):
+    r = X @ beta - y
+    return r @ r
+
+def gradiente_analitico(beta):
+    r = X @ beta - y
+    return 2 * X.T @ r
+
+# Amostra para visualização de convexidade
+_amostra = _housing.sample(n=100, random_state=42)
+X_amostra = _amostra[["MedInc", "HouseAge"]].to_numpy()
+y_amostra = _amostra["MedHouseVal"].to_numpy()
+
+def perda_amostra(b1, b2):
+    r = b1 * X_amostra[:, 0] + b2 * X_amostra[:, 1] - y_amostra
+    return np.sum(r**2)
+```
+
+# Convexidade e a Matriz Hessiana
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O que significa uma função ser "bem comportada"?
+
+Na Aula 6, vimos que o **gradiente** nos diz para onde a função cresce mais rápido. Mas o gradiente é uma informação *local* e de *primeira ordem*: ele nos diz a inclinação, mas não nos diz nada sobre a **curvatura** da superfície.
+
+Imagine que você está caminhando em uma montanha no escuro, apenas com uma lanterna que ilumina o chão sob seus pés. O gradiente é a inclinação do terreno exatamente onde você está. Mas isso é suficiente para saber se você está em um vale (mínimo), no topo de um pico (máximo) ou em um ponto de sela?
+
+Para responder isso, precisamos de informações de **segunda ordem**: como a inclinação muda conforme nos movemos. É aqui que entra o conceito de **Convexidade**.
+
+## Roteiro da Aula
+
+1. **Curvatura e Segunda Derivada:** Como medir o "enrolamento" de uma função.
+2. **A Matriz Hessiana:** A generalização da segunda derivada para múltiplas variáveis.
+3. **Convexidade:** O que define uma função "em forma de tigela" e por que isso é o "Santo Graal" da otimização.
+4. **Conexão com o Gradiente:** Como a Hessiana determina a estabilidade do Gradiente Descendente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O que significa uma função ser "bem comportada"?
+
+::: {.fragment}
+O gradiente é uma informação *local* e de *primeira ordem*: ele nos diz a inclinação, mas não nos diz nada sobre a **curvatura**.
+:::
+
+::: {.fragment}
+Imagine que você está em uma montanha no escuro. O gradiente é a inclinação sob seus pés. Mas isso é suficiente para saber se você está em um vale, um pico ou um ponto de sela?
+:::
+
+::: {.fragment}
+Para isso, precisamos de informações de **segunda ordem**: como a inclinação muda conforme nos movemos.
+:::
+
+## Roteiro da Aula
+
+::: {.fragment}
+**1.** Curvatura e Segunda Derivada.
+:::
+
+::: {.fragment}
+**2.** A Matriz Hessiana.
+:::
+
+::: {.fragment}
+**3.** Convexidade (o "Santo Graal" da otimização).
+:::
+
+::: {.fragment}
+**4.** Conexão com o Gradiente Descendente.
+:::
+:::
+
+# Curvatura e Segunda Derivada
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Relembrando o Cálculo 1
+
+Se temos uma função $f(x)$ de uma única variável, a primeira derivada $f'(x)$ nos dá a inclinação. A **segunda derivada** $f''(x)$ nos diz como essa inclinação está mudando.
+
+- Se $f''(x) > 0$: A inclinação está aumentando. A função está "curvando para cima" (formando um vale). Dizemos que a função é **convexa**.
+- Se $f''(x) < 0$: A inclinação está diminuindo. A função está "curvando para baixo" (formando um pico). Dizemos que a função é **côncava**.
+- Se $f''(x) = 0$: A curvatura é nula (pode ser uma reta ou um ponto de inflexão).
+
+Em termos de otimização, se $f''(x) > 0$ em um ponto onde $f'(x) = 0$, temos a garantia de que estamos em um **mínimo local**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Relembrando o Cálculo 1
+
+::: {.fragment}
+$f'(x)$ é a inclinação.
+:::
+
+::: {.fragment}
+$f''(x)$ é a **curvatura** (como a inclinação muda).
+:::
+
+::: {.fragment}
+- $f''(x) > 0 \Rightarrow$ Curva para cima (**Convexa** / Vale).
+:::
+
+::: {.fragment}
+- $f''(x) < 0 \Rightarrow$ Curva para baixo (**Côncava** / Pico).
+:::
+
+::: {.fragment}
+- $f''(x) = 0 \Rightarrow$ Sem curvatura (Reta ou Inflexão).
+:::
+
+::: {.fragment}
+**Otimização:** Se $f'(x)=0$ e $f''(x)>0$, você encontrou um **mínimo**.
+:::
+:::
+
+# A Matriz Hessiana
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Generalizando para $n$ Variáveis
+
+Quando temos $f(\mathbf{x})$ com $\mathbf{x} \in \mathbb{R}^n$, não temos apenas uma "segunda derivada", mas sim um conjunto de derivadas de segunda ordem para cada par de variáveis $(x_i, x_j)$.
+
+A **Matriz Hessiana** $\mathbf{H}(\mathbf{x})$ é a matriz quadrada que organiza todas essas derivadas parciais de segunda ordem:
+
+$$
+\mathbf{H}(\mathbf{x}) = \begin{bmatrix}
+\frac{\partial^2 f}{\partial x_1^2} & \frac{\partial^2 f}{\partial x_1 \partial x_2} & \dots & \frac{\partial^2 f}{\partial x_1 \partial x_n} \\
+\frac{\partial^2 f}{\partial x_2 \partial x_1} & \frac{\partial^2 f}{\partial x_2^2} & \dots & \frac{\partial^2 f}{\partial x_2 \partial x_n} \\
+\vdots & \vdots & \ddots & \vdots \\
+\frac{\partial^2 f}{\partial x_n \partial x_1} & \frac{\partial^2 f}{\partial x_n \partial x_2} & \dots & \frac{\partial^2 f}{\partial x_n^2}
+\end{bmatrix}
+$$
+
+Se a função for "suave" o suficiente (duas vezes continuamente diferenciável), a ordem das derivadas não importa (Teorema de Schwarz), o que torna a Hessiana uma **matriz simétrica**: $\frac{\partial^2 f}{\partial x_i \partial x_j} = \frac{\partial^2 f}{\partial x_j \partial x_i}$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Generalizando para $n$ Variáveis
+
+::: {.fragment}
+Para $f(\mathbf{x})$, temos derivadas de segunda ordem para cada par $(x_i, x_j)$.
+:::
+
+::: {.fragment}
+A **Matriz Hessiana** $\mathbf{H}(\mathbf{x})$ organiza tudo:
+$$
+\mathbf{H}(\mathbf{x}) = \begin{bmatrix}
+\frac{\partial^2 f}{\partial x_1^2} & \dots & \frac{\partial^2 f}{\partial x_1 \partial x_n} \\
+\vdots & \ddots & \vdots \\
+\frac{\partial^2 f}{\partial x_n \partial x_1} & \dots & \frac{\partial^2 f}{\partial x_n^2}
+\end{bmatrix}
+$$
+:::
+
+::: {.fragment}
+**Propriedade:** Se $f$ é suave, $\mathbf{H}$ é **simétrica** ($\frac{\partial^2 f}{\partial x_i \partial x_j} = \frac{\partial^2 f}{\partial x_j \partial x_i}$).
+:::
+:::
+
+# Convexidade
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Definição de Função Convexa
+
+Uma função $f: \mathbb{R}^n \to \mathbb{R}$ é **convexa** se, para quaisquer dois pontos $\mathbf{x}, \mathbf{y}$ no seu domínio e qualquer $\lambda \in [0, 1]$, o seguinte se mantém:
+
+$$
+f(\lambda \mathbf{x} + (1-\lambda)\mathbf{y}) \leq \lambda f(\mathbf{x}) + (1-\lambda)f(\mathbf{y})
+$$
+
+**Geometricamente:** Se você traçar uma linha reta entre qualquer dois pontos no gráfico da função, a linha estará sempre **acima** (ou sobre) o gráfico da função. Isso caracteriza uma "tigela".
+
+## O Teste da Hessiana
+
+Como podemos verificar a convexidade de forma algébrica? Para uma função duas vezes diferenciável, a convexidade está diretamente ligada à **positividade** da Hessiana:
+
+> Uma função $f$ é convexa se, e somente se, sua matriz Hessiana $\mathbf{H}(\mathbf{x})$ for **Semidefinida Positiva (PSD)** para todo $\mathbf{x}$ no domínio.
+
+Em termos de autovalores, isso significa que todos os autovalores $\lambda_i$ de $\mathbf{H}(\mathbf{x})$ devem ser não-negativos: $\lambda_i \geq 0$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Definição de Função Convexa
+
+::: {.fragment}
+$f(\lambda \mathbf{x} + (1-\lambda)\mathbf{y}) \leq \lambda f(\mathbf{x}) + (1-\lambda)f(\mathbf{y})$
+:::
+
+::: {.fragment}
+**Geometricamente:** A linha entre dois pontos no gráfico está sempre **acima** da função (formato de "tigela").
+:::
+
+::: {.fragment}
+## O Teste da Hessiana
+
+::: {.fragment}
+$f$ é convexa $\iff \mathbf{H}(\mathbf{x})$ é **Semidefinida Positiva (PSD)**.
+:::
+
+::: {.fragment}
+$\Rightarrow$ Todos os autovalores $\lambda_i$ de $\mathbf{H}(\mathbf{x})$ são $\geq 0$.
+:::
+:::
+
+# Exemplo Prático: A Perda Quadrática
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Perda do Problema-Fio
+
+Vamos aplicar o que aprendemos à nossa função de perda:
+$L(\boldsymbol{\beta}) = \|X\boldsymbol{\beta} - \mathbf{y}\|^2$.
+
+Já sabemos que o gradiente é $\nabla L(\boldsymbol{\beta}) = 2X^T(X\boldsymbol{\beta} - \mathbf{y})$.
+Para encontrar a Hessiana, derivamos o gradiente novamente em relação a $\boldsymbol{\beta}$:
+
+$$
+\mathbf{H}_L = \frac{\partial}{\partial \boldsymbol{\beta}} [2X^T(X\boldsymbol{\beta} - \mathbf{y})] = 2X^T X
+$$
+
+**Conclusão:** A Hessiana da perda quadrática é $2X^TX$.
+Como $X^TX$ é sempre uma matriz semidefinida positiva (pois $\mathbf{v}^T X^T X \mathbf{v} = \|X\mathbf{v}\|^2 \geq 0$), a nossa função de perda é **sempre convexa**!
+
+Isso é fundamental: em problemas de regressão linear, não precisamos nos preocupar com mínimos locais; qualquer ponto onde o gradiente é zero é um mínimo global.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Perda do Problema-Fio
+
+::: {.fragment}
+$L(\boldsymbol{\beta}) = \|X\boldsymbol{\beta} - \mathbf{y}\|^2$
+:::
+
+::: {.fragment}
+$\nabla L(\boldsymbol{\beta}) = 2X^T(X\boldsymbol{\beta} - \mathbf{y})$
+:::
+
+::: {.fragment}
+$\mathbf{H}_L = \frac{\partial}{\partial \boldsymbol{\beta}} [2X^T(X\boldsymbol{\beta} - \mathbf{y})] = 2X^T X$
+:::
+
+::: {.fragment}
+**Conclusão:** $2X^TX$ é sempre **Semidefinida Positiva (PSD)**.
+:::
+
+::: {.fragment}
+$\Rightarrow$ A perda quadrática é **sempre convexa**.
+:::
+
+::: {.fragment}
+**Implicação:** Não existem mínimos locais "falsos". O gradiente zero $\Rightarrow$ mínimo global.
+:::
+:::
+
+# Visualizando a Curvatura
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Curvatura da Perda Quadrática
+
+Vamos visualizar como a perda muda em torno de um ponto para entender a "tigela".
+:::
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{python}
+#| echo: false
+
+# Gerar dados sintéticos para uma superfície de perda 2D
+beta1 = np.linspace(-2, 2, 100)
+beta2 = np.linspace(-2, 2, 100)
+B1, B2 = np.meshgrid(beta1, beta2)
+
+# Simular uma perda quadrática: L = (B1^2 + B2^2)
+Z = B1**2 + B2**2
+
+plt.figure(figsize=(8, 6))
+cp = plt.contourf(B1, B2, Z, cmap='viridis', levels=20)
+plt.colorbar(cp)
+plt.xlabel("$\beta_1$")
+plt.ylabel("$\beta_2$")
+plt.title("Superfície de Perda (Convexa)")
+plt.show()
+```
+:::
+
+# Resumo da Aula
+
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O que aprendemos hoje?
+
+- **Segunda Derivada:** Mede a taxa de mudança da inclinação (curvatura).
+- **Matriz Hessiana:** A matriz de todas as derivadas de segunda ordem; essencial para entender a geometria de funções multivariadas.
+- **Convexidade:** Uma propriedade que garante que "o fundo da tigela" é o único ponto de mínimo.
+- **Hessiana e Convexidade:** Uma função é convexa se sua Hessiana for Semidefinida Positiva ($\lambda_i \geq 0$).
+- **Caso de Estudo:** A perda quadrática $L(\boldsymbol{\beta}) = \|X\boldsymbol{\beta} - \mathbf{y}\|^2$ tem Hessiana $2X^TX$, sendo sempre convexa.
+
+**Próxima Aula:** Como usar o gradiente para "descer" essa superfície de forma eficiente (Gradiente Descendente).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O que aprendemos hoje?
+
+::: {.fragment}
+- **Segunda Derivada:** Mede a curvatura.
+:::
+
+::: {.fragment}
+- **Matriz Hessiana:** Organiza as derivadas de segunda ordem.
+:::
+
+::: {.fragment}
+- **Convexidade:** Garante que o mínimo é global (formato de "tigela").
+:::
+
+::: {.fragment}
+- **Hessiana e Convexidade:** $f$ é convexa $\iff \mathbf{H}(\mathbf{x})$ é **PSD** ($\lambda_i \geq 0$).
+:::
+
+::: {.fragment}
+- **Caso de Estudo:** Perda quadrática $\Rightarrow \mathbf{H} = 2X^TX$ (sempre convexa).
+:::
+
+::: {.fragment}
+**Próxima Aula:** Gradiente Descendente (descendo a superfície).
+:::
+:::
