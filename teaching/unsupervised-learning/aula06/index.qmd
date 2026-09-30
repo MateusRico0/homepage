@@ -177,8 +177,6 @@ principal_cosines = np.linalg.svd(Q_pca.T @ Q_ae, compute_uv=False)
 - **A Transição de Hoje:** Até agora, a variável latente $z_n$ era **categórica** ("qual população?").
 - **O Novo Eixo:** E se a variável latente for **contínua** $\mathbf{z}\in\mathbb{R}^M$?
 
-:::
-
 ## Ideia Central
 
 O Breast Cancer Wisconsin, usado desde a Aula 3, tem $30$ atributos por paciente — impossível de visualizar diretamente. Até agora, a disciplina lidou com essa alta dimensionalidade de duas formas: ignorando-a (usando só $2$ atributos escolhidos à mão) ou combatendo-a como um problema (a maldição da dimensionalidade, Aula 2).
@@ -245,11 +243,17 @@ sempre **categórica**: "de qual das $K$ populações?"
 ## Roteiro da Aula
 
 **1.** "Resumir sem perder o que importa": PCA responde de duas formas equivalentes — quais, por que coincidem?
+
 . . .
+
 **2.** Existe versão probabilística (estilo GMM, mas $z$ contínuo, linear-Gaussiano)? O que ela revela?
+
 . . .
+
 **3.** Um autoencoder raso (rede neural) resolve outro problema, ou é a mesma coisa disfarçada?
+
 . . .
+
 **4.** Essas três ferramentas têm alguma limitação em comum?
 
 ## Problema Motivador
@@ -420,19 +424,20 @@ espaço por um vetor $\mathbf{u}_1\in\mathbb{R}^D$, escolhido unitário
 **Passo 1 — a variância projetada.** Cada ponto $\mathbf{x}_n$ é
 projetado ao escalar $\mathbf{u}_1^T\mathbf{x}_n$. A média dos valores
 projetados é $\mathbf{u}_1^T\bar{\mathbf{x}}$, onde
-$\bar{\mathbf{x}}=\frac1N\sum_n\mathbf{x}_n$; a variância dos valores
-projetados é
+$\bar{\mathbf{x}}=\frac1N\sum_n\mathbf{x}_n$. A variância dos valores
+projetados é calculada como:
 
 $$
-\frac1N\sum_n\{\mathbf{u}_1^T\mathbf{x}_n - \mathbf{u}_1^T\bar{\mathbf{x}}\}^2 = \mathbf{u}_1^T\mathbf{S}\mathbf{u}_1,
-\qquad
-\mathbf{S} = \frac1N\sum_n(\mathbf{x}_n-\bar{\mathbf{x}})(\mathbf{x}_n-\bar{\mathbf{x}})^T
+\begin{aligned}
+\text{Var}(\text{proj}) &= \frac1N\sum_n\{\mathbf{u}_1^T\mathbf{x}_n - \mathbf{u}_1^T\bar{\mathbf{x}}\}^2 \\
+&= \frac1N\sum_n\{\mathbf{u}_1^T(\mathbf{x}_n - \bar{\mathbf{x}})\}^2 \\
+&= \frac1N\sum_n\{\mathbf{u}_1^T(\mathbf{x}_n - \bar{\mathbf{x}})\}\{\mathbf{u}_1^T(\mathbf{x}_n - \bar{\mathbf{x}})\}^T \\
+&= \mathbf{u}_1^T \left( \frac1N\sum_n(\mathbf{x}_n-\bar{\mathbf{x}})(\mathbf{x}_n-\bar{\mathbf{x}})^T \right) \mathbf{u}_1 \\
+&= \mathbf{u}_1^T\mathbf{S}\mathbf{u}_1,
+\end{aligned}
 $$
 
-(a matriz de covariância amostral $\mathbf{S}$, simétrica por
-construção — $\mathbf{S}=\mathbf{S}^T$ — e semidefinida positiva, pois
-$\mathbf{v}^T\mathbf{S}\mathbf{v}=\frac1N\sum_n[\mathbf{v}^T(\mathbf{x}_n-\bar{\mathbf{x}})]^2\ge0$
-para qualquer $\mathbf{v}$).
+onde $\mathbf{S} = \frac1N\sum_n(\mathbf{x}_n-\bar{\mathbf{x}})(\mathbf{x}_n-\bar{\mathbf{x}})^T$ é a matriz de covariância amostral, simétrica por construção ($\mathbf{S}=\mathbf{S}^T$) e semidefinida positiva, pois $\mathbf{v}^T\mathbf{S}\mathbf{v}=\frac1N\sum_n[\mathbf{v}^T(\mathbf{x}_n-\bar{\mathbf{x}})]^2\ge0$ para qualquer $\mathbf{v}$).
 
 **Passo 2 — maximizar sob restrição.** Maximizar
 $\mathbf{u}_1^T\mathbf{S}\mathbf{u}_1$ livremente não tem solução finita
@@ -477,19 +482,65 @@ projetada é o gerado pelos $M$ autovetores de $\mathbf{S}$ associados
 aos $M$ maiores autovalores (o **subespaço principal**).
 :::
 
-*Demonstração (caso $M$ geral, por indução).* Já provamos o caso
-$M=1$. Suponha os $M-1$ primeiros componentes principais
-($\mathbf{u}_1,\dots,\mathbf{u}_{M-1}$, os $M-1$ autovetores de maiores
-autovalores) já determinados. Buscamos $\mathbf{u}_M$ que maximize a
-variância projetada **entre todas as direções ortogonais às já
-escolhidas** — essa restrição extra de ortogonalidade entra com seus
-próprios multiplicadores de Lagrange, mas o mesmo argumento do Passo 3
-mostra que a solução ainda precisa satisfazer $\mathbf{S}\mathbf{u}_M=
-\lambda_M\mathbf{u}_M$; entre os autovetores restantes (ortogonais aos
-já escolhidos, pela ortogonalidade do Teorema Espectral), o de maior
-autovalor remanescente maximiza a variância. Por indução, os $M$
-autovetores de maiores autovalores formam o subespaço ótimo.
-$\blacksquare$
+**Ferramenta: $\mathbf{S}$ como soma de matrizes de posto 1.** Como
+$\mathbf{S}$ é simétrica, o Teorema Espectral
+(`optimization-linear-algebra`, Aula 4) dá $\mathbf{S}=Q\Lambda Q^T$,
+com $Q=[\mathbf{u}_1\,\cdots\,\mathbf{u}_D]$ ortogonal e
+$\Lambda=\mathrm{diag}(\lambda_1,\dots,\lambda_D)$, ordenados de modo
+que $\lambda_1\ge\lambda_2\ge\dots\ge\lambda_D$. Escrevendo o produto
+$Q\Lambda Q^T$ coluna a coluna, ele é uma soma de $D$ matrizes de
+posto 1:
+$$
+\mathbf{S}=\sum_{i=1}^{D}\lambda_i\,\mathbf{u}_i\mathbf{u}_i^T .
+$$
+Como $\mathbf{S}$ é semidefinida positiva, todo autovalor é não
+negativo: $\lambda_i=\mathbf{u}_i^T\mathbf{S}\mathbf{u}_i\ge0$. Cada
+termo $\lambda_i\mathbf{u}_i\mathbf{u}_i^T$ é a "fatia" de variância
+dos dados na direção $\mathbf{u}_i$.
+
+**A variância projetada nessa base.** Para uma direção unitária
+$\mathbf{u}$, defina $c_i=\mathbf{u}_i^T\mathbf{u}$ (a coordenada de
+$\mathbf{u}$ na base ortonormal $\{\mathbf{u}_i\}$). Substituindo a
+decomposição,
+$$
+\mathbf{u}^T\mathbf{S}\mathbf{u}
+=\sum_{i=1}^{D}\lambda_i\,(\mathbf{u}^T\mathbf{u}_i)(\mathbf{u}_i^T\mathbf{u})
+=\sum_{i=1}^{D}\lambda_i\,c_i^2 ,
+\qquad
+\sum_{i=1}^{D}c_i^2=\|Q^T\mathbf{u}\|^2=\|\mathbf{u}\|^2=1,
+$$
+em que a última igualdade usa que $Q^T$ é ortogonal e preserva normas.
+Ou seja, a variância projetada é uma **média ponderada dos
+autovalores**, com pesos $c_i^2\ge0$ que somam 1.
+
+*Demonstração (por indução em $M$).*
+
+- **Base ($M=1$).** Uma média ponderada nunca excede o maior termo:
+  $\sum_i\lambda_ic_i^2\le\lambda_1\sum_ic_i^2=\lambda_1$, com igualdade
+  em $\mathbf{u}=\mathbf{u}_1$ ($c_1=1$, demais $c_i=0$). Isso confirma,
+  sem Lagrange, o resultado do Passo 3.
+- **Passo indutivo.** Suponha $\mathbf{u}_1,\dots,\mathbf{u}_{M-1}$ já
+  escolhidos. A próxima direção deve ser unitária e ortogonal a elas, o
+  que força $c_1=\dots=c_{M-1}=0$. Os termos de posto 1 já usados saem
+  da soma:
+  $$
+  \mathbf{u}^T\mathbf{S}\mathbf{u}=\sum_{i=M}^{D}\lambda_i c_i^2
+  \le\lambda_M\sum_{i=M}^{D}c_i^2=\lambda_M ,
+  $$
+  com igualdade em $\mathbf{u}=\mathbf{u}_M$. Equivalentemente, a busca
+  da $M$-ésima direção é a busca da primeira direção na matriz
+  $\mathbf{S}-\sum_{i<M}\lambda_i\mathbf{u}_i\mathbf{u}_i^T$, da qual as
+  fatias já capturadas foram subtraídas.
+
+Por indução, a escolha sequencial produz $\mathbf{u}_1,\dots,\mathbf{u}_M$,
+os autovetores dos $M$ maiores autovalores, com variância total
+$\lambda_1+\dots+\lambda_M$. $\blacksquare$
+
+*Aviso de leitura:* a indução mostra que a construção **sequencial**
+(uma direção por vez, cada uma ortogonal às anteriores) chega a esse
+subespaço. Que nenhum outro subespaço de dimensão $M$, escolhido de uma
+só vez, supere $\lambda_1+\dots+\lambda_M$ é um resultado a mais (o
+princípio do máximo de Ky Fan, 1949), citado aqui sem demonstração.
 
 **Aplicando ao Breast Cancer Wisconsin completo ($D=30$).** Calculando
 $\mathbf{S}$ sobre os $30$ atributos padronizados e sua decomposição
@@ -549,10 +600,42 @@ $\mathbf{S}$ com os $M$ maiores autovalores.
 :::
 
 ::: {.fragment}
-*Prova por indução:* com $\mathbf{u}_1,\dots,\mathbf{u}_{M-1}$ já
-fixados, maximizar entre as direções **ortogonais** a elas ainda exige
-$\mathbf{S}\mathbf{u}_M=\lambda_M\mathbf{u}_M$; entre os autovetores
-restantes, o de maior autovalor vence. $\blacksquare$
+**Ferramenta — soma de matrizes de posto 1** (Teorema Espectral,
+$\mathbf{S}=Q\Lambda Q^T$ escrito coluna a coluna):
+$$
+\mathbf{S}=\sum_{i=1}^{D}\lambda_i\,\mathbf{u}_i\mathbf{u}_i^T,
+\qquad \lambda_1\ge\dots\ge\lambda_D\ge0 \;\;(\mathbf{S}\succeq0).
+$$
+:::
+
+::: {.fragment}
+Para $\mathbf{u}$ unitário, com $c_i=\mathbf{u}_i^T\mathbf{u}$:
+$$
+\mathbf{u}^T\mathbf{S}\mathbf{u}=\sum_i\lambda_i c_i^2,\qquad \sum_i c_i^2=\|Q^T\mathbf{u}\|^2=1
+$$
+— uma **média ponderada dos autovalores**.
+:::
+
+## Prova por Indução
+
+Onde paramos: $\mathbf{u}^T\mathbf{S}\mathbf{u}=\sum_i\lambda_i c_i^2$, com $\sum_i c_i^2=1$.
+
+::: {.fragment}
+- **Base ($M=1$):** $\sum_i\lambda_ic_i^2\le\lambda_1\sum_ic_i^2=\lambda_1$; igualdade em $\mathbf{u}=\mathbf{u}_1$.
+:::
+
+::: {.fragment}
+- **Passo:** ortogonal a $\mathbf{u}_1,\dots,\mathbf{u}_{M-1}$ $\Rightarrow$ $c_1=\dots=c_{M-1}=0$. Os termos de posto 1 já usados saem da soma:
+$$
+\mathbf{u}^T\mathbf{S}\mathbf{u}=\sum_{i=M}^{D}\lambda_ic_i^2\le\lambda_M,
+$$
+igualdade em $\mathbf{u}=\mathbf{u}_M$. $\blacksquare$
+:::
+
+::: {.fragment .callout-warning}
+A indução prova a construção **sequencial**. Que nenhum subespaço de
+dimensão $M$ escolhido de uma vez supere $\lambda_1+\dots+\lambda_M$ é
+o princípio de Ky Fan (1949), citado sem prova.
 :::
 
 ## PCA no Breast Cancer Wisconsin ($D=30$)
@@ -565,7 +648,7 @@ autovetor de **menor** variância.
 
 :::
 
-::: {.fig-resize style="width: 82%; margin: 0 auto;"}
+::: {.fig-resize style="width: 62%; margin: 0 auto;"}
 ```{python}
 #| echo: false
 #| fig-align: center
@@ -607,8 +690,6 @@ descrita — sem usar o rótulo `diagnosis` em nenhum momento do cálculo.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-
-## Os Autovalores do Breast Cancer Wisconsin
 
 ::: {.fragment}
 $\lambda_1=13{,}2816$ ($44{,}27\%$), $\lambda_2=5{,}6914$
@@ -769,10 +850,25 @@ primeiros componentes.**
 ## A Segunda Pergunta: Erro de Reconstrução
 
 ::: {.fragment}
-Base ortonormal completa $\{\mathbf{u}_i\}$;
-$\tilde{\mathbf{x}}_n=\sum_{i\le M}z_{ni}\mathbf{u}_i+\sum_{i>M}b_i
-\mathbf{u}_i$. Minimizar $J=\frac1N\sum_n\|\mathbf{x}_n-
-\tilde{\mathbf{x}}_n\|^2$.
+**O Objetivo:** Em vez de maximizar a variância, queremos minimizar a distorção média de reconstrução $J$.
+:::
+
+::: {.fragment}
+**A Ferramenta:** Para qualquer ponto $\mathbf{x}_n$, podemos escrever sua decomposição exata em uma base ortonormal completa $\{\mathbf{u}_i\}_{i=1}^D$:
+$$
+\mathbf{x}_n = \sum_{i=1}^D (\mathbf{x}_n^T \mathbf{u}_i) \mathbf{u}_i
+$$
+:::
+
+::: {.fragment}
+**A Aproximação:** Se usarmos apenas as $M$ primeiras direções, a reconstrução $\tilde{\mathbf{x}}_n$ é a projeção ortogonal:
+$$
+\tilde{\mathbf{x}}_n = \sum_{i=1}^M (\mathbf{x}_n^T \mathbf{u}_i) \mathbf{u}_i
+$$
+:::
+
+::: {.fragment}
+**O Erro:** A distância $\|\mathbf{x}_n - \tilde{\mathbf{x}}_n\|^2$ é a soma dos quadrados das coordenadas nas direções **descartadas** ($i > M$).
 :::
 
 ## Otimizando $z_{ni}$, $b_i$ e a Distorção Resultante
@@ -822,15 +918,15 @@ duas coincidências.
 #| fig-align: center
 
 fig, ax = plt.subplots(figsize=(7.2, 5.4))
-colors_diag = np.where(diagnosis == "M", COR_B, COR_A)
+colors_diag = np.where(diagnosis == "M", COR_LARANJA, COR_AZUL)
 ax.scatter(Z[:, 0], Z[:, 1], c=colors_diag, s=14, alpha=0.75)
 ax.set_xlabel("componente principal 1 (z1)")
 ax.set_ylabel("componente principal 2 (z2)")
 ax.set_title(f"Projeção nos 2 primeiros componentes (rótulo NUNCA usado no ajuste)\nlimiar em z1 separa diagnosis com {brl(best_acc*100,1)}% de acurácia")
 
 from matplotlib.lines import Line2D
-handles = [Line2D([0], [0], marker='o', color='w', markerfacecolor=COR_A, markersize=8, label='Benigno (só p/ avaliar)'),
-           Line2D([0], [0], marker='o', color='w', markerfacecolor=COR_B, markersize=8, label='Maligno (só p/ avaliar)')]
+handles = [Line2D([0], [0], marker='o', color='w', markerfacecolor=COR_AZUL, markersize=8, label='Benigno (só p/ avaliar)'),
+           Line2D([0], [0], marker='o', color='w', markerfacecolor=COR_LARANJA, markersize=8, label='Maligno (só p/ avaliar)')]
 ax.legend(handles=handles, loc="upper right", fontsize=8)
 plt.tight_layout()
 plt.show()
@@ -1013,31 +1109,25 @@ $\mathbf{z}\in\mathbb{R}^M$ é **contínua**.
 :::
 
 ::: {.callout-note icon=false}
-**Definição (PPCA):** $p(\mathbf{z})=\mathcal{N}(\mathbf{0},I)$;
-$p(\mathbf{x}\mid\mathbf{z})=\mathcal{N}(\mathbf{Wz}+\boldsymbol\mu,
-\sigma^2I)$ — equivalente a $\mathbf{x}=\mathbf{Wz}+\boldsymbol\mu+
-\boldsymbol\epsilon$.
+**Definição (PPCA):** 
+- $p(\mathbf{z})=\mathcal{N}(\mathbf{0},I)$;
+- $p(\mathbf{x}\mid\mathbf{z})=\mathcal{N}(\mathbf{Wz}+\boldsymbol\mu,\sigma^2I)$ ;
+- equivalente a $\mathbf{x}=\mathbf{Wz}+\boldsymbol\mu+\boldsymbol\epsilon$.
 :::
 
 ## A Marginal $p(\mathbf{x})$ é Gaussiana
 
 ::: {.fragment}
-$$
-p(\mathbf{x})=\mathcal{N}(\mathbf{x}\mid\boldsymbol\mu,\mathbf{C}),\qquad
-\mathbf{C}=\mathbf{WW}^T+\sigma^2I
-$$
-($\mathbf{z}$, $\boldsymbol\epsilon$ independentes, $\mathbb{E}[\mathbf{zz}^T]=I$).
+$p(\mathbf{x})=\mathcal{N}(\mathbf{x}\mid\boldsymbol\mu,\mathbf{C})$ onde $\mathbf{C}=\mathbf{WW}^T+\sigma^2I$, $\mathbf{z}$, $\boldsymbol\epsilon$ independentes, $\mathbb{E}[\mathbf{zz}^T]=I$.
 :::
 
 ::: {.fragment .callout-note}
-Sem variável latente: $D(D+1)/2$ parâmetros livres em $\mathbf{C}$. Com
-PPCA: $\mathbf{C}$ restrita à forma $\mathbf{WW}^T+\sigma^2I$ — muito
-menos parâmetros quando $M\ll D$.
+Sem variável latente: $D(D+1)/2$. Com PPCA: $DM$ parâmetros.
 :::
 
 :::
 
-::: {.fig-resize style="width: 74%; margin: 0 auto;"}
+::: {.fig-resize style="width: 60%; margin: 0 auto;"}
 ```{.tikz}
 \definecolor{latent}{RGB}{93,109,126}
 \definecolor{obs}{RGB}{0,133,202}
@@ -1306,48 +1396,6 @@ normalizados".
 
 :::
 
-::: {.fig-resize style="width: 66%; margin: 0 auto;"}
-```{.tikz}
-\definecolor{enc}{RGB}{0,133,202}
-\definecolor{dec}{RGB}{255,94,0}
-\definecolor{neu}{RGB}{93,109,126}
-
-\begin{tikzpicture}[x=1cm,y=1cm]
-
-\foreach \y/\lab in {5.2/1, 4.2/2, 2.2/{D-1}, 1.2/D} {
-  \node[draw, circle, minimum size=0.8cm, color=neu] at (0.8,\y) {$x_{\lab}$};
-}
-\node[font=\scriptsize] at (0.8,3.2) {$\vdots$};
-
-\node[draw, circle, minimum size=0.9cm, color=enc, thick, fill=enc!12] (h1) at (5.2,3.9) {$z_1$};
-\node[draw, circle, minimum size=0.9cm, color=enc, thick, fill=enc!12] (h2) at (5.2,2.5) {$z_2$};
-
-\foreach \y/\lab in {5.2/1, 4.2/2, 2.2/{D-1}, 1.2/D} {
-  \node[draw, circle, minimum size=0.8cm, color=neu] (o\lab) at (9.6,\y) {$y_{\lab}$};
-}
-\node[font=\scriptsize] at (9.6,3.2) {$\vdots$};
-
-\foreach \y in {5.2,4.2,2.2,1.2} {
-  \draw[->, color=enc] (0.8,\y) -- (h1);
-  \draw[->, color=enc] (0.8,\y) -- (h2);
-}
-\foreach \y in {5.2,4.2,2.2,1.2} {
-  \draw[->, color=dec] (h1) -- (9.6,\y);
-  \draw[->, color=dec] (h2) -- (9.6,\y);
-}
-
-\node[font=\small, color=enc] at (2.9,6.6) {codificador ($D\to M$)};
-\node[font=\small, color=dec] at (7.4,6.6) {decodificador ($M\to D$)};
-\node[font=\small] at (0.8,6.9) {entrada ($D$)};
-\node[font=\small] at (5.2,6.9) {gargalo ($M<D$)};
-\node[font=\small] at (9.6,6.9) {saída ($D$)};
-
-\node[font=\scriptsize, color=neu] at (5.2,0.2) {alvo: $\mathbf{y}(\mathbf{x}_n,\mathbf{w})\approx\mathbf{x}_n$};
-
-\end{tikzpicture}
-```
-:::
-
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
 **Verificação numérica no Breast Cancer Wisconsin ($M=2$).** Treinando
@@ -1399,6 +1447,48 @@ Projeção sobre um subespaço admite infinitas bases (ortonormais ou não)
 
 :::
 
+::: {.fig-resize style="width: 66%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{enc}{RGB}{0,133,202}
+\definecolor{dec}{RGB}{255,94,0}
+\definecolor{neu}{RGB}{93,109,126}
+
+\begin{tikzpicture}[x=1cm,y=1cm]
+
+\foreach \y/\lab in {5.2/1, 4.2/2, 2.2/{D-1}, 1.2/D} {
+  \node[draw, circle, minimum size=0.8cm, color=neu] at (0.8,\y) {$x_{\lab}$};
+}
+\node[font=\scriptsize] at (0.8,3.2) {$\vdots$};
+
+\node[draw, circle, minimum size=0.9cm, color=enc, thick, fill=enc!12] (h1) at (5.2,3.9) {$z_1$};
+\node[draw, circle, minimum size=0.9cm, color=enc, thick, fill=enc!12] (h2) at (5.2,2.5) {$z_2$};
+
+\foreach \y/\lab in {5.2/1, 4.2/2, 2.2/{D-1}, 1.2/D} {
+  \node[draw, circle, minimum size=0.8cm, color=neu] (o\lab) at (9.6,\y) {$y_{\lab}$};
+}
+\node[font=\scriptsize] at (9.6,3.2) {$\vdots$};
+
+\foreach \y in {5.2,4.2,2.2,1.2} {
+  \draw[->, color=enc] (0.8,\y) -- (h1);
+  \draw[->, color=enc] (0.8,\y) -- (h2);
+}
+\foreach \y in {5.2,4.2,2.2,1.2} {
+  \draw[->, color=dec] (h1) -- (9.6,\y);
+  \draw[->, color=dec] (h2) -- (9.6,\y);
+}
+
+\node[font=\small, color=enc] at (2.9,6.6) {codificador ($D\to M$)};
+\node[font=\small, color=dec] at (7.4,6.6) {decodificador ($M\to D$)};
+\node[font=\small] at (0.8,6.9) {entrada ($D$)};
+\node[font=\small] at (5.2,6.9) {gargalo ($M<D$)};
+\node[font=\small] at (9.6,6.9) {saída ($D$)};
+
+\node[font=\scriptsize, color=neu] at (5.2,0.2) {alvo: $\mathbf{y}(\mathbf{x}_n,\mathbf{w})\approx\mathbf{x}_n$};
+
+\end{tikzpicture}
+```
+:::
+
 ::: {.fig-resize style="width: 78%; margin: 0 auto;"}
 ```{python}
 #| echo: false
@@ -1407,7 +1497,7 @@ Projeção sobre um subespaço admite infinitas bases (ortonormais ou não)
 fig, ax = plt.subplots(figsize=(6.6, 4.2))
 labels = ["PCA (ótimo teórico)", "Autoencoder linear\n(treinado por gradiente)"]
 vals = [mse_pca, mse_ae]
-bars = ax.bar(labels, vals, color=[COR_A, COR_B], width=0.5, alpha=0.9)
+bars = ax.bar(labels, vals, color=[COR_AZUL, COR_LARANJA], width=0.5, alpha=0.9)
 for b, v in zip(bars, vals):
     ax.annotate(f"{v:.6f}".replace(".", ","), xy=(b.get_x() + b.get_width()/2, v),
                 xytext=(0, 4), textcoords="offset points", ha="center", fontsize=9)
@@ -1655,4 +1745,6 @@ $\mathbf{x}$; posterior deixa de ter forma fechada $\Rightarrow$ volta o
 
 [Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
 [Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+
 :::

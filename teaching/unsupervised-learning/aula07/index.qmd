@@ -1,0 +1,528 @@
+---
+title: "Aula 7: O Mundo Não Linear — Autoencoders e VAEs"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-09-30"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: homepage
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL
+# =====================================================================
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar, load_dataset
+disable_progress_bar()
+
+import numpy as np
+import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.preprocessing import StandardScaler
+import pandas as pd
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({
+    "figure.dpi": 130,
+    "font.size": 11,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "legend.frameon": True,
+    "legend.framealpha": 0.9,
+})
+
+rng = np.random.default_rng(20260930)
+
+# Paleta visual
+COR_AZUL    = "#1B365D"
+COR_LARANJA = "#D9531E"
+COR_VERM    = "#C0392B"
+COR_VERDE   = "#27AE60"
+COR_CINZA   = "#7F8C8D"
+
+def brl(x, nd=2):
+    return f"{x:.{nd}f}".replace(".", ",")
+
+# Datasets
+# 1. Breast Cancer (Fio de compressão)
+ds_bc = load_dataset("scikit-learn/breast-cancer-wisconsin")["train"].to_pandas()
+ds_bc = ds_bc.drop(columns=["id", "Unnamed: 32"])
+X_bc = ds_bc.drop(columns=["diagnosis"]).values
+scaler_bc = StandardScaler()
+X_bc_scaled = scaler_bc.fit_transform(X_bc)
+
+# 2. MNIST (Fio de geração)
+ds_mnist = load_dataset("ylecun/mnist", split="train").with_format("numpy")
+X_mnist = np.asarray(ds_mnist["image"], dtype=np.float32).reshape(-1, 784) / 255.0
+# Subamostra para agilizar a aula
+X_mnist_sub = X_mnist[rng.choice(X_mnist.shape[0], 10000, replace=False)]
+```
+
+# Revisão e Introdução
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Na aula anterior, vimos que a PCA e a PPCA definem um subespaço linear onde a variância é maximizada. Provamos que um Autoencoder (AE) com ativações lineares e um gargalo de dimensão $M$ converge para o mesmo subespaço da PCA. No entanto, a natureza linear da PCA é limitante: se os dados residem em uma estrutura curva (um *manifold*), a projeção linear "achata" a geometria e perde informações essenciais.
+
+**Ideia Central:** Para capturar estruturas complexas, precisamos de não linearidade. Ao introduzir funções de ativação (como ReLU ou Sigmoide) e camadas profundas, transformamos o AE em uma ferramenta capaz de aprender representações comprimidas de variedades não lineares. Mas isso traz um novo problema: a perda da interpretabilidade geométrica e a incapacidade de gerar novos dados.
+
+**Roteiro da Aula:**
+1. **Autoencoders (AE):** Como a compressão não linear funciona e a hipótese do manifold.
+2. **O Gap Generativo:** Por que AEs não servem para gerar dados (o problema do espaço latente "buracado").
+3. **Variational Autoencoders (VAE):** A transição de pontos para distribuições.
+4. **O ELBO no VAE:** Como a regularização via KL impede o colapso do espaço latente.
+5. **Reparameterization Trick:** A solução matemática para treinar VAEs via gradiente.
+
+**Problema Motivador:** Imagine que queremos comprimir as imagens do MNIST. Um AE linear (PCA) consegue reduzir a dimensão, mas se tentarmos interpolar entre dois dígitos no espaço latente, o resultado será uma mancha borrada. Um VAE, por outro lado, garante que o espaço latente seja contínuo, permitindo que "naveguemos" suavemente entre as formas dos dígitos.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Revisão: O Mundo Linear
+
+- **PCA $\equiv$ PPCA $\equiv$ Linear AE.**
+- Todos buscam o mesmo subespaço de dimensão $M$.
+- **Limitação:** Não capturam curvatura. Se o dado é um "S", a PCA vê apenas a projeção plana.
+
+## Ideia Central: Além da Linearidade
+
+- **Objetivo:** Aprender a geometria intrínseca dos dados (Manifold Learning).
+- **Ferramenta:** Redes Neurais Profundas $\to$ Não linearidade $\to$ Flexibilidade.
+- **Desafio:** Como garantir que o espaço comprimido seja útil para *gerar* novos dados?
+
+## Roteiro da Aula
+
+1. **Autoencoders (AE):** Compressão e Manifolds.
+2. **O Gap Generativo:** Por que AEs falham ao gerar?
+3. **VAEs:** De pontos a distribuições.
+4. **ELBO:** Equilíbrio entre Fidelidade e Regularização.
+5. **Reparameterization Trick:** O "pulo do gato" do gradiente.
+
+## Problema Motivador
+
+**Pergunta:** Se eu comprimir um dígito '1' e um '7' em um espaço latente, o que existe exatamente no meio deles?
+
+- **AE Tradicional:** Provavelmente ruído ou um vazio.
+- **VAE:** Um dígito que parece a transição suave de '1' para '7'.
+:::
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{python}
+#| echo: false
+# Visualização simples de um manifold sintético (S-curve) para motivar
+from sklearn.datasets import make_s_curve
+X_s, _ = make_s_curve(n_samples=1000, noise=0.1, random_state=42)
+
+fig, ax = plt.subplots(1, 2, figsize=(10, 4), subplot_kw={'projection': '3d'})
+ax[0].scatter(X_s[:, 0], X_s[:, 1], X_s[:, 2], c=X_s[:, 2], cmap='viridis', s=10)
+ax[0].set_title("Dados no Espaço Original (3D)")
+ax[1].scatter(X_s[:, 0], X_s[:, 1], c=X_s[:, 2], cmap='viridis', s=10)
+ax[1].set_title("Projeção Linear (2D) - Perda de Estrutura")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+## Pausa Ativa
+
+::: {.callout-tip}
+## O que define um "Manifold"?
+
+Se os dados de alta dimensão (ex: 784 pixels) residem em um manifold de baixa dimensão (ex: 10 dimensões), o que acontece com a distância euclidiana entre dois pontos próximos no manifold quando medida no espaço original?
+:::
+
+::: {.callout-tip}
+## Julgue V ou F
+
+- □ Um Autoencoder linear é matematicamente equivalente a uma PCA.
+- □ A função de ativação ReLU introduz a não linearidade necessária para aprender manifolds.
+- □ Aumentar a dimensão do gargalo ($M$) sempre melhora a generalização do modelo.
+- □ O objetivo de um AE é minimizar a distância entre a entrada e a reconstrução.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa Ativa — Resposta
+
+::: {.callout-tip}
+## Julgue V ou F — Resposta
+
+- ✔ Verdadeiro — Provado na Aula 6.
+- ✔ Verdadeiro — Quebras a linearidade da projeção.
+- ✗ Falso — Gargalos muito grandes levam ao "mapeamento identidade" (overfitting).
+- ✔ Verdadeiro — Geralmente via MSE (Mean Squared Error).
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** A distância euclidiana no espaço original pode ser enganosa. Dois pontos podem estar próximos no manifold (seguindo a curvatura), mas distantes no espaço original (em linha reta através do "vazio"). O AE tenta aprender a métrica intrínseca do manifold.
+:::
+
+:::
+
+# Intuição — O Gargalo e o Manifold
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A premissa fundamental dos Autoencoders é a **Hipótese do Manifold**: dados do mundo real, embora representados em espaços de altíssima dimensão, tendem a concentrar-se em subvariedades (manifolds) de dimensão muito menor. 
+
+Um Autoencoder opera criando um "estrangulamento" (bottleneck). Ao forçar a rede a comprimir a entrada $\mathbf{x} \in \mathbb{R}^D$ em um vetor latente $\mathbf{z} \in \mathbb{R}^M$ (com $M \ll D$), obrigamos o modelo a descartar o ruído e reter apenas as características essenciais para a reconstrução. Se a rede for profunda e não linear, ela não aprende apenas um plano (como a PCA), mas uma superfície curva que "envolve" os dados.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Gargalo (Bottleneck)
+
+- **Encoder:** $\mathbf{z} = f_{\phi}(\mathbf{x})$ (Compressão).
+- **Decoder:** $\mathbf{\hat{x}} = g_{\theta}(\mathbf{z})$ (Reconstrução).
+- **Restrição:** $\dim(\mathbf{z}) \ll \dim(\mathbf{x})$.
+- **Força:** A rede deve aprender a representação mais eficiente possível para minimizar o erro.
+
+## A Hipótese do Manifold
+
+- Dados reais não preenchem o espaço $\mathbb{R}^D$ uniformemente.
+- Eles residem em "folhas" ou "curvas" de baixa dimensão.
+- **Exemplo:** Uma imagem de um rosto é apenas uma combinação de rotação, expressão e iluminação (poucos graus de liberdade), apesar de ter milhares de pixels.
+:::
+
+# Bloco 1: Autoencoders (AE) Tradicionais
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Um Autoencoder tradicional é treinado para minimizar a função de custo de reconstrução, tipicamente o Erro Quadrático Médio (MSE):
+$$J(\phi, \theta) = \frac{1}{N} \sum_{n=1}^N \|\mathbf{x}_n - g_{\theta}(f_{\phi}(\mathbf{x}_n))\|^2$$
+
+**O Risco do Mapeamento Identidade:** Se $M \ge D$, a rede pode simplesmente aprender a função identidade ($\mathbf{z} = \mathbf{x}$), copiando os pixels sem aprender nada sobre a estrutura dos dados. Para evitar isso, devemos:
+1. Manter $M < D$ (Undercomplete AE).
+2. Adicionar ruído à entrada (Denoising AE).
+3. Forçar a esparsidade no gargalo (Sparse AE).
+
+No nosso dataset de Breast Cancer, um AE não linear consegue capturar correlações complexas entre os atributos que a PCA ignora, resultando em um erro de reconstrução menor para a mesma dimensão de gargalo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Autoencoders (AE) Tradicionais
+
+- **Objetivo:** $\min_{\phi, \theta} \mathbb{E} [\|\mathbf{x} - \text{dec}(\text{enc}(\mathbf{x}))\|^2]$.
+- **Arquitetura:** Simétrica (geralmente).
+- **Aprendizado:** Backpropagation via gradiente descendente.
+
+## O Perigo do "Cópia e Cola"
+
+- Se o gargalo for largo demais $\to$ **Overfitting**.
+- A rede aprende a "memorizar" os dados em vez de "comprimir".
+- **Solução:** Forçar $M \ll D$ ou usar regularização (Denoising/Sparsity).
+
+## AE Linear vs Não Linear
+
+- **Linear:** $\mathbf{z} = \mathbf{W}\mathbf{x} + \mathbf{b}$.
+- **Não Linear:** $\mathbf{z} = \sigma(\mathbf{W}\mathbf{x} + \mathbf{b})$.
+- A não linearidade permite que o modelo "dobre" o espaço para melhor ajustar o manifold.
+:::
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{python}
+#| echo: false
+# Comparação simples de erro de reconstrução: Linear vs Não Linear no Breast Cancer
+def build_ae(input_dim, latent_dim, non_linear=True):
+    class AE(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.enc = nn.Sequential(
+                nn.Linear(input_dim, latent_dim),
+                nn.ReLU() if non_linear else nn.Identity()
+            )
+            self.dec = nn.Sequential(
+                nn.Linear(latent_dim, input_dim),
+                nn.ReLU() if non_linear else nn.Identity()
+            )
+        def forward(self, x):
+            return self.dec(self.enc(x))
+    return AE()
+
+def train_ae(model, data, epochs=50):
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    criterion = nn.MSELoss()
+    data_t = torch.FloatTensor(data)
+    for _ in range(epochs):
+        optimizer.zero_grad()
+        loss = criterion(model(data_t), data_t)
+        loss.backward()
+        optimizer.step()
+    return model
+
+M = 2
+ae_lin = train_ae(build_ae(X_bc_scaled.shape[1], M, False), X_bc_scaled)
+ae_non = train_ae(build_ae(X_bc_scaled.shape[1], M, True), X_bc_scaled)
+
+with torch.no_grad():
+    err_lin = nn.MSELoss()(ae_lin(torch.FloatTensor(X_bc_scaled)), torch.FloatTensor(X_bc_scaled)).item()
+    err_non = nn.MSELoss()(ae_non(torch.FloatTensor(X_bc_scaled)), torch.FloatTensor(X_bc_scaled)).item()
+
+plt.figure(figsize=(5, 4))
+plt.bar(["Linear (PCA-like)", "Não Linear"], [err_lin, err_non], color=[COR_CINZA, COR_AZUL])
+plt.ylabel("Erro de Reconstrução (MSE)")
+plt.title(f"Impacto da Não Linearidade (M={M})")
+plt.show()
+```
+:::
+
+# Bloco 2: O Gap Generativo
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Embora o AE seja excelente para compressão, ele falha miseravelmente como modelo generativo. Por que?
+
+O AE aprende a mapear cada $\mathbf{x}$ para um ponto $\mathbf{z}$ no espaço latente. No entanto, ele não impõe nenhuma restrição sobre a **distribuição** desses pontos. O resultado é um espaço latente "buracado": regiões onde o decoder nunca foi treinado. Se amostramosmos um $\mathbf{z}$ de uma região vazia, o decoder produzirá lixo.
+
+Para ser generativo, precisamos que o espaço latente seja **contínuo** (pontos próximos em $\mathbf{z}$ geram imagens semelhantes) e **completo** (qualquer ponto amostrado de uma distribuição conhecida, como $\mathcal{N}(\mathbf{0}, \mathbf{I})$, resulte em algo válido).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Problema do Espaço Latente
+
+- **AE Tradicional:** $\mathbf{x} \to \mathbf{z}$ (mapeamento pontual).
+- O espaço $\mathbf{z}$ é arbitrário e descontínuo.
+- **Amostragem:** Escolher um $\mathbf{z}$ aleatório $\to$ Resultado imprevisível.
+
+## Compressão $\neq$ Geração
+
+- **Compressão:** Queremos que $\text{dec}(\text{enc}(\mathbf{x})) \approx \mathbf{x}$.
+- **Geração:** Queremos que $\text{dec}(\mathbf{z}) \approx \text{dado real}$ para qualquer $\mathbf{z} \sim p(\mathbf{z})$.
+- O AE não modela a densidade $p(\mathbf{z})$.
+:::
+
+## Pausa Ativa
+
+::: {.callout-tip}
+## O que aconteceria se forçássemos todos os $\mathbf{z}$ a estarem dentro de um círculo unitário?
+
+Isso resolveria o problema dos "buracos" no espaço latente ou apenas mudaria a escala do problema?
+:::
+
+::: {.callout-tip}
+## Julgue V ou F
+
+- □ O Autoencoder tradicional aprende a densidade de probabilidade dos dados.
+- □ No AE, a função de custo penaliza a distância entre a entrada e a saída.
+- □ Um espaço latente contínuo é essencial para a interpolação de características.
+- □ O decoder de um AE funciona como um modelo generativo por definição.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa Ativa — Resposta
+
+::: {.callout-tip}
+## Julgue V ou F — Resposta
+
+- ✗ Falso — O AE aprende um mapeamento, não uma densidade.
+- ✔ Verdadeiro — Via MSE.
+- ✔ Verdadeiro — Permite transições suaves entre classes.
+- ✗ Falso — Ele reconstrói, mas não sabe como amostrar novos dados.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Apenas mudar a escala não resolve. O problema é a *topologia* do espaço. Podemos ter todos os pontos no círculo, mas com "ilhas" de dados separadas por vastos desertos de baixa probabilidade. Precisamos de uma força que "empurre" as representações para preencher o espaço de forma regular.
+:::
+
+:::
+
+# Bloco 3: Variational Autoencoders (VAE)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O VAE resolve o gap generativo mudando a natureza do gargalo. Em vez de mapear $\mathbf{x}$ para um ponto $\mathbf{z}$, o encoder agora estima os **parâmetros de uma distribuição de probabilidade** $q_{\phi}(\mathbf{z}|\mathbf{x})$. 
+
+Geralmente, assumimos que essa distribuição é uma Gaussiana multivariada com diagonal:
+$$q_{\phi}(\mathbf{z}|\mathbf{x}) = \mathcal{N}(\mathbf{z} \mid \boldsymbol\mu_{\phi}(\mathbf{x}), \text{diag}(\boldsymbol\sigma_{\phi}^2(\mathbf{x})))$$
+
+O encoder produz dois vetores: $\boldsymbol\mu$ (a localização do dado no espaço latente) e $\boldsymbol\sigma$ (a incerteza ou "espalhamento" desse dado). O decoder então tenta reconstruir $\mathbf{x}$ a partir de amostras $\mathbf{z} \sim q_{\phi}(\mathbf{z}|\mathbf{x})$. Isso força o decoder a ser robusto a pequenas variações em $\mathbf{z}$, promovendo a continuidade do espaço.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Variational Autoencoders (VAE)
+
+- **Mudança de Paradigma:** $\mathbf{x} \to p(\mathbf{z}|\mathbf{x}) \to \mathbf{x}$.
+- O Encoder não é mais um compressor de pontos, mas um **estimador de densidade**.
+- **Saídas do Encoder:** $\boldsymbol\mu$ (média) e $\boldsymbol\sigma$ (desvio padrão).
+
+## O Processo Generativo
+
+1. **Encoder:** $\mathbf{x} \to (\boldsymbol\mu, \boldsymbol\sigma)$.
+2. **Amostragem:** $\mathbf{z} \sim \mathcal{N}(\boldsymbol\mu, \boldsymbol\sigma^2)$.
+3. **Decoder:** $\mathbf{z} \to \mathbf{\hat{x}}$.
+- Isso garante que regiões próximas no espaço latente gerem resultados semelhantes.
+:::
+
+# Bloco 4: O Objetivo do VAE (ELBO)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Se deixássemos o VAE apenas com o erro de reconstrução, o modelo simplesmente definiria $\boldsymbol\sigma \to 0$ e voltaria a ser um AE tradicional (pontos isolados). Para evitar isso, introduzimos uma regularização: queremos que a distribuição latente $q_{\phi}(\mathbf{z}|\mathbf{x})$ seja próxima de uma priori simples, tipicamente $\mathcal{N}(\mathbf{0}, \mathbf{I})$.
+
+Isso nos leva de volta ao **ELBO** (Aula 5). A função de custo do VAE é a minimização da perda:
+$$\text{Loss} = \underbrace{\mathbb{E}_{\mathbf{z} \sim q_{\phi}(\mathbf{z}|\mathbf{x})} [\|\mathbf{x} - g_{\theta}(\mathbf{z})\|^2]}_{\text{Fidelidade (Reconstrução)}} + \beta \cdot \underbrace{\mathrm{KL}(q_{\phi}(\mathbf{z}|\mathbf{x}) \| \mathcal{N}(\mathbf{0}, \mathbf{I}))}_{\text{Regularização (Prior)}}$$
+
+- **Fidelidade:** Força o modelo a reconstruir o dado com precisão.
+- **Regularização:** Força o espaço latente a ser compacto, centralizado e sem buracos.
+- **O Equilíbrio:** Se $\beta$ for muito alto, todos os dados colapsam no centro (borrado). Se for muito baixo, temos o problema do AE tradicional (overfitting).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Objetivo do VAE: ELBO
+
+A função de custo é um cabo de guerra entre dois termos:
+
+1. **Erro de Reconstrução (Fidelidade):**
+   - $\mathbb{E} [\|\mathbf{x} - \text{dec}(\mathbf{z})\|^2]$.
+   - "Quero que o dado seja reconstruído perfeitamente".
+   - $\to$ Tende a criar "ilhas" isoladas para cada dado.
+
+2. **Divergência KL (Regularização):**
+   - $\mathrm{KL}(q(\mathbf{z}|\mathbf{x}) \| \mathcal{N}(\mathbf{0}, \mathbf{I}))$.
+   - "Quero que o espaço latente seja uma Gaussiana padrão".
+   - $\to$ Tende a esmagar tudo no centro.
+
+**Resultado:** Um espaço latente suave, contínuo e centrado.
+:::
+
+# Bloco 5: O Reparameterization Trick
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Há um problema técnico fundamental: a operação de amostragem $\mathbf{z} \sim \mathcal{N}(\boldsymbol\mu, \boldsymbol\sigma^2)$ é estocástica e **não é diferenciável**. O gradiente do erro de reconstrução não consegue "atravessar" a amostragem para atualizar os pesos do encoder ($\boldsymbol\mu$ e $\boldsymbol\sigma$).
+
+A solução é o **Reparameterization Trick**. Em vez de amostrar diretamente da Gaussiana dependente de $\mathbf{x}$, expressamos $\mathbf{z}$ como uma transformação determinística de um ruído externo $\boldsymbol\epsilon \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$:
+$$\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$$
+
+Agora, a estocasticidade está isolada em $\boldsymbol\epsilon$, que não depende dos parâmetros da rede. O gradiente pode fluir livremente através de $\boldsymbol\mu$ e $\boldsymbol\sigma$ via a soma e a multiplicação, permitindo o treinamento via backpropagation.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Reparameterization Trick
+
+**O Problema:**
+$\text{Encoder} \to \text{Amostra } \mathbf{z} \to \text{Decoder}$.
+O gradiente $\nabla_{\phi}$ para no passo de amostragem (não é diferenciável).
+
+**A Solução:**
+Mover a aleatoriedade para fora da rede.
+$$\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon, \quad \text{onde } \boldsymbol\epsilon \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$$
+
+- $\boldsymbol\mu$ e $\boldsymbol\sigma$ são determinísticos (saídas da rede).
+- $\boldsymbol\epsilon$ é um ruído fixo para aquele passo.
+- **Agora o gradiente flui!**
+:::
+
+## Pausa Ativa
+
+::: {.callout-tip}
+## O que acontece se removermos o termo KL do VAE?
+
+O modelo ainda consegue gerar imagens? Elas seriam semelhantes às do MNIST?
+:::
+
+::: {.callout-tip}
+## Julgue V ou F
+
+- □ O Reparameterization Trick torna a amostragem diferenciável.
+- □ No VAE, o encoder prevê o valor exato de $\mathbf{z}$ para cada $\mathbf{x}$.
+- □ A divergência KL no VAE atua como um regularizador do espaço latente.
+- □ O decoder de um VAE é capaz de transformar qualquer $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ em um dado plausível.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa Ativa — Resposta
+
+::: {.callout-tip}
+## Julgue V ou F — Resposta
+
+- ✔ Verdadeiro — Permite o uso de backpropagation.
+- ✗ Falso — Ele prevê os parâmetros ($\boldsymbol\mu, \boldsymbol\sigma$) de uma distribuição.
+- ✔ Verdadeiro — Evita o colapso em pontos isolados.
+- ✔ Verdadeiro — Esse é o objetivo de ter um espaço latente regularizado.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Se removermos o KL, o VAE vira um AE tradicional com ruído. Ele ainda "gera" algo, mas o espaço latente terá buracos. Se você amostrar um $\mathbf{z}$ aleatório, as chances de cair num "buraco" são altas, resultando em imagens que não parecem nada com dígitos.
+:::
+
+:::
+
+# Fechamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Retomando as perguntas do roteiro:
+- **O que é um AE?** Uma rede que aprende a comprimir e reconstruir dados via gargalo não linear.
+- **Por que o AE não é generativo?** Porque seu espaço latente é descontínuo e não modela a densidade dos dados.
+- **Como o VAE resolve isso?** Transformando o gargalo em uma distribuição e regularizando-a via KL para ser próxima de $\mathcal{N}(\mathbf{0}, \mathbf{I})$.
+- **O que é o Reparameterization Trick?** Uma técnica para permitir o fluxo de gradientes através de amostragem estocástica.
+
+**O Que Fica em Aberto:** Vimos que VAEs geram dados "borrados" (devido à natureza da Gaussiana e do MSE). Existem formas de gerar imagens mais nítidas? (Spoiler: GANs e Diffusion Models).
+
+**Ponte para a Aula 8:** Até agora, focamos em reconstruir o dado. Mas e se quisermos apenas visualizar a estrutura de vizinhança em 2D, preservando a topologia local sem necessariamente reconstruir os pixels? Entraremos no mundo do MDS e t-SNE.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as Perguntas
+
+- **AE:** Compressão via gargalo $\to$ Manifold Learning.
+- **Gap Generativo:** Espaço latente "buracado" $\to$ Amostragem falha.
+- **VAE:** Encoder $\to$ Distribuição $\to$ Regularização KL.
+- **Reparameterization:** $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon \to$ Gradientes fluem.
+
+## O Que Fica em Aberto?
+
+- Por que as imagens do VAE são borradas?
+- Como gerar imagens com alta fidelidade (estilo "fotorealista")?
+
+## Ponte para a Aula 8
+
+**Próximo passo:** Redução para Visualização.
+Sairemos da reconstrução para a preservação de topologia: **MDS e t-SNE**.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
