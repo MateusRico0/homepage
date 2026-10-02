@@ -1,4 +1,4 @@
-# Respostas da Aula 5.1 — Pausas Ativas
+# Respostas da Aula 5 — Pausas Ativas
 
 > Arquivo de apoio, não publicado (prefixo `_`). Discussão em prosa das
 > 6 pausas ativas do `index.qmd` (a pergunta motivadora + a resolução

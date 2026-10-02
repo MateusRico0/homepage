@@ -131,6 +131,13 @@ for thr in thr_grid:
         acc = (pred == diagnosis).mean()
         best_acc = max(best_acc, acc)
 
+# --- Problema Motivador: redundância entre os 30 atributos ------------
+corr30 = np.corrcoef(Xs.T)
+_iu = np.triu_indices(D, 1)
+n_pares = len(_iu[0])
+n_forte = int((np.abs(corr30[_iu]) > 0.8).sum())
+r_rad_per = corr30[feat_cols.index("radius_mean"), feat_cols.index("perimeter_mean")]
+
 # --- Ilustração 2D (mesmo par das Aulas 3-5), para o Problema-Fio -----
 FEAT_2D = ["radius_worst", "concave points_worst"]
 X2d = StandardScaler().fit_transform(ds[FEAT_2D].values)
@@ -157,6 +164,14 @@ W1_ae = ae.coefs_[0]  # D x M, pesos de entrada->oculta
 Q_ae, _ = np.linalg.qr(W1_ae)
 Q_pca, _ = np.linalg.qr(U_M)
 principal_cosines = np.linalg.svd(Q_pca.T @ Q_ae, compute_uv=False)
+
+# --- Códigos latentes do autoencoder vs. coordenadas da PCA -----------
+Z_ae = Xc @ W1_ae + ae.intercepts_[0]
+A_ls = np.c_[Z, np.ones(N)]
+G_ls, *_ = np.linalg.lstsq(A_ls, Z_ae, rcond=None)
+res_ls = Z_ae - A_ls @ G_ls
+r2_ae = 1 - (res_ls**2).sum(0) / ((Z_ae - Z_ae.mean(0))**2).sum(0)
+cos_w = W1_ae[:, 0] @ W1_ae[:, 1] / np.prod(np.linalg.norm(W1_ae, axis=0))
 ```
 
 # Revisão e Introdução
@@ -173,7 +188,7 @@ principal_cosines = np.linalg.svd(Q_pca.T @ Q_ae, compute_uv=False)
 . . .
 
 - **EM vs. Bayesiano:** No EM clássico, $\theta$ é ponto fixo $\to$ sem penalidade de complexidade. No Bayesiano, $\theta$ tem priori $\to$ a KL impõe a Navalha de Occam.
-- **Validação Empírica:** Quando a analítica falha $\to$ Silhueta, Davies-Bouldin ou *Posterior Predictive Checks*.
+- **Validação Empírica:** Quando a analítica falha $\to$ ELPD em dados de validação, Silhueta e Dunn, e *Posterior Predictive Checks* quantitativos.
 - **A Transição de Hoje:** Até agora, a variável latente $z_n$ era **categórica** ("qual população?").
 - **O Novo Eixo:** E se a variável latente for **contínua** $\mathbf{z}\in\mathbb{R}^M$?
 
@@ -187,14 +202,25 @@ A ideia-ponte desta aula é tratar a redução de dimensionalidade como um objet
 
 Quatro perguntas organizam nossa jornada hoje:
 
-1. **O que significa, formalmente, "resumir sem perder o que importa"?** A Análise de Componentes Principais (PCA) responde isso de duas formas equivalentes — quais são elas e por que coincidem?
-2. **Existe uma versão probabilística dessa ideia?** Vamos explorar um modelo gerador de variável latente contínua, no mesmo espírito do GMM, mas linear-Gaussiano. O que a PPCA revela que a PCA clássica ignora?
-3. **Um autoencoder raso resolve um problema diferente, ou é a mesma coisa disfarçada?** Veremos como a reconstrução via redes neurais lineares converge para o mesmo subespaço da PCA.
+1. **O que é, concretamente, um espaço latente contínuo?** Um autoencoder linear — uma rede que comprime cada ponto em $M$ números e o reconstrói a partir deles — dá a resposta mais direta: o código latente são coordenadas num plano dentro do espaço dos dados. Que plano a rede aprende?
+2. **O que significa, formalmente, "resumir sem perder o que importa"?** A Análise de Componentes Principais (PCA) responde de duas formas — menor erro de reconstrução e maior variância retida. Por que coincidem, e o que isso diz sobre o autoencoder?
+3. **Existe uma versão probabilística dessa ideia?** Um modelo gerador de variável latente contínua, no mesmo espírito do GMM, mas linear-Gaussiano. O que a PPCA revela que a PCA clássica ignora?
 4. **Qual a limitação fundamental dessas três ferramentas?** O que acontece quando a estrutura dos dados não é um plano, mas uma variedade curva?
 
 ## Problema Motivador
 
-Sem fórmulas por enquanto: imagine que você tem dois atributos padronizados do Breast Cancer Wisconsin. Se você fosse forçado a guardar **uma única direção** de projeção para resumir esses dois atributos num único número por paciente, qual direção você escolheria? Por que "essa" e não qualquer outra? O que tornaria essa direção "melhor" que as demais?
+Cada paciente do Breast Cancer Wisconsin é descrito por $30$ números. Mas
+serão $30$ informações diferentes? A figura mostra o módulo da
+correlação entre cada par de atributos. Há blocos inteiros de atributos
+quase redundantes: raio, perímetro e área medem, no fundo, o tamanho do
+tumor (a correlação entre raio médio e perímetro médio é
+$0{,}998$), e $`{python} n_forte`$ dos
+$`{python} n_pares`$ pares têm $|r|>0{,}8$.
+
+Se tanta coisa se repete, deve bastar guardar **bem menos que $30$
+números** por paciente e, a partir deles, reconstruir os $30$ quase sem
+perda. Quantos números? **Quais** números? E como saber se o resumo
+perdeu o que importa?
 
 :::
 
@@ -222,8 +248,8 @@ de priori" (mesmo dilema no K-Means, no DBSCAN).
 
 ::: {.fragment}
 Sem via analítica sempre disponível: validação **empírica**
-(Silhueta/Davies-Bouldin, verossimilhança preditiva, *Posterior
-Predictive Checks*).
+(ELPD em validação, Silhueta e Dunn, *Posterior Predictive Checks*
+quantitativos).
 :::
 
 ::: {.fragment .callout-note}
@@ -242,15 +268,15 @@ sempre **categórica**: "de qual das $K$ populações?"
 
 ## Roteiro da Aula
 
-**1.** "Resumir sem perder o que importa": PCA responde de duas formas equivalentes — quais, por que coincidem?
+**1.** O que é um espaço latente contínuo? Um autoencoder linear comprime e reconstrói — que plano ele aprende?
 
 . . .
 
-**2.** Existe versão probabilística (estilo GMM, mas $z$ contínuo, linear-Gaussiano)? O que ela revela?
+**2.** "Resumir sem perder o que importa": PCA responde de duas formas (erro mínimo, variância máxima) — por que coincidem, e o que dizem do autoencoder?
 
 . . .
 
-**3.** Um autoencoder raso (rede neural) resolve outro problema, ou é a mesma coisa disfarçada?
+**3.** Existe versão probabilística (estilo GMM, mas $z$ contínuo, linear-Gaussiano)? O que ela revela?
 
 . . .
 
@@ -258,10 +284,31 @@ sempre **categórica**: "de qual das $K$ populações?"
 
 ## Problema Motivador
 
+- $30$ atributos por paciente — mas $30$ informações diferentes?
+- Raio médio $\times$ perímetro médio: $r=`{python} brl(r_rad_per, 3)`$; $`{python} n_forte`$ de $`{python} n_pares`$ pares com $|r|>0{,}8$.
+
 ::: {.fragment}
-Sem fórmula ainda: escolha $2$ atributos padronizados do Breast Cancer Wisconsin. Se só pudesse guardar **uma direção** de projeção por paciente, qual escolheria — e por quê essa e não outra?
+Se tanta coisa se repete: quantos números bastam para reconstruir os $30$? **Quais**? E como saber se o resumo perdeu o que importa?
 :::
 
+:::
+
+::: {.fig-resize style="width: 35%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(7.4, 6.4))
+im = ax.imshow(np.abs(corr30), cmap="Blues", vmin=0, vmax=1)
+ax.set_xticks(range(D)); ax.set_yticks(range(D))
+ax.set_xticklabels(feat_cols, rotation=90, fontsize=6)
+ax.set_yticklabels(feat_cols, fontsize=6)
+ax.grid(False)
+fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03, label="|correlação|")
+ax.set_title("Correlação entre os 30 atributos do Breast Cancer Wisconsin")
+plt.tight_layout()
+plt.show()
+```
 :::
 
 ## Pergunta
@@ -324,54 +371,63 @@ importa — é a mesma. O resto da aula formaliza "o que importa".
 
 :::
 
-# Problema-Fio: Qual Direção Resume Melhor?
+
+# Problema-Fio: Guardar Um Número, Reconstruir Dois
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-Antes de qualquer fórmula, veja o problema em $2$ dimensões, onde dá
-para desenhar. A figura abaixo usa o mesmo par de atributos padronizados
-já conhecido (`radius_worst`, `concave points_worst`) e compara duas
-direções candidatas para resumir cada paciente num único número: o eixo
-bruto de `radius_worst` (linha pontilhada) e uma direção a $45°$ (linha
-sólida azul) — a diagonal ao longo da qual os dois atributos crescem
-juntos.
+Antes de qualquer método, o problema no menor caso possível, onde dá
+para desenhar. Cada paciente tem dois atributos padronizados, o mesmo
+par já conhecido (`radius_worst`, `concave points_worst`). Queremos
+guardar **um único número** por paciente e, só a partir dele,
+reconstruir os dois atributos. Uma forma natural de fazer isso: escolher
+uma reta que passa pelo centro dos dados, guardar a posição de cada
+paciente ao longo dela e reconstruí-lo como o ponto da reta mais
+próximo dele.
+
+A figura compara duas retas candidatas: o eixo bruto de `radius_worst`
+(linha pontilhada) e uma direção a $45°$ (linha sólida azul) — a
+diagonal ao longo da qual os dois atributos crescem juntos. Para cada
+uma, a legenda mostra duas medidas: a **variância retida** (quanto os
+números guardados variam entre pacientes) e o **erro** de reconstrução
+(a distância quadrática média de cada paciente até a reta).
 
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## Duas Direções Candidatas
+## Guardar Um Número, Reconstruir Dois
 
-- Mesmo par padronizado (`radius_worst`, `concave points_worst`).
-- Duas direções candidatas para resumir num único número:
-  - O eixo bruto de `radius_worst`.
-  - A diagonal a $45°$.
+- Dessas variáveis, (`radius_worst`, `concave points_worst`), guardamos **um número** por paciente; reconstruir os **dois** atributos a partir dele.
+- Receita natural: uma reta pelo centro dos dados; guardar a posição ao longo dela; reconstruir pelo ponto da reta.
 
 . . .
 
-- Qual delas "resume melhor" a variação dos dados?
+- Duas retas candidatas: o eixo bruto de `radius_worst` e a diagonal a $45°$.
+- Medidas: **variância retida** (dos números guardados) e **erro** (distância quadrática média até a reta).
 :::
 
-::: {.fig-resize style="width: 62%; margin: 0 auto;"}
+::: {.fig-resize style="width: 40%; margin: 0 auto;"}
 ```{python}
 #| echo: false
 #| fig-align: center
 
+var_tot2 = np.trace(S2)
 fig, ax = plt.subplots(figsize=(5.6, 5.2))
 ax.scatter(Xc2[:, 0], Xc2[:, 1], s=10, alpha=0.35, color=COR_CINZA)
 
 lim = 3.6
 ax.plot([-lim, lim], [0, 0], linestyle=":", color=COR_VERM, linewidth=2,
-        label=f"eixo bruto (radius_worst): var={brl(Xc2[:,0].var(),2)}")
+        label=f"eixo bruto: retida={brl(S2[0,0],2)}, erro={brl(var_tot2 - S2[0,0],2)}")
 ax.plot([-lim * u1_2d[0], lim * u1_2d[0]], [-lim * u1_2d[1], lim * u1_2d[1]],
         color=COR_AZUL, linewidth=2.4,
-        label=f"direção a 45° (u1): var={brl(eigvals2[0],2)}")
+        label=f"direção a 45°: retida={brl(eigvals2[0],2)}, erro={brl(var_tot2 - eigvals2[0],2)}")
 
 ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
 ax.set_aspect("equal", adjustable="box")
 ax.set_xlabel("radius_worst (padronizado)")
 ax.set_ylabel("concave points_worst (padronizado)")
-ax.set_title("Duas direções candidatas para resumir 2 atributos em 1 número")
+ax.set_title("Duas retas candidatas: variância retida e erro de reconstrução")
 ax.legend(loc="upper left", fontsize=8)
 plt.tight_layout()
 plt.show()
@@ -380,43 +436,586 @@ plt.show()
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-A resposta não é uma questão de gosto: projetando os $569$ pacientes
-sobre o eixo bruto de `radius_worst`, a variância dos números resultantes
-é $1{,}00$ (o próprio atributo, já padronizado). Projetando sobre a
-direção a $45°$, a variância sobe para $1{,}79$ — quase o dobro.
+Sobre o eixo bruto, os números guardados têm variância $1{,}00$ (o
+próprio atributo, já padronizado), e o erro de reconstrução também é
+$1{,}00$. Sobre a reta a $45°$, a variância retida sobe para $1{,}79$ e o
+erro cai para $0{,}21$. A figura já contém as perguntas que a aula
+inteira responde:
 
-A direção a $45°$ "resume melhor" nesse sentido preciso: um único número
-ao longo dela carrega mais informação sobre como os pacientes variam
-entre si do que um único número ao longo de qualquer eixo bruto isolado.
-Formalizar "resumir melhor" como "maximizar a variância da projeção" é
-exatamente o que o Bloco 3 faz a seguir — e a direção a $45°$ desta
-figura não foi escolhida à mão: ela é, como o Bloco 3 vai provar, o
-autovetor de maior autovalor da matriz de covariância desses dois
-atributos.
+- **O número guardado é um código latente.** A posição ao longo da reta
+  é uma variável latente contínua: não foi medida, mas resume o paciente.
+  Uma rede neural que aprende a comprimir e reconstruir — o
+  **autoencoder linear** — faz o mesmo em qualquer dimensão, com um
+  plano no lugar da reta. Que plano ela aprende?
+- **Qual reta erra menos?** Formalizar "resumir sem perder o que
+  importa" como menor erro de reconstrução é o **Mecanismo I**.
+- **Qual reta retém mais variância?** A reta a $45°$ ganha nos dois
+  critérios ao mesmo tempo, e nas duas retas retida $+$ erro $=2{,}00$,
+  a variância total. Não é coincidência: o **Mecanismo II** mostra que
+  os dois critérios são o mesmo problema e que a melhor reta é um
+  autovetor da matriz de covariância — a direção a $45°$ não foi
+  escolhida à mão.
+- **E o que sobra fora da reta?** Nenhum paciente cai exatamente sobre
+  ela: o erro de $0{,}21$ é espalhamento em torno da reta. Tratar esse
+  espalhamento como ruído de um modelo que gera os dados é a **PPCA**.
 
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## Qual Direção "Resume Melhor"?
+## O Que a Figura Pergunta
 
-- Eixo bruto (`radius_worst`): variância $=1{,}00$.
-- Direção a $45°$: variância $=1{,}79$ — quase o dobro.
+- Eixo bruto: retida $=1{,}00$, erro $=1{,}00$. 
+- Diagonal a $45°$: retida $=1{,}79$, erro $=0{,}21$.
 
-. . .
-
-- **Conclusão:** "Resumir melhor" $\equiv$ maximizar a variância da projeção.
-- A direção a $45°$ não foi escolhida à mão — ela é o autovetor de maior autovalor da covariância (provado no Bloco 3).
+::: {.fragment}
+- **Número guardado $=$ código latente.** Uma rede que comprime e reconstrói (o **autoencoder linear**) faz o mesmo em dimensão qualquer. Que plano aprende?
 :::
 
-# Mecanismo I: Formulação de Máxima Variância
+::: {.fragment}
+- **Qual reta erra menos?** (Mecanismo I.)
+- **Qual retém mais variância?** Retida $+$ erro $=2{,}00$ nas duas: mesmo problema? Qual reta, sem escolher à mão? (Mecanismo II.)
+:::
+
+::: {.fragment}
+- **E o que sobra fora da reta?** O erro $0{,}21$ como ruído de um modelo gerador (PPCA).
+:::
+
+:::
+
+
+# O Autoencoder Linear: Comprimir, Codificar, Reconstruir
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-**Premissas.** Um conjunto de observações $\{\mathbf{x}_n\}$,
-$n=1,\dots,N$, cada $\mathbf{x}_n\in\mathbb{R}^D$. Queremos projetar os
-dados sobre um espaço de dimensão $M<D$, maximizando a variância dos
-dados projetados. Comece pelo caso $M=1$: definimos a direção desse
+O Problema-Fio guardou um número por paciente e reconstruiu dois a
+partir dele. A forma mais direta de generalizar isso é construir uma
+máquina que faça exatamente o mesmo em qualquer dimensão: comprimir cada paciente em $M$
+números e, só a partir deles, reconstruir os $30$ atributos originais. O
+que se perde no resumo é o que não volta na reconstrução. Essa máquina é
+uma rede neural rasa, treinada não para classificar nem prever nada
+externo, mas para **reconstruir a própria entrada**.
+
+::: {.callout-note icon=false}
+## Definição (autoencoder; DLFC §19.1.1)
+
+Um *autoencoder* é uma rede com $D$ unidades de entrada, $D$ unidades
+de saída e $M<D$ unidades na camada oculta (o "gargalo"), treinada com
+alvo $\mathbf{y}(\mathbf{x}_n,\mathbf{w})\approx\mathbf{x}_n$ — cada
+vetor de entrada como seu próprio alvo (mapeamento *auto-associativo*).
+Os parâmetros $\mathbf{w}$ são ajustados minimizando o erro de
+soma-de-quadrados
+
+$$
+E(\mathbf{w}) = \frac12\sum_{n=1}^N\|\mathbf{y}(\mathbf{x}_n,\mathbf{w})-\mathbf{x}_n\|^2.
+$$
+:::
+
+Com $M<D$ unidades ocultas, reconstrução perfeita de todos os pontos
+não é, em geral, possível — a rede é forçada a aprender uma
+representação comprimida de $M$ números por ponto.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Autoencoder: Comprimir para Reconstruir
+
+::: {.callout-note icon=false}
+**Definição (DLFC §19.1.1):** rede $D$-$M$-$D$, $M<D$, alvo
+$\mathbf{y}(\mathbf{x}_n,\mathbf{w})\approx\mathbf{x}_n$,
+$$
+E(\mathbf{w})=\tfrac12\sum_n\|\mathbf{y}(\mathbf{x}_n,\mathbf{w})-\mathbf{x}_n\|^2.
+$$
+:::
+
+::: {.fragment}
+- "Resumir sem perder o que importa" vira uma máquina: comprimir em $M$ números, reconstruir os $D$.
+- O que se perde $=$ o que não volta na reconstrução. Com $M<D$, reconstrução perfeita não é, em geral, possível.
+:::
+
+## A Arquitetura
+
+:::
+
+::: {.fig-resize style="width: 66%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{enc}{RGB}{0,133,202}
+\definecolor{dec}{RGB}{255,94,0}
+\definecolor{neu}{RGB}{93,109,126}
+
+\begin{tikzpicture}[x=1cm,y=1cm]
+
+\foreach \y/\lab in {5.2/1, 4.2/2, 2.2/{D-1}, 1.2/D} {
+  \node[draw, circle, minimum size=0.8cm, color=neu] at (0.8,\y) {$x_{\lab}$};
+}
+\node[font=\scriptsize] at (0.8,3.2) {$\vdots$};
+
+\node[draw, circle, minimum size=0.9cm, color=enc, thick, fill=enc!12] (h1) at (5.2,3.9) {$z_1$};
+\node[draw, circle, minimum size=0.9cm, color=enc, thick, fill=enc!12] (h2) at (5.2,2.5) {$z_2$};
+
+\foreach \y/\lab in {5.2/1, 4.2/2, 2.2/{D-1}, 1.2/D} {
+  \node[draw, circle, minimum size=0.8cm, color=neu] (o\lab) at (9.6,\y) {$y_{\lab}$};
+}
+\node[font=\scriptsize] at (9.6,3.2) {$\vdots$};
+
+\foreach \y in {5.2,4.2,2.2,1.2} {
+  \draw[->, color=enc] (0.8,\y) -- (h1);
+  \draw[->, color=enc] (0.8,\y) -- (h2);
+}
+\foreach \y in {5.2,4.2,2.2,1.2} {
+  \draw[->, color=dec] (h1) -- (9.6,\y);
+  \draw[->, color=dec] (h2) -- (9.6,\y);
+}
+
+\node[font=\small, color=enc] at (2.9,6.6) {codificador $\mathbf{V}$ ($D\to M$)};
+\node[font=\small, color=dec] at (7.4,6.6) {decodificador $\mathbf{W}$ ($M\to D$)};
+\node[font=\small] at (0.8,6.9) {entrada ($D$)};
+\node[font=\small] at (5.2,6.9) {código latente ($M<D$)};
+\node[font=\small] at (9.6,6.9) {saída ($D$)};
+
+\node[font=\scriptsize, color=neu] at (5.2,0.2) {alvo: $\mathbf{y}(\mathbf{x}_n,\mathbf{w})\approx\mathbf{x}_n$};
+
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Codificador, espaço latente e decodificador.** No caso **linear**
+(ativação identidade) e com os dados centrados (os vieses só
+recentralizam), a rede tem duas matrizes de pesos:
+
+$$
+\underbrace{\mathbf{z}_n=\mathbf{V}\mathbf{x}_n}_{\text{codificador},\ \mathbf{V}\in\mathbb{R}^{M\times D}},
+\qquad
+\underbrace{\mathbf{y}_n=\mathbf{W}\mathbf{z}_n}_{\text{decodificador},\ \mathbf{W}\in\mathbb{R}^{D\times M}},
+\qquad\text{logo}\qquad
+\mathbf{y}_n=\mathbf{W}\mathbf{V}\mathbf{x}_n .
+$$
+
+O vetor $\mathbf{z}_n\in\mathbb{R}^M$, a saída da camada oculta, é o
+**código latente** do paciente $n$, e $\mathbb{R}^M$ é o **espaço
+latente**. É a variável latente contínua $\mathbf{z}$ anunciada na Ideia
+Central, agora com uma receita explícita para calculá-la a partir de
+$\mathbf{x}$.
+
+A geometria aparece olhando o decodificador. Com
+$\mathbf{w}_1,\dots,\mathbf{w}_M$ as colunas de $\mathbf{W}$, toda
+reconstrução tem a forma
+$\mathbf{W}\mathbf{z}=z_1\mathbf{w}_1+\dots+z_M\mathbf{w}_M$. Portanto:
+
+- as reconstruções vivem no subespaço
+  $\mathcal{C}(\mathbf{W})=\{\mathbf{W}\mathbf{z}\mid\mathbf{z}\in\mathbb{R}^M\}$,
+  um "plano" de dimensão (no máximo) $M$ dentro de $\mathbb{R}^D$;
+- o código $\mathbf{z}_n$ são as **coordenadas** do ponto reconstruído
+  nesse plano, e as colunas $\mathbf{w}_j$ são os **eixos** dessas
+  coordenadas;
+- o erro de reconstrução de $\mathbf{x}_n$ é a distância entre
+  $\mathbf{x}_n$ e o ponto do plano que o representa.
+
+O espaço latente é, então, um **sistema de coordenadas para um plano de
+dimensão $M$ dentro do espaço dos dados**. Treinar o autoencoder é
+escolher esse plano e a regra que leva cada ponto até ele.
+
+**O que os dados determinam, e o que não.** Para qualquer matriz
+invertível $\mathbf{G}\in\mathbb{R}^{M\times M}$, o par
+$(\mathbf{G}\mathbf{V},\ \mathbf{W}\mathbf{G}^{-1})$ produz o mesmo
+produto, $\mathbf{W}\mathbf{G}^{-1}\mathbf{G}\mathbf{V}=\mathbf{W}\mathbf{V}$,
+logo as mesmas reconstruções e o mesmo erro $E$. Os códigos, porém,
+mudam: $\mathbf{z}_n\mapsto\mathbf{G}\mathbf{z}_n$. O erro enxerga o
+**plano** — $\mathcal{C}(\mathbf{W}\mathbf{G}^{-1})=\mathcal{C}(\mathbf{W})$
+—, não os eixos escolhidos dentro dele. Duas redes com o mesmo erro podem
+dar coordenadas latentes diferentes ao mesmo paciente, e nenhuma delas é
+"a certa": os eixos do espaço latente só estão definidos a menos de uma
+mudança de base invertível.
+
+Sobra a pergunta que organiza o resto da aula: **qual plano** o treino
+encontra? Os próximos blocos respondem sem rede nenhuma, olhando só
+para os dados. O **Mecanismo I** procura o plano de menor erro de
+reconstrução; o **Mecanismo II** mostra que ele é também o plano de
+maior variância retida e o constrói a partir dos autovetores da matriz
+de covariância — os **componentes principais**. O bloco **De Volta ao
+Autoencoder** prova que é esse o plano que a rede encontra.
+
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Codificador, Espaço Latente, Decodificador
+
+Caso linear, dados centrados:
+$$
+\mathbf{z}_n=\mathbf{V}\mathbf{x}_n\ \ (\mathbf{V}\in\mathbb{R}^{M\times D}),\qquad
+\mathbf{y}_n=\mathbf{W}\mathbf{z}_n\ \ (\mathbf{W}\in\mathbb{R}^{D\times M}),\qquad
+\mathbf{y}_n=\mathbf{W}\mathbf{V}\mathbf{x}_n.
+$$
+
+::: {.fragment}
+- $\mathbf{z}_n\in\mathbb{R}^M$: **código latente**; $\mathbb{R}^M$: **espaço latente**.
+- $\mathbf{W}\mathbf{z}=z_1\mathbf{w}_1+\dots+z_M\mathbf{w}_M$: reconstruções vivem no plano $\mathcal{C}(\mathbf{W})$, de dimensão $\le M$, dentro de $\mathbb{R}^D$.
+- $\mathbf{z}_n$ $=$ **coordenadas** no plano; colunas $\mathbf{w}_j$ $=$ **eixos**.
+:::
+
+::: {.fragment .callout-important}
+Espaço latente $=$ sistema de coordenadas de um plano $M$-dimensional dentro do espaço dos dados. Treinar $=$ escolher o plano.
+:::
+
+## O Que os Dados Determinam
+
+::: {.fragment}
+Para qualquer $\mathbf{G}$ invertível $M\times M$:
+$$
+(\mathbf{V},\mathbf{W})\ \to\ (\mathbf{G}\mathbf{V},\ \mathbf{W}\mathbf{G}^{-1}):\qquad
+\mathbf{W}\mathbf{G}^{-1}\mathbf{G}\mathbf{V}=\mathbf{W}\mathbf{V}.
+$$
+:::
+
+::: {.fragment}
+- Mesmas reconstruções, mesmo erro — mas códigos $\mathbf{z}_n\mapsto\mathbf{G}\mathbf{z}_n$.
+- O erro enxerga o **plano** ($\mathcal{C}(\mathbf{W}\mathbf{G}^{-1})=\mathcal{C}(\mathbf{W})$), não os **eixos**.
+:::
+
+::: {.fragment .callout-note}
+Os eixos do espaço latente só estão definidos a menos de uma mudança de base. Pergunta que sobra: **qual plano** o treino encontra?
+:::
+
+## A Pergunta que Sobra: Qual Plano?
+
+::: {.fragment}
+- O treino escolhe um plano de dimensão $M$ (os eixos são arbitrários, por $\mathbf{G}$).
+- Qual? Resposta nos próximos blocos, **sem rede**, só com os dados:
+:::
+
+::: {.fragment}
+- **Mecanismo I:** o plano de menor erro de reconstrução.
+- **Mecanismo II:** é o mesmo plano de maior variância retida — gerado pelos autovetores da covariância (**componentes principais**).
+- **De Volta ao Autoencoder:** a rede encontra exatamente esse plano.
+:::
+
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**O espaço latente no Breast Cancer Wisconsin.** Treinando por
+gradiente um autoencoder linear (`MLPRegressor(activation="identity")`,
+$M=2$ unidades ocultas) sobre os $30$ atributos centrados, cada paciente
+vira um ponto $\mathbf{z}_n\in\mathbb{R}^2$ — seu código latente. A
+figura mostra esses códigos, coloridos por diagnóstico só para
+**avaliar** (o rótulo não entrou no treino).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Espaço Latente no Breast Cancer Wisconsin
+
+::: {.fragment}
+Autoencoder linear treinado por gradiente ($D=30$, $M=2$): cada paciente
+vira um código $\mathbf{z}_n\in\mathbb{R}^2$. Cores só para **avaliar**.
+:::
+
+:::
+
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(6.8, 4.8))
+colors_diag = np.where(diagnosis == "M", COR_LARANJA, COR_AZUL)
+ax.scatter(Z_ae[:, 0], Z_ae[:, 1], c=colors_diag, s=14, alpha=0.75)
+ax.set_xlabel("código latente $z_1$ (unidade oculta 1)")
+ax.set_ylabel("código latente $z_2$ (unidade oculta 2)")
+ax.set_title("Espaço latente de um autoencoder linear (M=2)\nrótulo NUNCA usado no treino")
+
+from matplotlib.lines import Line2D
+handles = [Line2D([0], [0], marker='o', color='w', markerfacecolor=COR_AZUL, markersize=8, label='Benigno (só p/ avaliar)'),
+           Line2D([0], [0], marker='o', color='w', markerfacecolor=COR_LARANJA, markersize=8, label='Maligno (só p/ avaliar)')]
+ax.legend(handles=handles, loc="best", fontsize=8)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Dois fatos já aparecem. Primeiro, os dois tipos de tumor ocupam regiões
+diferentes do espaço latente, sem que a rede tenha visto o rótulo.
+Segundo, os eixos $z_1$ e $z_2$ não têm nada de canônico: os dois
+vetores de pesos de entrada (as linhas de $\mathbf{V}$) têm cosseno
+$\approx-0{,}58$ entre si, longe de ortogonais. Outra
+semente de treino daria outros eixos, com o mesmo erro. O que a rede
+aprendeu de estável é o plano, e é ele que os próximos blocos
+identificam.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Duas Observações
+
+::: {.fragment}
+- Benignos e malignos em regiões diferentes — sem o rótulo no treino.
+:::
+
+::: {.fragment}
+- Eixos não canônicos: linhas de $\mathbf{V}$ com cosseno $\approx-0{,}58$ (longe de ortogonais). Outra semente, outros eixos, mesmo erro.
+:::
+
+::: {.fragment .callout-note}
+O estável é o **plano**. Os próximos blocos o identificam sem rede.
+:::
+
+:::
+
+## Pergunta
+
+::: {.callout-tip}
+## Duas redes treinadas com sementes diferentes chegam ao mesmo erro de reconstrução, mas dão códigos latentes diferentes ao mesmo paciente. Qual delas aprendeu o espaço latente "certo"?
+
+Pense no que o erro de reconstrução consegue enxergar: o produto
+$\mathbf{W}\mathbf{V}$, ou cada fator separadamente?
+
+- □ Se $(\mathbf{V},\mathbf{W})$ minimiza o erro de reconstrução, então
+  $(2\mathbf{V},\tfrac12\mathbf{W})$ também minimiza, e os códigos
+  latentes de todos os pacientes dobram de tamanho.
+- □ No caso-limite $M=D$, com $\mathbf{V}$ invertível e
+  $\mathbf{W}=\mathbf{V}^{-1}$, a reconstrução é perfeita, mas o código
+  latente não comprime nada.
+- □ Como o erro só depende do produto $\mathbf{W}\mathbf{V}$, a
+  coordenada $z_1$ de um paciente tem um significado fixo, comparável
+  entre duas redes treinadas com sementes diferentes.
+- □ Numa fatoração de matrizes para recomendação,
+  $R\approx PQ^T$ (usuários $\times$ itens), os fatores latentes dos
+  usuários também só estão definidos a menos de uma transformação
+  invertível: $P\mapsto PG$ e $Q^T\mapsto G^{-1}Q^T$ dão a mesma
+  predição.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Resposta
+
+::: {.callout-tip}
+## Resposta — o que os dados determinam é o plano
+
+- ✔ É a invariância com $\mathbf{G}=2I$: $\tfrac12\mathbf{W}\cdot2\mathbf{V}=\mathbf{W}\mathbf{V}$, mesmo erro, códigos $2\mathbf{z}_n$.
+- ✔ $\mathbf{W}\mathbf{V}=I$ reconstrói tudo; sem gargalo, o código é só uma mudança de coordenadas de $\mathbb{R}^D$.
+- ✗ Os códigos mudam para $\mathbf{G}\mathbf{z}_n$ sem mudar o erro: $z_1$ isolado não tem significado fixo entre redes.
+- ✔ Mesma estrutura de produto de fatores: $PGG^{-1}Q^T=PQ^T$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** nenhuma é "a certa". As duas aprenderam o mesmo
+**plano**, em eixos diferentes ($\mathbf{z}\mapsto\mathbf{G}\mathbf{z}$).
+Para comparar redes, compare planos, não coordenadas — ou fixe uma
+convenção de eixos, que é o que a PCA fará: eixos ortonormais,
+ordenados pela variância.
+:::
+
+:::
+
+
+# Mecanismo I: O Melhor Plano Pelo Erro de Reconstrução
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+O autoencoder colocou a pergunta; agora ela é resolvida diretamente, sem
+treinar rede nenhuma. O caminho tem duas suposições sobre os pesos, que
+simplificam as contas, e três passos. No fim, o Passo 1 mostra que as
+duas suposições não custam nada.
+
+**Do autoencoder a uma base.** O autoencoder linear reconstrói
+$\mathbf{y}_n=\mathbf{W}\mathbf{V}\mathbf{x}_n$, com $\mathbf{V}$ e
+$\mathbf{W}$ livres. Pela invariância por $\mathbf{G}$, muitos pares
+dão o mesmo erro, então podemos escolher o par mais conveniente.
+
+- **Suposição 1 — pesos amarrados.** Em vez de duas matrizes
+  independentes, usamos uma só matriz $\mathbf{U}\in\mathbb{R}^{D\times M}$:
+  o decodificador é $\mathbf{W}=\mathbf{U}$ e o codificador é a sua
+  transposta, $\mathbf{V}=\mathbf{U}^T$. Assim
+  $\mathbf{z}_n=\mathbf{U}^T\mathbf{x}_n$ e
+  $\mathbf{y}_n=\mathbf{U}\mathbf{z}_n=\mathbf{U}\mathbf{U}^T\mathbf{x}_n$.
+- **Suposição 2 — uma base ortonormal.** As colunas
+  $\mathbf{u}_1,\dots,\mathbf{u}_M$ de $\mathbf{U}$ são ortonormais,
+  $\mathbf{U}^T\mathbf{U}=\mathbf{I}$. Todo plano de dimensão $M$ tem
+  uma base assim, então nenhum plano fica de fora. Com ela, o código
+  $z_{ni}=\mathbf{x}_n^T\mathbf{u}_i$ é a coordenada de $\mathbf{x}_n$ ao
+  longo de $\mathbf{u}_i$, e $\mathbf{U}\mathbf{U}^T\mathbf{x}_n$ é a
+  projeção ortogonal de $\mathbf{x}_n$ no plano.
+
+**Completando a base.** Acrescentamos $\mathbf{u}_{M+1},\dots,\mathbf{u}_D$
+até formar uma base ortonormal de $\mathbb{R}^D$
+($\mathbf{u}_i^T\mathbf{u}_j=\delta_{ij}$). Nessa base todo ponto se
+escreve exatamente, separando as $M$ coordenadas no plano das $D-M$
+fora dele:
+$$
+\mathbf{x}_n=\sum_{i=1}^M(\mathbf{x}_n^T\mathbf{u}_i)\mathbf{u}_i+\sum_{i=M+1}^D(\mathbf{x}_n^T\mathbf{u}_i)\mathbf{u}_i .
+$$
+Para não pressupor a resposta, deixamos a reconstrução geral, escrita
+na mesma base: um coeficiente livre $z_{ni}$ por ponto em cada direção
+do plano e uma constante $b_i$, a mesma para todos os pontos, em cada
+direção de fora (o papel do viés da rede):
+$$
+\tilde{\mathbf{x}}_n = \sum_{i=1}^M z_{ni}\mathbf{u}_i + \sum_{i=M+1}^D b_i\mathbf{u}_i,
+\qquad
+J = \frac1N\sum_{n=1}^N\|\mathbf{x}_n-\tilde{\mathbf{x}}_n\|^2 .
+$$
+Como as duas expansões usam a mesma base, a diferença se faz
+coordenada a coordenada:
+$$
+\mathbf{x}_n-\tilde{\mathbf{x}}_n=\sum_{i=1}^M(\mathbf{x}_n^T\mathbf{u}_i-z_{ni})\,\mathbf{u}_i+\sum_{i=M+1}^D(\mathbf{x}_n^T\mathbf{u}_i-b_i)\,\mathbf{u}_i .
+$$
+
+$J$ é o erro $E$ do autoencoder, a menos do fator $\tfrac12$ e da divisão
+por $N$ (PRML §12.1.2).
+
+**Passo 1 — os melhores códigos e constantes.** Numa base ortonormal,
+a norma ao quadrado de um vetor é a soma dos quadrados dos seus
+coeficientes (Pitágoras):
+$\|\sum_i a_i\mathbf{u}_i\|^2=\sum_i\sum_j a_ia_j\,\mathbf{u}_i^T\mathbf{u}_j=\sum_i a_i^2$,
+porque $\mathbf{u}_i^T\mathbf{u}_j=\delta_{ij}$ elimina os termos
+cruzados. Aplicando à diferença acima:
+$$
+J=\frac1N\sum_{n=1}^N\Big[\sum_{i=1}^M(\mathbf{x}_n^T\mathbf{u}_i-z_{ni})^2+\sum_{i=M+1}^D(\mathbf{x}_n^T\mathbf{u}_i-b_i)^2\Big].
+$$
+Cada termo depende de uma única incógnita, então cada um é minimizado
+separadamente:
+
+- $z_{ni}=\mathbf{x}_n^T\mathbf{u}_i$ zera o primeiro grupo. Esse é
+  exatamente o codificador amarrado $\mathbf{z}_n=\mathbf{U}^T\mathbf{x}_n$
+  da Suposição 1, que era, portanto, a melhor escolha;
+- $b_i=\bar{\mathbf{x}}^T\mathbf{u}_i$ minimiza
+  $\sum_n(\mathbf{x}_n^T\mathbf{u}_i-b_i)^2$, porque a média é a
+  constante que minimiza a soma dos quadrados dos desvios.
+
+Com essas escolhas, o erro que sobra é
+$\mathbf{x}_n-\tilde{\mathbf{x}}_n=\sum_{i=M+1}^D\big((\mathbf{x}_n-\bar{\mathbf{x}})^T\mathbf{u}_i\big)\mathbf{u}_i$:
+só tem componentes **fora** do plano. O melhor ponto do plano é a
+projeção ortogonal, nunca um deslocamento oblíquo.
+
+**Passo 2 — o erro em termos da covariância.** Substituindo em $J$:
+$$
+J=\frac1N\sum_{n=1}^N\sum_{i=M+1}^D\big((\mathbf{x}_n-\bar{\mathbf{x}})^T\mathbf{u}_i\big)^2
+=\sum_{i=M+1}^D \mathbf{u}_i^T\mathbf{S}\mathbf{u}_i,
+\qquad
+\mathbf{S}=\frac1N\sum_n(\mathbf{x}_n-\bar{\mathbf{x}})(\mathbf{x}_n-\bar{\mathbf{x}})^T,
+$$
+com $\mathbf{S}$ a matriz de covariância amostral. Cada termo
+$\mathbf{u}_i^T\mathbf{S}\mathbf{u}_i$ é a variância dos dados ao longo
+de uma direção **descartada**.
+
+**Passo 3 — erro $=$ variância total $-$ variância retida.** A soma sobre
+**todas** as direções não depende da base: com
+$Q=[\mathbf{u}_1\,\cdots\,\mathbf{u}_D]$ ortogonal,
+$\sum_{i=1}^D\mathbf{u}_i^T\mathbf{S}\mathbf{u}_i=\mathrm{tr}(Q^T\mathbf{S}Q)
+=\mathrm{tr}(\mathbf{S}QQ^T)=\mathrm{tr}(\mathbf{S})$, a variância total
+dos dados. Logo
+$$
+J=\mathrm{tr}(\mathbf{S})-\sum_{i=1}^M\mathbf{u}_i^T\mathbf{S}\mathbf{u}_i .
+$$
+Como $\mathrm{tr}(\mathbf{S})$ não depende do plano, **minimizar o erro
+de reconstrução e maximizar a variância retida são o mesmo problema**.
+É o que a figura do Problema-Fio mostrava: nas duas retas,
+retida $+$ erro $=2{,}00$.
+
+O problema do autoencoder virou, então: escolher $M$ direções
+ortonormais que **maximizem**
+$\sum_{i=1}^M\mathbf{u}_i^T\mathbf{S}\mathbf{u}_i$. O Mecanismo II
+resolve essa maximização.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Do Autoencoder a Uma Base
+
+Autoencoder linear: $\mathbf{y}_n=\mathbf{W}\mathbf{V}\mathbf{x}_n$. Pela invariância por $\mathbf{G}$, podemos escolher o par mais conveniente.
+
+**Suposição 1 — pesos amarrados.** Uma só matriz $\mathbf{U}\in\mathbb{R}^{D\times M}$: $\mathbf{W}=\mathbf{U}$, $\mathbf{V}=\mathbf{U}^T$. Então
+$$
+\mathbf{z}_n=\mathbf{U}^T\mathbf{x}_n,\qquad \mathbf{y}_n=\mathbf{U}\mathbf{U}^T\mathbf{x}_n .
+$$
+
+**Suposição 2 — base ortonormal.** $\mathbf{U}^T\mathbf{U}=\mathbf{I}$: colunas $\mathbf{u}_1,\dots,\mathbf{u}_M$ ortonormais. Todo plano tem uma base assim; $z_{ni}=\mathbf{x}_n^T\mathbf{u}_i$ é a coordenada ao longo de $\mathbf{u}_i$, e $\mathbf{U}\mathbf{U}^T\mathbf{x}_n$ é a projeção ortogonal no plano.
+
+::: {.fragment .callout-note}
+As suposições simplificam as contas. O Passo 1 vai mostrar que elas não custam nada: fixado o plano, são a melhor escolha.
+:::
+
+## Completando a Base
+
+Acrescentar $\mathbf{u}_{M+1},\dots,\mathbf{u}_D$ até uma base ortonormal de $\mathbb{R}^D$. Escrevendo o ponto e a reconstrução **na mesma base**, separados em "no plano" e "fora":
+$$
+\begin{aligned}
+\mathbf{x}_n &= \sum_{i=1}^M(\mathbf{x}_n^T\mathbf{u}_i)\,\mathbf{u}_i &&+ \sum_{i=M+1}^D(\mathbf{x}_n^T\mathbf{u}_i)\,\mathbf{u}_i &&\text{(exato)}\\
+\tilde{\mathbf{x}}_n &= \sum_{i=1}^M z_{ni}\,\mathbf{u}_i &&+ \sum_{i=M+1}^D b_i\,\mathbf{u}_i &&\text{(}z_{ni}\text{ livre por ponto; } b_i\text{ constante, o viés)}
+\end{aligned}
+$$
+
+Subtraindo coordenada a coordenada:
+$$
+\mathbf{x}_n-\tilde{\mathbf{x}}_n=\sum_{i=1}^M\underbrace{(\mathbf{x}_n^T\mathbf{u}_i-z_{ni})}_{\text{erro no plano}}\mathbf{u}_i+\sum_{i=M+1}^D\underbrace{(\mathbf{x}_n^T\mathbf{u}_i-b_i)}_{\text{erro fora}}\mathbf{u}_i,
+\qquad
+J = \frac1N\sum_{n}\|\mathbf{x}_n-\tilde{\mathbf{x}}_n\|^2 .
+$$
+
+$J$ é o erro $E$ do autoencoder, a menos de $\tfrac12$ e $N$ (PRML §12.1.2).
+
+## Passo 1: Os Melhores Códigos e Constantes
+
+Numa base ortonormal, a norma ao quadrado é a soma dos quadrados dos coeficientes (Pitágoras):
+$$
+\Big\|\sum_i a_i\mathbf{u}_i\Big\|^2=\sum_i\sum_j a_ia_j\,\underbrace{\mathbf{u}_i^T\mathbf{u}_j}_{\delta_{ij}}=\sum_i a_i^2 .
+$$
+
+Aplicando ao erro do slide anterior, com $a_i$ os coeficientes "erro no plano" e "erro fora":
+$$
+J=\frac1N\sum_{n}\Big[\sum_{i=1}^M(\mathbf{x}_n^T\mathbf{u}_i-z_{ni})^2+\sum_{i=M+1}^D(\mathbf{x}_n^T\mathbf{u}_i-b_i)^2\Big].
+$$
+
+Cada termo tem uma só incógnita:
+
+- $z_{ni}=\mathbf{x}_n^T\mathbf{u}_i$ — é o codificador amarrado $\mathbf{U}^T\mathbf{x}_n$ da Suposição 1;
+- $b_i=\bar{\mathbf{x}}^T\mathbf{u}_i$ — a média minimiza a soma dos quadrados dos desvios.
+
+::: {.fragment .callout-important}
+Sobra $\mathbf{x}_n-\tilde{\mathbf{x}}_n=\sum_{i>M}\big((\mathbf{x}_n-\bar{\mathbf{x}})^T\mathbf{u}_i\big)\mathbf{u}_i$: erro só **fora** do plano. Melhor reconstrução $=$ projeção ortogonal.
+:::
+
+## Passos 2 e 3: Erro $=$ Total $-$ Retida
+
+**Passo 2.** Substituindo em $J$, com $\mathbf{S}$ a covariância amostral:
+$$
+J=\frac1N\sum_{n}\sum_{i=M+1}^D\big((\mathbf{x}_n-\bar{\mathbf{x}})^T\mathbf{u}_i\big)^2=\sum_{i=M+1}^D\mathbf{u}_i^T\mathbf{S}\mathbf{u}_i
+$$
+— a variância nas direções **descartadas**.
+
+**Passo 3.** Somando todas as direções, $\sum_{i=1}^D\mathbf{u}_i^T\mathbf{S}\mathbf{u}_i=\mathrm{tr}(Q^T\mathbf{S}Q)=\mathrm{tr}(\mathbf{S})$, que não depende da base. Logo
+$$
+J=\mathrm{tr}(\mathbf{S})-\sum_{i=1}^M\mathbf{u}_i^T\mathbf{S}\mathbf{u}_i .
+$$
+
+::: {.fragment .callout-important}
+Minimizar o erro $=$ maximizar a variância retida. No Problema-Fio: $1{,}00+1{,}00=1{,}79+0{,}21=2{,}00$. Falta: qual plano maximiza $\sum_{i\le M}\mathbf{u}_i^T\mathbf{S}\mathbf{u}_i$? (Mecanismo II.)
+:::
+
+:::
+
+
+# Mecanismo II: O Melhor Plano Pela Variância Retida
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Premissas.** O Mecanismo I reduziu o problema do autoencoder a
+escolher $M$ direções ortonormais que **maximizem a variância retida**.
+Dado um conjunto de observações $\{\mathbf{x}_n\}$, $n=1,\dots,N$, cada
+$\mathbf{x}_n\in\mathbb{R}^D$, queremos projetar os dados sobre um
+espaço de dimensão $M<D$, maximizando a variância dos dados projetados.
+Comece pelo caso $M=1$: definimos a direção desse
 espaço por um vetor $\mathbf{u}_1\in\mathbb{R}^D$, escolhido unitário
 ($\mathbf{u}_1^T\mathbf{u}_1=1$) sem perda de generalidade (só a
 **direção** de $\mathbf{u}_1$ importa, não sua magnitude).
@@ -437,29 +1036,40 @@ $$
 \end{aligned}
 $$
 
-onde $\mathbf{S} = \frac1N\sum_n(\mathbf{x}_n-\bar{\mathbf{x}})(\mathbf{x}_n-\bar{\mathbf{x}})^T$ é a matriz de covariância amostral, simétrica por construção ($\mathbf{S}=\mathbf{S}^T$) e semidefinida positiva, pois $\mathbf{v}^T\mathbf{S}\mathbf{v}=\frac1N\sum_n[\mathbf{v}^T(\mathbf{x}_n-\bar{\mathbf{x}})]^2\ge0$ para qualquer $\mathbf{v}$).
+onde $\mathbf{S} = \frac1N\sum_n(\mathbf{x}_n-\bar{\mathbf{x}})(\mathbf{x}_n-\bar{\mathbf{x}})^T$ é a mesma matriz de covariância amostral do Mecanismo I, simétrica por construção ($\mathbf{S}=\mathbf{S}^T$) e semidefinida positiva, pois $\mathbf{v}^T\mathbf{S}\mathbf{v}=\frac1N\sum_n[\mathbf{v}^T(\mathbf{x}_n-\bar{\mathbf{x}})]^2\ge0$ para qualquer $\mathbf{v}$).
 
-**Passo 2 — maximizar sob restrição.** Maximizar
-$\mathbf{u}_1^T\mathbf{S}\mathbf{u}_1$ livremente não tem solução finita
-(sem a restrição $\|\mathbf{u}_1\|=1$, escalar $\mathbf{u}_1$ por
-qualquer $c>0$ multiplica a variância projetada por $c^2$, sem limite).
-Precisamos maximizar sujeitos à restrição $\mathbf{u}_1^T\mathbf{u}_1=1$
-— um multiplicador de Lagrange $\lambda_1$ transforma isso na
-maximização irrestrita de
+**Passo 2 — o problema restrito.** Maximizar
+$\mathbf{u}_1^T\mathbf{S}\mathbf{u}_1$ livremente não tem solução finita:
+trocar $\mathbf{u}_1$ por $c\,\mathbf{u}_1$ multiplica a variância
+projetada por $c^2$, sem limite. Como só a **direção** importa, fixamos
+o comprimento, e o problema fica
 
 $$
-\mathbf{u}_1^T\mathbf{S}\mathbf{u}_1 + \lambda_1(1-\mathbf{u}_1^T\mathbf{u}_1).
+\max_{\mathbf{u}_1\in\mathbb{R}^D}\ \mathbf{u}_1^T\mathbf{S}\mathbf{u}_1
+\qquad\text{sujeito a}\qquad \mathbf{u}_1^T\mathbf{u}_1=1 .
 $$
 
-**Passo 3 — a equação de autovalores.** Igualando a derivada em relação
-a $\mathbf{u}_1$ a zero:
+**Passo 3 — a Lagrangeana.** Para um problema com restrição de
+igualdade, soma-se ao objetivo a restrição, escrita como
+"$\,\text{algo}=0\,$", multiplicada por uma nova variável
+$\lambda_1$, o multiplicador de Lagrange:
+
+$$
+\mathcal{L}(\mathbf{u}_1,\lambda_1)=\mathbf{u}_1^T\mathbf{S}\mathbf{u}_1+\lambda_1\big(1-\mathbf{u}_1^T\mathbf{u}_1\big).
+$$
+
+Nos pontos ótimos do problema restrito, as derivadas de $\mathcal{L}$
+em relação a $\mathbf{u}_1$ e a $\lambda_1$ se anulam. A derivada em
+$\lambda_1$ devolve a própria restrição, $1-\mathbf{u}_1^T\mathbf{u}_1=0$.
+A derivada em $\mathbf{u}_1$ (com $\mathbf{S}$ simétrica) é
 
 $$
 2\mathbf{S}\mathbf{u}_1 - 2\lambda_1\mathbf{u}_1 = \mathbf{0} \quad\Longrightarrow\quad \mathbf{S}\mathbf{u}_1=\lambda_1\mathbf{u}_1.
 $$
 
-Ou seja: $\mathbf{u}_1$ precisa ser um **autovetor** de $\mathbf{S}$.
-Pré-multiplicando por $\mathbf{u}_1^T$ e usando
+**Passo 4 — ler a solução.** $\mathbf{u}_1$ precisa ser um **autovetor**
+de $\mathbf{S}$, e o multiplicador é o seu autovalor.
+Pré-multiplicando por $\mathbf{u}_1^T$ e usando a restrição
 $\mathbf{u}_1^T\mathbf{u}_1=1$:
 $\mathbf{u}_1^T\mathbf{S}\mathbf{u}_1=\lambda_1$ — a variância
 projetada, no ponto estacionário, é exatamente o autovalor
@@ -555,6 +1165,8 @@ qual componente é "o primeiro"), os $5$ maiores autovalores são:
 
 ## Premissas e a Variância Projetada
 
+Do Mecanismo I: maximizar a variância retida. Comece por $M=1$.
+
 ::: {.fragment}
 $\{\mathbf{x}_n\}\subset\mathbb{R}^D$; projetar sobre direção unitária
 $\mathbf{u}_1$ ($\mathbf{u}_1^T\mathbf{u}_1=1$). Variância projetada:
@@ -571,19 +1183,23 @@ semidefinida positiva
 
 ## Maximizar Sob Restrição $\to$ Autovetores
 
-::: {.fragment}
-Sem restrição, $\mathbf{u}_1^T\mathbf{S}\mathbf{u}_1$ não tem máximo
-finito (escalar $\mathbf{u}_1$ aumenta sem limite). Lagrange:
+**O problema restrito.** Sem restrição não há máximo ($c\,\mathbf{u}_1$ multiplica a variância por $c^2$). Só a direção importa, então fixamos o comprimento:
 $$
-\mathbf{u}_1^T\mathbf{S}\mathbf{u}_1+\lambda_1(1-\mathbf{u}_1^T\mathbf{u}_1)
+\max_{\mathbf{u}_1}\ \mathbf{u}_1^T\mathbf{S}\mathbf{u}_1
+\qquad\text{s.a.}\qquad \mathbf{u}_1^T\mathbf{u}_1=1 .
 $$
-:::
 
-::: {.fragment}
-Derivada $=0$: $\mathbf{S}\mathbf{u}_1=\lambda_1\mathbf{u}_1$ —
-$\mathbf{u}_1$ é autovetor de $\mathbf{S}$; pré-multiplicando por
-$\mathbf{u}_1^T$: variância $=\lambda_1$ no ótimo.
-:::
+**A Lagrangeana.** Objetivo $+$ multiplicador $\times$ restrição escrita como "$=0$":
+$$
+\mathcal{L}(\mathbf{u}_1,\lambda_1)=\mathbf{u}_1^T\mathbf{S}\mathbf{u}_1+\lambda_1\big(1-\mathbf{u}_1^T\mathbf{u}_1\big).
+$$
+
+**Derivadas nulas.** Em $\lambda_1$: devolve a restrição. Em $\mathbf{u}_1$:
+$$
+2\mathbf{S}\mathbf{u}_1-2\lambda_1\mathbf{u}_1=\mathbf{0}\ \Longrightarrow\ \mathbf{S}\mathbf{u}_1=\lambda_1\mathbf{u}_1,
+\qquad
+\mathbf{u}_1^T\mathbf{S}\mathbf{u}_1=\lambda_1\mathbf{u}_1^T\mathbf{u}_1=\lambda_1 .
+$$
 
 ::: {.fragment .callout-important}
 $\mathbf{S}$ simétrica $\Rightarrow$ autovalores reais, autovetores
@@ -639,13 +1255,6 @@ o princípio de Ky Fan (1949), citado sem prova.
 :::
 
 ## PCA no Breast Cancer Wisconsin ($D=30$)
-
-::: {.fragment .callout-warning}
-`np.linalg.eigh` devolve autovalores em ordem **ascendente** — reordenar
-explicitamente, ou "o primeiro componente" vira silenciosamente o
-autovetor de **menor** variância.
-:::
-
 :::
 
 ::: {.fig-resize style="width: 62%; margin: 0 auto;"}
@@ -687,6 +1296,24 @@ forte: dois números resumem quase dois terços de toda a variação entre
 pacientes que, originalmente, precisava de $30$ números para ser
 descrita — sem usar o rótulo `diagnosis` em nenhum momento do cálculo.
 
+**Juntando os dois mecanismos.** Pelo Passo 3 do Mecanismo I, o
+subespaço que maximiza a variância retida é o mesmo que minimiza o erro
+de reconstrução, e o erro que sobra é o que não foi retido:
+
+::: {.callout-note icon=false}
+## Teorema (PCA por erro mínimo; PRML §12.1.2)
+
+Entre todas as bases ortonormais $\{\mathbf{u}_i\}$ de $\mathbb{R}^D$, a
+distorção média de reconstrução $J=\frac1N\sum_n\|\mathbf{x}_n-
+\tilde{\mathbf{x}}_n\|^2$, restrita a subespaços de dimensão $M$, é
+minimizada pelo mesmo subespaço principal do Teorema de máxima
+variância — gerado pelos $M$ autovetores de $\mathbf{S}$ com os $M$
+maiores autovalores. O valor mínimo é $J^\star=\sum_{i=M+1}^D\lambda_i$.
+:::
+
+No Breast Cancer Wisconsin com $M=2$, $J^\star$ é a soma dos $28$
+autovalores descartados, $36{,}76\%$ da variância total.
+
 :::
 
 ::: {.content-visible when-format="revealjs"}
@@ -697,6 +1324,19 @@ $\lambda_1=13{,}2816$ ($44{,}27\%$), $\lambda_2=5{,}6914$
 atributos, em só $2$ números, sem usar `diagnosis`.
 :::
 
+## Juntando os Mecanismos
+
+::: {.callout-note icon=false}
+**Teorema (PCA, erro mínimo; PRML §12.1.2):** o mesmo subespaço principal
+minimiza $J$, com $J^\star=\sum_{i=M+1}^D\lambda_i$ — a variância dos
+autovalores **descartados**.
+:::
+
+::: {.fragment}
+- Mecanismo I: erro $=$ total $-$ retida. Mecanismo II: retida máxima $=\lambda_1+\dots+\lambda_M$.
+- Breast Cancer Wisconsin, $M=2$: $J^\star=36{,}76\%$ da variância total.
+:::
+
 :::
 
 ## Pergunta
@@ -704,7 +1344,7 @@ atributos, em só $2$ números, sem usar `diagnosis`.
 ::: {.callout-tip}
 ## O multiplicador de Lagrange $\lambda_1$ é só um artifício técnico da restrição, ou carrega significado próprio?
 
-Releia o Passo 3: o que $\lambda_1$ passa a representar depois de
+Releia o Passo 4: o que $\lambda_1$ passa a representar depois de
 pré-multiplicar a equação por $\mathbf{u}_1^T$?
 
 - □ Se, em vez de maximizar $\mathbf{u}^T\mathbf{S}\mathbf{u}$ sujeito
@@ -754,609 +1394,15 @@ possível.
 
 :::
 
-# Mecanismo II: Formulação de Erro Mínimo, e Sua Equivalência com a Anterior
+# De Volta ao Autoencoder: a Prova
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-A formulação por máxima variância não é a única forma clássica de
-derivar a PCA — existe uma segunda pergunta, aparentemente diferente,
-que chega ao mesmo lugar: em vez de perguntar "que direção captura mais
-variância?", perguntar "que subespaço, ao reconstruir cada ponto a
-partir dele, produz o menor erro possível?".
-
-**Premissas.** Considere uma base ortonormal completa
-$\{\mathbf{u}_i\}_{i=1}^D$ de $\mathbb{R}^D$
-($\mathbf{u}_i^T\mathbf{u}_j=\delta_{ij}$). Qualquer ponto se escreve
-exatamente como $\mathbf{x}_n=\sum_{i=1}^D(\mathbf{x}_n^T\mathbf{u}_i)
-\mathbf{u}_i$. Para aproximar $\mathbf{x}_n$ usando só $M<D$ dessas
-direções, defina
-
-$$
-\tilde{\mathbf{x}}_n = \sum_{i=1}^M z_{ni}\mathbf{u}_i + \sum_{i=M+1}^D b_i\mathbf{u}_i,
-$$
-
-com $z_{ni}$ livre por ponto e $b_i$ constante para todos os pontos —
-queremos escolher $\{\mathbf{u}_i\}$, $\{z_{ni}\}$ e $\{b_i\}$ para
-minimizar a distorção média
-
-$$
-J = \frac1N\sum_{n=1}^N\|\mathbf{x}_n-\tilde{\mathbf{x}}_n\|^2.
-$$
-
-**Passo 1 — otimizar $z_{ni}$ e $b_i$.** Derivando $J$ em relação a
-$z_{nj}$ e igualando a zero: $z_{nj}=\mathbf{x}_n^T\mathbf{u}_j$.
-Derivando em relação a $b_j$: $b_j=\bar{\mathbf{x}}^T\mathbf{u}_j$.
-Substituindo de volta, o vetor deslocamento
-$\mathbf{x}_n-\tilde{\mathbf{x}}_n=\sum_{i=M+1}^D\{(\mathbf{x}_n-
-\bar{\mathbf{x}})^T\mathbf{u}_i\}\mathbf{u}_i$ vive inteiramente no
-subespaço **ortogonal** ao subespaço de projeção — geometricamente, o
-erro mínimo é sempre a projeção ortogonal, nunca um deslocamento
-oblíquo.
-
-**Passo 2 — a distorção como função só dos $\{\mathbf{u}_i\}$.**
-Substituindo de volta em $J$:
-
-$$
-J = \sum_{i=M+1}^D \mathbf{u}_i^T\mathbf{S}\mathbf{u}_i.
-$$
-
-**Passo 3 — minimizar sob ortonormalidade.** Minimizar $J$ sujeito a
-$\mathbf{u}_i^T\mathbf{u}_i=1$ para cada $i=M+1,\dots,D$ (o mesmo tipo
-de restrição do Bloco 3, agora para múltiplas direções simultâneas) leva,
-pelo mesmo argumento de Lagrange, a $\mathbf{S}\mathbf{u}_i=
-\lambda_i\mathbf{u}_i$ — de novo, os $\mathbf{u}_i$ precisam ser
-autovetores de $\mathbf{S}$. Substituindo de volta,
-$J=\sum_{i=M+1}^D\lambda_i$ — a soma dos autovalores **excluídos** do
-subespaço de projeção. Para minimizar essa soma, os $D-M$ autovalores
-excluídos devem ser os **menores** possíveis — equivalentemente, os $M$
-autovalores **retidos** devem ser os **maiores**.
-
-::: {.callout-note icon=false}
-## Teorema (PCA por erro mínimo; PRML §12.1.2)
-
-Entre todas as bases ortonormais $\{\mathbf{u}_i\}$ de $\mathbb{R}^D$, a
-distorção média de reconstrução $J=\frac1N\sum_n\|\mathbf{x}_n-
-\tilde{\mathbf{x}}_n\|^2$, restrita a subespaços de dimensão $M$, é
-minimizada exatamente pelo mesmo subespaço principal do Teorema
-anterior — gerado pelos $M$ autovetores de $\mathbf{S}$ com os $M$
-maiores autovalores. O valor mínimo é $J^\star=\sum_{i=M+1}^D\lambda_i$.
-:::
-
-**Por que as duas formulações concordam — um argumento intuitivo, além
-da álgebra.** As duas provas (Blocos 3 e 4) chegam à mesma equação de
-autovalores por caminhos formalmente distintos — mas a coincidência não
-é acidente. Pelo Teorema de Pitágoras aplicado a cada ponto centrado
-$\mathbf{x}_n-\bar{\mathbf{x}}$ e sua decomposição em componente
-retida (dentro do subespaço) mais componente perdida (fora dele, o
-erro):
-$$
-\|\mathbf{x}_n-\bar{\mathbf{x}}\|^2 = \underbrace{\sum_{i=1}^M z_{ni}^2}_{\text{variância retida}} + \underbrace{\|\mathbf{x}_n-\tilde{\mathbf{x}}_n\|^2}_{\text{erro}},
-$$
-e a **variância total** dos dados, $\mathrm{tr}(\mathbf{S})=\sum_{i=1}^D
-\lambda_i$, é uma constante que não depende de $\{\mathbf{u}_i\}$.
-Somando a identidade acima sobre todos os pontos: variância total =
-variância retida + erro médio. Como o lado esquerdo é fixo, **maximizar
-a variância retida e minimizar o erro são, literalmente, o mesmo
-problema** — dois nomes para a mesma otimização, não duas coincidências
-separadas.
-
-**Verificação real: projetando o Breast Cancer Wisconsin nos $2$
-primeiros componentes.**
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## A Segunda Pergunta: Erro de Reconstrução
-
-::: {.fragment}
-**O Objetivo:** Em vez de maximizar a variância, queremos minimizar a distorção média de reconstrução $J$.
-:::
-
-::: {.fragment}
-**A Ferramenta:** Para qualquer ponto $\mathbf{x}_n$, podemos escrever sua decomposição exata em uma base ortonormal completa $\{\mathbf{u}_i\}_{i=1}^D$:
-$$
-\mathbf{x}_n = \sum_{i=1}^D (\mathbf{x}_n^T \mathbf{u}_i) \mathbf{u}_i
-$$
-:::
-
-::: {.fragment}
-**A Aproximação:** Se usarmos apenas as $M$ primeiras direções, a reconstrução $\tilde{\mathbf{x}}_n$ é a projeção ortogonal:
-$$
-\tilde{\mathbf{x}}_n = \sum_{i=1}^M (\mathbf{x}_n^T \mathbf{u}_i) \mathbf{u}_i
-$$
-:::
-
-::: {.fragment}
-**O Erro:** A distância $\|\mathbf{x}_n - \tilde{\mathbf{x}}_n\|^2$ é a soma dos quadrados das coordenadas nas direções **descartadas** ($i > M$).
-:::
-
-## Otimizando $z_{ni}$, $b_i$ e a Distorção Resultante
-
-::: {.fragment}
-Ótimo: $z_{nj}=\mathbf{x}_n^T\mathbf{u}_j$, $b_j=\bar{\mathbf{x}}^T
-\mathbf{u}_j$ — erro sempre ortogonal ao subespaço de projeção (nunca
-oblíquo).
-:::
-
-::: {.fragment}
-Substituindo: $J=\sum_{i=M+1}^D\mathbf{u}_i^T\mathbf{S}\mathbf{u}_i$ —
-só função dos $\mathbf{u}_i$ **descartados**.
-:::
-
-::: {.fragment .callout-important}
-Minimizar sob ortonormalidade $\to\mathbf{S}\mathbf{u}_i=\lambda_i
-\mathbf{u}_i$ de novo; $J^\star=\sum_{i=M+1}^D\lambda_i$ — minimizado
-descartando os **menores** autovalores.
-:::
-
-## Teorema e o Argumento de Pitágoras
-
-::: {.callout-note icon=false}
-**Teorema (PCA, erro mínimo):** o mesmo subespaço principal minimiza
-$J$; $J^\star=\sum_{i=M+1}^D\lambda_i$.
-:::
-
-::: {.fragment}
-Por que as duas formulações concordam:
-$$
-\|\mathbf{x}_n-\bar{\mathbf{x}}\|^2 = \underbrace{\textstyle\sum_i z_{ni}^2}_{\text{retido}} + \underbrace{\|\mathbf{x}_n-\tilde{\mathbf{x}}_n\|^2}_{\text{erro}}
-$$
-:::
-
-::: {.fragment .callout-note}
-Variância total ($\mathrm{tr}(\mathbf{S})$) é **fixa**. Maximizar
-variância retida = minimizar erro — o mesmo problema, dois nomes, não
-duas coincidências.
-:::
-
-:::
-
-::: {.fig-resize style="width: 80%; margin: 0 auto;"}
-```{python}
-#| echo: false
-#| fig-align: center
-
-fig, ax = plt.subplots(figsize=(7.2, 5.4))
-colors_diag = np.where(diagnosis == "M", COR_LARANJA, COR_AZUL)
-ax.scatter(Z[:, 0], Z[:, 1], c=colors_diag, s=14, alpha=0.75)
-ax.set_xlabel("componente principal 1 (z1)")
-ax.set_ylabel("componente principal 2 (z2)")
-ax.set_title(f"Projeção nos 2 primeiros componentes (rótulo NUNCA usado no ajuste)\nlimiar em z1 separa diagnosis com {brl(best_acc*100,1)}% de acurácia")
-
-from matplotlib.lines import Line2D
-handles = [Line2D([0], [0], marker='o', color='w', markerfacecolor=COR_AZUL, markersize=8, label='Benigno (só p/ avaliar)'),
-           Line2D([0], [0], marker='o', color='w', markerfacecolor=COR_LARANJA, markersize=8, label='Maligno (só p/ avaliar)')]
-ax.legend(handles=handles, loc="upper right", fontsize=8)
-plt.tight_layout()
-plt.show()
-```
-:::
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-O rótulo `diagnosis` nunca entrou no cálculo de $\mathbf{S}$ nem na
-decomposição espectral — a projeção usou só os $30$ atributos, sem
-supervisão nenhuma. Ainda assim, colorindo os pontos por diagnóstico só
-para **avaliar** o resultado (nunca para ajustar), a separação salta aos
-olhos: um único limiar ao longo do primeiro componente já classifica
-$92{,}1\%$ dos pacientes corretamente. Isso não é uma coincidência
-específica deste dataset — é o mesmo padrão já visto nas Aulas 3 e 4
-(HDBSCAN, GMM): a estrutura clínica real (dois tipos de tumor,
-biologicamente distintos) deixa uma marca estatística forte o bastante
-para emergir de um critério puramente geométrico (variância), sem
-nenhuma informação de rótulo.
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## O Que Emerge Sem Rótulo Nenhum
-
-::: {.fragment}
-Rótulo `diagnosis` nunca entrou no ajuste — só os $30$ atributos.
-Colorido só para **avaliar**: um limiar em $z_1$ já classifica
-$92{,}1\%$ corretamente.
-:::
-
-::: {.fragment .callout-note}
-Mesmo padrão das Aulas 3–4 (HDBSCAN, GMM): estrutura clínica real deixa
-marca estatística forte o bastante para emergir de um critério
-puramente geométrico.
-:::
-
-:::
-
-## Pergunta
-
-::: {.callout-tip}
-## A alta acurácia obtida (92,1%) sem usar o rótulo prova que a PCA "sabia" sobre o diagnóstico durante o ajuste?
-
-Releia com cuidado onde `diagnosis` entrou nos cálculos do Bloco 3/4 —
-em algum passo da decomposição espectral, ou só depois, para colorir o
-gráfico?
-
-- □ Se a matriz de covariância $\mathbf{S}$ não fosse simétrica
-  (hipoteticamente), a equivalência entre a formulação de máxima
-  variância e a de mínimo erro deixaria de valer, pois ambas as provas
-  dependem de $\mathbf{S}$ ter autovetores ortogonais entre si.
-- □ No caso-limite $M=1$, a formulação de erro mínimo e a de máxima
-  variância produzem, sozinhas, exatamente a mesma direção
-  $\mathbf{u}_1$ — mas para $M\ge2$ não há garantia de que ambas
-  encontrem o mesmo subespaço.
-- □ Como a acurácia de $92{,}1\%$ obtida usando só o primeiro
-  componente principal para separar benigno/maligno é alta, isso prova
-  que a PCA "sabia" sobre o rótulo `diagnosis` durante o ajuste.
-- □ A mesma lógica de comprimir dados numa direção de máxima variância,
-  preservando estrutura discriminativa por acidente (sem usar
-  rótulos), é o que torna embeddings pré-treinados de auto-supervisão
-  úteis depois para tarefas de classificação supervisionada.
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Resposta
-
-::: {.callout-tip}
-## Resposta — a PCA não viu o rótulo em nenhum momento
-
-- ✔ A prova de ambos os Teoremas depende do Teorema Espectral
-  (autovetores ortogonais de matriz simétrica) — sem simetria de
-  $\mathbf{S}$, o argumento de Lagrange não garante mais ortogonalidade
-  entre os $\mathbf{u}_i$.
-- ✗ O Teorema do Bloco 4 é geral para **qualquer** $M<D$, não só
-  $M=1$ — as duas formulações concordam para todo $M$, prova por
-  indução do Bloco 3 incluída.
-- ✗ A PCA usou só os $30$ atributos — `diagnosis` só entrou depois, para
-  **colorir** o gráfico e avaliar; a separação é um achado real, não um
-  vazamento de rótulo.
-- ✔ Exatamente o argumento por trás de embeddings auto-supervisionados:
-  otimizar um critério sem rótulo (aqui, variância; noutros métodos,
-  reconstrução ou contraste) pode preservar estrutura útil para
-  classificação depois.
-:::
-
-::: {.fragment}
-**Voltando à pergunta:** não — a PCA nunca viu `diagnosis`. A separação
-é um achado genuíno de que a variação biológica entre tumores benignos
-e malignos domina boa parte da variância total dos $30$ atributos.
-:::
-
-:::
-
-# Diagnóstico Teórico: PCA Probabilística (PPCA)
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-As duas formulações da PCA clássica são puramente algébricas — nenhuma
-delas conta uma "história" de como os dados foram gerados. A PPCA
-reformula a mesma ideia como um **modelo gerador de variável latente**,
-no mesmo espírito do GMM da Aula 4, mas com uma diferença estrutural
-central: a variável latente $\mathbf{z}$ passa a ser **contínua**, não
-categórica.
-
-::: {.callout-note icon=false}
-## Definição (modelo gerador da PPCA; PRML §12.2, eq. 12.31–12.33)
-
-Seja $\mathbf{z}\in\mathbb{R}^M$ uma variável latente com prior
-
-$$
-p(\mathbf{z}) = \mathcal{N}(\mathbf{z}\mid\mathbf{0},\mathbf{I}).
-$$
-
-A variável observada $\mathbf{x}\in\mathbb{R}^D$ é gerada, condicional a
-$\mathbf{z}$, por
-
-$$
-p(\mathbf{x}\mid\mathbf{z}) = \mathcal{N}(\mathbf{x}\mid\mathbf{Wz}+\boldsymbol\mu,\sigma^2\mathbf{I}),
-$$
-
-onde $\mathbf{W}\in\mathbb{R}^{D\times M}$, $\boldsymbol\mu\in
-\mathbb{R}^D$ e $\sigma^2>0$ são os parâmetros do modelo. Equivalentemente,
-$\mathbf{x}=\mathbf{Wz}+\boldsymbol\mu+\boldsymbol\epsilon$, com
-$\boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\sigma^2\mathbf{I})
-$ independente de $\mathbf{z}$.
-:::
-
-Compare com a Definição do GMM (Aula 4): lá, $z_n$ era 1-de-$K$
-(categórica), e $\mathbf{x}\mid z_{nk}=1\sim\mathcal{N}(\mu_k,\Sigma_k)$
-— uma gaussiana **diferente** por categoria. Aqui, $\mathbf{z}$ é
-contínua, e a relação entre $\mathbf{z}$ e $\mathbf{x}$ é **linear**
-(mais ruído isotrópico) — a mesma lógica de "variável não observada
-gerando o que se vê", só que a natureza da variável (e da transformação)
-mudou.
-
-**A distribuição marginal $p(\mathbf{x})$.** Como o modelo é
-linear-Gaussiano, $p(\mathbf{x})=\int p(\mathbf{x}\mid\mathbf{z})
-p(\mathbf{z})\,\mathrm{d}\mathbf{z}$ também é Gaussiana:
-
-$$
-p(\mathbf{x}) = \mathcal{N}(\mathbf{x}\mid\boldsymbol\mu,\mathbf{C}),
-\qquad
-\mathbf{C} = \mathbf{WW}^T+\sigma^2\mathbf{I}
-$$
-
-(PRML, eq. 12.35–12.36 — a demonstração completa usa média/covariância
-de uma transformação linear de variáveis Gaussianas independentes,
-$\mathbb{E}[\mathbf{x}]=\boldsymbol\mu$,
-$\mathrm{cov}[\mathbf{x}]=\mathbb{E}[\mathbf{Wzz}^T\mathbf{W}^T]+
-\mathbb{E}[\boldsymbol\epsilon\boldsymbol\epsilon^T]=\mathbf{WW}^T+
-\sigma^2\mathbf{I}$, já que $\mathbf{z}$ e $\boldsymbol\epsilon$ são
-independentes e $\mathbb{E}[\mathbf{zz}^T]=\mathbf{I}$). Sem a variável
-latente, teríamos que estimar uma matriz de covariância $D\times D$
-geral, com $D(D+1)/2$ parâmetros livres; com a PPCA, $\mathbf{C}$ fica
-**restrita** à forma $\mathbf{WW}^T+\sigma^2\mathbf{I}$ — só
-$DM+1-\tfrac{M(M-1)}{2}$ parâmetros efetivos (descontando a redundância
-rotacional discutida no Bloco 6), muito menos que $D(D+1)/2$ quando
-$M\ll D$.
-
-**A ilustração gráfica.** Um jeito intuitivo de pensar na geração:
-imagine uma "lata de tinta gaussiana isotrópica" (o ruído $\sigma^2I$)
-sendo borrifada ao longo de todo o subespaço principal (a imagem de
-$\mathbf{Wz}+\boldsymbol\mu$ conforme $\mathbf{z}$ varia), ponderada
-pelo prior de $\mathbf{z}$ — a densidade acumulada dessa "tinta" produz
-a forma de "panqueca" característica de $p(\mathbf{x})$ (PRML, p. 573).
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## O Modelo Gerador da PPCA
-
-::: {.fragment}
-Comparando com o GMM (Aula 4): $z_n$ era 1-de-$K$ (categórica); aqui,
-$\mathbf{z}\in\mathbb{R}^M$ é **contínua**.
-:::
-
-::: {.callout-note icon=false}
-**Definição (PPCA):** 
-- $p(\mathbf{z})=\mathcal{N}(\mathbf{0},I)$;
-- $p(\mathbf{x}\mid\mathbf{z})=\mathcal{N}(\mathbf{Wz}+\boldsymbol\mu,\sigma^2I)$ ;
-- equivalente a $\mathbf{x}=\mathbf{Wz}+\boldsymbol\mu+\boldsymbol\epsilon$.
-:::
-
-## A Marginal $p(\mathbf{x})$ é Gaussiana
-
-::: {.fragment}
-$p(\mathbf{x})=\mathcal{N}(\mathbf{x}\mid\boldsymbol\mu,\mathbf{C})$ onde $\mathbf{C}=\mathbf{WW}^T+\sigma^2I$, $\mathbf{z}$, $\boldsymbol\epsilon$ independentes, $\mathbb{E}[\mathbf{zz}^T]=I$.
-:::
-
-::: {.fragment .callout-note}
-Sem variável latente: $D(D+1)/2$. Com PPCA: $DM$ parâmetros.
-:::
-
-:::
-
-::: {.fig-resize style="width: 60%; margin: 0 auto;"}
-```{.tikz}
-\definecolor{latent}{RGB}{93,109,126}
-\definecolor{obs}{RGB}{0,133,202}
-\definecolor{noise}{RGB}{224,60,49}
-
-\begin{tikzpicture}[x=1cm,y=1cm]
-
-\draw (0.9,0.9) rectangle (7.6,6.1);
-\node[font=\small, color=latent] at (7.1,5.8) {$N$};
-
-\node[draw, circle, minimum size=1.3cm, color=latent, thick] (z) at (2.6,3.5) {$\mathbf{z}_n$};
-\node[draw, circle, minimum size=1.3cm, fill=obs!25, color=obs, thick] (x) at (5.9,3.5) {$\mathbf{x}_n$};
-
-\draw[->, thick, color=latent] (z) -- (x);
-\node[font=\scriptsize, align=center] at (4.25,4.75) {$\mathbf{x}_n=\mathbf{Wz}_n+\boldsymbol\mu+\boldsymbol\epsilon_n$};
-
-\node[font=\scriptsize, color=latent] at (2.6,1.7) {$p(\mathbf{z}_n)=\mathcal{N}(\mathbf{0},\mathbf{I})$};
-\node[font=\scriptsize, color=noise] at (5.9,1.7) {$\boldsymbol\epsilon_n\sim\mathcal{N}(\mathbf{0},\sigma^2\mathbf{I})$};
-
-\node[font=\small, color=latent] at (2.6,5.4) {latente, $M$-dim};
-\node[font=\small, color=obs] at (5.9,5.4) {observado, $D$-dim};
-
-\node[font=\scriptsize] at (9.6,4.3) {parâmetros:};
-\node[font=\scriptsize] at (9.6,3.8) {$\mathbf{W}$ ($D\times M$)};
-\node[font=\scriptsize] at (9.6,3.3) {$\boldsymbol\mu$ ($D$-dim)};
-\node[font=\scriptsize] at (9.6,2.8) {$\sigma^2$ (escalar)};
-
-\end{tikzpicture}
-```
-:::
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-**Ajuste por máxima verossimilhança.** A log-verossimilhança dos dados
-observados,
-$\ln p(\mathbf{X}\mid\boldsymbol\mu,\mathbf{W},\sigma^2)=\sum_n\ln
-p(\mathbf{x}_n\mid\mathbf{W},\boldsymbol\mu,\sigma^2)$, tem
-$\boldsymbol\mu_{\mathrm{ML}}=\bar{\mathbf{x}}$ (a média amostral,
-mesmo resultado da PCA clássica) e, para $\mathbf{W}$ e $\sigma^2$, uma
-solução fechada surpreendente (Tipping & Bishop, 1999, citados no
-PRML):
-
-::: {.callout-note icon=false}
-## Teorema (solução de máxima verossimilhança da PPCA; PRML eq. 12.45–12.46)
-
-Sejam $\mathbf{U}_M$ a matriz $D\times M$ cujas colunas são $M$
-autovetores de $\mathbf{S}$, $\mathbf{L}_M$ a matriz diagonal com os
-autovalores correspondentes, e $\mathbf{R}$ uma matriz ortogonal
-$M\times M$ arbitrária. Os pontos estacionários da log-verossimilhança
-satisfazem
-
-$$
-\mathbf{W}_{\mathrm{ML}} = \mathbf{U}_M(\mathbf{L}_M-\sigma^2\mathbf{I})^{1/2}\mathbf{R},
-$$
-
-e o **máximo** é atingido exatamente quando os $M$ autovetores
-escolhidos são os de **maiores** autovalores, com
-
-$$
-\sigma^2_{\mathrm{ML}} = \frac{1}{D-M}\sum_{i=M+1}^D\lambda_i
-$$
-
-(a média dos autovalores **descartados**).
-:::
-
-A matriz $\mathbf{R}$ é uma invariância rotacional: como
-$\widetilde{\mathbf{W}}\widetilde{\mathbf{W}}^T=\mathbf{WRR}^T
-\mathbf{W}^T=\mathbf{WW}^T$ (pois $\mathbf{RR}^T=\mathbf{I}$), toda a
-família de matrizes $\mathbf{W}$ ligadas por uma rotação $\mathbf{R}$
-produz exatamente a mesma densidade preditiva $p(\mathbf{x})$ —
-análoga à não-identificabilidade de rótulo de componente (*label
-switching*) do GMM da Aula 4, só que contínua (uma rotação inteira),
-não discreta (uma permutação de índices).
-
-**Verificação numérica no Breast Cancer Wisconsin ($M=2$).**
-$\sigma^2_{\mathrm{ML}}=0{,}39382$ — confirmado numericamente igual à
-média dos $28$ autovalores descartados. Verificando a covariância
-marginal $\mathbf{C}=\mathbf{WW}^T+\sigma^2I$ (com $\mathbf{R}=I$):
-projetando na direção do primeiro componente retido,
-$\mathbf{u}_1^T\mathbf{Cu}_1=\lambda_1=13{,}2816$ exatamente; projetando
-numa direção **descartada**, $\mathbf{v}^T\mathbf{Cv}=\sigma^2_{\mathrm{ML}}=0{,}39382$ — exatamente como a eq. 12.36 prevê: a variância ao longo das direções retidas é capturada corretamente, e a variância em todas as demais direções é aproximada por um único valor médio.
-
-**O caso-limite $\sigma^2\to0$: recuperando a PCA clássica.** A
-posterior $p(\mathbf{z}\mid\mathbf{x})$ (via Bayes, forma fechada por
-ser linear-Gaussiano) tem média
-
-$$
-\mathbb{E}[\mathbf{z}\mid\mathbf{x}] = \mathbf{M}^{-1}\mathbf{W}_{\mathrm{ML}}^T(\mathbf{x}-\bar{\mathbf{x}}),
-\qquad \mathbf{M}=\mathbf{W}_{\mathrm{ML}}^T\mathbf{W}_{\mathrm{ML}}+\sigma^2\mathbf{I}
-$$
-
-(PRML, eq. 12.42, 12.48). No limite $\sigma^2\to0$, essa expressão se
-reduz a
-$(\mathbf{W}_{\mathrm{ML}}^T\mathbf{W}_{\mathrm{ML}})^{-1}
-\mathbf{W}_{\mathrm{ML}}^T(\mathbf{x}-\bar{\mathbf{x}})$ — a projeção
-**ortogonal** do ponto sobre o subespaço principal (PRML, eq. 12.50),
-exatamente o mesmo resultado do Bloco 3/4. A PCA clássica é, portanto,
-o caso-limite **sem ruído** da PPCA: onde a PCA clássica projeta
-deterministicamente, a PPCA modela explicitamente a incerteza residual
-que sobra fora do subespaço, com $\sigma^2>0$ — não uma versão "pior" da
-PCA, mas um modelo honesto sobre a variância que de fato existe fora do
-subespaço retido.
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Ajuste por Máxima Verossimilhança
-
-::: {.callout-note icon=false}
-**Teorema (Tipping & Bishop, 1999; PRML eq. 12.45–12.46):**
-$$
-\mathbf{W}_{\mathrm{ML}}=\mathbf{U}_M(\mathbf{L}_M-\sigma^2I)^{1/2}\mathbf{R},\qquad
-\sigma^2_{\mathrm{ML}}=\frac{1}{D-M}\sum_{i=M+1}^D\lambda_i
-$$
-Máximo atingido com os $M$ **maiores** autovalores.
-:::
-
-::: {.fragment}
-$\mathbf{R}$ (ortogonal, $M\times M$) é invariância rotacional:
-$\mathbf{WRR}^T\mathbf{W}^T=\mathbf{WW}^T$ — mesma densidade preditiva,
-qualquer $\mathbf{R}$. Análogo contínuo do *label switching* do GMM.
-:::
-
-## Verificação e o Caso-Limite $\sigma^2\to0$
-
-::: {.fragment}
-$\sigma^2_{\mathrm{ML}}=0{,}39382$ = média dos $28$ autovalores
-descartados, confirmado. $\mathbf{u}_1^T\mathbf{Cu}_1=\lambda_1$;
-$\mathbf{v}^T\mathbf{Cv}=\sigma^2_{\mathrm{ML}}$ p/ direção descartada
-— eq. 12.36 verificada.
-:::
-
-::: {.fragment .callout-important}
-$\sigma^2\to0$: posterior média
-$\to(\mathbf{W}^T\mathbf{W})^{-1}\mathbf{W}^T(\mathbf{x}-\bar{\mathbf{x}})$
-— projeção ortogonal, PCA clássica exatamente recuperada.
-:::
-
-::: {.fragment}
-PCA clássica = PPCA **sem ruído**; PPCA com $\sigma^2>0$ modela
-honestamente a variância real fora do subespaço, não é "pior" versão.
-:::
-
-:::
-
-## Pergunta
-
-::: {.callout-tip}
-## Se a distribuição condicional da PPCA usasse covariância geral em vez de isotrópica, o limite σ²→0 ainda recuperaria a PCA do mesmo jeito?
-
-Pense no papel específico que $\sigma^2$ (um único escalar) desempenha
-na demonstração do limite — o argumento depende de haver só **um**
-parâmetro de ruído a levar a zero?
-
-- □ Se a distribuição condicional $p(\mathbf{x}\mid\mathbf{z})$ usasse
-  uma covariância geral $\boldsymbol\Sigma$ em vez de isotrópica
-  $\sigma^2\mathbf{I}$, o modelo deixaria de ser equivalente à PCA
-  clássica mesmo no limite, porque a própria formulação perderia esse
-  parâmetro único a ser levado a zero.
-- □ No caso-limite $\sigma^2\to0$, a covariância marginal
-  $\mathbf{C}=\mathbf{WW}^T+\sigma^2\mathbf{I}$ se reduz a uma matriz
-  singular (não invertível) quando $M<D$.
-- □ Como a PPCA é um modelo probabilístico e a PCA clássica não é, a
-  PPCA é sempre estritamente mais informativa que a PCA clássica, nunca
-  produzindo exatamente o mesmo resultado.
-- □ A mesma estrutura de modelo latente linear-Gaussiano da PPCA
-  (variável latente contínua com prior Gaussiano, observação linear mais
-  ruído Gaussiano) é também a base da Análise Fatorial (*Factor
-  Analysis*), usada em psicometria para inferir traços latentes a
-  partir de respostas de questionários.
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Resposta
-
-::: {.callout-tip}
-## Resposta — o papel específico de $\sigma^2$ isotrópico
-
-- ✔ Com $\boldsymbol\Sigma$ geral (não isotrópica), não há um único
-  escalar de ruído a levar a zero — o argumento do limite (Bloco 5)
-  perde a variável que precisa desaparecer; o modelo vira algo mais
-  próximo de Análise Fatorial, com comportamento limite diferente.
-- ✔ $\mathbf{WW}^T$ tem posto no máximo $M<D$ — no limite,
-  $\mathbf{C}\to\mathbf{WW}^T$, singular por construção.
-- ✗ Pelo contrário: o Bloco 5 mostrou que a PPCA **recupera exatamente**
-  a PCA clássica no limite $\sigma^2\to0$ — "sempre mais informativa,
-  nunca igual" contradiz esse resultado central.
-- ✔ PRML observa essa conexão explicitamente — PPCA é um caso
-  particular/restrito de Análise Fatorial, mesma estrutura de variável
-  latente linear-Gaussiana.
-:::
-
-::: {.fragment}
-**Voltando à pergunta:** não do mesmo jeito — o argumento depende
-crucialmente de $\sigma^2$ ser um único escalar isotrópico; sem essa
-estrutura específica, o limite "sem ruído" não tem o mesmo significado.
-:::
-
-:::
-
-# O Autoencoder Linear Compartilha o Mesmo Subespaço
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-A terceira perspectiva sobre o mesmo subespaço vem de uma direção
-aparentemente distante: uma rede neural rasa, treinada não para
-classificar nem prever nada externo, mas para **reconstruir sua própria
-entrada**.
-
-::: {.callout-note icon=false}
-## Definição (autoencoder; DLFC §19.1.1)
-
-Um *autoencoder* é uma rede com $D$ unidades de entrada, $D$ unidades
-de saída e $M<D$ unidades na camada oculta (o "gargalo"), treinada com
-alvo $\mathbf{y}(\mathbf{x}_n,\mathbf{w})\approx\mathbf{x}_n$ — cada
-vetor de entrada como seu próprio alvo (mapeamento *auto-associativo*).
-Os parâmetros $\mathbf{w}$ são ajustados minimizando o erro de
-soma-de-quadrados
-
-$$
-E(\mathbf{w}) = \frac12\sum_{n=1}^N\|\mathbf{y}(\mathbf{x}_n,\mathbf{w})-\mathbf{x}_n\|^2.
-$$
-:::
-
-Com $M<D$ unidades ocultas, reconstrução perfeita de todos os pontos
-não é geralmente possível — a rede é forçada a aprender uma
-representação comprimida de $M$ números por ponto.
+Os Mecanismos I e II resolveram o "melhor plano" sem rede nenhuma. Falta
+mostrar que o problema do autoencoder linear é **o mesmo**. Agora que
+os componentes principais estão definidos, o resultado pode ser
+enunciado com precisão. É um resultado clássico, que o DLFC enuncia sem
+demonstrá-lo por extenso; a prova não exige nenhuma ferramenta nova.
 
 ::: {.callout-note icon=false}
 ## Teorema (autoencoder linear = subespaço de PCA; Bourlard & Kamp, 1988; Baldi & Hornik, 1989 — citado via DLFC §19.1.1, p. 565)
@@ -1370,195 +1416,83 @@ levam à camada oculta formam uma base desse subespaço — mas **não
 precisam** ser ortogonais nem normalizados.
 :::
 
-O DLFC enuncia esse resultado sem demonstrá-lo por extenso — mas a prova
-não exige nenhuma ferramenta nova: é uma consequência direta do Teorema
-de erro mínimo já demonstrado no Bloco 4. Com ativação linear e sem
-termos de viés (por simplicidade — os vieses só recentralizam os
-dados), a composição codificador ($D\to M$) seguido de decodificador
-($M\to D$) é, para **qualquer** peso $\mathbf{w}$, uma transformação
-linear $\mathbf{x}\mapsto\mathbf{A}\mathbf{x}$ com
-$\mathrm{posto}(\mathbf{A})\le M$ — e, reciprocamente, toda
-transformação linear de posto $\le M$ é alcançável por alguma escolha
-de pesos (basta fatorar $\mathbf{A}=\mathbf{A}_2\mathbf{A}_1$ com
-$\mathbf{A}_1$ de tamanho $M\times D$ e $\mathbf{A}_2$ de tamanho
-$D\times M$ — sempre possível para uma matriz de posto $\le M$).
-Minimizar $E(\mathbf{w})=\frac12\sum_n\|\mathbf{Ax}_n-\mathbf{x}_n\|^2$
-sobre **todas** as matrizes de posto $\le M$ é, a menos do fator
-$\frac12$ e da normalização por $N$, **exatamente** o problema $J$ do
-Bloco 4 — não um problema parecido, o mesmo problema, já resolvido: o
-mínimo é atingido projetando ortogonalmente sobre o subespaço principal.
-Como a projeção ortogonal sobre um subespaço de dimensão $M$ é
-realizável por infinitas escolhas de base para esse subespaço (qualquer
-base, ortonormal ou não, gera a mesma matriz de projeção), os pesos do
-autoencoder podem convergir a qualquer uma dessas bases — daí a
-observação do DLFC de que eles "não precisam ser ortogonais nem
-normalizados".
+A última frase é a invariância por $\mathbf{G}$ do primeiro bloco: se
+uma base do plano serve, qualquer outra também.
 
-:::
+*Demonstração (por redução).* Com ativação linear e sem vieses (dados
+centrados), a composição codificador seguido de decodificador é, para
+**qualquer** escolha de pesos, uma transformação linear
+$\mathbf{x}\mapsto\mathbf{A}\mathbf{x}$ com $\mathbf{A}=\mathbf{W}\mathbf{V}$
+e $\mathrm{posto}(\mathbf{A})\le M$. Reciprocamente, toda matriz de
+posto $\le M$ é alcançável por alguma escolha de pesos: basta fatorá-la
+como $\mathbf{A}=\mathbf{W}\mathbf{V}$, com $\mathbf{V}$ de tamanho
+$M\times D$ e $\mathbf{W}$ de tamanho $D\times M$. Logo, treinar a rede
+é minimizar $E=\frac12\sum_n\|\mathbf{A}\mathbf{x}_n-\mathbf{x}_n\|^2$
+sobre **todas** as matrizes de posto $\le M$. Para qualquer uma delas, as
+reconstruções $\mathbf{A}\mathbf{x}_n$ caem no subespaço
+$\mathcal{C}(\mathbf{A})$, de dimensão $\le M$, e pelo Passo 1 do
+Mecanismo I nenhuma reconstrução nesse subespaço erra menos que a
+projeção ortogonal sobre ele. Pelos Mecanismos I e II, o menor erro de
+projeção entre todos os subespaços de dimensão $M$ é o do subespaço
+principal, atingido por $\mathbf{A}=\mathbf{U}_M\mathbf{U}_M^T$. Esse é,
+portanto, o mínimo global de $E$. Como a mesma projeção se escreve como
+$\mathbf{W}\mathbf{V}$ para infinitas fatorações (a invariância por
+$\mathbf{G}$), os pesos podem convergir a qualquer base do subespaço — daí
+a observação do DLFC de que eles "não precisam ser ortogonais nem
+normalizados". $\blacksquare$
 
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-**Verificação numérica no Breast Cancer Wisconsin ($M=2$).** Treinando
-um autoencoder linear (`MLPRegressor(activation="identity")`,
-$2$ unidades ocultas) sobre os $30$ atributos centrados:
+Uma ressalva do próprio DLFC (p. 565): a não linearidade, sozinha, não
+escapa dessa conclusão. Trocando a ativação linear por uma não linear
+(por exemplo, sigmoide) nessa **mesma** arquitetura rasa ($D$-$M$-$D$,
+uma única camada oculta), o mínimo global do erro de reconstrução ainda
+corresponde ao subespaço de PCA. Só arquiteturas mais profundas, com
+camadas adicionais de unidades não lineares, realizam de fato uma
+redução de dimensionalidade não linear — o assunto da Aula 7.
 
 :::
 
 ::: {.content-visible when-format="revealjs"}
-
-## O Autoencoder: Definição
-
-::: {.callout-note icon=false}
-**Definição (DLFC §19.1.1):** rede $D$-$M$-$D$, alvo
-$\mathbf{y}(\mathbf{x}_n,\mathbf{w})\approx\mathbf{x}_n$,
-$$
-E(\mathbf{w})=\tfrac12\sum_n\|\mathbf{y}(\mathbf{x}_n,\mathbf{w})-\mathbf{x}_n\|^2.
-$$
-:::
 
 ## Teorema: Ativação Linear $\Rightarrow$ Subespaço de PCA
 
 ::: {.callout-note icon=false}
-**Teorema (Bourlard & Kamp 1988; Baldi & Hornik 1989):** com ativação
-linear, $E(\mathbf{w})$ tem mínimo global único (a menos de rotação),
-realizando a projeção sobre o subespaço de PCA de dimensão $M$. Pesos
-não precisam ser ortogonais/normalizados.
+**Teorema (Bourlard & Kamp 1988; Baldi & Hornik 1989; via DLFC §19.1.1, p. 565):** com ativação
+linear, $E(\mathbf{w})$ tem mínimo global único (a menos de
+reparametrização), realizando a projeção sobre o subespaço dos $M$
+primeiros componentes principais. Pesos não precisam ser
+ortogonais/normalizados.
 :::
 
-## A Prova: Redução ao Bloco 4
+::: {.fragment}
+- A resposta à pergunta do primeiro bloco: o plano é o **subespaço principal**.
+- "Não precisam ser ortogonais" $=$ a invariância por $\mathbf{G}$.
+:::
+
+
+## A Prova: Redução aos Mecanismos I e II
 
 ::: {.fragment}
-Ativação linear, sem viés: codificador+decodificador = transformação
-linear $\mathbf{x}\mapsto\mathbf{Ax}$, $\mathrm{posto}(\mathbf{A})\le M$
+Ativação linear, sem viés: $\mathbf{x}\mapsto\mathbf{A}\mathbf{x}$, $\mathbf{A}=\mathbf{W}\mathbf{V}$, $\mathrm{posto}(\mathbf{A})\le M$
 — e toda matriz de posto $\le M$ é alcançável (fatorar
-$\mathbf{A}=\mathbf{A}_2\mathbf{A}_1$).
+$\mathbf{A}=\mathbf{W}\mathbf{V}$).
+:::
+
+::: {.fragment}
+Reconstruções em $\mathcal{C}(\mathbf{A})$, dimensão $\le M$ $\Rightarrow$ erro $\ge$ erro da projeção ortogonal (Passo 1, Mecanismo I) $\ge$ erro do subespaço principal (Mecanismos I e II).
 :::
 
 ::: {.fragment .callout-important}
-Minimizar $E(\mathbf{w})$ sobre matrizes de posto $\le M$ é **o mesmo**
-problema $J$ do Bloco 4 — mínimo já conhecido: projeção ortogonal sobre
-o subespaço principal.
+Mínimo global de $E$: $\mathbf{A}=\mathbf{U}_M\mathbf{U}_M^T$, projeção sobre o subespaço principal. Infinitas fatorações $\mathbf{W}\mathbf{V}$ (invariância por $\mathbf{G}$) $\Rightarrow$ pesos não precisam ser ortonormais. $\blacksquare$
+:::
+
+## Uma Ressalva: Não Linearidade Rasa
+
+::: {.fragment .callout-warning}
+DLFC, p. 565: ativação não linear (ex.: sigmoide) na **mesma** arquitetura rasa $D$-$M$-$D$ ainda dá o subespaço de PCA.
 :::
 
 ::: {.fragment}
-Projeção sobre um subespaço admite infinitas bases (ortonormais ou não)
-— daí os pesos do autoencoder não precisarem ser ortogonais/normalizados.
-:::
-
-:::
-
-::: {.fig-resize style="width: 66%; margin: 0 auto;"}
-```{.tikz}
-\definecolor{enc}{RGB}{0,133,202}
-\definecolor{dec}{RGB}{255,94,0}
-\definecolor{neu}{RGB}{93,109,126}
-
-\begin{tikzpicture}[x=1cm,y=1cm]
-
-\foreach \y/\lab in {5.2/1, 4.2/2, 2.2/{D-1}, 1.2/D} {
-  \node[draw, circle, minimum size=0.8cm, color=neu] at (0.8,\y) {$x_{\lab}$};
-}
-\node[font=\scriptsize] at (0.8,3.2) {$\vdots$};
-
-\node[draw, circle, minimum size=0.9cm, color=enc, thick, fill=enc!12] (h1) at (5.2,3.9) {$z_1$};
-\node[draw, circle, minimum size=0.9cm, color=enc, thick, fill=enc!12] (h2) at (5.2,2.5) {$z_2$};
-
-\foreach \y/\lab in {5.2/1, 4.2/2, 2.2/{D-1}, 1.2/D} {
-  \node[draw, circle, minimum size=0.8cm, color=neu] (o\lab) at (9.6,\y) {$y_{\lab}$};
-}
-\node[font=\scriptsize] at (9.6,3.2) {$\vdots$};
-
-\foreach \y in {5.2,4.2,2.2,1.2} {
-  \draw[->, color=enc] (0.8,\y) -- (h1);
-  \draw[->, color=enc] (0.8,\y) -- (h2);
-}
-\foreach \y in {5.2,4.2,2.2,1.2} {
-  \draw[->, color=dec] (h1) -- (9.6,\y);
-  \draw[->, color=dec] (h2) -- (9.6,\y);
-}
-
-\node[font=\small, color=enc] at (2.9,6.6) {codificador ($D\to M$)};
-\node[font=\small, color=dec] at (7.4,6.6) {decodificador ($M\to D$)};
-\node[font=\small] at (0.8,6.9) {entrada ($D$)};
-\node[font=\small] at (5.2,6.9) {gargalo ($M<D$)};
-\node[font=\small] at (9.6,6.9) {saída ($D$)};
-
-\node[font=\scriptsize, color=neu] at (5.2,0.2) {alvo: $\mathbf{y}(\mathbf{x}_n,\mathbf{w})\approx\mathbf{x}_n$};
-
-\end{tikzpicture}
-```
-:::
-
-::: {.fig-resize style="width: 78%; margin: 0 auto;"}
-```{python}
-#| echo: false
-#| fig-align: center
-
-fig, ax = plt.subplots(figsize=(6.6, 4.2))
-labels = ["PCA (ótimo teórico)", "Autoencoder linear\n(treinado por gradiente)"]
-vals = [mse_pca, mse_ae]
-bars = ax.bar(labels, vals, color=[COR_AZUL, COR_LARANJA], width=0.5, alpha=0.9)
-for b, v in zip(bars, vals):
-    ax.annotate(f"{v:.6f}".replace(".", ","), xy=(b.get_x() + b.get_width()/2, v),
-                xytext=(0, 4), textcoords="offset points", ha="center", fontsize=9)
-ax.set_ylabel("erro quadrático médio de reconstrução")
-ax.set_title("Erro de reconstrução: PCA ótima vs. autoencoder linear treinado\nBreast Cancer Wisconsin, D=30, M=2")
-plt.tight_layout()
-plt.show()
-```
-:::
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-O erro quadrático médio de reconstrução da PCA (o ótimo teórico,
-$J^\star/D$) é $0{,}367568$; o do autoencoder linear, treinado do zero
-por gradiente (sem nunca ver a decomposição espectral), é $0{,}367575$
-— coincidência a $5$ algarismos significativos. Verificando também o
-**subespaço** aprendido pelo autoencoder (comparando o espaço gerado
-pelas colunas da matriz de pesos de entrada com o subespaço principal
-via cossenos dos ângulos principais): os valores obtidos foram
-$\approx0{,}98$ e $\approx0{,}93$ — próximos de $1$ (subespaços quase
-coincidentes), mas não exatamente $1$. Isso **não contradiz** o
-Teorema: como o próprio enunciado destaca, os pesos do autoencoder não
-precisam ser uma base ortonormal alinhada aos autovetores — o pequeno
-desvio residual nos ângulos principais vem da convergência finita do
-otimizador (gradiente, não uma fórmula fechada), não de uma falha da
-equivalência teórica, que a coincidência quase exata do erro de
-reconstrução já confirma na prática.
-
-**Uma ressalva importante do próprio DLFC.** A não linearidade, sozinha,
-não escapa dessa limitação: mesmo trocando a ativação linear por uma
-não linear (por exemplo, sigmoide) nessa **mesma** arquitetura rasa
-($D$-$M$-$D$, uma única camada oculta), o mínimo global do erro de
-reconstrução ainda corresponde ao mesmo subespaço de PCA (DLFC, p. 565)
-— só arquiteturas mais profundas, com camadas adicionais de unidades não
-lineares, conseguem de fato ultrapassar a limitação linear e realizar
-uma forma não linear de redução de dimensionalidade. Esse é
-precisamente o assunto da Aula 7.
-
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## Verificação Numérica
-
-::: {.fragment}
-Erro de reconstrução: PCA ótima $=0{,}367568$; autoencoder linear
-treinado por gradiente $=0{,}367575$ — coincidência a $5$ algarismos
-significativos.
-:::
-
-::: {.fragment}
-Subespaço aprendido (cossenos dos ângulos principais):
-$\approx0{,}98$/$\approx0{,}93$ — próximo de $1$, não exato. **Não**
-contradiz o Teorema: pesos não precisam ser base ortonormal alinhada;
-desvio vem da convergência finita do otimizador, não de falha teórica.
-:::
-
-::: {.fragment .callout-note}
-Ressalva do DLFC: trocar só a ativação por não linear, na mesma
-arquitetura **rasa**, ainda dá o mesmo subespaço de PCA — só
-arquiteturas mais **profundas** escapam da limitação linear (Aula 7).
+- Só **profundidade** (camadas adicionais não lineares) escapa do linear — Aula 7.
 :::
 
 :::
@@ -1600,11 +1534,12 @@ Releia a ressalva do DLFC citada no bloco — ela distingue arquitetura
 - ✔ Exatamente a ressalva do DLFC citada no bloco — arquitetura rasa,
   mesmo não linear, ainda encontra o mesmo subespaço de PCA; é preciso
   profundidade extra para escapar.
-- ✔ Com $M=D$, qualquer base completa reconstrói exatamente (mesmo
-  argumento do $M=D$ da PCA clássica, Bloco 3).
+- ✔ Com $M=D$ e $\mathbf{V}$ invertível, $\mathbf{W}=\mathbf{V}^{-1}$
+  dá $\mathbf{W}\mathbf{V}=I$: toda entrada é reconstruída exatamente.
 - ✗ O Teorema garante o mesmo **subespaço** (mesmo erro), não a mesma
-  **base** — os pesos podem ser qualquer base desse subespaço, não
-  precisando ser ortonormais (confirmado na verificação numérica).
+  **base** — pela invariância por $\mathbf{G}$, os pesos podem ser
+  qualquer base desse subespaço (na rede treinada, cosseno
+  $\approx-0{,}58$ entre eles).
 - ✔ Mesma técnica de prova: mostrar equivalência de duas famílias de
   soluções alcançáveis (ou convergência no limite) para concluir que os
   mínimos coincidem — usada em vários contextos de otimização em ML.
@@ -1619,18 +1554,375 @@ ativação.
 
 :::
 
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Verificação numérica no Breast Cancer Wisconsin ($M=2$).** O
+autoencoder linear do primeiro bloco, treinado do zero por gradiente
+(sem nunca ver a decomposição espectral), comparado ao ótimo da PCA:
+
+::: {.fig-resize style="width: 78%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(6.6, 4.2))
+labels = ["PCA (ótimo teórico)", "Autoencoder linear\n(treinado por gradiente)"]
+vals = [mse_pca, mse_ae]
+bars = ax.bar(labels, vals, color=[COR_AZUL, COR_LARANJA], width=0.5, alpha=0.9)
+for b, v in zip(bars, vals):
+    ax.annotate(f"{v:.6f}".replace(".", ","), xy=(b.get_x() + b.get_width()/2, v),
+                xytext=(0, 4), textcoords="offset points", ha="center", fontsize=9)
+ax.set_ylabel("erro quadrático médio de reconstrução")
+ax.set_title("Erro de reconstrução: PCA ótima vs. autoencoder linear treinado\nBreast Cancer Wisconsin, D=30, M=2")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+O erro quadrático médio de reconstrução da PCA (o ótimo teórico,
+$J^\star/D$) é $0{,}367568$; o do autoencoder linear é $0{,}367575$ —
+coincidência a $5$ algarismos significativos. Verificando também o
+**subespaço** aprendido (comparando o espaço gerado pelos vetores de
+pesos de entrada com o subespaço principal via cossenos dos ângulos
+principais): os valores obtidos foram $\approx0{,}98$ e $\approx0{,}93$ —
+próximos de $1$ (subespaços quase coincidentes), mas não exatamente $1$.
+Isso **não contradiz** o Teorema: o pequeno desvio vem da convergência
+finita do otimizador (gradiente, não uma fórmula fechada), e as direções
+em que o otimizador ainda não convergiu são as de variância pequena,
+que quase não afetam o erro.
+
+**O espaço latente da PCA: eixos canônicos.** A PCA também produz
+códigos latentes: as coordenadas $\mathbf{z}_n=\mathbf{U}_M^T(\mathbf{x}_n-\bar{\mathbf{x}})$
+na base dos componentes principais. Pelo Teorema, o autoencoder e a PCA
+aprendem o mesmo plano, então os dois códigos devem diferir só por uma
+mudança de base $\mathbf{G}$. Verificando: regredindo os códigos do
+autoencoder nas coordenadas da PCA por uma transformação afim, o
+coeficiente de determinação é $R^2>0{,}99999$ em cada coordenada. O
+espaço latente que a rede aprendeu é o da PCA, visto em outros eixos. O
+que a PCA acrescenta é uma escolha **canônica** desses eixos:
+ortonormais e ordenados pela variância que carregam
+($\lambda_1\ge\lambda_2$).
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(7.2, 5.4))
+colors_diag = np.where(diagnosis == "M", COR_LARANJA, COR_AZUL)
+ax.scatter(Z[:, 0], Z[:, 1], c=colors_diag, s=14, alpha=0.75)
+ax.set_xlabel("componente principal 1 (z1)")
+ax.set_ylabel("componente principal 2 (z2)")
+ax.set_title(f"Projeção nos 2 primeiros componentes (rótulo NUNCA usado no ajuste)\nlimiar em z1 separa diagnosis com {brl(best_acc*100,1)}% de acurácia")
+
+from matplotlib.lines import Line2D
+handles = [Line2D([0], [0], marker='o', color='w', markerfacecolor=COR_AZUL, markersize=8, label='Benigno (só p/ avaliar)'),
+           Line2D([0], [0], marker='o', color='w', markerfacecolor=COR_LARANJA, markersize=8, label='Maligno (só p/ avaliar)')]
+ax.legend(handles=handles, loc="upper right", fontsize=8)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+O rótulo `diagnosis` nunca entrou no cálculo de $\mathbf{S}$ nem na
+decomposição espectral — a projeção usou só os $30$ atributos, sem
+supervisão nenhuma. Ainda assim, colorindo os pontos por diagnóstico só
+para **avaliar** o resultado (nunca para ajustar), a separação salta aos
+olhos: um único limiar ao longo do primeiro componente já classifica
+$92{,}1\%$ dos pacientes corretamente. É a mesma separação vista no
+espaço latente do autoencoder, agora num eixo só, porque a PCA ordena os
+eixos por variância. Isso não é uma coincidência específica deste
+dataset — é o mesmo padrão já visto nas Aulas 3 e 4 (HDBSCAN, GMM): a
+estrutura clínica real (dois tipos de tumor, biologicamente distintos)
+deixa uma marca estatística forte o bastante para emergir de um critério
+puramente geométrico (variância), sem nenhuma informação de rótulo.
+
+:::
+
+# PCA Como Gaussiana de Posto Reduzido (PPCA)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Até aqui a PCA foi geometria: planos, projeções, variância. Há um
+terceiro jeito de lê-la, probabilístico. Suponha que quiséssemos
+descrever os pacientes por uma **Gaussiana** $\mathcal{N}(\bar{\mathbf{x}},\mathbf{C})$.
+Com uma covariância $\mathbf{C}$ completamente livre, o ajuste seria
+$\mathbf{C}=\mathbf{S}$, com $D(D+1)/2=`{python} D*(D+1)//2`$ números a
+estimar. Mas o Mecanismo II mostrou que quase toda a variância vive em
+poucas direções. Então por que não uma Gaussiana cuja covariância
+**também** só tem $M$ direções importantes — uma covariância de **posto
+reduzido**?
+
+O problema de uma covariância de posto $M<D$ pura é que ela é singular:
+a Gaussiana fica inteiramente achatada sobre um plano, e nenhum paciente
+real, que está sempre um pouco fora dele, tem densidade positiva. A
+solução é somar um pouco de ruído igual em todas as direções:
+
+$$
+\mathbf{C}=\underbrace{\mathbf{W}\mathbf{W}^T}_{\text{posto }M}+\underbrace{\sigma^2\mathbf{I}}_{\text{ruído isotrópico}},\qquad \mathbf{W}\in\mathbb{R}^{D\times M}.
+$$
+
+Essa é a **PCA probabilística (PPCA)**. Ela tem uma história geradora
+simples, que é o decodificador do autoencoder com uma distribuição para
+o código e ruído em torno do plano:
+
+::: {.callout-note icon=false}
+## Definição (modelo gerador da PPCA; PRML §12.2, eq. 12.31–12.33)
+
+$$
+\mathbf{z}\sim\mathcal{N}(\mathbf{0},\mathbf{I}_M),\qquad
+\mathbf{x}=\mathbf{W}\mathbf{z}+\boldsymbol\mu+\boldsymbol\epsilon,\qquad
+\boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\sigma^2\mathbf{I}_D)\ \text{independente de }\mathbf{z}.
+$$
+:::
+
+Como $\mathbf{x}$ é uma transformação linear de Gaussianas
+independentes, ele também é Gaussiano, com média $\boldsymbol\mu$ e
+covariância
+$\mathbb{E}[\mathbf{W}\mathbf{z}\mathbf{z}^T\mathbf{W}^T]+\mathbb{E}[\boldsymbol\epsilon\boldsymbol\epsilon^T]=\mathbf{W}\mathbf{W}^T+\sigma^2\mathbf{I}$
+(PRML eq. 12.35–12.36): exatamente a Gaussiana de posto reduzido mais
+ruído. Compare com o GMM da Aula 4: lá, uma variável latente
+**categórica** escolhia uma entre $K$ Gaussianas; aqui, uma variável
+latente **contínua** desliza ao longo de um plano. E o espalhamento dos
+pacientes em torno da reta do Problema-Fio é o ruído
+$\boldsymbol\epsilon$.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Uma Gaussiana com Poucas Direções
+
+- Descrever os pacientes por $\mathcal{N}(\bar{\mathbf{x}},\mathbf{C})$. Com $\mathbf{C}$ livre: $\mathbf{C}=\mathbf{S}$, $D(D+1)/2=`{python} D*(D+1)//2`$ números.
+- Mecanismo II: quase toda a variância está em **poucas** direções. Por que não uma covariância de **posto reduzido**?
+
+::: {.fragment}
+- Posto $M$ puro é singular: Gaussiana achatada num plano, densidade zero fora dele. Solução: somar ruído igual em todas as direções.
+$$
+\mathbf{C}=\underbrace{\mathbf{W}\mathbf{W}^T}_{\text{posto }M}+\underbrace{\sigma^2\mathbf{I}}_{\text{ruído isotrópico}}
+$$
+:::
+
+## O Modelo Gerador da PPCA
+
+::: {.callout-note icon=false}
+**Definição (PRML §12.2):** $\mathbf{z}\sim\mathcal{N}(\mathbf{0},\mathbf{I}_M)$, $\ \mathbf{x}=\mathbf{W}\mathbf{z}+\boldsymbol\mu+\boldsymbol\epsilon$, $\ \boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\sigma^2\mathbf{I}_D)$.
+:::
+
+- É o **decodificador** do autoencoder, com distribuição para o código e ruído em torno do plano.
+- $\mathrm{cov}[\mathbf{x}]=\mathbf{W}\mathbf{W}^T+\sigma^2\mathbf{I}$ — a Gaussiana de posto reduzido (PRML eq. 12.36).
+- GMM (Aula 4): latente categórica escolhe uma Gaussiana. Aqui: latente contínua desliza ao longo de um plano.
+
+## O Modelo em Diagrama
+
+:::
+
+::: {.fig-resize style="width: 60%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{latent}{RGB}{93,109,126}
+\definecolor{obs}{RGB}{0,133,202}
+\definecolor{noise}{RGB}{224,60,49}
+
+\begin{tikzpicture}[x=1cm,y=1cm]
+
+\draw (0.9,0.9) rectangle (7.6,6.1);
+\node[font=\small, color=latent] at (7.1,5.8) {$N$};
+
+\node[draw, circle, minimum size=1.3cm, color=latent, thick] (z) at (2.6,3.5) {$\mathbf{z}_n$};
+\node[draw, circle, minimum size=1.3cm, fill=obs!25, color=obs, thick] (x) at (5.9,3.5) {$\mathbf{x}_n$};
+
+\draw[->, thick, color=latent] (z) -- (x);
+\node[font=\scriptsize, align=center] at (4.25,4.75) {$\mathbf{x}_n=\mathbf{Wz}_n+\boldsymbol\mu+\boldsymbol\epsilon_n$};
+
+\node[font=\scriptsize, color=latent] at (2.6,1.7) {$p(\mathbf{z}_n)=\mathcal{N}(\mathbf{0},\mathbf{I})$};
+\node[font=\scriptsize, color=noise] at (5.9,1.7) {$\boldsymbol\epsilon_n\sim\mathcal{N}(\mathbf{0},\sigma^2\mathbf{I})$};
+
+\node[font=\small, color=latent] at (2.6,5.4) {latente, $M$-dim};
+\node[font=\small, color=obs] at (5.9,5.4) {observado, $D$-dim};
+
+\node[font=\scriptsize] at (9.6,4.3) {parâmetros:};
+\node[font=\scriptsize] at (9.6,3.8) {$\mathbf{W}$ ($D\times M$)};
+\node[font=\scriptsize] at (9.6,3.3) {$\boldsymbol\mu$ ($D$-dim)};
+\node[font=\scriptsize] at (9.6,2.8) {$\sigma^2$ (escalar)};
+
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**O que o ajuste encontra.** Ajustando $\mathbf{W}$ e $\sigma^2$ por
+máxima verossimilhança, a resposta tem forma fechada (Tipping & Bishop,
+1999; PRML eq. 12.45–12.46, pp. 574–575): as colunas de $\mathbf{W}$
+apontam para os $M$ primeiros componentes principais, e
+$\sigma^2_{\mathrm{ML}}$ é a média dos $D-M$ autovalores descartados.
+Substituindo em $\mathbf{C}$, a leitura fica direta:
+
+$$
+\mathbf{C}_{\mathrm{ML}}=\sum_{i=1}^{M}\lambda_i\,\mathbf{u}_i\mathbf{u}_i^T+\sigma^2_{\mathrm{ML}}\sum_{i=M+1}^{D}\mathbf{u}_i\mathbf{u}_i^T,
+\qquad
+\sigma^2_{\mathrm{ML}}=\frac{1}{D-M}\sum_{i=M+1}^{D}\lambda_i .
+$$
+
+Compare com $\mathbf{S}=\sum_{i=1}^D\lambda_i\mathbf{u}_i\mathbf{u}_i^T$,
+a mesma soma de matrizes de posto 1 do Mecanismo II. A Gaussiana
+ajustada **copia $\mathbf{S}$ exatamente nas $M$ direções principais** e
+**achata as outras $D-M$ num único valor**, a média delas. A figura
+mostra isso no Breast Cancer Wisconsin com $M=2$: as duas primeiras
+barras são reproduzidas, as $28$ restantes viram uma linha plana em
+$\sigma^2_{\mathrm{ML}}=`{python} brl(sigma2_ml, 3)`$. Em vez de
+$`{python} D*(D+1)//2`$ números, a covariância usa
+$DM+1-\tfrac{M(M-1)}{2}=`{python} D*M + 1 - M*(M-1)//2`$ (o último termo
+desconta que girar $\mathbf{W}$ por uma rotação $\mathbf{R}$ não muda
+$\mathbf{W}\mathbf{W}^T$ — a mesma invariância por $\mathbf{G}$ do
+autoencoder, agora restrita a rotações).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Que o Ajuste Encontra
+
+Máxima verossimilhança (Tipping & Bishop, 1999; PRML eq. 12.45–12.46): colunas de $\mathbf{W}$ nos $M$ primeiros componentes principais, e
+$$
+\mathbf{C}_{\mathrm{ML}}=\sum_{i=1}^{M}\lambda_i\,\mathbf{u}_i\mathbf{u}_i^T+\sigma^2_{\mathrm{ML}}\sum_{i=M+1}^{D}\mathbf{u}_i\mathbf{u}_i^T,
+\qquad
+\sigma^2_{\mathrm{ML}}=\frac{1}{D-M}\sum_{i>M}\lambda_i .
+$$
+
+::: {.fragment .callout-important}
+Compare com $\mathbf{S}=\sum_i\lambda_i\mathbf{u}_i\mathbf{u}_i^T$: a Gaussiana **copia $\mathbf{S}$** nas $M$ direções principais e **achata** as outras na média.
+:::
+
+::: {.fragment}
+- Breast Cancer Wisconsin, $M=2$: $`{python} D*M + 1 - M*(M-1)//2`$ números em vez de $`{python} D*(D+1)//2`$.
+:::
+
+## O Espectro de $\mathbf{S}$ e o de $\mathbf{C}_{\mathrm{ML}}$
+
+:::
+
+::: {.fig-resize style="width: 72%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+eig_C = np.r_[eigvals[:M], np.full(D - M, sigma2_ml)]
+fig, ax = plt.subplots(figsize=(7.6, 4.0))
+idx = np.arange(1, D + 1)
+ax.bar(idx, eigvals, color=COR_CINZA, alpha=0.6, label=r"autovalores de $\mathbf{S}$ (Gaussiana completa)")
+ax.step(idx, eig_C, where="mid", color=COR_LARANJA, linewidth=2.4,
+        label=r"autovalores de $\mathbf{C}_{\mathrm{ML}}$ (PPCA, $M=2$)")
+ax.axhline(sigma2_ml, color=COR_LARANJA, linestyle=":", linewidth=1)
+ax.set_yscale("log")
+ax.set_xlabel("direção principal $i$")
+ax.set_ylabel("variância (escala log)")
+ax.set_title("A PPCA copia as 2 primeiras direções e achata as outras 28")
+ax.legend(fontsize=9, loc="upper right")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**Sem ruído, sobra a PCA.** Fazendo $\sigma^2\to0$, a parte achatada
+desaparece e
+$\mathbf{C}\to\sum_{i\le M}\lambda_i\mathbf{u}_i\mathbf{u}_i^T$: uma
+Gaussiana de posto exatamente $M$, com toda a massa sobre o subespaço
+principal. Nesse limite, a melhor estimativa do código de um paciente,
+$\mathbb{E}[\mathbf{z}\mid\mathbf{x}]$, vira a projeção ortogonal sobre
+esse subespaço (PRML eq. 12.48–12.50), o mesmo resultado dos Mecanismos
+I e II. A PCA é, portanto, **o ajuste de uma Gaussiana de posto
+reduzido**, e a PPCA é a mesma coisa com um ruído honesto para a
+variância que sobra fora do plano. No Problema-Fio ($D=2$, $M=1$), esse
+ruído é $\sigma^2_{\mathrm{ML}}=\lambda_2=0{,}21$, exatamente o erro da
+reta a $45°$.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Sem Ruído, Sobra a PCA
+
+- $\sigma^2\to0$: $\mathbf{C}\to\sum_{i\le M}\lambda_i\mathbf{u}_i\mathbf{u}_i^T$ — Gaussiana de posto **exatamente** $M$, toda a massa no subespaço principal.
+- $\mathbb{E}[\mathbf{z}\mid\mathbf{x}]$ vira a projeção ortogonal (PRML eq. 12.48–12.50): Mecanismos I e II.
+
+::: {.fragment .callout-important}
+PCA $=$ ajuste de uma Gaussiana de posto reduzido. PPCA $=$ o mesmo, com ruído para o que sobra fora do plano. Problema-Fio: $\sigma^2_{\mathrm{ML}}=\lambda_2=0{,}21$, o erro da reta a $45°$.
+:::
+
+:::
+
+## Pergunta
+
+::: {.callout-tip}
+## Se a distribuição condicional da PPCA usasse covariância geral em vez de isotrópica, o limite σ²→0 ainda recuperaria a PCA do mesmo jeito?
+
+Pense no papel específico que $\sigma^2$ (um único escalar) desempenha
+na demonstração do limite — o argumento depende de haver só **um**
+parâmetro de ruído a levar a zero?
+
+- □ Se a distribuição condicional $p(\mathbf{x}\mid\mathbf{z})$ usasse
+  uma covariância geral $\boldsymbol\Sigma$ em vez de isotrópica
+  $\sigma^2\mathbf{I}$, o modelo deixaria de ser equivalente à PCA
+  clássica mesmo no limite, porque a própria formulação perderia esse
+  parâmetro único a ser levado a zero.
+- □ No caso-limite $\sigma^2\to0$, a covariância marginal
+  $\mathbf{C}=\mathbf{WW}^T+\sigma^2\mathbf{I}$ se reduz a uma matriz
+  singular (não invertível) quando $M<D$.
+- □ Como a PPCA é um modelo probabilístico e a PCA clássica não é, a
+  PPCA é sempre estritamente mais informativa que a PCA clássica, nunca
+  produzindo exatamente o mesmo resultado.
+- □ A mesma estrutura de modelo latente linear-Gaussiano da PPCA
+  (variável latente contínua com prior Gaussiano, observação linear mais
+  ruído Gaussiano) é também a base da Análise Fatorial (*Factor
+  Analysis*), usada em psicometria para inferir traços latentes a
+  partir de respostas de questionários.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Resposta
+
+::: {.callout-tip}
+## Resposta — o papel específico de $\sigma^2$ isotrópico
+
+- ✔ Com $\boldsymbol\Sigma$ geral (não isotrópica), não há um único
+  escalar de ruído a levar a zero — o argumento do limite $\sigma^2\to0$
+  perde a variável que precisa desaparecer; o modelo vira algo mais
+  próximo de Análise Fatorial, com comportamento limite diferente.
+- ✔ $\mathbf{WW}^T$ tem posto no máximo $M<D$ — no limite,
+  $\mathbf{C}\to\mathbf{WW}^T$, singular por construção.
+- ✗ Pelo contrário: o bloco da PPCA mostrou que ela **recupera exatamente**
+  a PCA clássica no limite $\sigma^2\to0$ — "sempre mais informativa,
+  nunca igual" contradiz esse resultado central.
+- ✔ PRML observa essa conexão explicitamente — PPCA é um caso
+  particular/restrito de Análise Fatorial, mesma estrutura de variável
+  latente linear-Gaussiana.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não do mesmo jeito — o argumento depende
+crucialmente de $\sigma^2$ ser um único escalar isotrópico; sem essa
+estrutura específica, o limite "sem ruído" não tem o mesmo significado.
+:::
+
+:::
+
+
 # Síntese, Fechamento e Ponte para a Aula 7
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
 **Síntese.** Este aula revisitou o mesmo objeto — o subespaço de maior
 variância dos dados — de quatro ângulos diferentes, e todos concordaram
-exatamente: geométrico (máxima variância projetada), algébrico
-(mínimo erro de reconstrução, ligado ao primeiro por Pitágoras),
-probabilístico (PPCA, MLE de um modelo gerador linear-Gaussiano, que
-recupera a PCA clássica no limite $\sigma^2\to0$) e neural (autoencoder
-linear, cujo mínimo global é o mesmo subespaço, provado por redução ao
-problema algébrico). Essas quatro perspectivas não são quatro técnicas
+exatamente: neural (o autoencoder linear, cujo código latente são
+coordenadas num plano e cujo mínimo global é o subespaço principal),
+algébrico (mínimo erro de reconstrução), geométrico (máxima variância
+retida, ligada ao anterior por Pitágoras) e probabilístico (PPCA, MLE de
+um modelo gerador linear-Gaussiano, que recupera a PCA clássica no
+limite $\sigma^2\to0$). Essas quatro perspectivas não são quatro técnicas
 independentes que "por acaso" concordam — são quatro formalizações da
 mesma pergunta ("qual subespaço de dimensão $M$ resume os dados sem
 perder o que importa?"), cada uma revelando algo que as outras não
@@ -1650,16 +1942,18 @@ classe inteira de soluções lineares.
 
 Retomando as quatro perguntas da Abertura, uma frase cada:
 
-1. **O que significa "resumir sem perder o que importa"?** Maximizar a
-   variância projetada — equivalentemente (por Pitágoras), minimizar o
-   erro médio de reconstrução; ambas levam à decomposição espectral da
-   covariância amostral.
-2. **Existe uma versão probabilística?** Sim — a PPCA, um modelo gerador
+1. **O que é um espaço latente contínuo?** No autoencoder linear, um
+   sistema de coordenadas para um plano de dimensão $M$ dentro do
+   espaço dos dados; os dados determinam o plano, não os eixos
+   (invariância por $\mathbf{G}$). O plano aprendido é o subespaço de
+   PCA, provado por redução.
+2. **O que significa "resumir sem perder o que importa"?** Minimizar o
+   erro médio de reconstrução — equivalentemente (por Pitágoras),
+   maximizar a variância retida; ambas levam à decomposição espectral da
+   covariância amostral, que também fornece eixos canônicos.
+3. **Existe uma versão probabilística?** Sim — a PPCA, um modelo gerador
    linear-Gaussiano de variável latente contínua, cujo MLE recupera a
    PCA clássica no limite $\sigma^2\to0$.
-3. **O autoencoder resolve outro problema, ou o mesmo disfarçado?** O
-   mesmo, provado por redução direta: com ativação linear, o mínimo
-   global do autoencoder raso é exatamente o subespaço de PCA.
 4. **Qual a limitação em comum?** Estrutura só **linear** — nenhuma das
    três ferramentas representa bem uma variedade curva.
 
@@ -1673,7 +1967,7 @@ PPCA desta aula ao *Variational Autoencoder* (VAE): a mesma variável
 latente $\mathbf{z}$, agora relacionada a $\mathbf{x}$ por uma
 rede neural não linear em vez de uma transformação linear $\mathbf{W}$.
 Como a posterior $p(\mathbf{z}\mid\mathbf{x})$ deixa de ter forma
-fechada nesse regime não linear (ao contrário da PPCA, Bloco 5), o VAE
+fechada nesse regime não linear (ao contrário da PPCA), o VAE
 precisa exatamente da ferramenta construída na Aula 5 — o ELBO,
 $\mathcal{L}(q)=\ln p(\mathbf{x})-\mathrm{KL}(q\|p)$ — como critério de
 ajuste, com $q$ aproximado por uma rede neural (o *reparameterization
@@ -1691,10 +1985,10 @@ na posterior da PPCA.
 ## Síntese: Um Subespaço, Quatro Ângulos
 
 ::: {.fragment}
-Geométrico (máxima variância) $\leftrightarrow$ algébrico (mínimo
-erro, via Pitágoras) $\leftrightarrow$ probabilístico (PPCA, MLE,
-$\sigma^2\to0$) $\leftrightarrow$ neural (autoencoder linear, mesmo
-mínimo por redução).
+Neural (autoencoder linear: código $=$ coordenadas num plano)
+$\leftrightarrow$ algébrico (mínimo erro) $\leftrightarrow$ geométrico
+(máxima variância, via Pitágoras) $\leftrightarrow$ probabilístico
+(PPCA, MLE, $\sigma^2\to0$).
 :::
 
 ::: {.fragment .callout-note}
@@ -1716,18 +2010,19 @@ técnica isolada.
 ## Retomando as Quatro Perguntas
 
 ::: {.fragment}
-**1.** Maximizar variância projetada = minimizar erro de reconstrução
-(Pitágoras) $\to$ decomposição espectral de $\mathbf{S}$.
+**1.** Espaço latente $=$ coordenadas num plano $M$-dim; dados fixam o
+plano, não os eixos ($\mathbf{G}$). Autoencoder linear aprende o
+subespaço de PCA (redução).
 :::
 
 ::: {.fragment}
-**2.** PPCA: modelo gerador linear-Gaussiano; MLE recupera PCA clássica
+**2.** Minimizar erro de reconstrução $=$ maximizar variância retida
+(Pitágoras) $\to$ decomposição espectral de $\mathbf{S}$, eixos canônicos.
+:::
+
+::: {.fragment}
+**3.** PPCA: modelo gerador linear-Gaussiano; MLE recupera PCA clássica
 em $\sigma^2\to0$.
-:::
-
-::: {.fragment}
-**3.** Autoencoder linear = mesmo problema, provado por redução —
-mesmo subespaço, mínimo global.
 :::
 
 ::: {.fragment}
@@ -1748,3 +2043,4 @@ $\mathbf{x}$; posterior deixa de ter forma fechada $\Rightarrow$ volta o
 :::
 
 :::
+

@@ -1,4 +1,4 @@
-## Resumo — Aula 5.1
+## Resumo — Aula 5
 
 Versão nova da Aula 5 (a Aula 5 original é mantida intacta — esta é uma
 segunda versão, mais ambiciosa, do mesmo tema). Cobre seleção Bayesiana
@@ -26,7 +26,7 @@ Breast Cancer Wisconsin, atributos `radius_worst` e
 limite prático do EM clássico (Aula 4) e sobe ao formalismo Bayesiano,
 depois volta à prática (validação empírica, PPC).
 
-## Plano de aula — Aula 5.1 (carga horária: ~135min, aula estendida)
+## Plano de aula — Aula 5 (carga horária: ~135min, aula estendida)
 
 1. **Revisão e Introdução** (~12 min) — EM clássico não penaliza
    complexidade; log-verossimilhança de treino nunca cai em $K$;
@@ -55,7 +55,7 @@ depois volta à prática (validação empírica, PPC).
 7. **Fechamento** (~8 min) — retomada das perguntas; ponte para a
    Aula 6 (o ELBO reaparece na PPCA/VAE).
 
-## Fontes usadas — Aula 5.1
+## Fontes usadas — Aula 5
 
 Disciplina sem `_fontes/` PDF específico para este conteúdo (não há um
 capítulo único do PRML fisicamente disponível localmente cobrindo
