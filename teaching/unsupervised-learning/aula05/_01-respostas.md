@@ -1,199 +1,139 @@
-# Respostas da Aula 5 — Pausas Ativas
+# Respostas da Aula 5.1 — Pausas Ativas
 
 > Arquivo de apoio, não publicado (prefixo `_`). Discussão em prosa das
-> 5 pausas ativas do `index.qmd` (a pergunta motivadora + a resolução
+> 6 pausas ativas do `index.qmd` (a pergunta motivadora + a resolução
 > do V/F, que no `index.qmd` só aparece nos slides RevealJS, nunca nas
 > notas HTML).
->
-> Reescrito do zero junto com a Aula 5 inteira (2026-09-16) — o
-> conteúdo, o roteiro e as pausas ativas anteriores (sobre BIC/Laplace)
-> não existem mais nesta versão.
 >
 > (O gabarito dos 8 blocos de V/F da seção Exercícios **não** é
 > discutido aqui — vive em `exercicios.qmd`/`soluções.qmd`, páginas
 > públicas e separadas desta aula.)
 
-### Pausa 1 — Verossimilhança de treino e a singularidade do Passo M
+### Pausa 1 — O papel legítimo da log-verossimilhança de treino
 
-A pergunta pede para conectar "um componente do GMM pode encolher sua
-covariância sobre um único ponto de treino" com "usar a
-log-verossimilhança de treino para escolher $K$". A conexão é direta: se
-essa singularidade pode inflar a log-verossimilhança de forma
-arbitrária (levando-a a $+\infty$ no limite), então o "melhor" $\theta$
-segundo esse critério, para $K$ grande, pode ser um artefato numérico
-sem sentido estatístico — não uma estrutura real da população. Isso já
-antecipa por que qualquer forma de validação em dados nunca vistos
-(seja log-verossimilhança de validação, seja Silhueta) quebra essa
-monotonicidade: o artefato de colapso beneficia só os pontos específicos
-de treino que sofreram o colapso, e desaparece quando o modelo é
-avaliado em pontos diferentes.
+A pergunta tenta uma dicotomia falsa: já que a log-verossimilhança de
+treino nunca pune complexidade, seria ela inútil? Não — o ponto da
+Abertura é que ela continua sendo o **termo de ajuste** correto, só
+não é suficiente **sozinha** para decidir $K$. Toda a aula constrói,
+sobre essa mesma quantidade, um segundo termo (a KL) que soma uma
+penalidade de complexidade genuína — a log-verossimilhança nunca é
+descartada, é complementada.
 
-- ✔ Um componente pode encolher sua covariância sobre um único ponto de
-  treino, levando a densidade naquele ponto (e a log-verossimilhança
-  total) a divergir — logo o "melhor" $\theta$ para $K$ grande pode nem
-  ser um ponto interessante, só um artefato numérico.
-- ✔ Se, em vez de comparar $K$ por log-verossimilhança de treino,
-  comparássemos por log-verossimilhança medida num conjunto de
-  validação nunca usado no ajuste, mais componentes deixaria de
-  garantir uma melhora monotônica.
-- ✗ Como a log-verossimilhança de treino nunca piora ao acrescentar
-  componentes, um GMM com $K=10$ sempre generaliza melhor que um com
-  $K=2$ no Breast Cancer Wisconsin — falso: "nunca piora no treino" é
-  sobre ajuste, nunca sobre generalização; é exatamente essa confusão
-  que motiva toda a aula.
-- ✔ O mesmo fenômeno — erro de treino não-crescente conforme a
-  complexidade do modelo aumenta — aparece em árvores de decisão sem
-  profundidade máxima, cujo erro de treino pode chegar a zero isolando
-  cada ponto num nó-folha próprio.
+- ✔ A log-verossimilhança de treino mede corretamente o quão bem os
+  parâmetros ajustados explicam os dados que os ajustaram — o
+  problema é usá-la sozinha para comparar complexidades diferentes.
+- ✗ Um critério bem fundamentado tipicamente reaproveita a
+  log-verossimilhança como um termo, somado a uma penalidade — não a
+  descarta por completo.
+- ✔ Sim — é exatamente a lógica do ELBO: termo de ajuste (relacionado
+  à verossimilhança) menos um termo de penalidade (KL).
+- ✔ Sim — é o mesmo fenômeno de sobreajuste por máxima verossimilhança
+  de qualquer modelo suficientemente flexível.
 
-### Pausa 2 — A priori certa é sobre π, não sobre μ,Σ (nem sobre Z)
+### Pausa 2 — O ELBO não inventa Occam, ele viabiliza calculá-la
 
-A pergunta tenta uma armadilha: já que o GMM tem, desde a Aula 4, uma
-priori $\pi_k$ sobre a variável latente $z_n$, será que o que falta é
-dar uma priori de verdade a **outra** coisa — especificamente,
-$\mu_k,\Sigma_k$ (mantendo $\pi$ fixo, como sempre)? Não é isso, e o
-Passo 4 da derivação mostra exatamente por quê: o termo de ajuste do
-ELBO virou uma esperança só sobre $\mathbf{Z}$ justamente porque a
-verossimilhança de $\mathbf{X}$ não depende de $\pi$ dado $\mathbf{Z}$
-e $\phi=\{\mu_k,\Sigma_k\}$ — ou seja, $\pi$ não entra no termo de
-ajuste de jeito nenhum, só no termo de KL (Passo 5). Dar priori a
-$\mu_k,\Sigma_k$, mantendo $\pi$ fora do tratamento variacional, não
-introduz nenhum termo de KL novo — a penalidade de Occam continuaria
-zero, e o problema de $K=N$ persistiria. A peça que faltava é
-literalmente a priori sobre **$\pi$**: sem ela, $\pi$ é só um número
-fixo (como no EM clássico); com ela, $\pi$ vira uma variável do próprio
-ELBO, com uma distribuição $q(\pi)$ que paga um custo de KL para se
-afastar de $p(\pi)$ — e é esse custo que penaliza componentes
-supérfluos. Vale notar também que a validade da decomposição $\ln
-p(\mathbf{X}\mid\phi)=\mathcal{L}(q,\phi)+\mathrm{KL}(q\|p)$ não
-depende de $q$ ser fatorada em campo médio ou não — a fatoração afeta
-só o quão apertada é a cota, nunca sua validade como cota inferior.
+Essa pausa testa se o aluno confunde "de onde vem a penalidade de
+complexidade" com "o que o ELBO faz". A Navalha de Occam já mora na
+integral da evidência $p(\mathbf{X}\mid\mathcal{M}_m)=\int
+p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)\,\mathrm{d}\mathbf{H}$, antes
+de qualquer aproximação variacional. O ELBO resolve um problema
+diferente — calculabilidade —, ao custo de uma aproximação cuja
+qualidade (a folga de KL) precisa ser levada a sério.
 
-- ✔ O termo de KL do Passo 5 é sobre $(\mathbf{Z},\pi)$, não sobre
-  $(\mu_k,\Sigma_k)$ — dar priori a $\mu_k,\Sigma_k$ mantendo $\pi$
-  fixo não cria nenhuma penalidade de complexidade nesta derivação; o
-  problema de $K=N$ persistiria.
-- ✔ No caso-limite em que a priori $p(\pi)$ é extremamente concentrada
-  (quase um ponto único), a decomposição com $\pi$ dentro de
-  $\mathbf{H}$ se aproxima da decomposição do EM clássico, já que
-  $q(\pi)$ tem pouquíssima liberdade para se afastar desse ponto.
-- ✗ Como o campo médio $q(\mathbf{Z},\pi)\approx q(\mathbf{Z})q(\pi)$ é
-  só uma conveniência computacional, o ELBO resultante deixa de ser uma
-  cota inferior válida de $\ln p(\mathbf{X}\mid\phi)$ sempre que essa
-  fatoração não corresponde à dependência real — falso: a desigualdade
-  $\mathcal{L}(q,\phi)\le\ln p(\mathbf{X}\mid\phi)$ vale para qualquer
-  $q$ normalizada; a fatoração só piora o quão apertada é a cota.
-- ✔ O mesmo princípio de poda automática via priori esparsa também
-  aparece em regressão linear regularizada por LASSO, onde uma priori
-  Laplaciana sobre os coeficientes empurra muitos deles exatamente a
-  zero.
+- ✔ O ELBO resolve calculabilidade, não a ausência de penalidade — essa
+  já está na integral da evidência, antes de qualquer aproximação.
+- ✗ Se a evidência já fosse calculável exatamente, não haveria motivo
+  para aproximá-la — a Navalha de Occam já estaria lá, sem precisar
+  de $q$.
+- ✔ Quanto mais apertada a KL residual, mais o ranqueamento por
+  $\mathcal{L}_m$ se aproxima do ranqueamento pela evidência verdadeira.
+- ✗ Mesma família $q$ não garante gaps iguais entre modelos diferentes
+  — a distância de $q$ à posterior real pode variar bastante mesmo com
+  a mesma forma funcional (a "folga variacional" do Bloco 4).
 
-### Pausa 3 — Métricas de treino vs. validação em clusterização dura
+### Pausa 3 — Poda com $\alpha_0$ fixo: o contraste é com $N_k$, não entre rodadas
 
-A pergunta pede para separar "medir a qualidade da partição nos mesmos
-pontos que a definiram" de "medir numa amostra independente" — o mesmo
-erro conceitual da Pausa 1, agora aplicado a métricas geométricas em vez
-de verossimilhança. Calcular Silhueta/Davies-Bouldin no próprio conjunto
-de treino mediria só o quão bem o K-Means otimizou sua função objetivo
-ali (por construção, o K-Means já minimiza a distorção interna que a
-Silhueta/DB recompensam) — não diz nada sobre generalização. Vale notar
-também um caso-limite matemático interessante: com $K=N$ no treino (um
-cluster por ponto), a Silhueta fica indefinida, porque $a(i)$ (distância
-média aos **outros** pontos do mesmo cluster) não tem nenhum outro ponto
-para calcular a média — o conceito de "coesão interna" perde sentido
-quando não há "interno" nenhum além do próprio ponto.
+Essa é a pausa mais fácil de responder errado por analogia superficial
+com a Aula 5 original (que variava $\alpha_0$). O mecanismo de poda
+não depende de comparar $\alpha_0$ entre valores diferentes — depende
+do **contraste interno**, componente a componente, entre $\alpha_0$
+(fixo, igual para todos) e $N_k$ (varia por componente, vindo dos
+dados). Um componente com $N_k\approx0$ já fica "preso" perto da
+priori, não importa o valor de $\alpha_0$ escolhido, desde que ele seja
+o mesmo para todos os componentes.
 
-- ✔ Calcular Silhueta/Davies-Bouldin no próprio conjunto de treino
-  mediria só o quão bem o K-Means otimizou sua função objetivo ali —
-  não diria nada sobre se essa estrutura generaliza, o mesmo problema
-  estrutural da log-verossimilhança de treino na Abertura.
-- ✔ No caso-limite $K=N$ (um cluster por ponto de treino), a Silhueta
-  calculada no próprio treino fica matematicamente indefinida, pois
-  cada cluster teria um único ponto e $a(i)$ não seria calculável.
-- ✗ Como a Silhueta e o Davies-Bouldin são métricas puramente
-  geométricas (não usam verossimilhança), elas são igualmente
-  confiáveis calculadas no treino ou na validação, diferente do que
-  acontece com log-verossimilhança — falso: qualquer métrica calculada
-  nos dados que definiram a partição tende a favorecer partições mais
-  ajustadas àquele conjunto específico, geométrica ou não.
-- ✔ A mesma lógica de "ajustar num conjunto, validar estabilidade em
-  outro" se aplica a escolher o número de fatores latentes de uma
-  Análise de Componentes Principais (PCA) por variância explicada
-  reconstruída em dados de validação.
+- ✔ A poda vem do contraste entre $\alpha_0$ (fixo) e $N_k$ (varia por
+  componente): $N_k\approx0$ já basta para a concentração posterior
+  ficar perto de $\alpha_0$.
+- ✗ Colapso de $\Sigma_k$ (EM clássico) e $N_k\approx0$ (GMM Bayesiano)
+  são fenômenos relacionados mas distintos — um componente pode ter
+  $N_k$ moderado e ainda colapsar sobre um subconjunto pequeno de
+  pontos muito próximos.
+- ✔ $\alpha_0$ alto deixa a priori mais rígida em torno de pesos
+  iguais — dificulta, não facilita, a poda.
+- ✔ $W_0^{-1}$ (Normal-Wishart) e $\alpha_0$ (Dirichlet) são ambos
+  "pesos" da priori que persistem na atualização posterior, cada um
+  impedindo um extremo diferente.
 
-### Pausa 4 — O que o descolamento treino/validação prova (e o que não prova)
+### Pausa 4 — Um acerto do ELBO não é garantia geral
 
-A pergunta separa "o critério aponta para $K=3$" de "existem, de fato,
-três populações distintas". A log-verossimilhança de validação, como
-qualquer estatística calculada sobre uma amostra finita, tem variância
-de amostragem: o $K$ vencedor numa divisão específica treino/validação é
-a melhor aposta **sob essa divisão**, não uma garantia da estrutura
-populacional verdadeira. É por isso que, na prática, é comum repetir o
-procedimento com várias divisões diferentes (validação cruzada) e
-observar se o mesmo $K$ continua vencendo — um único resultado, sozinho,
-não distingue "sinal real" de "ruído daquela amostra específica". Note
-também que essa incerteza não desaparece nem no caso-limite de um
-conjunto de validação minúsculo: mesmo com um único ponto, modelos
-diferentes ainda atribuem densidades diferentes a ele, então a
-comparação continua, em princípio, possível — só fica mais ruidosa.
+Essa pausa prepara terreno para o Bloco 4 inteiro. O ELBO ter acertado
+$K=2$ neste dataset específico não prova nada sobre outros datasets,
+nem sobre a folga variacional ser sempre pequena, nem sobre a forma
+gaussiana sempre ser adequada. É importante que o aluno não generalize
+de "funcionou uma vez" para "sempre funciona" — o mesmo erro de
+raciocínio que motivou desconfiar da log-verossimilhança de treino na
+Pausa 1.
 
-- ✔ A log-verossimilhança de validação, como qualquer critério estimado
-  a partir de uma amostra finita, tem variância de amostragem — um
-  valor máximo em $K=3$ indicaria que $K=3$ generalizou melhor **nesta**
-  divisão treino/validação específica, não uma garantia de que $3$ é o
-  número "verdadeiro" de populações latentes.
-- ✗ No caso-limite em que o conjunto de validação tem um único ponto, a
-  log-verossimilhança de validação para qualquer $K\ge1$ se torna
-  idêntica, pois um único ponto não permite distinguir modelos — falso:
-  modelos diferentes ainda atribuem densidades diferentes a esse ponto;
-  a comparação fica mais ruidosa, não impossível.
-- ✗ Como a validação usa dados nunca vistos no ajuste, o $K$ que
-  maximiza a log-verossimilhança de validação é, por construção, a
-  estrutura verdadeira da população, sem nenhuma incerteza residual —
-  falso: validação reduz o risco de sobreajuste, não elimina variância
-  de amostragem.
-- ✔ O mesmo cuidado (não confundir "o critério aponta para X" com "X é
-  a verdade") se aplica a escolher o grau de um polinômio de regressão
-  pelo erro quadrático mínimo num conjunto de validação.
+- ✔ O ELBO de treino é uma cota sob a família $q$ escolhida — nada
+  garante que a folga seja igualmente apertada para qualquer estrutura
+  de dados.
+- ✗ O ELBO penalizar complexidade dentro da família variacional não o
+  isenta do viés de otimismo geral de qualquer quantidade avaliada só
+  no treino.
+- ✔ Má especificação de forma é um problema diferente de excesso de
+  parâmetros — um GMM bem penalizado ainda pode "escolher" mal se a
+  forma real não é gaussiana.
+- ✗ K-Means e DBSCAN não ficam fora de comparação — é exatamente o
+  papel da Silhueta/Dunn numa validação comum.
 
-### Pausa 5 — Por que boas métricas agregadas não garantem forma correta
+### Pausa 5 — Discordância entre métricas não é erro
 
-O exemplo das duas luas mostrou algo desconfortável: um GMM elíptico
-pode ter log-verossimilhança "razoável" e ainda gerar dados sintéticos
-visivelmente incompatíveis com a forma real dos dados. A pergunta pede
-para generalizar essa observação: seria coincidência do exemplo, ou um
-limite estrutural de qualquer métrica agregada (log-verossimilhança,
-Silhueta, Davies-Bouldin)? É estrutural — todas essas métricas resumem
-a relação entre pontos e modelo a números que dependem de
-densidade/distância agregada, nunca da forma geométrica da região que o
-modelo cobre. Duas luas perfeitamente separadas (sem sobreposição
-nenhuma na fronteira) ainda teriam esse problema: a elipse de cada
-componente Gaussiano continuaria preenchendo a região côncava entre as
-luas, simplesmente porque uma elipse não consegue ter a forma de um
-crescente, independente de quão bem separados os dois grupos estejam.
-Validação em dados nunca vistos (Blocos 3 e 4) protege contra
-sobreajuste ao ruído específico do treino, mas não contra esse tipo de
-incompatibilidade estrutural de forma — os pontos de validação das
-luas seriam mal explicados pela mesma elipse, e a métrica agregada
-continuaria sem denunciar isso diretamente.
+O ponto pedagógico aqui é distinguir "discordância" de "erro". Silhueta
+e Dunn formalizam noções diferentes de qualidade de partição (médias
+vs. extremos); um aluno que conclui "uma delas está bugada" perdeu o
+ponto — a lição é usar as duas, cientes de que respondem perguntas
+ligeiramente diferentes, e que uma discordância é, ela mesma,
+informação (não ruído a ser descartado).
 
-- ✔ Não necessariamente — tanto a log-verossimilhança quanto a Silhueta
-  são agregados que dependem de densidade/distância entre pontos, não
-  da forma geométrica do cluster; um modelo pode obter bons valores
-  agregados e ainda assim gerar dados com formato visivelmente
-  incompatível com o real, como no exemplo das luas.
-- ✗ No caso-limite em que os dois clusters do formato de lua estão
-  perfeitamente separados (sem sobreposição alguma na fronteira), o PPC
-  de um GMM elíptico necessariamente coincide pixel a pixel com os
-  dados reais — falso: a elipse de cada componente ainda preenche a
-  região côncava entre as luas, independente do grau de separação.
-- ✗ Como a Silhueta e a log-verossimilhança de validação já são
-  calculadas em dados nunca vistos no ajuste, elas automaticamente
-  capturam qualquer incompatibilidade de forma entre o modelo gerador e
-  os dados reais — falso: validação protege contra sobreajuste ao
-  treino, não contra incompatibilidade estrutural de forma entre família
-  de modelo e processo gerador.
-- ✔ A mesma limitação — métricas agregadas escondendo incompatibilidade
-  de forma — motiva, em modelos generativos de imagens, o uso de
-  inspeção visual das amostras geradas além de métricas escalares como
-  FID (*Fréchet Inception Distance*).
+- ✔ As duas métricas formalizam noções diferentes de "boa partição" —
+  podem legitimamente discordar sem erro de implementação.
+- ✔ Uma métrica de extremos é, por construção, mais sensível a um
+  único ponto atípico do que uma métrica de médias.
+- ✗ Não assumir forma esférica é uma vantagem conceitual, mas não
+  torna o Dunn imune a ruído estatístico em amostra finita.
+- ✔ É o mesmo tipo de tensão entre critério agregado (média) e critério
+  de pior-caso, presente também em métricas supervisionadas
+  (acurácia média vs. pior recall entre classes).
+
+### Pausa 6 — Um teste não rejeitar não é "sem discrepância nenhuma"
+
+A pausa final fecha o círculo da aula: nenhuma ferramenta de validação,
+sozinha e numa única configuração, é definitiva. O MMD com largura de
+banda da mediana não rejeitar para as duas luas não significa "sem
+discrepância" — significa "sem discrepância **na escala que essa
+configuração consegue enxergar**". Testar em mais de uma escala (ou
+usar mais de uma ferramenta, como o KS via projeções) é a prática
+cuidadosa que a aula modela.
+
+- ✔ Não é falha do MMD como família de teste — é a largura de banda
+  específica que estava insensível àquela escala; $4\gamma$ revelou a
+  mesma diferença sem trocar de teste.
+- ✗ KS via projeções e MMD capturam discrepâncias por caminhos
+  diferentes; a aula usou os dois porque um pode pegar algo que o
+  outro não pega.
+- ✔ Um PPC quantitativo honesto não deveria reportar um único teste
+  com uma única configuração sem justificar a escolha, sobretudo de
+  largura de banda.
+- ✔ A largura de banda $h$ do KDE (Aula 2) tem o mesmo papel — a mesma
+  tensão de escala revisitada aqui.
