@@ -16,7 +16,7 @@ Estado aprovado + vocabulário, para dar continuidade entre aulas. O histórico 
 | `aula05` | 5 — Pesquisa qualitativa, teste A/B e tecnologia persuasiva | A/B | seguradora | publicada |
 | `aula06` | 6 — Dados, viés e discriminação algorítmica (LGPD) | A | Amazon (abertura), seguradora da Aula 5 | publicada (reescrita em 2026-09-21) |
 | `aula07` | 7 — Fairness algorítmica: definições, métricas e mitigação | A | empréstimo; três danos documentados | publicada; título diverge do index (ver Pendências) |
-| — | 8 — Arquitetura, energia e custo material | — | — | no index, mas **a pasta `aula08/` não existe** |
+| `aula08` | 8 — Arquitetura, energia e custo material da infraestrutura digital | A | Scala AI City / Tekoa Pekuruty (Eldorado do Sul); Querétaro, Módulo Penco, LEAF/Pará | publicada (recuperada da antiga `aula06` em 2026-10-05) |
 | — | 9–15 | — | — | não iniciadas |
 
 ## Fio condutor
@@ -28,6 +28,7 @@ Estado aprovado + vocabulário, para dar continuidade entre aulas. O histórico 
 - **5:** métodos de pesquisa com usuário, teste A/B e tecnologia persuasiva; método e métrica já mudam o produto.
 - **6:** o dado de treino é a sociedade: quatro espaços (construto, observado, bruto, preparado) × três validades × cinco vieses (Varshney, cap. 4). A cegueira de atributo não resolve. LGPD: princípios do art. 6º × vieses (síntese nossa); histórico do art. 20. Métricas de fairness e mitigação ficaram, por decisão do usuário, para a Aula 7.
 - **7:** atributo sensível $Z$; injustiça individual × de grupo; paridade demográfica × igualdade de oportunidade; teorema da impossibilidade; fairness rawlsiana (princípio da diferença, M²FGB); fairness de longo prazo com rótulos seletivos. **Ponte:** o custo material de onde esse cálculo roda (Aula 8).
+- **8:** a "nuvem" tem peso: energia, água e minerais (TI Verde, Tabela 14.1 de Maciel & Viterbo) recaem sobre territórios concretos. Caso-fio Scala AI City; soberania digital (4 dimensões e seu paradoxo), policrise, zona de sacrifício digital (inclusão predatória) × redlining; colonialismo verde (LEAF/Pará, CLPI); Brundtland, justiça intra/intergeracional, ciclo de vida; síntese em ética territorial. **Ponte:** a Parte 2 termina com quem *não* estava na sala; a Aula 9 (Parte 3) pergunta quem *está* — gênero e diversidade na equipe.
 
 ## Vocabulário (termos que as aulas seguintes podem usar sem redefinir)
 
@@ -48,12 +49,20 @@ Estado aprovado + vocabulário, para dar continuidade entre aulas. O histórico 
 | teorema da impossibilidade | as métricas de grupo não podem valer juntas em geral | 7 |
 | fairness rawlsiana | melhorar o pior grupo em vez de igualar | 7 |
 | rótulos seletivos | só se observa o desfecho de quem foi aprovado | 7 |
+| TI Verde; Verde Por Software × Verde No Software | práticas para reduzir o impacto ambiental da TI; software como ferramenta de sustentabilidade × software ele mesmo sustentável | 8 |
+| soberania digital (infraestrutural, de dados, regulatória, epistêmica) | autoridade de um Estado sobre sua arquitetura digital; paradoxo: autonomia exige capital estrangeiro | 8 |
+| policrise | crises (clima, energia, sociedade) causalmente entrelaçadas | 8 |
+| zona de sacrifício digital × redlining digital | inclusão predatória (território como sítio de extração) × exclusão do serviço | 8 |
+| colonialismo verde; CLPI | compensar emissões comprando crédito em território alheio; Consentimento Livre, Prévio e Informado (Convenção 169 da OIT) | 8 |
+| justiça intra/intergeracional; poluidor-pagador | divisão justa dentro da/entre gerações; quem causa o dano repara | 8 |
+| análise de ciclo de vida | impacto em extração, produção, uso e descarte (e-waste) | 8 |
+| ética territorial | território como ecossistema + modo de vida, não só jurisdição | 8 |
 
 ## Pendências
 
-- **Index da disciplina** (tem alterações não commitadas): a Lesson 7 chama-se "Automated Decision-Making, Optimization, AI, and Risk", mas a `aula07` trata de Fairness algorítmica; a Lesson 8 linka `./aula08/index.qmd`, que não existe (a aula antiga de Arquitetura estava em `aula06/` até o commit `65f5276`); as Lessons 9–13 aparecem duplicadas.
+- **Index da disciplina** (tem alterações não commitadas): a Lesson 7 chama-se "Automated Decision-Making, Optimization, AI, and Risk", mas a `aula07` trata de Fairness algorítmica; as Lessons 9–13 aparecem duplicadas.
 - **Pontes desatualizadas pela renumeração:** `aula04` ("Ponte para a Aula 6" deveria ser Aula 5); `aula05` ainda chama a próxima de "Aula 6" e a descreve como arquitetura (hoje é Dados e Viés).
-- **Leituras com capítulo errado na ementa (não corrigidas):** na Lesson 8 (Arquitetura), Van de Poel "Chapter 9" é na verdade o Cap. 10 e Maciel & Viterbo Vol. 2 "Capítulo 8" é o Cap. 14. Numa lição da Parte 3 (a entrada duplicada), o Cap. 10 de Maciel & Viterbo entrou no lugar de uma citação inexistente, sem conferir se o conteúdo serve.
+- **Leituras com capítulo errado na ementa (não corrigidas):** numa lição da Parte 3 (a entrada duplicada), o Cap. 10 de Maciel & Viterbo entrou no lugar de uma citação inexistente, sem conferir se o conteúdo serve.
 - **Quantidade de testes:** Aulas 1–4 têm 12 testes (a regra é 6–10).
 - **Render de projeto:** o `quarto render` falhava numa etapa final (`site_libs`/`publications`), fora do conteúdo das aulas. Conferir se ainda acontece.
 - **Nomes legados:** `_03-respostas-pausas.md` (Aulas 1–5).

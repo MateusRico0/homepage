@@ -15,7 +15,8 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 | `aula04` | 4 — GMM e o algoritmo EM | A | Breast Cancer 2D | publicada |
 | `aula05` | 5 — Modelos variacionais, GMM bayesiano e seleção de modelos | A | Breast Cancer 2D + duas luas | publicada |
 | `aula06` | 6 — PCA, PPCA e autoencoders lineares | B | Breast Cancer (30 atributos) | publicada |
-| — | 7 — Autoencoders não lineares e VAE | — | — | não iniciada |
+| `aula07` | 7 — Autoencoders não lineares e VAE | A | Breast Cancer + MNIST | publicada |
+| `aula08` | 8 — Redução para visualização: MDS e t-SNE | A | Breast Cancer + MNIST | publicada |
 
 ## Fio condutor (o que cada aula deixa para a seguinte)
 
@@ -25,6 +26,8 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 - **4:** GMM com latente categórica $z$, responsabilidades, EM (E/M), K-Means como caso-limite. **Ponte:** a verossimilhança de treino sempre prefere $K$ maior; sem priori em $\theta$, não há como penalizar a complexidade.
 - **5:** seleção bayesiana de modelos (evidência = Occam), KL e decomposição da evidência, GMM bayesiano completo (Normal-Wishart + Dirichlet, $\alpha_0$ fixo), ELBO dissecado, ELPD e *double-dipping*, Silhueta + Dunn (inclusive DBSCAN via $k$-NN) e PPC quantitativo (KS em projeções, MMD). **Ponte:** a latente foi sempre categórica; a Aula 6 passa a uma latente contínua.
 - **6:** latente contínua. Ordem: Problema-Fio 2D (guardar um número, reconstruir dois) → autoencoder linear (código latente = coordenadas num plano; invariância por $\mathbf{G}$: os dados fixam o plano, não os eixos) → Mecanismo I (erro mínimo, com pesos amarrados e base ortonormal; erro $=\mathrm{tr}\,\mathbf{S}-$ variância retida) → Mecanismo II (máxima variância, Lagrange, indução) → prova por redução do teorema do autoencoder → PPCA como Gaussiana de posto reduzido ($\sigma^2\to0$ recupera a PCA). Resultados: $\lambda_1$ explica 44,27%; um limiar no PC1 dá 92,1% sem rótulo. **Ponte:** *deep autoencoder* e VAE; a posterior perde a forma fechada, e o ELBO da Aula 5 volta com o *reparameterization trick*.
+- **7:** Autoencoders não lineares e VAE. Reconstrução em manifolds curvos, gargalos e regularização de espaço latente via KL com priori $\mathcal{N}(\mathbf{0}, \mathbf{I})$. *Reparameterization trick* ($\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$) permitindo backpropagation. **Ponte:** na visualização em 2D, reconstrução global falha por *crowding*; é preciso focar em vizinhanças locais (MDS e t-SNE na Aula 8).
+- **8:** Redução para visualização. Geometria de hiperesferas e o *crowding problem* ($r^D$ vs $r^2$). MDS métrico e o viés do *Stress* em favor de distâncias longas. SNE probabilístico, busca binária de $\sigma_i$ via Perplexidade $2^{H(P_i)}$ e assimetria da divergência KL ($p_{ij} \parallel q_{ij}$). t-SNE: quebra de simetria de famílias de densidade adotando a cauda pesada de Student-$t$ ($\nu=1$ / Cauchy) no mapa 2D, aliviando a pressão de volume. Dinâmica de forças (mola atrativa e repulsão eletrostática). As 4 armadilhas de interpretação: distâncias inter-cluster espúrias, áreas sem relação com densidade/variância original, alucinação em ruído e ausência de projeção paramétrica. **Ponte:** encerramento da Parte 2 (espaço latente); início da Parte 3 com Modelos Gráficos Probabilísticos (PGMs) e mineração de itens frequentes (Aula 9).
 
 ## Dicionário de notações
 
@@ -68,6 +71,11 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 | *Double-dipping* / viés de otimismo | Viés de estimar o ELPD usando os próprios dados de treino — reutilizar pontos de ajuste na avaliação | 5 |
 | Índice de Dunn | $\min$ distância inter-cluster / $\max$ diâmetro intra-cluster (Dunn, 1974) — geométrico, livre de distribuição, sensível a extremos | 5 |
 | PPC quantitativo, MMD, teste *sliced* | Checagem preditiva a posteriori com números: projeções aleatórias + KS (Massey, 1951) e *Maximum Mean Discrepancy* com kernel RBF (Gretton et al., 2012) | 5 |
+| $\sigma_M(\mathbf{Y})$, *Stress* | Função de perda do MDS (discrepância quadrática entre distâncias originais e no mapa) | 8 |
+| $p_{j|i}$, $p_{ij}$ | Probabilidade de vizinhança na alta dimensão (condicional via kernel gaussiano com $\sigma_i$ local / conjunta simetrizada) | 8 |
+| $\text{Perp}(P_i) = 2^{H(P_i)}$ | Perplexidade da distribuição condicional $P_i$ (número efetivo de vizinhos por ponto) | 8 |
+| $q_{ij}$ | Probabilidade conjunta no mapa 2D do t-SNE (kernel Student-$t$ com 1 grau de liberdade / Cauchy) | 8 |
+| *Crowding problem* | Confinamento e colapso de pontos no centro de mapas 2D devido ao gargalo volumétrico entre $r^D$ e $r^2$ | 8 |
 
 ## Pendências
 

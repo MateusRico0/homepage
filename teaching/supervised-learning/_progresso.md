@@ -17,8 +17,8 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 | `revisao1` | Revisão 1 — o fio probabilístico das Aulas 1–4 | B | Pima (`Glucose`, `BMI`) | publicada |
 | `aula05` | 5 — Regressão linear e máxima verossimilhança | A | California Housing (`MedHouseVal` ~ `MedInc`) | publicada |
 | `aula06` | 6 — Regressão logística e GLMs | A | Adult Census (idade, horas/semana) | publicada |
-| `aula07` | 7 — Regularização e MAP bayesiano | B | California Housing | publicada no index; não commitada |
-| — | 8 — Viés-variância (teórico) | — | — | não iniciada |
+| `aula07` | 7 — Regularização e MAP bayesiano | B | California Housing | publicada |
+| `aula08` | 8 — O tradeoff teórico viés-variância | B | Sintético ($f(x)=\sin(2\pi x)$) + California Housing | publicada |
 
 ## Fio condutor (o que cada aula deixa para a seguinte)
 
@@ -30,6 +30,7 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 - **5:** OLS geométrico (RSS, equações normais, projeção em $\mathcal S=\mathrm{span}(\varphi_1,\varphi_2)$) = MLE sob ruído gaussiano homocedástico. Viés de $\hat\sigma^2_{\text{MLE}}$. Limitações: heterocedasticidade, censura de `MedHouseVal` em $5{,}00001$. **Ponte:** trocar a Gaussiana por Bernoulli.
 - **6:** logit/sigmoide, entropia cruzada = $-\ln L$, gradiente $X^T(\boldsymbol\mu-\mathbf y)$, Hessiana $X^TRX$ (convexa), IRLS, GLM e ligação canônica. **Ponte:** a separação perfeita faz $\lVert\mathbf w\rVert\to\infty$, o que motiva a regularização.
 - **7:** Ridge (forma fechada $(X^TX+\lambda I)^{-1}X^T\mathbf y$), Lasso e soft-thresholding, MAP (priori gaussiana → Ridge com $\lambda=\sigma^2/\tau^2$; Laplace → Lasso com $\lambda=\sigma^2/b$). **Ponte:** como escolher $\lambda$ → decomposição viés-variância (Aula 8).
+- **8:** Decomposição formal $\text{EMSE} = \text{Bias}^2 + \text{Var} + \sigma^2$; estimador como variável aleatória sobre $\mathcal{D}$; ortogonalidade e cancelamento do termo cruzado; Teorema de Hoerl & Kennard (1970) provando a existência de $\lambda > 0$ com $\text{MSE}(\hat{\boldsymbol\beta}_{\text{Ridge}}) < \text{MSE}(\hat{\boldsymbol\beta}_{\text{OLS}})$; curvas de aprendizado para diagnóstico de alto viés vs. alta variância. **Ponte:** encerramento da Parte 2; a Parte 3 ataca o tradeoff por Ensembles (Bagging reduz variância na Aula 9; Boosting reduz viés na Aula 10).
 
 ## Dicionário de notações
 
@@ -58,6 +59,9 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 | $\eta=g(\mu)$ | parâmetro natural e função de ligação (GLM) | 6 |
 | $\lambda$ (Ridge/Lasso), $\tau^2$, $b$ | força da regularização; variância da priori gaussiana; escala da Laplace | 7 |
 | $\hat{\boldsymbol\beta}_{\text{Ridge}}$, $\hat{\boldsymbol\beta}_{\text{MLE}}$ | estimadores regularizado / não regularizado | 7 |
+| $\text{EMSE}(\mathbf{x})$ | Erro Quadrático Médio Esperado $\mathbb{E}_{\mathcal{D},\epsilon}[(y - \hat{f}(\mathbf{x}))^2]$ | 8 |
+| $\bar{f}(\mathbf{x})$ | estimador médio $\mathbb{E}_{\mathcal{D}}[\hat{f}(\mathbf{x};\mathcal{D})]$ sobre conjuntos de treino | 8 |
+| $\text{Bias}^2(\mathbf{x}), \text{Var}(\mathbf{x}), \sigma^2$ | viés ao quadrado, variância do estimador e erro irredutível | 8 |
 
 ## Pendências
 
