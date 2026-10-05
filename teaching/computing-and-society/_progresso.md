@@ -16,7 +16,7 @@ Estado aprovado + vocabulário, para dar continuidade entre aulas. O histórico 
 | `aula05` | 5 — Pesquisa qualitativa, teste A/B e tecnologia persuasiva | A/B | seguradora | publicada |
 | `aula06` | 6 — Dados, viés e discriminação algorítmica (LGPD) | A | Amazon (abertura), seguradora da Aula 5 | publicada (reescrita em 2026-09-21) |
 | `aula07` | 7 — Fairness algorítmica: definições, métricas e mitigação | A | empréstimo; três danos documentados | publicada; título diverge do index (ver Pendências) |
-| `aula08` | 8 — Arquitetura, energia e custo material da infraestrutura digital | A | Scala AI City / Tekoa Pekuruty (Eldorado do Sul); Querétaro, Módulo Penco, LEAF/Pará | publicada (recuperada da antiga `aula06` em 2026-10-05) |
+| `aula08` | 8 — Soberania digital na policrise (aula convidada: Beatriz Cardoso Nascimento) | — | Scala AI City (Eldorado do Sul); slides em PDF | publicada como PDF em 2026-10-05; a aula gerada anteriormente está em `aula08/_gerada/` (não publicada) |
 | — | 9–15 | — | — | não iniciadas |
 
 ## Fio condutor
