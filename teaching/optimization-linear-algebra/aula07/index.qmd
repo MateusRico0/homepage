@@ -1,0 +1,2085 @@
+---
+title: "Aula 7: Convexidade e a Matriz Hessiana"
+subtitle: "Álgebra Linear e Otimização para Aprendizado de Máquina"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-09-30"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    theme: [simple, ../../lesson-theme.scss]
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+jupyter: homepage
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar, load_dataset
+disable_progress_bar()
+
+import numpy as np
+import matplotlib.pyplot as plt
+from IPython.display import Markdown   # saída inline sem escape de markdown
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({"figure.dpi": 120, "font.size": 11})
+
+# --- Paleta do IC (a mesma das Aulas 1-6) ----------------------------
+COR_A   = "#0085CA"   # azul — elemento principal
+COR_B   = "#FF5E00"   # laranja — contraste
+COR_C   = "#E03C31"   # vermelho — alerta
+COR_NEU = "#5D6D7E"   # neutro
+
+
+def brl(x, nd=2):
+    """Número com vírgula decimal e espaço fino de milhar."""
+    s = f"{x:,.{nd}f}"
+    return Markdown(s.replace(",", "\\,").replace(".", "{,}"))
+
+
+def sci(x, nd=1):
+    """Notação científica em LaTeX, com vírgula decimal."""
+    m, e = f"{x:.{nd}e}".split("e")
+    return Markdown(f"{m.replace('.', '{,}')}\\cdot 10^{{{int(e)}}}")
+
+
+# --- Problema-fio: California Housing (o mesmo X da Aula 6) ----------
+_housing = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+COLS = ["MedInc", "HouseAge", "AveRooms", "AveBedrms"]
+X = _housing[COLS].to_numpy()
+y = _housing["MedHouseVal"].to_numpy()
+N, d = X.shape
+
+A = X.T @ X
+mu, U = np.linalg.eigh(A)                    # autovalores em ordem crescente
+cond_A = mu[-1] / mu[0]
+beta_star = np.linalg.solve(A, X.T @ y)
+L_star = np.sum((X @ beta_star - y) ** 2)
+
+# --- Coluna derivada: AveOtherRooms = AveRooms - AveBedrms -----------
+X5 = np.column_stack([X, _housing["AveRooms"] - _housing["AveBedrms"]])
+A5 = X5.T @ X5
+mu5, U5 = np.linalg.eigh(A5)
+rank5 = int(np.linalg.matrix_rank(X5))
+n_vec = np.array([0.0, 0.0, -1.0, 1.0, 1.0])            # X5 @ n_vec = 0
+norm_Xn = np.linalg.norm(X5 @ n_vec)
+beta5 = np.linalg.lstsq(X5, y, rcond=None)[0]
+L5 = lambda b: np.sum((X5 @ b - y) ** 2)
+T_LIST = [0, 1, 10, 100]
+L_along = [L5(beta5 + t * n_vec) for t in T_LIST]
+beta_solve = np.linalg.solve(A5, X5.T @ y)               # "resolve" sem erro
+cond_A5 = mu5[-1] / mu5[0]
+
+# --- Ridge sobre X5 ---------------------------------------------------
+LAMS = [1.0, 10.0, 100.0]
+ridge = {}
+for lam in LAMS:
+    Ar = A5 + lam * np.eye(5)
+    ev_r = np.linalg.eigvalsh(Ar)
+    b_r = np.linalg.solve(Ar, X5.T @ y)
+    ridge[lam] = dict(ev=ev_r, cond=ev_r[-1] / ev_r[0], beta=b_r,
+                      L_treino=L5(b_r))
+```
+
+# Revisão e Introdução
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## Revisão: O Que as Aulas 4–6 Deixaram Pronto
+
+**Da Aula 6 — o gradiente e o ponto crítico.** Para $f:\mathbb{R}^n\to\mathbb{R}$
+diferenciável, o gradiente $\nabla f(\mathbf{x})$ é o vetor-**linha** das
+derivadas parciais (convenção do MathML, a mesma da Aula 6). Ele resume
+toda a informação de primeira ordem: a derivada de $f$ ao longo de uma
+direção $\mathbf{v}$ é o produto $\nabla f(\mathbf{x})\,\mathbf{v}$, o que
+vimos pela regra da cadeia aplicada a $g(t)=f(\mathbf{x}+t\mathbf{v})$,
+que dá $g'(0)=\nabla f(\mathbf{x})\,\mathbf{v}$. Para a perda do
+problema-fio, $L(\boldsymbol\beta)=\|X\boldsymbol\beta-\mathbf{y}\|^2$,
+a regra da cadeia com o Jacobiano do resíduo
+($J_{\mathbf r}=X$) deu
+$$
+\nabla_{\boldsymbol\beta}L=2(X\boldsymbol\beta-\mathbf{y})^TX .
+$$
+Um **ponto crítico** é onde $\nabla f=\mathbf{0}$: nenhuma direção muda
+$f$ em primeira ordem. A Aula 6 terminou com a ressalva que abre esta
+aula: ponto crítico não é, por si só, mínimo. Pode ser máximo ou sela.
+
+**Da Aula 4 — matrizes semidefinidas positivas.** Uma matriz simétrica
+$A$ é semidefinida positiva ($A\succeq0$) se $\mathbf{v}^TA\mathbf{v}\ge0$
+para todo $\mathbf{v}$, e definida positiva ($A\succ0$) se a desigualdade
+é estrita para $\mathbf{v}\ne\mathbf{0}$. Pelo Teorema Espectral,
+$A=Q\Lambda Q^T$, e o quociente de Rayleigh fica entre os autovalores
+extremos:
+$$
+\lambda_{\min}(A)\le\frac{\mathbf{v}^TA\mathbf{v}}{\mathbf{v}^T\mathbf{v}}\le\lambda_{\max}(A).
+$$
+Por isso $A\succeq0\iff\lambda_{\min}\ge0$ e $A\succ0\iff\lambda_{\min}>0$:
+o sinal de uma forma quadrática em **todas** as direções se lê nos
+autovalores.
+
+**Das Aulas 2, 3 e 5 — posto e condicionamento.** A solução das equações
+normais $X^TX\hat{\boldsymbol\beta}=X^T\mathbf{y}$ (Aula 3) é única quando
+$X$ tem posto coluna completo (Aula 2). Na Aula 5 medimos quão perto o
+problema-fio está de perder essa unicidade:
+$\text{cond}(X^TX)=\lambda_{\max}/\lambda_{\min}\approx `{python} brl(cond_A, 1)`$,
+puxado pelo par quase colinear `AveRooms`/`AveBedrms` (correlação
+$0{,}87$).
+
+## Ideia Central
+
+O gradiente é informação de **primeira ordem**: diz se a função está
+parada, não **que forma** ela tem em volta. A ideia desta aula é olhar
+a segunda ordem, isto é, como o próprio gradiente muda de um ponto para
+outro. Essa informação cabe numa matriz simétrica, a **Hessiana**, e o
+vocabulário da Aula 4 (autovalores, $A\succeq0$) passa a descrever a
+**curvatura** da perda. Quando a Hessiana é semidefinida positiva em
+todo ponto, a função é **convexa**, e numa função convexa todo ponto
+crítico é mínimo global. Esse é o tipo de garantia que a regressão
+linear tem e que uma rede neural profunda não tem.
+
+## Roteiro da Aula
+
+Quatro perguntas organizam a aula:
+
+1. **O que é uma função convexa**, e por que, nela, "gradiente nulo"
+   passa a significar "mínimo global"? (Bloco 1)
+2. **Como medir a curvatura** de uma função de várias variáveis, e como
+   ela decide se a função é convexa? (Bloco 2: a Hessiana)
+3. **A perda da regressão linear é convexa?** E o que acontece quando o
+   mínimo existe, mas não é único? (Bloco 3)
+4. **Por que a regularização Ridge garante um minimizador único**, mesmo
+   com colunas colineares? (Bloco 4)
+
+## Problema Motivador: Infinitas Soluções Com a Mesma Perda
+
+Acrescente ao problema-fio uma coluna que alguém poderia construir de
+boa-fé: `AveOtherRooms` $=$ `AveRooms` $-$ `AveBedrms`, a média de
+cômodos que **não** são quartos. A nova matriz
+$X_5\in\mathbb{R}^{`{python} N`\times5}$ tem posto $`{python} rank5`$,
+porque a quinta coluna é combinação linear das outras. Em números, com
+$\mathbf{n}=(0,0,-1,1,1)$, vale $X_5\mathbf{n}=\mathbf{0}$:
+$-$`AveRooms` $+$ `AveBedrms` $+$ `AveOtherRooms` $=0$ em toda linha.
+
+Partindo de uma solução de mínimos quadrados $\boldsymbol\beta^\star$ e
+andando ao longo de $\mathbf{n}$, a perda **não muda**:
+
+| $t$ | $\boldsymbol\beta^\star+t\,\mathbf{n}$ (coeficientes de `AveRooms`, `AveBedrms`, `AveOtherRooms`) | $L$ |
+|---|---|---|
+| $0$ | $`{python} brl(beta5[2],3)`$, $`{python} brl(beta5[3],3)`$, $`{python} brl(beta5[4],3)`$ | $`{python} brl(L_along[0])`$ |
+| $10$ | $`{python} brl(beta5[2]-10,3)`$, $`{python} brl(beta5[3]+10,3)`$, $`{python} brl(beta5[4]+10,3)`$ | $`{python} brl(L_along[2])`$ |
+| $100$ | $`{python} brl(beta5[2]-100,3)`$, $`{python} brl(beta5[3]+100,3)`$, $`{python} brl(beta5[4]+100,3)`$ | $`{python} brl(L_along[3])`$ |
+
+Todos esses vetores têm gradiente nulo, a mesma perda e coeficientes
+completamente diferentes: num deles cada quarto a mais "aumenta" o preço
+em $100$ unidades; em outro, em menos de $1$. E `np.linalg.solve`
+resolve $X_5^TX_5\boldsymbol\beta=X_5^T\mathbf{y}$ **sem emitir erro**,
+com $\text{cond}(X_5^TX_5)\approx`{python} sci(cond_A5)`$: a resposta
+que ele devolve é só uma entre infinitas, escolhida por erro de
+arredondamento.
+
+A pergunta desta aula: **como saber, antes de rodar qualquer algoritmo,
+se um ponto crítico é mínimo, se é o único mínimo e se é global?**
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Da Aula 6: O Que Já Temos
+
+::: {.fragment}
+- Gradiente = vetor-**linha** das parciais; derivada ao longo de $\mathbf{v}$: $\nabla f(\mathbf{x})\,\mathbf{v}$ (regra da cadeia em $g(t)=f(\mathbf{x}+t\mathbf{v})$).
+- Problema-fio: $L(\boldsymbol\beta)=\|X\boldsymbol\beta-\mathbf{y}\|^2$, com $\nabla_{\boldsymbol\beta}L=2(X\boldsymbol\beta-\mathbf{y})^TX$ (via $J_{\mathbf r}=X$).
+:::
+
+::: {.fragment}
+**Ponto crítico:** $\nabla f=\mathbf{0}$ — parado em primeira ordem. A Aula 6 terminou com a ressalva: pode ser mínimo, máximo **ou sela**.
+:::
+
+## Das Aulas 4 e 5: Formas Quadráticas
+
+::: {.fragment}
+- $A\succeq0$: $\mathbf{v}^TA\mathbf{v}\ge0$ para todo $\mathbf{v}$; $A\succ0$: $>0$ para $\mathbf{v}\ne\mathbf{0}$.
+- Rayleigh (Aula 4): $\lambda_{\min}(A)\le\dfrac{\mathbf{v}^TA\mathbf{v}}{\mathbf{v}^T\mathbf{v}}\le\lambda_{\max}(A)$ $\Rightarrow$ o sinal em **todas** as direções está nos autovalores.
+:::
+
+::: {.fragment}
+- Equações normais $X^TX\hat{\boldsymbol\beta}=X^T\mathbf{y}$ (Aula 3): solução única se $X$ tem posto coluna completo (Aula 2).
+- Aula 5: $\text{cond}(X^TX)\approx `{python} brl(cond_A, 1)`$ — par quase colinear `AveRooms`/`AveBedrms`.
+:::
+
+## Ideia Central e Roteiro
+
+::: {.fragment}
+**Ideia central:** o gradiente diz se a função está parada; a **Hessiana** (segunda ordem) diz que forma ela tem em volta. Hessiana $\succeq0$ em todo ponto $\Rightarrow$ função **convexa** $\Rightarrow$ todo ponto crítico é mínimo global.
+:::
+
+::: {.fragment}
+1. O que é convexidade, e por que ela transforma "gradiente nulo" em "mínimo global"?
+2. Como medir curvatura em várias variáveis? (Hessiana)
+3. A perda da regressão linear é convexa? E quando o mínimo não é único?
+4. Por que a Ridge garante minimizador único?
+:::
+
+## Problema Motivador: A Mesma Perda, Infinitas Soluções
+
+::: {.fragment}
+Nova coluna, de boa-fé: `AveOtherRooms` $=$ `AveRooms` $-$ `AveBedrms` (cômodos que não são quartos). Posto de $X_5$: $`{python} rank5`$ (de 5 colunas). Com $\mathbf{n}=(0,0,-1,1,1)$: $X_5\mathbf{n}=\mathbf{0}$.
+:::
+
+::: {.fragment}
+| $t$ | coef. de `AveRooms`, `AveBedrms`, `AveOtherRooms` | $L$ |
+|---|---|---|
+| $0$ | $`{python} brl(beta5[2],3)`$, $`{python} brl(beta5[3],3)`$, $`{python} brl(beta5[4],3)`$ | $`{python} brl(L_along[0])`$ |
+| $10$ | $`{python} brl(beta5[2]-10,3)`$, $`{python} brl(beta5[3]+10,3)`$, $`{python} brl(beta5[4]+10,3)`$ | $`{python} brl(L_along[2])`$ |
+| $100$ | $`{python} brl(beta5[2]-100,3)`$, $`{python} brl(beta5[3]+100,3)`$, $`{python} brl(beta5[4]+100,3)`$ | $`{python} brl(L_along[3])`$ |
+:::
+
+::: {.fragment .callout-important}
+`np.linalg.solve` devolve uma resposta **sem erro**, com $\text{cond}(X_5^TX_5)\approx`{python} sci(cond_A5)`$. **Pergunta da aula:** como saber se um ponto crítico é mínimo, único e global?
+:::
+
+:::
+
+## Pausa Ativa — Coeficientes que Empatam
+
+::: {.callout-tip}
+## Entre os infinitos $\boldsymbol\beta$ com exatamente a mesma perda, algum é "o certo"? O que isso diz sobre interpretar coeficientes de uma regressão?
+
+Pense no que significa "um quarto a mais, mantidas as demais colunas
+fixas" quando `AveOtherRooms` é definida a partir de `AveRooms` e
+`AveBedrms`.
+:::
+
+::: {.callout-tip}
+## Pontos críticos e colunas redundantes
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Se $\nabla L(\boldsymbol\beta)=\mathbf{0}$ para uma perda $L$
+  qualquer, então $\boldsymbol\beta$ é necessariamente um minimizador de
+  $L$.
+- □ Num modelo linear em que uma coluna é a mesma renda registrada em
+  reais e outra em milhares de reais, os coeficientes deixam de ser
+  únicos, mas as predições $X\boldsymbol\beta$ de todos os minimizadores
+  coincidem.
+- □ Se `np.linalg.solve` devolve uma resposta sem erro para
+  $X^TX\boldsymbol\beta=X^T\mathbf{y}$, então esse sistema tinha solução
+  única.
+- □ Acrescentar a $X$ uma coluna que é combinação linear das demais pode
+  diminuir o menor valor atingível da perda de treino.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Coeficientes que Empatam — Resposta
+
+::: {.callout-tip}
+## Pontos críticos e colunas redundantes — Resposta
+
+- ✗ Gradiente nulo também ocorre em máximos e selas; mínimo exige informação de segunda ordem.
+- ✔ Se $X\mathbf{n}=\mathbf{0}$, então $X(\boldsymbol\beta^\star+t\mathbf{n})=X\boldsymbol\beta^\star$: as predições são as mesmas.
+- ✗ Com $\text{cond}\approx`{python} sci(cond_A5)`$ o solver devolve **uma** das infinitas soluções, escolhida pelo arredondamento.
+- ✗ O espaço-coluna não muda, logo a melhor aproximação de $\mathbf{y}$ (projeção, Aula 3) e a perda mínima também não.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** nenhum é "o certo" pelos dados. A perda só enxerga $X\boldsymbol\beta$, e todas as soluções dão as mesmas predições. "Um quarto a mais com o resto fixo" nem é possível, porque mudar `AveBedrms` muda `AveOtherRooms`. Escolher entre elas exige um critério **fora** da perda — é o que a Ridge fará no Bloco 4.
+:::
+
+:::
+
+# Intuição — Tigela, Sela e Vale Plano
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+Antes de qualquer definição, vale olhar três funções quadráticas de duas
+variáveis, $f(\mathbf{x})=\tfrac12\mathbf{x}^TP\mathbf{x}$, todas com
+ponto crítico na origem. A única coisa que muda entre elas é a matriz
+simétrica $P$, e com ela os sinais dos autovalores:
+
+- **Tigela** ($P$ com autovalores $2$ e $1$, ambos positivos): a função
+  sobe em qualquer direção que se saia da origem. A origem é o único
+  mínimo, e é global.
+- **Sela** (autovalores $2$ e $-1$): sobe numa direção e desce na outra.
+  O gradiente é nulo na origem, mas ela não é mínimo nem máximo.
+- **Vale plano** (autovalores $2$ e $0$): sobe numa direção e é
+  **constante** na outra. Todo ponto da reta do fundo do vale é mínimo
+  global. Existe mínimo, mas não é único. É exatamente a situação do
+  Problema Motivador, em cinco dimensões.
+
+O resto da aula transforma essa leitura visual em teoremas. O Bloco 1
+diz o que a forma "tigela" tem de especial (convexidade), o Bloco 2
+mostra que a matriz que decide a forma é a Hessiana, e os Blocos 3 e 4
+aplicam isso à perda do problema-fio.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Três Quadráticas, Três Formas
+
+::: {.fragment}
+$f(\mathbf{x})=\tfrac12\mathbf{x}^TP\mathbf{x}$, ponto crítico na origem. Só muda o sinal dos autovalores de $P$:
+:::
+
+::: {.fragment}
+- **Tigela** ($2,\,1$): sobe em toda direção — mínimo único e global.
+- **Sela** ($2,\,-1$): sobe numa direção, desce na outra — gradiente nulo, mas não é mínimo.
+- **Vale plano** ($2,\,0$): constante ao longo do fundo — mínimo existe, **não é único** (o Problema Motivador, em 5D).
+:::
+
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+casos = [
+    ("Tigela: autovalores 2 e 1", np.array([[2.0, 0.0], [0.0, 1.0]])),
+    ("Sela: autovalores 2 e −1", np.array([[2.0, 0.0], [0.0, -1.0]])),
+    ("Vale plano: autovalores 2 e 0", np.array([[1.0, 1.0], [1.0, 1.0]])),
+]
+g = np.linspace(-2, 2, 201)
+G1, G2 = np.meshgrid(g, g)
+fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+for ax, (titulo, P) in zip(axes, casos):
+    F = 0.5 * (P[0, 0] * G1**2 + 2 * P[0, 1] * G1 * G2 + P[1, 1] * G2**2)
+    cs = ax.contourf(G1, G2, F, levels=20, cmap="viridis")
+    ax.contour(G1, G2, F, levels=20, colors="white", linewidths=0.4)
+    ax.plot(0, 0, marker="o", color=COR_B, markersize=8)
+    ax.set_title(titulo)
+    ax.set_xlabel("$x_1$")
+    ax.set_ylabel("$x_2$")
+    ax.set_aspect("equal")
+axes[2].plot(g, -g, color=COR_B, linewidth=2, label="mínimos globais")
+axes[2].legend(loc="upper right", fontsize=9)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+# Bloco 1: Convexidade e a Condição de Primeira Ordem
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## Conjuntos
+
+**Premissa do bloco.** Trabalhamos em $\mathbb{R}^n$. Quando precisarmos
+de derivadas, suporemos o domínio aberto e $f$ diferenciável.
+
+Convexidade de funções é definida a partir de convexidade de conjuntos,
+então começamos pelos conjuntos.
+
+::: {.callout-note icon=false}
+## Definição (conjunto, pertinência, subconjunto)
+
+Um **conjunto** $C$ é uma coleção de objetos, os seus **elementos**.
+Escrevemos $\mathbf{x}\in C$ quando $\mathbf{x}$ pertence a $C$ e
+$\mathbf{x}\notin C$ caso contrário. Dois conjuntos são iguais quando têm
+os mesmos elementos. $C$ é **subconjunto** de $D$, $C\subseteq D$, se todo
+elemento de $C$ é elemento de $D$. Nesta aula os conjuntos são
+subconjuntos de $\mathbb{R}^n$ descritos **por compreensão**,
+$$
+C=\{\mathbf{x}\in\mathbb{R}^n \mid P(\mathbf{x})\},
+$$
+o conjunto dos vetores que satisfazem a propriedade $P$.
+:::
+
+É a noção usual de conjunto da matemática, suficiente para o curso (não
+faremos teoria axiomática). Exemplos que voltam nesta aula: o
+semiespaço $\{\mathbf{x}\mid\mathbf{a}^T\mathbf{x}\le b\}$, a bola
+$\{\mathbf{x}\mid\|\mathbf{x}-\mathbf{c}\|\le r\}$, o núcleo
+$\mathcal{N}(X)=\{\mathbf{v}\mid X\mathbf{v}=\mathbf{0}\}$ (Aula 2) e o
+conjunto dos minimizadores de uma função.
+
+Convexidade pede uma noção de "caminho reto" entre dois pontos. Para
+$\mathbf{x},\mathbf{y}\in\mathbb{R}^n$, o **segmento** entre eles é
+$$
+[\mathbf{x},\mathbf{y}]=\{\theta\mathbf{x}+(1-\theta)\mathbf{y}\mid\theta\in[0,1]\}.
+$$
+Com $\theta=1$ estamos em $\mathbf{x}$, com $\theta=0$ em $\mathbf{y}$, e
+$\theta=\tfrac12$ dá o ponto médio. Um ponto
+$\theta\mathbf{x}+(1-\theta)\mathbf{y}$ com $\theta\in[0,1]$ é uma
+**combinação convexa** de $\mathbf{x}$ e $\mathbf{y}$.
+
+## Conjuntos Convexos e Não Convexos
+
+::: {.callout-note icon=false}
+## Definição (conjunto convexo; Boyd & Vandenberghe, §2.1.4, p. 23; MathML, Def. 7.2, p. 236)
+
+Um conjunto $C\subseteq\mathbb{R}^n$ é **convexo** se contém o segmento
+entre quaisquer dois de seus pontos: para quaisquer
+$\mathbf{x},\mathbf{y}\in C$ e qualquer $\theta\in[0,1]$,
+$$
+\theta\mathbf{x}+(1-\theta)\mathbf{y}\in C.
+$$
+$C$ é **não convexo** se a definição falha em algum caso: existem
+$\mathbf{x},\mathbf{y}\in C$ e $\theta\in[0,1]$ com
+$\theta\mathbf{x}+(1-\theta)\mathbf{y}\notin C$.
+:::
+
+A definição tem um "para todo", e a sua negação, um "existe". Isso guia
+as provas: para mostrar que um conjunto é convexo é preciso um argumento
+que valha para **todos** os pares e todos os $\theta$; para mostrar que
+não é, basta **um** contraexemplo. (O conjunto vazio e um conjunto com
+um único ponto são convexos: não há par que falhe.)
+
+**Exemplo 1 — o semiespaço é convexo** (Boyd, §2.2.1, p. 27). Seja
+$H=\{\mathbf{x}\mid\mathbf{a}^T\mathbf{x}\le b\}$. Tome
+$\mathbf{x},\mathbf{y}\in H$ e $\theta\in[0,1]$. Pela linearidade do
+produto interno,
+$$
+\mathbf{a}^T(\theta\mathbf{x}+(1-\theta)\mathbf{y})
+=\theta\,\mathbf{a}^T\mathbf{x}+(1-\theta)\,\mathbf{a}^T\mathbf{y}
+\le\theta b+(1-\theta)b=b,
+$$
+em que a desigualdade usa $\theta\ge0$ e $1-\theta\ge0$. Logo o ponto
+está em $H$. O mesmo argumento, com igualdades no lugar de $\le$, mostra
+que hiperplanos e o núcleo $\mathcal{N}(X)$ são convexos.
+
+**Exemplo 2 — a bola é convexa** (Boyd, §2.2.2, p. 30). Se
+$\|\mathbf{x}-\mathbf{c}\|\le r$ e $\|\mathbf{y}-\mathbf{c}\|\le r$, pela
+desigualdade triangular e pela homogeneidade da norma,
+$$
+\|\theta\mathbf{x}+(1-\theta)\mathbf{y}-\mathbf{c}\|
+=\|\theta(\mathbf{x}-\mathbf{c})+(1-\theta)(\mathbf{y}-\mathbf{c})\|
+\le\theta\|\mathbf{x}-\mathbf{c}\|+(1-\theta)\|\mathbf{y}-\mathbf{c}\|\le r.
+$$
+
+**Exemplo 3 — o anel não é convexo.** Seja
+$A=\{\mathbf{x}\in\mathbb{R}^2\mid1\le\|\mathbf{x}\|\le2\}$. Os pontos
+$\mathbf{x}=(\tfrac32,0)$ e $\mathbf{y}=(-\tfrac32,0)$ estão em $A$, mas
+com $\theta=\tfrac12$ a combinação é $\mathbf{0}$, e $\|\mathbf{0}\|=0<1$.
+
+**Exemplo 4 — a união de convexos pode não ser convexa.** Em
+$\mathbb{R}$, $[0,1]\cup[2,3]$ contém $1$ e $2$, mas não o ponto médio
+$\tfrac32$. Já a **interseção** de convexos é sempre convexa (Boyd,
+§2.3.1, p. 36): se $\mathbf{x},\mathbf{y}\in C_1\cap C_2$, o segmento
+está em $C_1$ (que é convexo) e em $C_2$ (idem), logo em $C_1\cap C_2$.
+Esse fato volta no fim do bloco.
+
+A figura mostra os quatro exemplos em $\mathbb{R}^2$; nos não convexos,
+o trecho do segmento que sai do conjunto está em vermelho.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Conjuntos
+
+::: {.callout-note icon=false}
+## Definição (conjunto, subconjunto, compreensão)
+
+Um **conjunto** $C$ é uma coleção de **elementos**: $\mathbf{x}\in C$ ou $\mathbf{x}\notin C$. $C\subseteq D$ se todo elemento de $C$ está em $D$. Em $\mathbb{R}^n$: $C=\{\mathbf{x}\in\mathbb{R}^n\mid P(\mathbf{x})\}$.
+:::
+
+::: {.fragment}
+- Exemplos da aula: semiespaço $\{\mathbf{x}\mid\mathbf{a}^T\mathbf{x}\le b\}$, bola $\{\mathbf{x}\mid\|\mathbf{x}-\mathbf{c}\|\le r\}$, núcleo $\mathcal{N}(X)$, conjunto dos minimizadores.
+:::
+
+::: {.fragment}
+- **Segmento:** $[\mathbf{x},\mathbf{y}]=\{\theta\mathbf{x}+(1-\theta)\mathbf{y}\mid\theta\in[0,1]\}$; cada ponto dele é uma **combinação convexa** de $\mathbf{x}$ e $\mathbf{y}$ ($\theta=1$: $\mathbf{x}$; $\theta=0$: $\mathbf{y}$).
+:::
+
+## Conjunto Convexo
+
+::: {.callout-note icon=false}
+## Definição (Boyd, §2.1.4, p. 23; MathML, Def. 7.2, p. 236)
+
+$C$ é **convexo** se $\mathbf{x},\mathbf{y}\in C$ e $\theta\in[0,1]$ $\Rightarrow$ $\theta\mathbf{x}+(1-\theta)\mathbf{y}\in C$.
+
+$C$ é **não convexo** se **existem** $\mathbf{x},\mathbf{y}\in C$ e $\theta\in[0,1]$ com $\theta\mathbf{x}+(1-\theta)\mathbf{y}\notin C$.
+:::
+
+::: {.fragment}
+- Provar que **é** convexo: argumento para **todos** os pares e todos os $\theta$.
+- Provar que **não é**: basta **um** contraexemplo.
+:::
+
+::: {.fragment}
+- Interseção de convexos é convexa (Boyd, §2.3.1, p. 36); a união, nem sempre: $[0,1]\cup[2,3]$ não contém $\tfrac32$.
+:::
+
+## Provando e Refutando
+
+::: {.fragment}
+**Semiespaço** (Boyd, §2.2.1, p. 27): $\mathbf{a}^T(\theta\mathbf{x}+(1-\theta)\mathbf{y})=\theta\,\mathbf{a}^T\mathbf{x}+(1-\theta)\,\mathbf{a}^T\mathbf{y}\le\theta b+(1-\theta)b=b$ (usa $\theta,\,1-\theta\ge0$).
+:::
+
+::: {.fragment}
+**Bola** (Boyd, §2.2.2, p. 30): $\|\theta(\mathbf{x}-\mathbf{c})+(1-\theta)(\mathbf{y}-\mathbf{c})\|\le\theta\|\mathbf{x}-\mathbf{c}\|+(1-\theta)\|\mathbf{y}-\mathbf{c}\|\le r$ (desigualdade triangular).
+:::
+
+::: {.fragment}
+**Anel** $\{1\le\|\mathbf{x}\|\le2\}$: $(\tfrac32,0)$ e $(-\tfrac32,0)$ estão nele; o ponto médio $\mathbf{0}$ não. **Não convexo.**
+:::
+
+## Convexos e Não Convexos em $\mathbb{R}^2$
+
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 4, figsize=(14, 3.6))
+tt = np.linspace(0, 2 * np.pi, 300)
+
+
+def segmento(ax, p, q, dentro):
+    """Desenha o segmento [p, q], em vermelho onde sai do conjunto."""
+    s = np.linspace(0, 1, 400)[:, None]
+    pts = (1 - s) * np.asarray(p) + s * np.asarray(q)
+    ok = dentro(pts)
+    ax.plot(pts[:, 0], pts[:, 1], color=COR_B, linewidth=2.2)
+    fora = np.where(ok, np.nan, pts[:, 1])
+    ax.plot(pts[:, 0], fora, color=COR_C, linewidth=3.2)
+    ax.plot(*zip(p, q), "o", color=COR_B, markersize=6)
+
+
+# Bola
+ax = axes[0]
+ax.fill(1.5 * np.cos(tt), 1.5 * np.sin(tt), color=COR_A, alpha=0.3)
+segmento(ax, (-1.0, -0.8), (1.1, 0.9),
+         lambda P: np.linalg.norm(P, axis=1) <= 1.5)
+ax.set_title("Bola: convexa")
+
+# Semiespaço a^T x <= b, com a = (1, 1), b = 0.5
+ax = axes[1]
+ax.fill([-2.2, -2.2, 2.7], [2.7, -2.2, -2.2], color=COR_A, alpha=0.3)
+segmento(ax, (-1.6, 1.4), (1.2, -1.5),
+         lambda P: P.sum(axis=1) <= 0.5)
+ax.set_title(r"Semiespaço $x_1+x_2\leq 0{,}5$: convexo")
+
+# Anel 1 <= ||x|| <= 2
+ax = axes[2]
+ax.fill(np.r_[2 * np.cos(tt), np.cos(tt[::-1])],
+        np.r_[2 * np.sin(tt), np.sin(tt[::-1])], color=COR_NEU, alpha=0.3,
+        linewidth=0)
+segmento(ax, (-1.5, 0.0), (1.5, 0.0),
+         lambda P: (np.linalg.norm(P, axis=1) >= 1)
+         & (np.linalg.norm(P, axis=1) <= 2))
+ax.set_title("Anel: não convexo")
+
+# União de dois discos disjuntos
+ax = axes[3]
+for cx in (-1.1, 1.1):
+    ax.fill(cx + 0.8 * np.cos(tt), 0.8 * np.sin(tt), color=COR_NEU, alpha=0.3)
+segmento(ax, (-1.3, 0.3), (1.2, -0.2),
+         lambda P: (np.linalg.norm(P - [-1.1, 0], axis=1) <= 0.8)
+         | (np.linalg.norm(P - [1.1, 0], axis=1) <= 0.8))
+ax.set_title("União de discos: não convexa")
+
+for ax in axes:
+    ax.set_xlim(-2.2, 2.2)
+    ax.set_ylim(-2.2, 2.2)
+    ax.set_aspect("equal")
+    ax.set_xticks([])
+    ax.set_yticks([])
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## Funções, Convexidade e Epígrafe
+
+::: {.callout-note icon=false}
+## Definição (função; MathML, §5, pp. 139–140)
+
+Uma **função** $f:D\to\mathbb{R}$, com $D\subseteq\mathbb{R}^n$, associa a
+**cada** $\mathbf{x}\in D$ **exatamente um** valor $f(\mathbf{x})\in\mathbb{R}$.
+O conjunto $D$ é o **domínio** de $f$, denotado $\mathrm{dom}\,f$. O
+**gráfico** de $f$ é o subconjunto de $\mathbb{R}^{n+1}$
+$$
+\{(\mathbf{x},f(\mathbf{x}))\mid\mathbf{x}\in\mathrm{dom}\,f\}
+$$
+(Boyd, §3.1.7, p. 75).
+:::
+
+Seguindo o Boyd, escrevemos $f:\mathbb{R}^n\to\mathbb{R}$ mesmo quando
+$\mathrm{dom}\,f$ é só uma parte de $\mathbb{R}^n$. Mas uma função é
+**domínio e regra**: a mesma regra com domínios diferentes dá funções
+diferentes, e a convexidade pode mudar. A regra $1/x^2$ restrita a
+$(0,\infty)$ dá uma função convexa (veremos no Bloco 2 que basta
+$f''>0$ num domínio convexo); em $\mathbb{R}\setminus\{0\}$ não é, e o
+motivo é que esse domínio nem é convexo (Boyd, Remark 3.1, p. 71).
+
+::: {.callout-note icon=false}
+## Definição (função convexa; Boyd & Vandenberghe, §3.1.1, p. 67)
+
+$f$ é **convexa** se $\mathrm{dom}\,f$ é convexo e, para todos
+$\mathbf{x},\mathbf{y}\in\mathrm{dom}\,f$ e $\theta\in[0,1]$,
+$$
+f(\theta\mathbf{x}+(1-\theta)\mathbf{y})\le\theta f(\mathbf{x})+(1-\theta)f(\mathbf{y}).
+$$
+$f$ é **estritamente convexa** se a desigualdade é estrita sempre que
+$\mathbf{x}\ne\mathbf{y}$ e $0<\theta<1$. $f$ é **côncava** se $-f$ é
+convexa. $f$ é **não convexa** se $\mathrm{dom}\,f$ não é convexo ou se
+existem $\mathbf{x},\mathbf{y}\in\mathrm{dom}\,f$ e $\theta\in[0,1]$ com
+$f(\theta\mathbf{x}+(1-\theta)\mathbf{y})>\theta f(\mathbf{x})+(1-\theta)f(\mathbf{y})$.
+:::
+
+O domínio precisa ser convexo para que o lado esquerdo faça sentido: o
+ponto $\theta\mathbf{x}+(1-\theta)\mathbf{y}$ tem de estar em
+$\mathrm{dom}\,f$. Geometricamente, a corda entre $(\mathbf{x},f(\mathbf{x}))$
+e $(\mathbf{y},f(\mathbf{y}))$ fica acima do gráfico (Boyd, p. 67). Essa
+desigualdade é "às vezes chamada de desigualdade de Jensen" (Boyd,
+§3.1.8, p. 77, tradução livre), nome que vem da sua versão para médias
+de muitos pontos e para esperanças, $f(\mathbb{E}\,\mathbf{x})\le\mathbb{E}\,f(\mathbf{x})$.
+
+**Exemplo — $f(x)=x^2$ é estritamente convexa.** Para $x,y\in\mathbb{R}$
+e $\theta\in[0,1]$, expandindo o quadrado,
+$$
+\theta x^2+(1-\theta)y^2-\big(\theta x+(1-\theta)y\big)^2=\theta(1-\theta)(x-y)^2\ge0,
+$$
+com desigualdade estrita quando $x\ne y$ e $0<\theta<1$.
+
+**Exemplo — $f(x)=x^3$ não é convexa em $\mathbb{R}$.** Com $x=-1$, $y=0$
+e $\theta=\tfrac12$: $f(-\tfrac12)=-\tfrac18$, mas
+$\tfrac12f(-1)+\tfrac12f(0)=-\tfrac12$, e $-\tfrac18>-\tfrac12$.
+
+Três fatos que vamos usar sobre a classe das funções convexas (Boyd,
+§3.1.1, p. 67, e §3.2.1, p. 79):
+
+- funções afins $f(\mathbf{x})=\mathbf{a}^T\mathbf{x}+b$ são convexas e
+  côncavas ao mesmo tempo (a desigualdade vale com igualdade);
+- se $f$ é convexa e $\alpha\ge0$, $\alpha f$ é convexa;
+- a soma de funções convexas é convexa. Em particular, perda convexa
+  mais penalidade convexa é convexa.
+
+Falta a ponte entre as duas definições: convexidade de **conjuntos** e
+de **funções**. Ela é feita por um conjunto associado a $f$.
+
+::: {.callout-note icon=false}
+## Definição (epígrafe; Boyd & Vandenberghe, §3.1.7, p. 75)
+
+A **epígrafe** de $f:\mathbb{R}^n\to\mathbb{R}$ é o subconjunto de
+$\mathbb{R}^{n+1}$
+$$
+\mathrm{epi}\,f=\{(\mathbf{x},t)\in\mathbb{R}^n\times\mathbb{R}\mid\mathbf{x}\in\mathrm{dom}\,f,\ f(\mathbf{x})\le t\}.
+$$
+:::
+
+"Epi" quer dizer "acima": a epígrafe é tudo o que fica sobre o gráfico,
+e o gráfico é a sua borda inferior (Boyd, p. 75). Ela transforma uma
+função de $\mathbb{R}^n$ num conjunto de $\mathbb{R}^{n+1}$. Dois
+exemplos:
+
+- se $f(\mathbf{x})=\mathbf{a}^T\mathbf{x}+b$, então
+  $\mathrm{epi}\,f=\{(\mathbf{x},t)\mid\mathbf{a}^T\mathbf{x}-t\le-b\}$ é
+  um semiespaço de $\mathbb{R}^{n+1}$, convexo pelo Exemplo 1;
+- se $f(x)=x^2$, $\mathrm{epi}\,f=\{(x,t)\mid x^2\le t\}$ é a região
+  acima da parábola, à esquerda na figura abaixo. À direita, numa função
+  com dois vales, o segmento entre dois pontos do gráfico passa por
+  baixo da "corcova" e sai da epígrafe.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Função e Gráfico
+
+::: {.callout-note icon=false}
+## Definição (função; MathML, §5, pp. 139–140; gráfico: Boyd, §3.1.7, p. 75)
+
+$f:D\to\mathbb{R}$, $D\subseteq\mathbb{R}^n$, associa a **cada** $\mathbf{x}\in D$ **exatamente um** $f(\mathbf{x})\in\mathbb{R}$. $D=\mathrm{dom}\,f$. Gráfico: $\{(\mathbf{x},f(\mathbf{x}))\mid\mathbf{x}\in\mathrm{dom}\,f\}\subseteq\mathbb{R}^{n+1}$.
+:::
+
+::: {.fragment}
+- Função $=$ **domínio $+$ regra**. Escrevemos $f:\mathbb{R}^n\to\mathbb{R}$ mesmo com $\mathrm{dom}\,f\subsetneq\mathbb{R}^n$ (como o Boyd).
+- $1/x^2$ em $(0,\infty)$ é convexa; em $\mathbb{R}\setminus\{0\}$ não é: o domínio nem é convexo (Boyd, Remark 3.1, p. 71).
+:::
+
+## Função Convexa
+
+::: {.callout-note icon=false}
+## Definição (Boyd, §3.1.1, p. 67)
+
+$f$ **convexa**: $\mathrm{dom}\,f$ convexo e $f(\theta\mathbf{x}+(1-\theta)\mathbf{y})\le\theta f(\mathbf{x})+(1-\theta)f(\mathbf{y})$ para todos $\mathbf{x},\mathbf{y}\in\mathrm{dom}\,f$, $\theta\in[0,1]$.
+
+**Estritamente** convexa: $<$ para $\mathbf{x}\ne\mathbf{y}$, $0<\theta<1$. **Côncava**: $-f$ convexa. **Não convexa**: domínio não convexo, ou **existe** um caso com $>$.
+:::
+
+::: {.fragment}
+- Corda **acima** do gráfico; "às vezes chamada de desigualdade de Jensen" (Boyd, §3.1.8, p. 77, tradução livre).
+- O domínio precisa ser convexo para que $\theta\mathbf{x}+(1-\theta)\mathbf{y}\in\mathrm{dom}\,f$.
+:::
+
+## Convexa ou Não? Provando e Refutando
+
+::: {.fragment}
+- $x^2$: $\theta x^2+(1-\theta)y^2-(\theta x+(1-\theta)y)^2=\theta(1-\theta)(x-y)^2\ge0$ — estritamente convexa.
+- $x^3$: $x=-1$, $y=0$, $\theta=\tfrac12$ dá $-\tfrac18>-\tfrac12$ — **não** convexa.
+:::
+
+::: {.fragment}
+- Afins são convexas **e** côncavas; $\alpha f$ ($\alpha\ge0$) e somas de convexas são convexas (Boyd, §3.2.1, p. 79).
+:::
+
+## Epígrafe
+
+::: {.callout-note icon=false}
+## Definição (Boyd, §3.1.7, p. 75)
+
+$$
+\mathrm{epi}\,f=\{(\mathbf{x},t)\in\mathbb{R}^n\times\mathbb{R}\mid\mathbf{x}\in\mathrm{dom}\,f,\ f(\mathbf{x})\le t\}\subseteq\mathbb{R}^{n+1}.
+$$
+:::
+
+::: {.fragment}
+- "Epi" $=$ "acima": tudo o que fica sobre o gráfico; o gráfico é a borda inferior.
+- A ponte: uma **função** de $\mathbb{R}^n$ vira um **conjunto** de $\mathbb{R}^{n+1}$.
+- $f(\mathbf{x})=\mathbf{a}^T\mathbf{x}+b$: $\mathrm{epi}\,f=\{(\mathbf{x},t)\mid\mathbf{a}^T\mathbf{x}-t\le-b\}$ é um **semiespaço**.
+:::
+
+## Epígrafe: Convexa e Não Convexa
+
+:::
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+xs = np.linspace(-2.0, 2.0, 400)
+fig, axes = plt.subplots(1, 2, figsize=(11, 3.8))
+paineis = [
+    (axes[0], lambda x: x**2, (-1.5, 1.0), (-0.5, 4.0),
+     r"$f(x)=x^2$: epígrafe convexa"),
+    (axes[1], lambda x: x**4 - 2.5 * x**2 + 0.6 * x, (-1.2, 1.05), (-2.5, 4.0),
+     "Dois vales: epígrafe não convexa"),
+]
+for ax, f, (a, b), ylim, titulo in paineis:
+    ax.fill_between(xs, f(xs), ylim[1], color=COR_A, alpha=0.25,
+                    label=r"$\mathrm{epi}\,f$")
+    ax.plot(xs, f(xs), color=COR_A, linewidth=2.2, label="gráfico de $f$")
+    s = np.linspace(0, 1, 300)
+    sx = (1 - s) * a + s * b
+    sy = (1 - s) * f(a) + s * f(b)
+    ax.plot(sx, sy, color=COR_B, linewidth=2.2, label="segmento")
+    ax.plot(sx, np.where(sy < f(sx), sy, np.nan), color=COR_C, linewidth=3.4,
+            label="fora da epígrafe")
+    ax.plot([a, b], [f(a), f(b)], "o", color=COR_B)
+    ax.set_ylim(*ylim)
+    ax.set_xlabel("$x$")
+    ax.set_ylabel("$t$")
+    ax.set_title(titulo)
+    ax.legend(fontsize=9, loc="upper center")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## Epígrafe Convexa $\iff$ Função Convexa
+
+::: {.callout-note icon=false}
+## Teorema (Boyd & Vandenberghe, §3.1.7, p. 75; a prova é nossa)
+
+$f$ é convexa se, e somente se, $\mathrm{epi}\,f$ é um conjunto convexo.
+:::
+
+O Boyd enuncia o resultado ("a ligação entre conjuntos convexos e
+funções convexas é pela epígrafe", p. 75, tradução livre) sem
+demonstrá-lo. A ideia: dois pontos do gráfico estão na epígrafe, e o
+segmento entre eles em $\mathbb{R}^{n+1}$ é exatamente a corda. "A corda
+fica acima do gráfico" e "a corda fica dentro da epígrafe" são a mesma
+frase.
+
+*Demonstração.* Os dois sentidos usam que a combinação convexa de pares
+se faz coordenada a coordenada:
+$$
+\theta(\mathbf{x},s)+(1-\theta)(\mathbf{y},t)=\big(\theta\mathbf{x}+(1-\theta)\mathbf{y},\ \theta s+(1-\theta)t\big).
+\tag{$*$}
+$$
+
+($\Rightarrow$) Suponha $f$ convexa. Tome
+$(\mathbf{x},s),(\mathbf{y},t)\in\mathrm{epi}\,f$, $\theta\in[0,1]$ e
+$\mathbf{z}=\theta\mathbf{x}+(1-\theta)\mathbf{y}$.
+
+**Passo 1 — o que a hipótese dá.** Pela definição de epígrafe,
+$\mathbf{x},\mathbf{y}\in\mathrm{dom}\,f$, $f(\mathbf{x})\le s$ e
+$f(\mathbf{y})\le t$.
+
+**Passo 2 — $\mathbf{z}$ está no domínio**, porque $\mathrm{dom}\,f$ é
+convexo (faz parte da definição de função convexa).
+
+**Passo 3 — a altura.** Pela convexidade de $f$, e depois multiplicando
+$f(\mathbf{x})\le s$ por $\theta\ge0$, $f(\mathbf{y})\le t$ por
+$1-\theta\ge0$ e somando,
+$$
+f(\mathbf{z})\le\theta f(\mathbf{x})+(1-\theta)f(\mathbf{y})\le\theta s+(1-\theta)t.
+$$
+
+**Passo 4 — conclusão.** Por $(*)$, a combinação dos dois pontos é
+$(\mathbf{z},\theta s+(1-\theta)t)$, que satisfaz as duas condições da
+epígrafe (Passos 2 e 3). Logo $\mathrm{epi}\,f$ é convexo.
+
+($\Leftarrow$) Suponha $\mathrm{epi}\,f$ convexo. Tome
+$\mathbf{x},\mathbf{y}\in\mathrm{dom}\,f$, $\theta\in[0,1]$ e
+$\mathbf{z}=\theta\mathbf{x}+(1-\theta)\mathbf{y}$.
+
+**Passo 1 — pontos do gráfico estão na epígrafe.** $(\mathbf{x},f(\mathbf{x}))$
+e $(\mathbf{y},f(\mathbf{y}))$ pertencem a $\mathrm{epi}\,f$, pois
+$f(\mathbf{x})\le f(\mathbf{x})$.
+
+**Passo 2 — usar a convexidade da epígrafe.** A combinação convexa dos
+dois pontos está em $\mathrm{epi}\,f$; por $(*)$, isso diz
+$$
+\big(\mathbf{z},\ \theta f(\mathbf{x})+(1-\theta)f(\mathbf{y})\big)\in\mathrm{epi}\,f.
+$$
+
+**Passo 3 — ler a definição de epígrafe.** Pertencer a $\mathrm{epi}\,f$
+significa duas coisas: $\mathbf{z}\in\mathrm{dom}\,f$, logo
+$\mathrm{dom}\,f$ é convexo; e
+$f(\mathbf{z})\le\theta f(\mathbf{x})+(1-\theta)f(\mathbf{y})$, que é a
+desigualdade da definição. Logo $f$ é convexa. $\blacksquare$
+
+No sentido ($\Leftarrow$), a convexidade do domínio vem de graça. É por
+isso que a definição de função convexa exige domínio convexo: sem essa
+exigência o teorema seria falso.
+
+**Consequência — o máximo de funções convexas é convexo** (Boyd, §3.2.3,
+pp. 80–81). Sejam $f_1,f_2$ convexas e
+$f(\mathbf{x})=\max\{f_1(\mathbf{x}),f_2(\mathbf{x})\}$, com
+$\mathrm{dom}\,f=\mathrm{dom}\,f_1\cap\mathrm{dom}\,f_2$. Como
+$\max\{a,b\}\le t$ se, e somente se, $a\le t$ e $b\le t$,
+$$
+\mathrm{epi}\,f=\mathrm{epi}\,f_1\cap\mathrm{epi}\,f_2 .
+$$
+Pelo teorema, as duas epígrafes são convexas; a interseção de convexos é
+convexa (Exemplo 4); e, pelo teorema de novo, $f$ é convexa. Assim
+$|x|=\max\{x,-x\}$ e a perda *hinge* $\max\{0,\,1-z\}$, máximos de
+funções afins, são convexas sem nenhuma conta, e nenhuma delas é
+diferenciável em todo ponto.
+
+## A Condição de Primeira Ordem
+
+A definição fala de cordas. Para funções diferenciáveis existe uma
+caracterização equivalente, com a reta (ou o hiperplano) **tangente**, e
+é ela que liga convexidade ao gradiente da Aula 6.
+
+::: {.callout-note icon=false}
+## Teorema (condição de primeira ordem; Boyd & Vandenberghe, §3.1.3, eq. 3.2, p. 69)
+
+Seja $f$ diferenciável com $\mathrm{dom}\,f$ aberto e convexo. Então $f$
+é convexa se, e somente se,
+$$
+f(\mathbf{y})\ge f(\mathbf{x})+\nabla f(\mathbf{x})\,(\mathbf{y}-\mathbf{x})
+\quad\text{para todos }\mathbf{x},\mathbf{y}\in\mathrm{dom}\,f .
+$$
+:::
+
+*Aviso de notação:* o Boyd escreve $\nabla f(\mathbf{x})^T(\mathbf{y}-\mathbf{x})$
+porque lá o gradiente é coluna. Com a nossa convenção (gradiente-linha),
+o produto $\nabla f(\mathbf{x})\,(\mathbf{y}-\mathbf{x})$ já é um número.
+
+O lado direito é a aproximação de Taylor de primeira ordem de $f$ em
+torno de $\mathbf{x}$. O teorema diz que, numa função convexa, essa
+aproximação **nunca superestima** $f$, em nenhum ponto do domínio, não
+só perto de $\mathbf{x}$. O Boyd chama isso de "talvez a propriedade
+mais importante das funções convexas" (p. 69, tradução livre): de uma
+informação local (valor e gradiente num ponto) sai uma cota global.
+Na linguagem da epígrafe: o hiperplano tangente ao gráfico em
+$(\mathbf{x},f(\mathbf{x}))$ deixa $\mathrm{epi}\,f$ inteira de um lado só
+(Boyd, §3.1.7, p. 76, e Figura 3.6).
+
+*Demonstração* (segue Boyd, pp. 69–70, com a nossa notação).
+
+($\Rightarrow$) Suponha $f$ convexa e fixe $\mathbf{x},\mathbf{y}$.
+
+**Passo 1 — convexidade com $\theta=1-t$.** Para $0<t\le1$, o ponto
+$\mathbf{x}+t(\mathbf{y}-\mathbf{x})=(1-t)\mathbf{x}+t\mathbf{y}$ está
+no domínio, e
+$$
+f(\mathbf{x}+t(\mathbf{y}-\mathbf{x}))\le(1-t)f(\mathbf{x})+t\,f(\mathbf{y}).
+$$
+
+**Passo 2 — isolar a razão incremental.** Subtraindo $f(\mathbf{x})$ dos
+dois lados e dividindo por $t>0$:
+$$
+\frac{f(\mathbf{x}+t(\mathbf{y}-\mathbf{x}))-f(\mathbf{x})}{t}\le f(\mathbf{y})-f(\mathbf{x}).
+$$
+
+**Passo 3 — limite $t\to0^+$.** O lado esquerdo é a razão incremental de
+$g(t)=f(\mathbf{x}+t(\mathbf{y}-\mathbf{x}))$ em $t=0$, e converge para
+$g'(0)=\nabla f(\mathbf{x})\,(\mathbf{y}-\mathbf{x})$ pela regra da
+cadeia (Aula 6). Logo
+$f(\mathbf{y})\ge f(\mathbf{x})+\nabla f(\mathbf{x})(\mathbf{y}-\mathbf{x})$.
+
+($\Leftarrow$) Suponha a desigualdade para todos os pares. Fixe
+$\mathbf{x},\mathbf{y}$, $\theta\in[0,1]$ e
+$\mathbf{z}=\theta\mathbf{x}+(1-\theta)\mathbf{y}$.
+
+**Passo 1 — aplicar a hipótese duas vezes, a partir de $\mathbf{z}$:**
+$$
+f(\mathbf{x})\ge f(\mathbf{z})+\nabla f(\mathbf{z})(\mathbf{x}-\mathbf{z}),\qquad
+f(\mathbf{y})\ge f(\mathbf{z})+\nabla f(\mathbf{z})(\mathbf{y}-\mathbf{z}).
+$$
+
+**Passo 2 — combinar com pesos $\theta$ e $1-\theta$** e somar:
+$$
+\theta f(\mathbf{x})+(1-\theta)f(\mathbf{y})\ge f(\mathbf{z})+\nabla f(\mathbf{z})\big(\theta\mathbf{x}+(1-\theta)\mathbf{y}-\mathbf{z}\big).
+$$
+
+**Passo 3 — o termo do gradiente some**, porque
+$\theta\mathbf{x}+(1-\theta)\mathbf{y}-\mathbf{z}=\mathbf{0}$ pela
+definição de $\mathbf{z}$. Sobra
+$\theta f(\mathbf{x})+(1-\theta)f(\mathbf{y})\ge f(\mathbf{z})$, que é a
+definição de convexidade. $\blacksquare$
+
+## O Resultado Central do Bloco
+
+::: {.callout-note icon=false}
+## Corolário (gradiente nulo em função convexa; Boyd, p. 69)
+
+Se $f$ é convexa e diferenciável e $\nabla f(\mathbf{x}^\star)=\mathbf{0}$,
+então $\mathbf{x}^\star$ é um **minimizador global** de $f$.
+:::
+
+*Demonstração.* Substitua $\nabla f(\mathbf{x}^\star)=\mathbf{0}$ na
+condição de primeira ordem:
+$f(\mathbf{y})\ge f(\mathbf{x}^\star)+\mathbf{0}\,(\mathbf{y}-\mathbf{x}^\star)=f(\mathbf{x}^\star)$
+para todo $\mathbf{y}$. $\blacksquare$
+
+**Este é o resultado central do bloco:** em função convexa não existe
+sela nem mínimo local "falso". Um resultado aparentado, sem exigir
+diferenciabilidade, é que em problemas convexos todo ótimo local é
+global (Boyd, §4.2.2, p. 138). A figura abaixo contrasta os dois
+comportamentos: à esquerda, a corda fica acima e a tangente fica abaixo
+do gráfico; à direita, numa função com dois vales, a corda cruza o
+gráfico por baixo e a tangente num ponto crítico do vale mais alto não é
+cota inferior.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Epígrafe Convexa $\iff$ Função Convexa
+
+::: {.callout-note icon=false}
+## Teorema (Boyd, §3.1.7, p. 75 — enunciado sem prova; a prova é nossa)
+
+$f$ é convexa $\iff$ $\mathrm{epi}\,f$ é um conjunto convexo.
+:::
+
+::: {.fragment}
+- Dois pontos do **gráfico** estão na epígrafe; o segmento entre eles em $\mathbb{R}^{n+1}$ **é a corda**. "Corda acima do gráfico" $=$ "corda dentro da epígrafe".
+:::
+
+::: {.fragment}
+- Ferramenta dos dois sentidos — combinação coordenada a coordenada:
+$$
+\theta(\mathbf{x},s)+(1-\theta)(\mathbf{y},t)=\big(\theta\mathbf{x}+(1-\theta)\mathbf{y},\ \theta s+(1-\theta)t\big).\qquad(*)
+$$
+:::
+
+## Prova ($\Rightarrow$): $f$ Convexa $\Rightarrow$ Epígrafe Convexa
+
+Tome $(\mathbf{x},s),(\mathbf{y},t)\in\mathrm{epi}\,f$, $\theta\in[0,1]$, $\mathbf{z}=\theta\mathbf{x}+(1-\theta)\mathbf{y}$.
+
+::: {.fragment}
+**Passo 1 — hipótese:** $\mathbf{x},\mathbf{y}\in\mathrm{dom}\,f$, $f(\mathbf{x})\le s$, $f(\mathbf{y})\le t$.
+:::
+
+::: {.fragment}
+**Passo 2 — domínio:** $\mathrm{dom}\,f$ convexo $\Rightarrow$ $\mathbf{z}\in\mathrm{dom}\,f$.
+:::
+
+::: {.fragment}
+**Passo 3 — altura:** convexidade de $f$, depois $\theta\ge0$ e $1-\theta\ge0$:
+$$
+f(\mathbf{z})\le\theta f(\mathbf{x})+(1-\theta)f(\mathbf{y})\le\theta s+(1-\theta)t.
+$$
+:::
+
+::: {.fragment}
+**Passo 4:** por $(*)$, a combinação é $(\mathbf{z},\theta s+(1-\theta)t)\in\mathrm{epi}\,f$. Epígrafe convexa.
+:::
+
+## Prova ($\Leftarrow$): Epígrafe Convexa $\Rightarrow$ $f$ Convexa
+
+Tome $\mathbf{x},\mathbf{y}\in\mathrm{dom}\,f$, $\theta\in[0,1]$, $\mathbf{z}=\theta\mathbf{x}+(1-\theta)\mathbf{y}$.
+
+::: {.fragment}
+**Passo 1 — gráfico $\subseteq$ epígrafe:** $(\mathbf{x},f(\mathbf{x})),\,(\mathbf{y},f(\mathbf{y}))\in\mathrm{epi}\,f$.
+:::
+
+::: {.fragment}
+**Passo 2 — epígrafe convexa** e $(*)$: $\big(\mathbf{z},\ \theta f(\mathbf{x})+(1-\theta)f(\mathbf{y})\big)\in\mathrm{epi}\,f$.
+:::
+
+::: {.fragment}
+**Passo 3 — ler a definição de $\mathrm{epi}\,f$:** $\mathbf{z}\in\mathrm{dom}\,f$ (domínio convexo) **e** $f(\mathbf{z})\le\theta f(\mathbf{x})+(1-\theta)f(\mathbf{y})$. $\blacksquare$
+:::
+
+::: {.fragment}
+- A convexidade do domínio vem de graça — por isso a definição de função convexa a exige.
+:::
+
+## Consequência: Máximo de Convexas
+
+::: {.fragment}
+$f=\max\{f_1,f_2\}$, com $f_1,f_2$ convexas. Como $\max\{a,b\}\le t\iff a\le t$ e $b\le t$:
+$$
+\mathrm{epi}\,f=\mathrm{epi}\,f_1\cap\mathrm{epi}\,f_2 .
+$$
+:::
+
+::: {.fragment}
+Teorema $\Rightarrow$ epígrafes convexas $\Rightarrow$ interseção convexa $\Rightarrow$ teorema $\Rightarrow$ $f$ convexa (Boyd, §3.2.3, pp. 80–81).
+:::
+
+::: {.fragment}
+- $|x|=\max\{x,-x\}$ e a perda *hinge* $\max\{0,\,1-z\}$ são convexas **sem conta** — e não são diferenciáveis em todo ponto.
+:::
+
+## Condição de Primeira Ordem
+
+::: {.callout-note icon=false}
+## Teorema (Boyd, §3.1.3, eq. 3.2, p. 69)
+
+$f$ diferenciável, $\mathrm{dom}\,f$ aberto e convexo. $f$ é convexa $\iff$
+$f(\mathbf{y})\ge f(\mathbf{x})+\nabla f(\mathbf{x})\,(\mathbf{y}-\mathbf{x})$ para todos $\mathbf{x},\mathbf{y}$.
+:::
+
+::: {.fragment}
+- Gradiente-linha (Aula 6): $\nabla f(\mathbf{x})(\mathbf{y}-\mathbf{x})$ já é escalar — o Boyd escreve $\nabla f(\mathbf{x})^T(\mathbf{y}-\mathbf{x})$ (gradiente-coluna).
+- A tangente (Taylor de 1ª ordem) **nunca superestima** $f$, em nenhum ponto: informação local $\Rightarrow$ cota global.
+:::
+
+## Prova ($\Rightarrow$)
+
+::: {.fragment}
+**Passo 1 — convexidade**, $0<t\le1$: $f(\mathbf{x}+t(\mathbf{y}-\mathbf{x}))\le(1-t)f(\mathbf{x})+t\,f(\mathbf{y})$.
+:::
+
+::: {.fragment}
+**Passo 2 — subtrair $f(\mathbf{x})$, dividir por $t$:**
+$$
+\frac{f(\mathbf{x}+t(\mathbf{y}-\mathbf{x}))-f(\mathbf{x})}{t}\le f(\mathbf{y})-f(\mathbf{x}).
+$$
+:::
+
+::: {.fragment}
+**Passo 3 — $t\to0^+$:** com $g(t)=f(\mathbf{x}+t(\mathbf{y}-\mathbf{x}))$, o lado esquerdo $\to g'(0)=\nabla f(\mathbf{x})(\mathbf{y}-\mathbf{x})$ (regra da cadeia, Aula 6). Logo $f(\mathbf{y})\ge f(\mathbf{x})+\nabla f(\mathbf{x})(\mathbf{y}-\mathbf{x})$.
+:::
+
+## Prova ($\Leftarrow$)
+
+::: {.fragment}
+**Passo 1 — hipótese duas vezes**, a partir de $\mathbf{z}=\theta\mathbf{x}+(1-\theta)\mathbf{y}$:
+$$
+f(\mathbf{x})\ge f(\mathbf{z})+\nabla f(\mathbf{z})(\mathbf{x}-\mathbf{z}),\qquad
+f(\mathbf{y})\ge f(\mathbf{z})+\nabla f(\mathbf{z})(\mathbf{y}-\mathbf{z}).
+$$
+:::
+
+::: {.fragment}
+**Passo 2 — pesos $\theta$ e $1-\theta$, somar:**
+$$
+\theta f(\mathbf{x})+(1-\theta)f(\mathbf{y})\ge f(\mathbf{z})+\nabla f(\mathbf{z})\big(\theta\mathbf{x}+(1-\theta)\mathbf{y}-\mathbf{z}\big).
+$$
+:::
+
+::: {.fragment}
+**Passo 3:** $\theta\mathbf{x}+(1-\theta)\mathbf{y}-\mathbf{z}=\mathbf{0}$ $\Rightarrow$ $\theta f(\mathbf{x})+(1-\theta)f(\mathbf{y})\ge f(\mathbf{z})$: convexa. $\blacksquare$
+:::
+
+## O Resultado Central do Bloco
+
+::: {.fragment .callout-important}
+**Corolário (Boyd, p. 69).** $f$ convexa, diferenciável, $\nabla f(\mathbf{x}^\star)=\mathbf{0}$ $\Rightarrow$ $f(\mathbf{y})\ge f(\mathbf{x}^\star)+\mathbf{0}\,(\mathbf{y}-\mathbf{x}^\star)=f(\mathbf{x}^\star)$ para todo $\mathbf{y}$: **minimizador global**.
+:::
+
+::: {.fragment}
+- Função convexa: sem selas, sem mínimos locais "falsos" (em problemas convexos, ótimo local $=$ global: Boyd, §4.2.2, p. 138).
+- Na figura: à esquerda, corda acima e tangente abaixo; à direita (dois vales), a corda cruza o gráfico e a tangente no vale mais alto não é cota inferior.
+:::
+
+:::
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+xs = np.linspace(-2.2, 2.2, 400)
+fig, axes = plt.subplots(1, 2, figsize=(11, 3.8))
+
+# Convexa: f(x) = 0.5 x^2 + 0.3 x
+f1 = lambda x: 0.5 * x**2 + 0.3 * x
+df1 = lambda x: x + 0.3
+ax = axes[0]
+ax.plot(xs, f1(xs), color=COR_A, linewidth=2.2, label="$f$ convexa")
+a, b = -1.8, 1.6
+ax.plot([a, b], [f1(a), f1(b)], color=COR_B, linewidth=2, label="corda")
+x0 = 0.6
+ax.plot(xs, f1(x0) + df1(x0) * (xs - x0), color=COR_NEU, linestyle="--",
+        label="tangente em $x_0$")
+ax.plot(x0, f1(x0), "o", color=COR_NEU)
+ax.set_ylim(-1.5, 3.2)
+ax.set_title("Convexa: corda acima, tangente abaixo")
+ax.legend(fontsize=9, loc="upper center")
+
+# Não convexa: f(x) = x^4 - 2.5 x^2 + 0.6 x (dois vales)
+f2 = lambda x: x**4 - 2.5 * x**2 + 0.6 * x
+ax = axes[1]
+ax.plot(xs, f2(xs), color=COR_A, linewidth=2.2, label="$f$ não convexa")
+a, b = -1.6, 1.4
+ax.plot([a, b], [f2(a), f2(b)], color=COR_B, linewidth=2, label="corda")
+raizes = np.roots([4, 0, -5, 0.6])
+raizes = np.sort(raizes[np.isreal(raizes)].real)
+x_loc = raizes[-1]                                 # mínimo local do vale mais alto
+ax.axhline(f2(x_loc), color=COR_NEU, linestyle="--",
+           label="tangente no mínimo local")
+ax.plot(x_loc, f2(x_loc), "o", color=COR_NEU)
+ax.plot(raizes[0], f2(raizes[0]), "o", color=COR_C, label="mínimo global")
+ax.set_ylim(-3.2, 3.2)
+ax.set_title("Não convexa: ponto crítico sem garantia global")
+ax.legend(fontsize=9, loc="upper center")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+## Pausa Ativa — Dois Minimizadores?
+
+::: {.callout-tip}
+## Uma função convexa pode ter dois minimizadores globais diferentes? E o que acontece com os pontos do segmento entre eles?
+
+Aplique a definição com $\theta=\tfrac12$ aos dois minimizadores e
+compare com o valor mínimo.
+:::
+
+::: {.callout-tip}
+## A classe das funções convexas
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Toda função afim $f(\mathbf{x})=\mathbf{a}^T\mathbf{x}+b$ é convexa e
+  côncava ao mesmo tempo.
+- □ Se $\mathrm{epi}\,f$ é um conjunto convexo, $\mathrm{dom}\,f$ pode
+  mesmo assim não ser convexo.
+- □ Somar a uma perda de treino convexa uma penalidade convexa sobre os
+  parâmetros produz uma função objetivo convexa.
+- □ Uma função convexa e diferenciável pode ter um ponto de gradiente
+  nulo que não seja minimizador global.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Dois Minimizadores? — Resposta
+
+::: {.callout-tip}
+## A classe das funções convexas — Resposta
+
+- ✔ Para afins, a desigualdade da definição vale com igualdade, então vale para $f$ e para $-f$.
+- ✗ Se $(\mathbf{x},s),(\mathbf{y},t)\in\mathrm{epi}\,f$, a combinação $(\mathbf{z},\cdot)$ está em $\mathrm{epi}\,f$, logo $\mathbf{z}\in\mathrm{dom}\,f$: a epígrafe convexa já obriga o domínio a ser convexo.
+- ✔ Soma de convexas é convexa (Boyd, §3.2.1).
+- ✗ É exatamente o Corolário: gradiente nulo em função convexa $\Rightarrow$ minimizador global.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** pode, mas então todo o segmento entre eles também é minimizador. Com $m$ o valor mínimo, a definição dá $f(\tfrac12\mathbf{a}+\tfrac12\mathbf{b})\le\tfrac12m+\tfrac12m=m$, e nada fica abaixo de $m$: o conjunto de minimizadores é convexo (o vale plano da Intuição). Só a convexidade **estrita** proíbe isso (Bloco 4).
+:::
+
+:::
+
+# Bloco 2: A Hessiana e a Condição de Segunda Ordem
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## A Matriz Hessiana
+
+**Premissa do bloco.** Agora $f$ é **duas vezes continuamente
+diferenciável** num domínio aberto e convexo.
+
+::: {.callout-note icon=false}
+## Definição (Hessiana; MathML, §5.7, pp. 164–165)
+
+A **Hessiana** de $f:\mathbb{R}^n\to\mathbb{R}$ em $\mathbf{x}$ é a
+matriz $n\times n$ de todas as derivadas parciais de segunda ordem:
+$$
+\big[\nabla^2 f(\mathbf{x})\big]_{ij}=\frac{\partial^2 f}{\partial x_i\,\partial x_j}(\mathbf{x}).
+$$
+:::
+
+Duas leituras dessa definição, ambas úteis:
+
+- **Linha a linha**, a Hessiana é o Jacobiano do gradiente (Aula 6):
+  derivar cada componente de $\nabla f$ em relação a cada variável.
+- **Simetria.** Se $f$ é duas vezes continuamente diferenciável, a ordem
+  das derivadas parciais não importa,
+  $\frac{\partial^2 f}{\partial x_i\partial x_j}=\frac{\partial^2 f}{\partial x_j\partial x_i}$
+  (MathML, eq. 5.146, p. 165; o resultado é conhecido como Teorema de
+  Schwarz, ou de Clairaut). Logo **a Hessiana é uma matriz simétrica**,
+  e tudo da Aula 4 se aplica a ela: autovalores reais, autovetores
+  ortonormais, definitude lida nos autovalores. O MathML resume: "a
+  Hessiana mede a curvatura da função localmente" (p. 165, tradução
+  livre).
+
+## Curvatura ao Longo de uma Reta
+
+A ponte entre a Hessiana e a convexidade é restringir $f$ a uma reta.
+Fixe $\mathbf{x}$ e uma direção $\mathbf{v}$ e defina
+$g(t)=f(\mathbf{x}+t\mathbf{v})$.
+
+**Passo 1 — primeira derivada** (regra da cadeia, Aula 6):
+$$
+g'(t)=\nabla f(\mathbf{x}+t\mathbf{v})\,\mathbf{v}=\sum_{i=1}^n\frac{\partial f}{\partial x_i}(\mathbf{x}+t\mathbf{v})\,v_i .
+$$
+
+**Passo 2 — segunda derivada**, aplicando a regra da cadeia a cada
+parcial $\frac{\partial f}{\partial x_i}(\mathbf{x}+t\mathbf{v})$:
+$$
+g''(t)=\sum_{i=1}^n\sum_{j=1}^n\frac{\partial^2 f}{\partial x_j\,\partial x_i}(\mathbf{x}+t\mathbf{v})\,v_j\,v_i
+=\mathbf{v}^T\,\nabla^2 f(\mathbf{x}+t\mathbf{v})\,\mathbf{v}.
+$$
+
+A forma quadrática $\mathbf{v}^T\nabla^2f\,\mathbf{v}$ é a **curvatura de
+$f$ na direção $\mathbf{v}$**: a segunda derivada da função de uma
+variável que se obtém andando ao longo de $\mathbf{v}$. Pelo quociente
+de Rayleigh (Aula 4), para $\|\mathbf{v}\|=1$ ela fica entre
+$\lambda_{\min}$ e $\lambda_{\max}$ da Hessiana: os autovalores são as
+curvaturas extremas, e os autovetores, as direções em que elas ocorrem.
+
+## A Condição de Segunda Ordem
+
+::: {.callout-note icon=false}
+## Teorema (condição de segunda ordem; Boyd & Vandenberghe, §3.1.4, p. 71; MathML, §7.3, p. 237)
+
+Seja $f$ duas vezes continuamente diferenciável, com $\mathrm{dom}\,f$
+aberto e convexo. Então $f$ é convexa se, e somente se,
+$\nabla^2 f(\mathbf{x})\succeq0$ para todo $\mathbf{x}\in\mathrm{dom}\,f$.
+:::
+
+O Boyd deixa a prova como exercício (Exercício 3.8). A demonstração
+abaixo é nossa, montada com a condição de primeira ordem e com o
+Teorema de Taylor em uma variável com resto de Lagrange
+($g(1)=g(0)+g'(0)+\tfrac12g''(\xi)$ para algum $\xi\in(0,1)$, de Cálculo I).
+
+*Demonstração.* ($\Leftarrow$) Suponha $\nabla^2 f\succeq0$ em todo o
+domínio e fixe $\mathbf{x},\mathbf{y}$. Tome $\mathbf{v}=\mathbf{y}-\mathbf{x}$
+e $g(t)=f(\mathbf{x}+t\mathbf{v})$.
+
+- **Passo 1 — Taylor com resto:** $g(1)=g(0)+g'(0)+\tfrac12g''(\xi)$,
+  com $\xi\in(0,1)$.
+- **Passo 2 — traduzir cada termo** (Passos 1 e 2 da seção anterior):
+  $$
+  f(\mathbf{y})=f(\mathbf{x})+\nabla f(\mathbf{x})(\mathbf{y}-\mathbf{x})+\tfrac12(\mathbf{y}-\mathbf{x})^T\nabla^2f(\mathbf{x}+\xi\mathbf{v})(\mathbf{y}-\mathbf{x}).
+  $$
+- **Passo 3 — o último termo é $\ge0$**, porque a Hessiana é
+  semidefinida positiva no ponto $\mathbf{x}+\xi\mathbf{v}$ (que está no
+  domínio, por ser convexo). Logo
+  $f(\mathbf{y})\ge f(\mathbf{x})+\nabla f(\mathbf{x})(\mathbf{y}-\mathbf{x})$,
+  e a condição de primeira ordem dá a convexidade.
+
+($\Rightarrow$) Suponha $f$ convexa e fixe $\mathbf{x}$ e $\mathbf{v}$.
+
+- **Passo 1 — $g$ é convexa:** pontos da reta
+  $\{\mathbf{x}+t\mathbf{v}\}$ combinados convexamente continuam na reta,
+  então a desigualdade da definição vale para $g$.
+- **Passo 2 — $g'$ é não decrescente.** Aplicando a condição de primeira
+  ordem a $g$ nos pares $(s,t)$ e $(t,s)$:
+  $g(s)\ge g(t)+g'(t)(s-t)$ e $g(t)\ge g(s)+g'(s)(t-s)$. Somando,
+  $0\ge (g'(t)-g'(s))(s-t)$, isto é, $(g'(s)-g'(t))(s-t)\ge0$.
+- **Passo 3 — derivada de função não decrescente é $\ge0$:**
+  $g''(0)\ge0$, ou seja, $\mathbf{v}^T\nabla^2f(\mathbf{x})\mathbf{v}\ge0$.
+  Como $\mathbf{v}$ é arbitrário, $\nabla^2f(\mathbf{x})\succeq0$. $\blacksquare$
+
+**Convexidade estrita tem só uma das direções.** Se
+$\nabla^2 f(\mathbf{x})\succ0$ em todo ponto, $f$ é estritamente convexa
+(no Passo 3 acima, o termo de resto fica $>0$ para $\mathbf{y}\ne\mathbf{x}$).
+A recíproca é falsa: $f(x)=x^4$ é estritamente convexa, mas $f''(0)=0$
+(Boyd, p. 71). E a hipótese de domínio convexo não pode ser retirada:
+$f(x)=1/x^2$ em $\{x\ne0\}$ tem $f''>0$ em todo ponto e não é convexa
+(Boyd, Observação 3.1, p. 71).
+
+## Funções Quadráticas: a Taylor é Exata
+
+Para $f(\mathbf{x})=\tfrac12\mathbf{x}^TP\mathbf{x}+\mathbf{q}^T\mathbf{x}+r$,
+com $P$ simétrica, não é preciso resto de Lagrange: basta expandir.
+
+**Passo 1 — expandir $f(\mathbf{x}+\mathbf{v})$:**
+$$
+f(\mathbf{x}+\mathbf{v})=\tfrac12(\mathbf{x}+\mathbf{v})^TP(\mathbf{x}+\mathbf{v})+\mathbf{q}^T(\mathbf{x}+\mathbf{v})+r .
+$$
+
+**Passo 2 — distribuir e usar a simetria**, $\mathbf{v}^TP\mathbf{x}=(\mathbf{v}^TP\mathbf{x})^T=\mathbf{x}^TP^T\mathbf{v}=\mathbf{x}^TP\mathbf{v}$:
+$$
+f(\mathbf{x}+\mathbf{v})=f(\mathbf{x})+(\mathbf{x}^TP+\mathbf{q}^T)\,\mathbf{v}+\tfrac12\mathbf{v}^TP\mathbf{v}.
+$$
+
+O termo linear em $\mathbf{v}$ é o gradiente, $\nabla f(\mathbf{x})=\mathbf{x}^TP+\mathbf{q}^T$,
+e o termo quadrático identifica a Hessiana, $\nabla^2f(\mathbf{x})=P$,
+**constante**. Daí o Exemplo 3.2 do Boyd (p. 71): $f$ é convexa se, e
+somente se, $P\succeq0$, e estritamente convexa se, e somente se, $P\succ0$.
+
+A expansão também classifica os pontos críticos, **exatamente**, sem
+aproximação. Se $\nabla f(\mathbf{x}^\star)=\mathbf{0}$, então
+$f(\mathbf{x}^\star+\mathbf{v})=f(\mathbf{x}^\star)+\tfrac12\mathbf{v}^TP\mathbf{v}$:
+
+- $P\succ0$: $f$ cresce em toda direção. $\mathbf{x}^\star$ é o único
+  minimizador (a tigela).
+- $P$ com autovalores de sinais opostos: ao longo de um autovetor de
+  autovalor negativo, $f$ decresce. $\mathbf{x}^\star$ é uma sela.
+- $P\succeq0$ com autovalor zero: $f$ é constante ao longo do núcleo de
+  $P$. Os minimizadores formam $\mathbf{x}^\star+\mathcal{N}(P)$ (o vale
+  plano).
+
+Para uma $f$ qualquer (não quadrática) em torno de um ponto crítico, a
+mesma leitura vale **localmente** quando a Hessiana é definida positiva
+ou indefinida. É o teste da segunda derivada multivariado, que citamos
+sem demonstrar aqui. Quando a Hessiana é só semidefinida, a segunda
+ordem não decide (lembre de $x^4$ e $-x^4$, ambos com $f''(0)=0$).
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Matriz Hessiana
+
+::: {.callout-note icon=false}
+## Definição (MathML, §5.7, pp. 164–165)
+
+$\big[\nabla^2 f(\mathbf{x})\big]_{ij}=\dfrac{\partial^2 f}{\partial x_i\,\partial x_j}(\mathbf{x})$ — matriz $n\times n$ das derivadas de segunda ordem.
+:::
+
+::: {.fragment}
+- Linha a linha: o **Jacobiano do gradiente** (Aula 6).
+- $f$ duas vezes continuamente diferenciável $\Rightarrow$ $\frac{\partial^2 f}{\partial x_i\partial x_j}=\frac{\partial^2 f}{\partial x_j\partial x_i}$ (MathML, eq. 5.146; Teorema de Schwarz/Clairaut) $\Rightarrow$ **Hessiana simétrica**: vale tudo da Aula 4.
+- "A Hessiana mede a curvatura da função localmente" (MathML, p. 165, tradução livre).
+:::
+
+## Curvatura ao Longo de uma Reta
+
+$g(t)=f(\mathbf{x}+t\mathbf{v})$:
+
+::: {.fragment}
+**Passo 1 — regra da cadeia:** $g'(t)=\nabla f(\mathbf{x}+t\mathbf{v})\,\mathbf{v}=\sum_i\frac{\partial f}{\partial x_i}(\mathbf{x}+t\mathbf{v})\,v_i$.
+:::
+
+::: {.fragment}
+**Passo 2 — de novo, em cada parcial:**
+$$
+g''(t)=\sum_{i}\sum_{j}\frac{\partial^2 f}{\partial x_j\,\partial x_i}(\mathbf{x}+t\mathbf{v})\,v_jv_i=\mathbf{v}^T\nabla^2 f(\mathbf{x}+t\mathbf{v})\,\mathbf{v}.
+$$
+:::
+
+::: {.fragment .callout-important}
+$\mathbf{v}^T\nabla^2f\,\mathbf{v}$ = **curvatura na direção** $\mathbf{v}$. Por Rayleigh ($\|\mathbf{v}\|=1$): entre $\lambda_{\min}$ e $\lambda_{\max}$ da Hessiana — autovalores são as curvaturas extremas; autovetores, as direções.
+:::
+
+## Condição de Segunda Ordem
+
+::: {.callout-note icon=false}
+## Teorema (Boyd, §3.1.4, p. 71; MathML, §7.3, p. 237)
+
+$f$ duas vezes continuamente diferenciável, $\mathrm{dom}\,f$ aberto e convexo: $f$ convexa $\iff\nabla^2 f(\mathbf{x})\succeq0$ para todo $\mathbf{x}$.
+:::
+
+::: {.fragment}
+Prova nossa (o Boyd a deixa como Exercício 3.8), com Taylor em 1 variável com resto de Lagrange: $g(1)=g(0)+g'(0)+\tfrac12g''(\xi)$, $\xi\in(0,1)$.
+:::
+
+::: {.fragment}
+**($\Leftarrow$)** Com $\mathbf{v}=\mathbf{y}-\mathbf{x}$:
+$$
+f(\mathbf{y})=f(\mathbf{x})+\nabla f(\mathbf{x})(\mathbf{y}-\mathbf{x})+\underbrace{\tfrac12(\mathbf{y}-\mathbf{x})^T\nabla^2f(\mathbf{x}+\xi\mathbf{v})(\mathbf{y}-\mathbf{x})}_{\ge0\ (\succeq0)}
+$$
+$\Rightarrow$ condição de 1ª ordem $\Rightarrow$ convexa.
+:::
+
+## Condição de Segunda Ordem: a Volta
+
+**($\Rightarrow$)** $f$ convexa; $g(t)=f(\mathbf{x}+t\mathbf{v})$.
+
+::: {.fragment}
+**Passo 1:** $g$ é convexa (combinações convexas de pontos da reta ficam na reta).
+:::
+
+::: {.fragment}
+**Passo 2:** 1ª ordem em $(s,t)$ e $(t,s)$: $g(s)\ge g(t)+g'(t)(s-t)$ e $g(t)\ge g(s)+g'(s)(t-s)$. Somando: $(g'(s)-g'(t))(s-t)\ge0$ — $g'$ não decrescente.
+:::
+
+::: {.fragment}
+**Passo 3:** $g''(0)\ge0$, isto é, $\mathbf{v}^T\nabla^2f(\mathbf{x})\mathbf{v}\ge0$ para todo $\mathbf{v}$. $\blacksquare$
+:::
+
+::: {.fragment .callout-warning}
+$\nabla^2f\succ0$ em todo ponto $\Rightarrow$ estritamente convexa, mas **não** a recíproca: $x^4$ é estritamente convexa com $f''(0)=0$. E o domínio convexo é indispensável: $1/x^2$ em $\{x\ne0\}$ tem $f''>0$ e não é convexa (Boyd, p. 71).
+:::
+
+## Quadráticas: Taylor Exata
+
+$f(\mathbf{x})=\tfrac12\mathbf{x}^TP\mathbf{x}+\mathbf{q}^T\mathbf{x}+r$, $P$ simétrica:
+
+::: {.fragment}
+**Passo 1 — expandir:** $f(\mathbf{x}+\mathbf{v})=\tfrac12(\mathbf{x}+\mathbf{v})^TP(\mathbf{x}+\mathbf{v})+\mathbf{q}^T(\mathbf{x}+\mathbf{v})+r$.
+:::
+
+::: {.fragment}
+**Passo 2 — distribuir; simetria** $\mathbf{v}^TP\mathbf{x}=\mathbf{x}^TP\mathbf{v}$:
+$$
+f(\mathbf{x}+\mathbf{v})=f(\mathbf{x})+(\mathbf{x}^TP+\mathbf{q}^T)\,\mathbf{v}+\tfrac12\mathbf{v}^TP\mathbf{v}
+$$
+$\Rightarrow\nabla f(\mathbf{x})=\mathbf{x}^TP+\mathbf{q}^T$, $\nabla^2f=P$ **constante**. Convexa $\iff P\succeq0$; estritamente $\iff P\succ0$ (Boyd, Ex. 3.2).
+:::
+
+::: {.fragment}
+No ponto crítico, **exatamente** $f(\mathbf{x}^\star+\mathbf{v})=f(\mathbf{x}^\star)+\tfrac12\mathbf{v}^TP\mathbf{v}$:
+
+- $P\succ0$: tigela (minimizador único);
+- autovalores de sinais opostos: sela;
+- $P\succeq0$ com autovalor $0$: vale plano, minimizadores $\mathbf{x}^\star+\mathcal{N}(P)$.
+:::
+
+::: {.fragment}
+Para $f$ geral, a leitura vale **localmente** se a Hessiana é PD ou indefinida (teste da 2ª derivada, citado sem prova); se só PSD, a 2ª ordem não decide ($\pm x^4$).
+:::
+
+:::
+
+## Pausa Ativa — Lendo a Hessiana num Ponto Crítico
+
+::: {.callout-tip}
+## Num ponto crítico, a Hessiana tem autovalores $3$ e $-1$. O que acontece com $f$ quando você dá um passo pequeno ao longo de cada autovetor?
+
+Para uma quadrática, $f(\mathbf{x}^\star+\mathbf{v})=f(\mathbf{x}^\star)+\tfrac12\mathbf{v}^TP\mathbf{v}$;
+use $\mathbf{v}=\varepsilon\,\mathbf{u}_i$, com $\mathbf{u}_i$ autovetor
+unitário.
+:::
+
+::: {.callout-tip}
+## Hessiana e convexidade
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Se $\nabla^2f(\mathbf{x}_0)\succ0$ num único ponto $\mathbf{x}_0$,
+  então $f$ é convexa em todo o domínio.
+- □ $f(x)=x^4$ é estritamente convexa, embora $f''(0)=0$.
+- □ Para $f(\mathbf{x})=\tfrac12\mathbf{x}^TP\mathbf{x}+\mathbf{q}^T\mathbf{x}+r$
+  com $P$ simétrica, a Hessiana é $P$ em todos os pontos.
+- □ Para uma perda duas vezes continuamente diferenciável em relação aos
+  pesos de uma rede, trocar a ordem das derivadas parciais pode mudar a
+  Hessiana.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Lendo a Hessiana — Resposta
+
+::: {.callout-tip}
+## Hessiana e convexidade — Resposta
+
+- ✗ O teorema exige $\nabla^2 f\succeq0$ em **todo** ponto; num ponto só, no máximo se conclui algo local.
+- ✔ É o contraexemplo do Boyd: PD em todo ponto é suficiente para convexidade estrita, mas não necessário.
+- ✔ Pela expansão exata, o termo quadrático é $\tfrac12\mathbf{v}^TP\mathbf{v}$, qualquer que seja $\mathbf{x}$.
+- ✗ Com derivadas segundas contínuas vale a simetria (MathML, eq. 5.146): a Hessiana é a mesma.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** $f(\mathbf{x}^\star+\varepsilon\mathbf{u}_1)=f(\mathbf{x}^\star)+\tfrac32\varepsilon^2$ (sobe) e $f(\mathbf{x}^\star+\varepsilon\mathbf{u}_2)=f(\mathbf{x}^\star)-\tfrac12\varepsilon^2$ (desce): é uma **sela**, e o autovetor do autovalor negativo é uma direção de fuga. Para $f$ não quadrática, o mesmo vale para $\varepsilon$ pequeno.
+:::
+
+:::
+
+# Bloco 3: A Perda Quadrática do Problema-Fio
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## A Hessiana de $L(\boldsymbol\beta)=\|X\boldsymbol\beta-\mathbf{y}\|^2$
+
+Temos agora o necessário para responder à pergunta da Aula 6. Duas rotas
+levam à mesma Hessiana, e vale fazer as duas.
+
+**Rota 1 — derivar o gradiente.**
+
+- **Passo 1 — gradiente como coluna.** Da Aula 6,
+  $\nabla_{\boldsymbol\beta}L=2(X\boldsymbol\beta-\mathbf{y})^TX$.
+  Transpondo, $(\nabla_{\boldsymbol\beta}L)^T=2X^T(X\boldsymbol\beta-\mathbf{y})=2X^TX\boldsymbol\beta-2X^T\mathbf{y}$.
+- **Passo 2 — Jacobiano de uma função afim.** $\boldsymbol\beta\mapsto2X^TX\boldsymbol\beta-2X^T\mathbf{y}$
+  é afim, e o Jacobiano de $\boldsymbol\beta\mapsto M\boldsymbol\beta+\mathbf{c}$
+  é $M$ (o mesmo argumento que deu $J_{\mathbf r}=X$ na Aula 6). Logo
+  $$
+  \nabla^2_{\boldsymbol\beta}L=2X^TX,
+  $$
+  constante em $\boldsymbol\beta$.
+
+**Rota 2 — expansão exata.** Com $\mathbf{r}=X\boldsymbol\beta-\mathbf{y}$,
+
+- **Passo 1:** $L(\boldsymbol\beta+\mathbf{v})=\|X\boldsymbol\beta+X\mathbf{v}-\mathbf{y}\|^2=\|\mathbf{r}+X\mathbf{v}\|^2$.
+- **Passo 2 — expandir o quadrado da norma**, $\|\mathbf{a}+\mathbf{b}\|^2=\|\mathbf{a}\|^2+2\mathbf{a}^T\mathbf{b}+\|\mathbf{b}\|^2$:
+  $$
+  L(\boldsymbol\beta+\mathbf{v})=\underbrace{\|\mathbf{r}\|^2}_{L(\boldsymbol\beta)}+\underbrace{2\mathbf{r}^TX}_{\nabla_{\boldsymbol\beta}L}\,\mathbf{v}+\tfrac12\,\mathbf{v}^T\underbrace{(2X^TX)}_{\nabla^2_{\boldsymbol\beta}L}\,\mathbf{v}.
+  $$
+
+É a forma quadrática do Bloco 2, com $P=2X^TX$. E a curvatura em
+qualquer direção é explícita:
+$$
+\mathbf{v}^T(2X^TX)\mathbf{v}=2(X\mathbf{v})^T(X\mathbf{v})=2\|X\mathbf{v}\|^2\ge0 .
+$$
+
+::: {.callout-note icon=false}
+## Proposição (convexidade da perda quadrática)
+
+$L(\boldsymbol\beta)=\|X\boldsymbol\beta-\mathbf{y}\|^2$ é convexa para
+qualquer $X$ e qualquer $\mathbf{y}$. Sua curvatura na direção
+$\mathbf{v}$ é $2\|X\mathbf{v}\|^2$, nula exatamente quando
+$X\mathbf{v}=\mathbf{0}$. Em consequência:
+
+1. se $X$ tem posto coluna completo, $2X^TX\succ0$: $L$ é estritamente
+   convexa, e a solução das equações normais é o **único** minimizador;
+2. se não, os minimizadores formam o conjunto afim
+   $\boldsymbol\beta^\star+\mathcal{N}(X)$, para qualquer minimizador
+   $\boldsymbol\beta^\star$.
+:::
+
+*Demonstração.* A convexidade vem da condição de segunda ordem, com
+$2X^TX\succeq0$. Posto coluna completo significa $\mathcal{N}(X)=\{\mathbf{0}\}$
+(Aula 2), então $2\|X\mathbf{v}\|^2>0$ para $\mathbf{v}\ne\mathbf{0}$ e
+$2X^TX\succ0$. Pelo Bloco 2 (quadráticas), a solução é única; pelo
+Corolário do Bloco 1, o ponto de gradiente nulo é minimizador global.
+
+Para o item 2, seja $\boldsymbol\beta^\star$ um minimizador.
+
+- **Todo ponto de $\boldsymbol\beta^\star+\mathcal{N}(X)$ é minimizador.**
+  Se $X\mathbf{n}=\mathbf{0}$, então
+  $L(\boldsymbol\beta^\star+\mathbf{n})=\|X\boldsymbol\beta^\star+X\mathbf{n}-\mathbf{y}\|^2=\|X\boldsymbol\beta^\star-\mathbf{y}\|^2=L(\boldsymbol\beta^\star)$.
+- **Não há outros.** Se $\boldsymbol\beta$ também é minimizador, os dois
+  anulam o gradiente, $X^TX\boldsymbol\beta=X^T\mathbf{y}=X^TX\boldsymbol\beta^\star$.
+  Subtraindo, $X^TX(\boldsymbol\beta-\boldsymbol\beta^\star)=\mathbf{0}$.
+  Multiplicando à esquerda por $(\boldsymbol\beta-\boldsymbol\beta^\star)^T$,
+  $\|X(\boldsymbol\beta-\boldsymbol\beta^\star)\|^2=0$, logo
+  $\boldsymbol\beta-\boldsymbol\beta^\star\in\mathcal{N}(X)$. $\blacksquare$
+
+## O Vale Plano no Problema-Fio
+
+Os autovalores de $X^TX$ (a Hessiana dividida por 2) contam a história
+em números:
+
+| Matriz | autovalores de $X^TX$ | $\text{cond}$ |
+|---|---|---|
+| $X$ (4 colunas originais) | $`{python} brl(mu[0],1)`$, $`{python} brl(mu[1],1)`$, $`{python} brl(mu[2],1)`$, $`{python} brl(mu[3],1)`$ | $`{python} brl(cond_A,1)`$ |
+| $X_5$ (com `AveOtherRooms`) | $`{python} sci(mu5[0])`$, $`{python} brl(mu5[1],1)`$, $`{python} brl(mu5[2],1)`$, $`{python} brl(mu5[3],1)`$, $`{python} brl(mu5[4],1)`$ | $`{python} sci(cond_A5)`$ |
+
+Com as quatro colunas originais, todos os autovalores são positivos: a
+perda do problema-fio é estritamente convexa, e as equações normais da
+Aula 3 dão o único minimizador. A curvatura, porém, varia mais de
+$`{python} brl(cond_A,0)`$ vezes entre a direção mais íngreme e a mais
+plana. É uma tigela muito alongada, e isso vai importar na Aula 8.
+
+Com $X_5$, o menor autovalor é zero a menos de arredondamento
+($`{python} sci(mu5[0])`$): a direção correspondente é $\mathbf{n}$ (a
+menos de escala), e a Proposição explica a tabela do Problema Motivador.
+A figura abaixo corta a perda num plano que passa por
+$\boldsymbol\beta^\star$, gerado por $\mathbf{n}$ normalizado e pelo
+autovetor do menor autovalor **positivo**: as curvas de nível são retas
+paralelas a $\mathbf{n}$. É o vale plano da Intuição, agora em dados
+reais.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Hessiana de $L(\boldsymbol\beta)$ — Rota 1
+
+::: {.fragment}
+**Passo 1 — gradiente como coluna** (Aula 6): $(\nabla_{\boldsymbol\beta}L)^T=2X^T(X\boldsymbol\beta-\mathbf{y})=2X^TX\boldsymbol\beta-2X^T\mathbf{y}$.
+:::
+
+::: {.fragment}
+**Passo 2 — Jacobiano de função afim** $M\boldsymbol\beta+\mathbf{c}$ é $M$ (como $J_{\mathbf r}=X$ na Aula 6):
+$$
+\nabla^2_{\boldsymbol\beta}L=2X^TX \quad\text{(constante em }\boldsymbol\beta).
+$$
+:::
+
+## A Hessiana de $L(\boldsymbol\beta)$ — Rota 2
+
+::: {.fragment}
+**Passo 1:** $\mathbf{r}=X\boldsymbol\beta-\mathbf{y}$ $\Rightarrow$ $L(\boldsymbol\beta+\mathbf{v})=\|\mathbf{r}+X\mathbf{v}\|^2$.
+:::
+
+::: {.fragment}
+**Passo 2 — $\|\mathbf{a}+\mathbf{b}\|^2=\|\mathbf{a}\|^2+2\mathbf{a}^T\mathbf{b}+\|\mathbf{b}\|^2$:**
+$$
+L(\boldsymbol\beta+\mathbf{v})=\underbrace{\|\mathbf{r}\|^2}_{L(\boldsymbol\beta)}+\underbrace{2\mathbf{r}^TX}_{\nabla_{\boldsymbol\beta}L}\,\mathbf{v}+\tfrac12\,\mathbf{v}^T\underbrace{(2X^TX)}_{\nabla^2_{\boldsymbol\beta}L}\,\mathbf{v}
+$$
+:::
+
+::: {.fragment .callout-important}
+Curvatura na direção $\mathbf{v}$: $\mathbf{v}^T(2X^TX)\mathbf{v}=2\|X\mathbf{v}\|^2\ge0$ — **sempre convexa**, nula exatamente quando $X\mathbf{v}=\mathbf{0}$.
+:::
+
+## Proposição: Quando o Minimizador é Único
+
+::: {.callout-note icon=false}
+## Proposição (convexidade da perda quadrática)
+
+$L$ é convexa. (1) Posto coluna completo $\Rightarrow 2X^TX\succ0$ $\Rightarrow$ minimizador **único** (equações normais). (2) Caso contrário, minimizadores $=\boldsymbol\beta^\star+\mathcal{N}(X)$.
+:::
+
+::: {.fragment}
+- (1): $\mathcal{N}(X)=\{\mathbf{0}\}$ (Aula 2) $\Rightarrow 2\|X\mathbf{v}\|^2>0$ para $\mathbf{v}\ne\mathbf{0}$; Bloco 2 (unicidade) $+$ Corolário do Bloco 1 (global).
+- (2) $\supseteq$: $X\mathbf{n}=\mathbf{0}\Rightarrow L(\boldsymbol\beta^\star+\mathbf{n})=\|X\boldsymbol\beta^\star-\mathbf{y}\|^2=L(\boldsymbol\beta^\star)$.
+:::
+
+::: {.fragment}
+- (2) $\subseteq$: dois minimizadores anulam o gradiente $\Rightarrow X^TX(\boldsymbol\beta-\boldsymbol\beta^\star)=\mathbf{0}$; multiplicando por $(\boldsymbol\beta-\boldsymbol\beta^\star)^T$: $\|X(\boldsymbol\beta-\boldsymbol\beta^\star)\|^2=0$ $\Rightarrow\boldsymbol\beta-\boldsymbol\beta^\star\in\mathcal{N}(X)$. $\blacksquare$
+:::
+
+## O Vale Plano no Problema-Fio
+
+::: {.fragment}
+| Matriz | autovalores de $X^TX$ | $\text{cond}$ |
+|---|---|---|
+| $X$ (4 colunas) | $`{python} brl(mu[0],1)`$, $`{python} brl(mu[1],1)`$, $`{python} brl(mu[2],1)`$, $`{python} brl(mu[3],1)`$ | $`{python} brl(cond_A,1)`$ |
+| $X_5$ (+ `AveOtherRooms`) | $`{python} sci(mu5[0])`$, $`{python} brl(mu5[1],1)`$, $`{python} brl(mu5[2],1)`$, $`{python} brl(mu5[3],1)`$, $`{python} brl(mu5[4],1)`$ | $`{python} sci(cond_A5)`$ |
+:::
+
+::: {.fragment}
+- $X$: estritamente convexa, minimizador único — mas uma tigela $`{python} brl(cond_A,0)`$ vezes mais íngreme numa direção que na outra (importa na Aula 8).
+- $X_5$: autovalor $\approx0$ na direção $\mathbf{n}$ — o vale plano. No corte abaixo (por $\boldsymbol\beta^\star$, ao longo de $\mathbf{n}$ e do autovetor do menor autovalor positivo), as curvas de nível são **retas paralelas** a $\mathbf{n}$.
+:::
+
+:::
+
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+n_hat = n_vec / np.linalg.norm(n_vec)
+u_pos = U5[:, 1]                                  # menor autovalor positivo
+s_grid = np.linspace(-0.08, 0.08, 121)            # ao longo de u_pos
+t_grid = np.linspace(-3.0, 3.0, 121)              # ao longo de n_hat
+S, T = np.meshgrid(s_grid, t_grid)
+dL = np.zeros_like(S)
+for i in range(S.shape[0]):
+    for j in range(S.shape[1]):
+        b = beta5 + S[i, j] * u_pos + T[i, j] * n_hat
+        dL[i, j] = L5(b) - L_along[0]
+fig, ax = plt.subplots(figsize=(6.4, 4.4))
+cs = ax.contourf(S, T, dL, levels=20, cmap="viridis")
+fig.colorbar(cs, ax=ax, label=r"$L(\beta)-L(\beta^\star)$")
+ax.axvline(0, color=COR_B, linewidth=2.2, label="minimizadores: $\\beta^\\star+t\\,\\mathbf{n}$")
+ax.set_xlabel(r"deslocamento ao longo do autovetor do menor autovalor positivo")
+ax.set_ylabel(r"deslocamento ao longo de $\mathbf{n}$ (normalizado)")
+ax.set_title("Perda de mínimos quadrados com $X_5$: um vale plano")
+ax.legend(loc="upper right", fontsize=9)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+## Pausa Ativa — Curvatura Constante
+
+::: {.callout-tip}
+## A Hessiana da perda quadrática não depende de $\boldsymbol\beta$. Que consequência prática isso tem para verificar convexidade, e por que isso deixa de valer numa rede neural com camadas ocultas?
+
+Compare "checar $\nabla^2L\succeq0$ em um ponto" com "checar em todos
+os pontos" quando a Hessiana muda, ou não, com os parâmetros.
+:::
+
+::: {.callout-tip}
+## A geometria da perda quadrática
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ $\mathbf{v}^T(2X^TX)\mathbf{v}=0$ exatamente para os vetores
+  $\mathbf{v}$ com $X\mathbf{v}=\mathbf{0}$.
+- □ Se o número de linhas $N$ é maior que o de colunas $d$, a Hessiana
+  $2X^TX$ é necessariamente definida positiva.
+- □ Quando $X$ tem posto incompleto, o conjunto dos minimizadores de
+  $\|X\boldsymbol\beta-\mathbf{y}\|^2$ é sempre um subespaço vetorial
+  (contém $\boldsymbol\beta=\mathbf{0}$).
+- □ Treinar só a última camada linear de uma rede, com as camadas
+  anteriores congeladas e perda quadrática, é um problema convexo nos
+  pesos dessa camada.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Curvatura Constante — Resposta
+
+::: {.callout-tip}
+## A geometria da perda quadrática — Resposta
+
+- ✔ $\mathbf{v}^T(2X^TX)\mathbf{v}=2\|X\mathbf{v}\|^2$, que é zero se, e somente se, $X\mathbf{v}=\mathbf{0}$.
+- ✗ $X_5$ tem $N=`{python} N`$ linhas e 5 colunas e mesmo assim $X_5^TX_5$ é singular: o que importa é o posto.
+- ✗ É o conjunto **afim** $\boldsymbol\beta^\star+\mathcal{N}(X)$; só contém $\mathbf{0}$ se $\mathbf{0}$ já for minimizador.
+- ✔ Com as camadas anteriores fixas, as ativações viram uma matriz $X$ fixa e a perda é quadrática nos pesos da última camada.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** com Hessiana constante, checar $2X^TX\succeq0$ **uma vez** vale para todo $\boldsymbol\beta$, e a convexidade sai de graça. Numa rede com camadas ocultas, a Hessiana depende dos pesos: ela pode ser PSD perto de um ponto e indefinida perto de outro, e a condição de segunda ordem exige checar **todos** — é por isso que redes profundas não herdam a garantia.
+:::
+
+:::
+
+# Bloco 4: A Regularização Ridge Fecha o Vale
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## A Hessiana da Perda Ridge
+
+A Ridge acrescenta à perda uma penalidade sobre o tamanho dos
+coeficientes:
+$$
+L_\lambda(\boldsymbol\beta)=\|X\boldsymbol\beta-\mathbf{y}\|^2+\lambda\|\boldsymbol\beta\|^2,\qquad\lambda>0 .
+$$
+
+**Passo 1 — a penalidade é uma quadrática.** $\lambda\|\boldsymbol\beta\|^2=\lambda\boldsymbol\beta^T\boldsymbol\beta=\tfrac12\boldsymbol\beta^T(2\lambda I)\boldsymbol\beta$,
+que é a forma do Bloco 2 com $P=2\lambda I$, $\mathbf{q}=\mathbf{0}$, $r=0$.
+Sua Hessiana é $2\lambda I$.
+
+**Passo 2 — a Hessiana de uma soma é a soma das Hessianas** (derivada é
+linear):
+$$
+\nabla^2 L_\lambda=2X^TX+2\lambda I=2(X^TX+\lambda I).
+$$
+
+**Passo 3 — os autovalores são deslocados em $\lambda$.** Se
+$X^TX\mathbf{u}=\mu\mathbf{u}$, então
+$$
+(X^TX+\lambda I)\mathbf{u}=X^TX\mathbf{u}+\lambda\mathbf{u}=(\mu+\lambda)\,\mathbf{u}.
+$$
+Os autovetores são os mesmos, e cada autovalor sobe exatamente $\lambda$.
+Como $\mu\ge0$ (Bloco 3), todos os autovalores de $X^TX+\lambda I$ são
+$\ge\lambda>0$: a Hessiana é **definida positiva**, e $L_\lambda$ é
+estritamente convexa, **qualquer que seja o posto de $X$**. Na direção
+$\mathbf{n}$ do vale plano, a curvatura passa de $0$ para $2\lambda$.
+
+## Existência e Unicidade do Minimizador
+
+Convexidade estrita, sozinha, não garante que exista um minimizador
+($e^x$ é estritamente convexa e não tem mínimo). Precisamos das duas
+metades.
+
+::: {.callout-note icon=false}
+## Lema (no máximo um minimizador)
+
+Uma função estritamente convexa tem no máximo um minimizador.
+:::
+
+*Demonstração.* Se $\mathbf{a}\ne\mathbf{b}$ fossem minimizadores com
+valor $m$, a convexidade estrita com $\theta=\tfrac12$ daria
+$f(\tfrac12\mathbf{a}+\tfrac12\mathbf{b})<\tfrac12m+\tfrac12m=m$,
+contradizendo que $m$ é o mínimo. $\blacksquare$
+
+::: {.callout-note icon=false}
+## Proposição (a solução Ridge)
+
+Para $\lambda>0$ e qualquer $X$, $L_\lambda$ tem exatamente um
+minimizador,
+$$
+\boldsymbol\beta_\lambda=(X^TX+\lambda I)^{-1}X^T\mathbf{y}.
+$$
+:::
+
+*Demonstração.*
+
+- **Passo 1 — gradiente.** Somando o gradiente da Aula 6 ao da
+  penalidade (do Bloco 2, $\mathbf{x}^TP+\mathbf{q}^T$ com $P=2\lambda I$):
+  $\nabla L_\lambda=2(X\boldsymbol\beta-\mathbf{y})^TX+2\lambda\boldsymbol\beta^T$.
+- **Passo 2 — igualar a zero e transpor:**
+  $X^TX\boldsymbol\beta-X^T\mathbf{y}+\lambda\boldsymbol\beta=\mathbf{0}$,
+  isto é, $(X^TX+\lambda I)\boldsymbol\beta=X^T\mathbf{y}$.
+- **Passo 3 — existência.** $X^TX+\lambda I$ não tem autovalor zero
+  (todos são $\ge\lambda$), logo é invertível e $\boldsymbol\beta_\lambda$
+  existe. Pelo Corolário do Bloco 1, ele é minimizador global.
+- **Passo 4 — unicidade.** Pelo Lema, não há outro. $\blacksquare$
+
+## No Problema-Fio
+
+Aplicando a $X_5$, que tinha um vale plano:
+
+| $\lambda$ | autovalores de $X_5^TX_5+\lambda I$ (menor e maior) | $\text{cond}$ | coef. de `AveRooms`, `AveBedrms`, `AveOtherRooms` | perda de treino $\|X_5\boldsymbol\beta_\lambda-\mathbf{y}\|^2$ |
+|---|---|---|---|---|
+| $0$ | $`{python} sci(mu5[0])`$ e $`{python} sci(mu5[4])`$ | $`{python} sci(cond_A5)`$ | não únicos | $`{python} brl(L_along[0])`$ |
+| $1$ | $`{python} brl(ridge[1.0]['ev'][0],2)`$ e $`{python} sci(ridge[1.0]['ev'][4])`$ | $`{python} sci(ridge[1.0]['cond'])`$ | $`{python} brl(ridge[1.0]['beta'][2],4)`$, $`{python} brl(ridge[1.0]['beta'][3],4)`$, $`{python} brl(ridge[1.0]['beta'][4],4)`$ | $`{python} brl(ridge[1.0]['L_treino'])`$ |
+| $100$ | $`{python} brl(ridge[100.0]['ev'][0],2)`$ e $`{python} sci(ridge[100.0]['ev'][4])`$ | $`{python} sci(ridge[100.0]['cond'])`$ | $`{python} brl(ridge[100.0]['beta'][2],4)`$, $`{python} brl(ridge[100.0]['beta'][3],4)`$, $`{python} brl(ridge[100.0]['beta'][4],4)`$ | $`{python} brl(ridge[100.0]['L_treino'])`$ |
+
+Três leituras da tabela:
+
+- o menor autovalor passa de zero para $\lambda$ (mais o autovalor
+  original, que era zero), como o Passo 3 previu;
+- existe agora **um** vetor de coeficientes. Entre os infinitos
+  $\boldsymbol\beta^\star+t\mathbf{n}$ que empatavam, a penalidade
+  escolhe o que tem menor $\|\boldsymbol\beta\|^2$, e por isso nenhum
+  coeficiente dispara para $\pm100$;
+- a perda de treino **sobe** com $\lambda$: a Ridge não minimiza mais
+  $\|X\boldsymbol\beta-\mathbf{y}\|^2$, e sim $L_\lambda$. A unicidade
+  vem de um critério externo aos dados, o que responde à primeira Pausa
+  Ativa. Se esse critério é bom para prever casas que o modelo não viu é
+  outra pergunta, que pertence à disciplina de Aprendizado
+  Supervisionado.
+
+A figura mostra a perda ao longo da direção $\mathbf{n}$ do vale: plana
+para mínimos quadrados, parábolas com curvatura $2\lambda$ para a Ridge.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Hessiana da Ridge
+
+$L_\lambda(\boldsymbol\beta)=\|X\boldsymbol\beta-\mathbf{y}\|^2+\lambda\|\boldsymbol\beta\|^2$, $\lambda>0$.
+
+::: {.fragment}
+**Passo 1 — penalidade é quadrática:** $\lambda\boldsymbol\beta^T\boldsymbol\beta=\tfrac12\boldsymbol\beta^T(2\lambda I)\boldsymbol\beta$ $\Rightarrow$ Hessiana $2\lambda I$ (Bloco 2).
+:::
+
+::: {.fragment}
+**Passo 2 — Hessiana da soma:** $\nabla^2L_\lambda=2X^TX+2\lambda I=2(X^TX+\lambda I)$.
+:::
+
+::: {.fragment}
+**Passo 3 — autovalores deslocados:** $X^TX\mathbf{u}=\mu\mathbf{u}\Rightarrow(X^TX+\lambda I)\mathbf{u}=(\mu+\lambda)\mathbf{u}$.
+:::
+
+::: {.fragment .callout-important}
+Mesmos autovetores; autovalores $\mu+\lambda\ge\lambda>0$ $\Rightarrow$ Hessiana **definida positiva** para **qualquer** posto de $X$. Na direção $\mathbf{n}$ do vale, a curvatura vai de $0$ a $2\lambda$.
+:::
+
+## Existe, e é Único
+
+::: {.fragment}
+**Lema.** Estritamente convexa $\Rightarrow$ no máximo um minimizador: se $\mathbf{a}\ne\mathbf{b}$ tivessem valor $m$, $f(\tfrac12\mathbf{a}+\tfrac12\mathbf{b})<m$. $\blacksquare$ (Existência é outra história: $e^x$ é estritamente convexa sem mínimo.)
+:::
+
+::: {.fragment}
+**Passo 1 — gradiente:** $\nabla L_\lambda=2(X\boldsymbol\beta-\mathbf{y})^TX+2\lambda\boldsymbol\beta^T$.
+:::
+
+::: {.fragment}
+**Passo 2 — zerar e transpor:** $(X^TX+\lambda I)\boldsymbol\beta=X^T\mathbf{y}$.
+:::
+
+::: {.fragment}
+**Passo 3 — existência:** autovalores $\ge\lambda>0$ $\Rightarrow$ invertível $\Rightarrow\boldsymbol\beta_\lambda=(X^TX+\lambda I)^{-1}X^T\mathbf{y}$, minimizador global (Corolário, Bloco 1). **Passo 4 — unicidade:** Lema. $\blacksquare$
+:::
+
+## Ridge no Problema-Fio
+
+::: {.fragment}
+| $\lambda$ | menor / maior autovalor | $\text{cond}$ | coef. `AveRooms`, `AveBedrms`, `AveOtherRooms` | perda de treino |
+|---|---|---|---|---|
+| $0$ | $`{python} sci(mu5[0])`$ / $`{python} sci(mu5[4])`$ | $`{python} sci(cond_A5)`$ | não únicos | $`{python} brl(L_along[0])`$ |
+| $1$ | $`{python} brl(ridge[1.0]['ev'][0],2)`$ / $`{python} sci(ridge[1.0]['ev'][4])`$ | $`{python} sci(ridge[1.0]['cond'])`$ | $`{python} brl(ridge[1.0]['beta'][2],4)`$, $`{python} brl(ridge[1.0]['beta'][3],4)`$, $`{python} brl(ridge[1.0]['beta'][4],4)`$ | $`{python} brl(ridge[1.0]['L_treino'])`$ |
+| $100$ | $`{python} brl(ridge[100.0]['ev'][0],2)`$ / $`{python} sci(ridge[100.0]['ev'][4])`$ | $`{python} sci(ridge[100.0]['cond'])`$ | $`{python} brl(ridge[100.0]['beta'][2],4)`$, $`{python} brl(ridge[100.0]['beta'][3],4)`$, $`{python} brl(ridge[100.0]['beta'][4],4)`$ | $`{python} brl(ridge[100.0]['L_treino'])`$ |
+:::
+
+::: {.fragment}
+- Menor autovalor: de $0$ para $\approx\lambda$, como previsto.
+- Um só vetor de coeficientes: entre os que empatavam, a penalidade escolhe o de menor $\|\boldsymbol\beta\|^2$.
+- A perda de treino **sobe** com $\lambda$: a unicidade vem de um critério **fora** dos dados. Se ele ajuda a prever casas novas é assunto de Aprendizado Supervisionado.
+:::
+
+:::
+
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+n_hat = n_vec / np.linalg.norm(n_vec)
+ts = np.linspace(-3, 3, 201)
+fig, ax = plt.subplots(figsize=(6.4, 4.0))
+base = [L5(beta5 + t * n_hat) for t in ts]
+ax.plot(ts, np.array(base) - L_along[0], color=COR_NEU, linewidth=2.4,
+        label="mínimos quadrados ($\\lambda=0$)")
+for lam, cor in zip(LAMS, [COR_A, COR_B, COR_C]):
+    b_lam = ridge[lam]["beta"]
+    Llam = lambda b: L5(b) + lam * b @ b
+    vals = np.array([Llam(b_lam + t * n_hat) for t in ts])
+    ax.plot(ts, vals - Llam(b_lam), color=cor, linewidth=2,
+            label=f"Ridge, $\\lambda={int(lam)}$")
+ax.set_xlabel(r"deslocamento ao longo de $\mathbf{n}$ (normalizado), a partir do minimizador")
+ax.set_ylabel("aumento da perda")
+ax.set_title("A Ridge dá curvatura $2\\lambda$ à direção plana")
+ax.set_ylim(-20, 400)
+ax.legend(fontsize=9, loc="upper center")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+## Pausa Ativa — O Que a Ridge Escolhe
+
+::: {.callout-tip}
+## A Ridge "fecha" o vale plano. Isso significa que ela descobre qual combinação de `AveRooms`, `AveBedrms` e `AveOtherRooms` é a verdadeira?
+
+Pense no critério que a penalidade usa para desempatar os
+$\boldsymbol\beta^\star+t\mathbf{n}$, e se esse critério tem algo a ver
+com casas.
+:::
+
+::: {.callout-tip}
+## Ridge, autovalores e unicidade
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Os autovetores de $X^TX+\lambda I$ são os mesmos de $X^TX$.
+- □ Com $\lambda>0$, a perda Ridge tem minimizador único mesmo quando
+  $X$ tem mais colunas que linhas ($d>N$), como num modelo de texto com
+  milhares de palavras e poucas centenas de documentos.
+- □ Aumentar $\lambda$ sempre diminui a perda de treino
+  $\|X\boldsymbol\beta_\lambda-\mathbf{y}\|^2$.
+- □ Trocar a penalidade $\lambda\|\boldsymbol\beta\|^2$ por
+  $\lambda\|\boldsymbol\beta\|_1$ preserva a garantia de Hessiana
+  definida positiva em todo ponto.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Que a Ridge Escolhe — Resposta
+
+::: {.callout-tip}
+## Ridge, autovalores e unicidade — Resposta
+
+- ✔ $(X^TX+\lambda I)\mathbf{u}=(\mu+\lambda)\mathbf{u}$: mesmos autovetores, autovalores deslocados.
+- ✔ Com $d>N$, $X^TX$ tem posto no máximo $N<d$ e é singular, mas $X^TX+\lambda I$ tem autovalores $\ge\lambda>0$.
+- ✗ Ela **aumenta** (ou mantém): a Ridge troca ajuste de treino por norma menor, como na tabela.
+- ✗ $|\beta_j|$ não é duas vezes diferenciável em $0$ e, onde é, tem segunda derivada nula: a penalidade $L_1$ não acrescenta curvatura.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não. Os dados não distinguem os $\boldsymbol\beta^\star+t\mathbf{n}$: todos dão as mesmas predições. A Ridge desempata com um critério **nosso**, o de menor $\|\boldsymbol\beta\|^2$, que tem a ver com estabilidade numérica e com evitar coeficientes enormes, não com a "verdade" sobre quartos. A convexidade estrita garante que o problema tem uma resposta, não que a resposta tem significado causal.
+:::
+
+:::
+
+# Fechamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## Retomando as Quatro Perguntas
+
+1. **O que é convexidade, e por que ela transforma gradiente nulo em
+   mínimo global?** Uma função é convexa quando a corda entre dois
+   pontos do gráfico fica acima dele. Para funções diferenciáveis, isso
+   equivale à tangente nunca superestimar a função. Com gradiente nulo,
+   a tangente é horizontal, e a cota vira $f(\mathbf{y})\ge f(\mathbf{x}^\star)$
+   para todo $\mathbf{y}$.
+2. **Como medir curvatura em várias variáveis?** Pela Hessiana,
+   simétrica: $\mathbf{v}^T\nabla^2f\,\mathbf{v}$ é a curvatura na
+   direção $\mathbf{v}$, e seus autovalores são as curvaturas extremas.
+   Hessiana semidefinida positiva em todo ponto equivale a convexidade.
+3. **A perda da regressão linear é convexa?** Sempre: a Hessiana é
+   $2X^TX$ e a curvatura é $2\|X\mathbf{v}\|^2\ge0$. O minimizador é
+   único se, e somente se, $X$ tem posto coluna completo. Senão, os
+   minimizadores formam $\boldsymbol\beta^\star+\mathcal{N}(X)$, como
+   com `AveOtherRooms`.
+4. **Por que a Ridge garante minimizador único?** A penalidade soma
+   $2\lambda I$ à Hessiana, desloca todos os autovalores em $\lambda$ e
+   torna a perda estritamente convexa; $X^TX+\lambda I$ é invertível, o
+   que dá a existência. O desempate é um critério nosso, não dos dados.
+
+## O Que Fica em Aberto
+
+- **Perdas não convexas.** Numa rede com camadas ocultas, a Hessiana
+  depende dos pesos e pode ser indefinida: há selas e vales distintos,
+  e nenhum resultado desta aula se aplica ao problema inteiro.
+- **O custo de resolver.** Esta aula garantiu **que** existe um único
+  mínimo. Ela não disse como chegar lá quando resolver
+  $(X^TX+\lambda I)\boldsymbol\beta=X^T\mathbf{y}$ diretamente é caro
+  demais, nem quanto a tigela alongada do problema-fio
+  ($\text{cond}\approx`{python} brl(cond_A,1)`$) atrapalha um método
+  iterativo.
+
+## Ponte para a Aula 8
+
+A Aula 8 constrói o método iterativo mais simples: dar passos na direção
+oposta ao gradiente (a direção de maior descida, da Aula 6). A convexidade
+desta aula garante que, se o método chegar a um ponto de gradiente nulo,
+chegou ao mínimo global. A Hessiana vai reaparecer para dizer **com que
+tamanho de passo** e **em quantos passos**: seus autovalores extremos
+controlam a velocidade, e o número de condição mede o quanto o caminho
+ziguezagueia numa tigela alongada.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Retomando as Quatro Perguntas
+
+::: {.fragment}
+1. **Convexidade:** corda acima do gráfico $\iff$ tangente nunca superestima; gradiente nulo $\Rightarrow f(\mathbf{y})\ge f(\mathbf{x}^\star)$ para todo $\mathbf{y}$.
+:::
+
+::: {.fragment}
+2. **Curvatura:** Hessiana simétrica; $\mathbf{v}^T\nabla^2f\,\mathbf{v}$ = curvatura em $\mathbf{v}$; $\nabla^2f\succeq0$ em todo ponto $\iff$ convexa.
+:::
+
+::: {.fragment}
+3. **Regressão linear:** Hessiana $2X^TX$, curvatura $2\|X\mathbf{v}\|^2\ge0$ — sempre convexa; minimizador único $\iff$ posto coluna completo; senão, $\boldsymbol\beta^\star+\mathcal{N}(X)$.
+:::
+
+::: {.fragment}
+4. **Ridge:** $+2\lambda I$ na Hessiana, autovalores $+\lambda$, estritamente convexa e $X^TX+\lambda I$ invertível: existe e é único. O desempate é critério nosso.
+:::
+
+## O Que Fica em Aberto e Ponte para a Aula 8
+
+::: {.fragment}
+- **Não convexas:** em redes com camadas ocultas a Hessiana depende dos pesos e pode ser indefinida — selas e vales distintos.
+- **Como chegar lá:** garantimos que o mínimo é único, não como alcançá-lo quando resolver o sistema é caro, nem o efeito de $\text{cond}\approx`{python} brl(cond_A,1)`$ num método iterativo.
+:::
+
+::: {.fragment .callout-tip icon=false}
+**Aula 8 — descida do gradiente:** passos contra o gradiente (Aula 6). A convexidade garante que gradiente nulo é mínimo global; os autovalores da Hessiana dizem **que passo** usar e **quantos** passos serão necessários — e o número de condição mede o ziguezague numa tigela alongada.
+:::
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+
+:::

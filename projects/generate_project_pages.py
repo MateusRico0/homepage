@@ -107,7 +107,12 @@ def update_project_related_publications(path: Path, has_publications: bool) -> N
         item = (
             f"  {RELATED_PUBS_LISTING_START}\n"
             "  - id: related-publications\n"
-            f'    contents: "pubs-by-project/{slug}/*.qmd"\n'
+            # Dois globs: o primeiro resolve a partir de projects/<slug>.qmd; o segundo
+            # a partir do symlink em projects/<username>/<slug>.qmd (Quarto resolve
+            # caminhos relativos à pasta do symlink, não do arquivo original).
+            "    contents:\n"
+            f'      - "pubs-by-project/{slug}/*.qmd"\n'
+            f'      - "../pubs-by-project/{slug}/*.qmd"\n'
             "    type: default\n"
             '    sort: "date desc"\n'
             "    fields: [title, description]\n"

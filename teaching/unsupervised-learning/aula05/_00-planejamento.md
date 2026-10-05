@@ -1,192 +1,89 @@
 ## Resumo — Aula 5
 
-Esta aula é uma reescrita completa (substitui a versão anterior, focada
-em BIC/aproximação de Laplace/prova formal de que o EM é subida de
-coordenadas no ELBO). O novo eixo: como escolher a **estrutura** de um
-modelo não supervisionado (número de componentes $K$, hiperparâmetros
-de uma priori, $\epsilon$/`min_samples` de vizinhança) quando não existe
-rótulo de gabarito para comparar contra. Parte da Aula 4 (EM clássico,
-GMM) e mostra que maximizar a verossimilhança de treino sempre prefere
-$K=N$; introduz a injeção de uma **priori** sobre os parâmetros,
-chegando a uma forma do ELBO com $\theta$ **dentro** do tratamento
-variacional (não como ponto fixo) — a versão corrigida, com
-propriedade de Occam de verdade, da ideia de "ELBO como critério de
-seleção" que a versão anterior desta aula tratava de forma incompleta.
-A partir daí, a aula desloca o problema (trocamos $K$ por
-hiperparâmetros de priori — mesmo tipo de escolha, sem gabarito) e
-desenvolve três formas de **validação empírica** com conjunto de
-validação, já que não há métrica de erro supervisionada disponível:
-(a) estabilidade/coesão topológica (Silhueta, Davies-Bouldin) para
-clusterização "dura"; (b) verossimilhança preditiva/ELBO em validação
-para modelos probabilísticos; (c) *Posterior Predictive Checks* (PPC)
-como teste definitivo de adequação do modelo generativo, além de
-qualquer métrica escalar. Pré-requisitos: EM e GMM (Aula 4), a
-definição básica de KL e da decomposição
-$\ln p(\mathbf{X})=\mathcal{L}(q)+\mathrm{KL}(q\|p)$ (já construída na
-versão anterior desta própria aula, reaproveitada aqui em versão mais
-enxuta).
+Versão nova da Aula 5 (a Aula 5 original é mantida intacta — esta é uma
+segunda versão, mais ambiciosa, do mesmo tema). Cobre seleção Bayesiana
+de modelos como princípio geral (evidência, Navalha de Occam orgânica),
+o GMM Bayesiano completo (priori Normal-Wishart em $\mu,\Sigma$ **e**
+Dirichlet em $\pi$ — diferente da Aula 5 original, que só dava priori a
+$\pi$), a decomposição do ELBO variacional resultante, validação
+empírica via verossimilhança preditiva held-out (ELPD) com discussão
+explícita do viés de otimismo/*double-dipping*, métricas geométricas
+unificadas (Silhueta + Índice de Dunn, com adaptação de Silhueta via
+$k$-ésimo vizinho para DBSCAN), e Posterior Predictive Checks
+**quantitativos** (projeções aleatórias + teste KS, MMD com kernel
+RBF) — versão mais rigorosa do PPC qualitativo da Aula 5 original.
 
-**Estratégia Pedagógica:** Estratégia A (*Outside-In*) — o fio da aula
-é um framework de **decisão prática** (como escolher e validar um
-modelo/hiperparâmetro sem rótulo), não uma nova linguagem matemática
-autocontida; a lógica é prático → necessidade teórica → formalização →
-síntese, com a validação empírica (Blocos 3–5) claramente mais próxima
-de "modelo mental aplicado" do que de fundamentação matemática pura.
+**Pré-requisitos:** EM clássico e GMM (Aula 4); a própria Aula 5
+original não é pré-requisito (esta aula é autocontida e redefine KL/
+ELBO do zero).
 
-## Plano de aula — Aula 5 (carga horária: ~115 min)
+**Continuidade de dataset:** mesmo problema-fio das Aulas 3–5 —
+Breast Cancer Wisconsin, atributos `radius_worst` e
+`concave points_worst`, padronizados. Contraexemplo de forma: duas
+"luas" (`make_moons`), mesmo de antes.
 
-1. **Abertura — Revisão e Introdução** (~12 min) — revisão cuidadosa do
-   Algoritmo EM e do GMM (Aula 4): variável latente $z_n$, responsabilidade
-   $\gamma(z_{nk})$ via Bayes, Passo E/Passo M, por que não tem solução
-   fechada. Reencena o teste que fecha a versão anterior desta aula: GMM
-   ajustado para $K=1,\dots,10$ no mesmo dataset (Breast Cancer
-   Wisconsin, `radius_worst`/`concave points_worst`), log-verossimilhança
-   de treino nunca cai — se o critério fosse maximizar isso, a resposta
-   seria sempre "use o maior $K$", inútil na prática. Ideia central: a
-   pergunta certa não é "que $\theta$ explica melhor os dados", é "que
-   **estrutura** de modelo é razoável à luz dos dados — e como validar
-   essa escolha sem rótulo?". Roteiro explícito (as 4 perguntas do
-   roteiro do usuário, adaptadas): (1) como uma priori sobre $\theta$
-   conserta o problema de $K=N$? (2) trocar $K$ por hiperparâmetros de
-   priori elimina a subjetividade, ou só a desloca? (3) sem rótulo, como
-   validar clusterização "dura" (K-Means/DBSCAN)? (4) e modelos
-   probabilísticos — e existe um teste mais definitivo que qualquer
-   métrica escalar?
+**Estratégia Pedagógica:** Estratégia A (*Outside-In*) — parte do
+limite prático do EM clássico (Aula 4) e sobe ao formalismo Bayesiano,
+depois volta à prática (validação empírica, PPC).
 
-2. **Intuição** (~8 min) — sem equações: se penalizarmos $\theta$ com
-   uma priori, a "distância" entre a priori e a posterior aprendida vira
-   uma penalidade natural de complexidade (quanto mais o modelo precisa
-   se afastar da priori para explicar os dados, mais caro); esse mesmo
-   princípio de "pagar para se afastar de uma crença inicial" reaparece,
-   de formas diferentes, em todo hiperparâmetro de estrutura (um $K$ de
-   k-means, um $\epsilon$ de DBSCAN); quando não dá para calcular isso
-   analiticamente, validamos empiricamente, olhando o comportamento do
-   modelo em dados nunca usados no ajuste — o panorama inteiro da aula.
+## Plano de aula — Aula 5 (carga horária: ~135min, aula estendida)
 
-3. **Bloco 1 — Do EM Clássico ao ELBO (EM + Priori)** (~20 min) —
-   desenvolvimento *principled*: (i) reaproveita a decomposição geral
-   $\ln p(\mathbf{X})=\mathcal{L}(q)+\mathrm{KL}(q\|p)$ e a
-   não-negatividade do KL, já demonstradas na versão anterior desta
-   aula (reaproveitar a prova via Jensen, de forma mais enxuta — não
-   precisa redemonstrar do zero, só recordar o resultado com 1-2 frases
-   do porquê, no espírito da regra de Revisão); (ii) mostra que manter
-   $\theta$ **fora** de $\mathbf{Z}$ (como a Aula 4 fez) devolve o EM
-   comum, cujo ELBO no ótimo colapsa a $\ln p(\mathbf{X}\mid
-   \theta_{\mathrm{ML}})$ — sem penalidade de complexidade nenhuma,
-   mesma falha do Bloco de Abertura; (iii) constrói a alternativa: dar
-   uma priori $p(\theta)$ a $\theta$ e tratá-lo também como variável do
-   tratamento variacional, $q(\mathbf{Z},\theta)\approx q(\mathbf{Z})
-   q(\theta)$, chegando a
-   $$\mathrm{ELBO} = \mathbb{E}_q[\ln p(\mathbf{X}\mid\mathbf{Z},\theta)]
-   - \mathrm{KL}\big(q(\mathbf{Z},\theta)\,\|\,p(\mathbf{Z},\theta)\big),$$
-   com o termo de ajuste tentando "decorar" os dados e o KL agindo como
-   Navalha de Occam. Demonstração numérica: `BayesianGaussianMixture`
-   do scikit-learn (Dirichlet Process/priori de Dirichlet truncada) no
-   mesmo dataset, mostrando componentes "sobrando" terem seu peso
-   empurrado a quase zero automaticamente — a poda automática do PRML
-   §10.2, conectando de volta à correção feita informalmente no
-   documento `_nota-variacional-e-selecao-de-modelos.md` desta sessão.
-
-4. **Bloco 2 — O Dilema dos Hiperparâmetros** (~12 min) — a troca de
-   problemas: sair de "escolher $K$" para "calibrar hiperparâmetros de
-   priori" desloca a subjetividade, não a remove. Exemplos concretos:
-   $\alpha_0$ da priori de Dirichlet (Bloco 1), $K$ do K-Means (sem
-   priori nenhuma — parâmetro de estrutura "nu"), $\epsilon$/`min_samples`
-   do DBSCAN (já visto na Aula 3, via HDBSCAN — reconectar brevemente).
-   Fecha nomeando o problema central que os Blocos 3–5 resolvem: como
-   calibrar e validar essas escolhas sem métrica supervisionada?
-
-5. **Bloco 3 — Validação Empírica em Clusterização "Dura"** (~18 min) —
-   redefine "validação" no não supervisionado: não é acerto contra
-   gabarito, é estabilidade topológica/capacidade de generalização.
-   Métricas intrínsecas calculadas no conjunto de **validação** (nunca
-   visto no ajuste) a partir das regras/centroides aprendidos no treino:
-   Coeficiente de Silhueta (Rousseeuw, 1987) e Índice de Davies-Bouldin
-   (Davies & Bouldin, 1979) — definição de cada uma, com fórmula.
-   Técnica de perturbação/consistência: ajustar no treino, aplicar na
-   validação, verificar se a estrutura se mantém — estruturas de
-   sobreajuste desaparecem em dados novos. Demonstração: K-Means com
-   vários $K$ no dataset-fio, treino/validação, Silhueta e
-   Davies-Bouldin calculados na validação.
-
-6. **Bloco 4 — Validação por Verossimilhança (Modelos Probabilísticos)**
-   (~18 min) — para GMM (e, por extensão, VAEs — ponte futura), a
-   métrica migra de topologia para probabilidade direta: congelar
-   $q(\theta)$/$\theta$ aprendido no treino, avaliar log-verossimilhança
-   preditiva (ou o próprio ELBO) nas amostras de validação. Diagnóstico
-   de sub/sobreajuste: modelo complexo demais concentra densidade quase
-   infinita nos pontos de treino, mas a probabilidade de validação
-   despenca — permite comparar empiricamente, por exemplo, $\alpha_0=0{,}1$
-   vs. $\alpha_0=1{,}0$ na priori de Dirichlet do Bloco 1. Demonstração:
-   curva de log-verossimilhança de treino vs. validação por $K$/por
-   $\alpha_0$, mostrando a divergência entre as duas curvas quando o
-   modelo generaliza mal.
-
-7. **Bloco 5 — A Prova Final: Posterior Predictive Checks (PPC)** (~15
-   min) — limitação de números únicos (ELBO, Silhueta): podem esconder
-   falha estrutural (o modelo pode ter um bom escore e ainda assim não
-   ter entendido o processo gerador). PPC: amostrar parâmetros da
-   posterior aprendida, gerar dados sintéticos $\mathbf{X}_{\text{sim}}$,
-   comparar estatísticas/formato contra $\mathbf{X}_{\text{real}}$
-   (Gelman & Rubin, 1996 — conceito, sem trecho literal de um PDF desta
-   disciplina). Demonstração: amostrar do GMM ajustado no dataset-fio,
-   sobrepor a dispersão sintética à real.
-
-8. **Fechamento — Síntese e Ponte para a Aula 6** (~12 min) — retomar as
-   4 perguntas do roteiro (uma frase cada). Síntese: seleção de modelo
-   não supervisionado é sempre uma combinação de penalidade analítica
-   (ELBO/BIC) **e** validação empírica — nenhuma sozinha basta. Ponte
-   para a Aula 6: a Parte 2 do curso troca a variável latente categórica
-   (Aulas 3–5) por uma contínua (PCA/PPCA) — a mesma pergunta de
-   validação ("este hiperparâmetro de estrutura — aqui, a dimensão
-   latente — é razoável?") reaparece lá, e o ELBO volta a aparecer de
-   forma central na Aula 7 (VAE), agora sem posterior de forma fechada.
+1. **Revisão e Introdução** (~12 min) — EM clássico não penaliza
+   complexidade; log-verossimilhança de treino nunca cai em $K$;
+   pergunta central de seleção de modelos.
+2. **Bloco 1 — Seleção Bayesiana de Modelos** (~20 min) — $p(\mathcal
+   M_m\mid\mathbf X)\propto p(\mathcal M_m)p(\mathbf X\mid\mathcal
+   M_m)$; a evidência como integral intratável que já embute Occam;
+   KL, decomposição geral, ELBO como *proxy* tratável.
+3. **Bloco 2 — GMM Bayesiano: a Mecânica das Prioris** (~20 min) —
+   $\mathbf H=(\mathbf Z,\pi,\mu,\Sigma)$ inteiro dentro do tratamento
+   variacional; Normal-Wishart barra o colapso de $\Sigma_k$; Dirichlet
+   com $\alpha_0$ fixo neutro poda componentes via comparação de ELBO
+   entre $K$'s (não mais variando $\alpha_0$, como na Aula 5 antiga).
+4. **Bloco 3 — Dissecando o ELBO Variacional** (~15 min) — decomposição
+   ajuste−KL especializada a este $\mathbf H$; ELBO empírico sobe e
+   desce em função de $K$ (ao contrário da verossimilhança crua).
+5. **Bloco 4 — Teoria Preditiva e Validação Empírica** (~30 min) — ELPD
+   como alvo estatístico verdadeiro; viés de treino (*double-dipping*);
+   estimador Monte Carlo via conjunto de validação; três razões para o
+   ELBO de treino não bastar (folga variacional, má especificação,
+   comparação universal); Silhueta + Dunn (DBSCAN adaptado via
+   $k$-NN) na validação.
+6. **Bloco 5 — PPC Quantitativo** (~25 min) — ponto cego dos escalares;
+   projeções aleatórias + KS; MMD com kernel RBF (e o papel da largura
+   de banda); contraexemplo das duas luas, quantificado.
+7. **Fechamento** (~8 min) — retomada das perguntas; ponte para a
+   Aula 6 (o ELBO reaparece na PPCA/VAE).
 
 ## Fontes usadas — Aula 5
 
-### Fonte 1: PRML, §9.4 (decomposição $\ln p(\mathbf{X})=\mathcal{L}(q)+\mathrm{KL}(q\|p)$) e §1.6.1 (desigualdade de Gibbs/KL$\ge0$)
-**Uso pretendido:** recordar (não redemonstrar do zero) a decomposição
-geral e a não-negatividade do KL, base do Bloco 1. Reaproveita a
-demonstração já aprovada na versão anterior desta aula — trecho literal
-a confirmar contra o PDF na Etapa 3, se for citar de novo.
+Disciplina sem `_fontes/` PDF específico para este conteúdo (não há um
+capítulo único do PRML fisicamente disponível localmente cobrindo
+GMM Bayesiano completo — §10.1–10.2 é a referência, citada por número
+de seção/equação a partir do conhecimento consolidado do livro, não de
+um trecho literal copiado de PDF). Citações adicionais, fora do padrão
+usual desta disciplina (mesmo desvio já registrado na Aula 5 original):
 
-### Fonte 2: PRML, §10.1–10.2 (Inferência Variacional; GMM Variacional com priori de Dirichlet)
-**Uso pretendido:** base formal do Bloco 1 (ELBO com $\theta$ dentro do
-tratamento variacional) e da demonstração de poda automática de
-componentes via `BayesianGaussianMixture`, citada no Bloco 1/2.
-**Trecho a extrair na Etapa 3** (ainda não lido nesta etapa de
-planejamento — sinalizar se a citação literal mudar o enunciado
-proposto acima).
+- Bishop, C. M. (2006). *Pattern Recognition and Machine Learning*.
+  Springer. §3.4 (evidência/Occam), §10.1 (Variational Bayes geral),
+  §10.2 (GMM Bayesiano — Dirichlet + Normal-Wishart, atualizações
+  variacionais).
+- Dunn, J. C. (1974). "Well-Separated Clusters and Optimal Fuzzy
+  Partitions." *Journal of Cybernetics*, 4(1), 95–104.
+- Gretton, A., Borgwardt, K. M., Rasmussen, C. J., Schölkopf, B., &
+  Smola, A. (2012). "A Kernel Two-Sample Test." *Journal of Machine
+  Learning Research*, 13, 723–773.
+- Vehtari, A., & Ojanen, J. (2012). "A Survey of Bayesian Predictive
+  Methods for Model Assessment, Selection and Comparison." *Statistics
+  Surveys*, 6, 142–228.
+- Massey, F. J. (1951). "The Kolmogorov-Smirnov Test for Goodness of
+  Fit." *Journal of the American Statistical Association*, 46(253),
+  68–78.
+- Rousseeuw, P. J. (1987) e Gelman, A. & Rubin, D. B. (1996) —
+  reaproveitadas da Aula 5 original (Silhueta e PPC qualitativo).
 
-### Fonte 3: Rousseeuw, P.J. (1987), "Silhouettes: a graphical aid to the interpretation and validation of cluster analysis" — fora dos PDFs de `_fontes/`
-**Uso pretendido:** definição formal do Coeficiente de Silhueta, Bloco 3.
-Citado por nome/ano, sem trecho literal (artigo não disponível em
-`_fontes/`) — a fórmula em si é reproduzida diretamente, é matemática
-padrão, não uma citação de prosa.
-
-### Fonte 4: Davies, D.L. & Bouldin, D.W. (1979), "A Cluster Separation Measure" — fora dos PDFs de `_fontes/`
-**Uso pretendido:** definição formal do Índice de Davies-Bouldin, Bloco 3.
-Mesmo tratamento da Fonte 3 (fórmula direta, sem trecho literal).
-
-### Fonte 5: Gelman, A. & Rubin, D.B. (1996), conceito de *Posterior Predictive Check* — fora dos PDFs de `_fontes/`
-**Uso pretendido:** fundamentação conceitual do Bloco 5. Citado por
-nome/ano, explicado com palavras próprias (não há PDF desta obra em
-`_fontes/` para extrair trecho literal).
-
-**Observação sobre fontes 3–5:** diferente das aulas anteriores desta
-disciplina (que citam PRML/DLFC/ESL quase exclusivamente), estas três
-técnicas não constam nos três livros-texto do curso — são citadas por
-nome/ano/artigo original, com a fórmula/ideia reproduzida diretamente
-em vez de um trecho de prosa traduzido. Sinalizando isso explicitamente
-para aprovação, já que foge um pouco do padrão de citação já
-estabelecido nas Aulas 1–4.
-
----
-
-**Peça explícita de aprovação:** este plano risca e substitui o
-`_00-planejamento.md` anterior (aprovado em 2026-09-15) — a aula final
-também vai substituir o `index.qmd`, `exercicios.qmd` e `soluções.qmd`
-atuais por completo. Pode seguir para a Etapa 3 (montar `index.qmd`
-completo) com esta estrutura, ou prefere ajustar algo no plano antes
-(tempos por bloco, dataset, as fontes 3–5 fora do padrão, ou a ordem dos
-blocos)?
+Todos os números apresentados na aula (log-verossimilhanças, ELBOs,
+Silhueta/Dunn, estatísticas KS/MMD) foram computados diretamente do
+Breast Cancer Wisconsin (mesmos 2 atributos padronizados das Aulas
+3–5) e do dataset sintético de duas luas, nunca fabricados — ver
+`index.qmd` para o código completo.

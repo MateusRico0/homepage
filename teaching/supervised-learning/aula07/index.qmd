@@ -1,0 +1,882 @@
+---
+title: "Regularização e Estimativa MAP Bayesiana"
+subtitle: "Aula 7 — Do Controle de Complexidade à Incerteza dos Parâmetros"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-09-20"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    fig-width: 6
+    fig-height: 3.5
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+jupyter: homepage
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from sklearn.linear_model import Ridge, Lasso, LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()  # evita o aviso "unauthenticated requests"
+from datasets import disable_progress_bar
+disable_progress_bar()  # evita a barra de progresso do download
+from datasets import load_dataset
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({
+    "figure.dpi": 130,
+    "font.size": 11,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "legend.frameon": True,
+    "legend.framealpha": 0.9,
+})
+
+rng = np.random.default_rng(20260920)
+
+# --- Paleta visual consistente com o curso (mesma da Aula 6) --------
+COR_AZUL    = "#1B365D"  # Azul institucional
+COR_LARANJA = "#D9531E"  # Laranja de contraste
+COR_VERM    = "#C0392B"  # Vermelho de erro/destaque
+COR_VERDE   = "#27AE60"  # Verde de acerto
+COR_CINZA   = "#7F8C8D"  # Cinza de apoio
+
+# --- Dataset-fio: California Housing (regressão) --------------------
+# Colunas reais do dataset (confirmadas por load_dataset): MedInc,
+# HouseAge, AveRooms, AveBedrms, Population, AveOccup, Latitude,
+# Longitude, MedHouseVal — o alvo é MedHouseVal, não "target".
+_ch = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+_ch = _ch.sample(n=1000, random_state=2026, replace=False)
+X_ch = _ch.drop(columns=["MedHouseVal"])
+y_ch = _ch["MedHouseVal"]
+
+# Escalonamento é CRÍTICO para regularização: a penalidade trata todos
+# os coeficientes de forma simétrica, então atributos em escalas
+# diferentes (ex.: Population na casa dos milhares, AveRooms de 1 a 10)
+# seriam penalizados de forma desigual sem padronização.
+scaler = StandardScaler()
+X_ch_scaled = scaler.fit_transform(X_ch)
+
+Xtr, Xte, ytr, yte = train_test_split(
+    X_ch_scaled, y_ch, test_size=0.2, random_state=2026
+)
+```
+
+# Revisão e Introdução
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Na Aula 6, avançamos da regressão contínua para a classificação paramétrica: sob a hipótese de que $Y \mid \mathbf{x} \sim \text{Bernoulli}(\mu(\mathbf{x}))$ com $\mu(\mathbf{x}) = \sigma(\mathbf{w}^T\mathbf{x})$, derivamos a perda de Entropia Cruzada a partir do princípio da Máxima Verossimilhança e mostramos que, apesar de não haver solução fechada (o parâmetro $\mathbf{w}$ fica "preso" dentro da sigmoide transcendental), a estrita convexidade da perda garante um único mínimo global, alcançável com convergência quadrática pelo algoritmo IRLS (Newton-Raphson).
+
+Fechamos aquela aula, porém, com uma patologia severa: quando os dados de treino são **linearmente separáveis**, não existe mínimo finito. Multiplicar o vetor separador $\mathbf{w}^*$ por um escalar $k \to +\infty$ empurra todas as probabilidades previstas para $0$ ou $1$, e a perda de entropia cruzada cai para zero **no limite**, nunca num ponto alcançável — o otimizador persegue $\|\mathbf{w}\| \to \infty$ para sempre, a Hessiana satura ($R \to \mathbf{0}$) e o modelo perde toda calibração probabilística. Sinalizamos ali que a cura seria abandonar a verossimilhança pura em favor de uma penalidade sobre a magnitude dos pesos — e é exatamente esse abandono controlado que formalizamos hoje.
+
+A ideia central desta aula é dupla. Primeiro: regularizar significa **expandir o objetivo de otimização**, adicionando um termo que penaliza parâmetros de magnitude excessiva — não é um "truque de engenharia", é uma correção estrutural para um problema estrutural (superfície de verossimilhança achatada ou ilimitada em certas direções). Segundo, e mais profundo: essa penalidade **não é arbitrária**. Sob a ótica Bayesiana, tratar $\mathbf{w}$ como uma variável aleatória com uma distribuição a priori conhecida, e maximizar a probabilidade a posteriori (estimativa **MAP** — *Maximum A Posteriori*) em vez da verossimilhança pura, produz exatamente os mesmos objetivos de Ridge e Lasso — a penalidade é, literalmente, o logaritmo de uma crença prévia sobre os parâmetros.
+
+Hoje respondemos a quatro perguntas:
+
+1. **Por que o MLE produz coeficientes instáveis ou infinitos** quando há multicolinearidade ou separação perfeita nos dados — e como uma penalidade de complexidade resolve isso analiticamente?
+2. **Qual a diferença estrutural entre a penalidade $L_2$ (Ridge) e $L_1$ (Lasso)**, e por que só uma delas produz coeficientes exatamente zero?
+3. **Por que regularizar é matematicamente equivalente a assumir uma distribuição a priori** sobre os parâmetros — o que é, formalmente, a estimativa MAP?
+4. **Qual prior específica corresponde a Ridge e qual corresponde a Lasso**, e por que a forma geométrica de cada prior explica a diferença de esparsidade?
+
+**Dataset-fio de hoje:** California Housing (`gvlassis/california_housing`), o mesmo já usado em `optimization-linear-algebra` — um problema real de regressão com 8 atributos em escalas muito diferentes (de `Population`, na casa dos milhares, a `AveRooms`, tipicamente entre 1 e 10) e correlações substanciais entre alguns pares (por exemplo, `AveRooms` e `AveBedrms`). É um cenário realista, não sintético, para observar por que a regularização é necessária e como Ridge e Lasso reagem de forma diferente à mesma multicolinearidade.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Revisão da Aula 6: A Patologia que Ficou em Aberto
+
+- **Regressão Logística:** $\mu(\mathbf{x}) = \sigma(\mathbf{w}^T\mathbf{x})$, ajustada por Máxima Verossimilhança sob Bernoulli $\to$ perda de Entropia Cruzada, resolvida sem solução fechada pelo IRLS (convergência quadrática).
+
+. . .
+
+- **A patologia da separação perfeita:** se os dados são linearmente separáveis, $\|\mathbf{w}\| \to \infty$ minimiza a perda — mínimo **inatingível**, Hessiana satura, modelo perde calibração.
+- **O que ficou sinalizado:** a cura é abandonar a verossimilhança pura em favor de uma penalidade sobre $\|\mathbf{w}\|$.
+
+## A Ideia Central de Hoje
+
+- **Regularizar = expandir o objetivo:** um termo de penalidade corrige uma superfície de verossimilhança achatada/ilimitada — não é um ajuste ad-hoc.
+
+. . .
+
+- **A penalidade não é arbitrária:** sob a ótica Bayesiana, tratar $\mathbf{w}$ como variável aleatória com uma *prior* e maximizar a posterior (estimativa **MAP**) produz exatamente Ridge e Lasso.
+
+## Quatro Perguntas de Hoje
+
+1. Por que o MLE produz coeficientes instáveis com multicolinearidade/separação perfeita — e como uma penalidade resolve isso?
+. . .
+2. Qual a diferença estrutural entre $L_2$ (Ridge) e $L_1$ (Lasso) — por que só uma zera coeficientes?
+. . .
+3. Por que regularizar equivale a assumir uma *prior* sobre os parâmetros (MAP)?
+. . .
+4. Qual *prior* corresponde a Ridge, qual a Lasso, e por que a geometria de cada uma explica a esparsidade?
+
+:::
+
+# O Limite da Máxima Verossimilhança (MLE)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Em modelos lineares com ruído gaussiano (Aula 5), o estimador de Máxima Verossimilhança tem solução fechada pelas equações normais:
+$$\hat{\boldsymbol\beta}_{\text{MLE}} = \arg\min_{\boldsymbol\beta} \|\mathbf{y} - X\boldsymbol\beta\|^2 = (X^TX)^{-1}X^T\mathbf{y}$$
+
+Essa fórmula depende crucialmente da matriz $X^TX \in \mathbb{R}^{D\times D}$ ser invertível. Se $X$ tem colunas fortemente correlacionadas (**multicolinearidade**), $X^TX$ fica **quase singular**: seus autovalores mais próximos de zero fazem $(X^TX)^{-1}$ amplificar qualquer ruído presente nos dados de treino em coeficientes desproporcionalmente grandes. No caso limite de colunas exatamente colineares, $X^TX$ é exatamente singular e a solução deixa de ser única — existem infinitas combinações de $\boldsymbol\beta$ que produzem o mesmo ajuste.
+
+Isso é, estruturalmente, a mesma doença já vista na Aula 6 sob outra forma: na separação perfeita, a superfície de log-verossimilhança fica **ilimitada** em certas direções do espaço de parâmetros; na multicolinearidade, ela fica **achatada** (quase plana) nessas direções. Em ambos os casos, o MLE — que só enxerga o ajuste aos dados de treino — não tem nenhuma força que o traga de volta para valores razoáveis de $\boldsymbol\beta$. A figura abaixo simula esse cenário: duas colunas quase idênticas (correlação $\approx 0{,}99$) com efeito verdadeiro $2x_0+3x_1$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Limite da MLE: Multicolinearidade
+
+- **Solução fechada da Aula 5:** $\hat{\boldsymbol\beta}_{\text{MLE}} = (X^TX)^{-1}X^T\mathbf{y}$ — depende de $X^TX$ ser invertível.
+
+. . .
+
+- **Multicolinearidade:** colunas correlacionadas $\to$ $X^TX$ quase singular $\to$ $(X^TX)^{-1}$ amplifica ruído em coeficientes gigantescos. **Mesma problema da separação perfeita (Aula 6), mas em outra outra forma.**.
+- **Simulação:** efeito verdadeiro $2x_0+3x_1$, com $x_0\approx x_1$ (correlação $0{,}99$).
+
+. . .
+:::
+
+::: {.fig-resize style="width: 50%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+# Simulação de multicolinearidade
+n, p = 100, 5
+X_sim = rng.standard_normal((n, p))
+# Criar forte correlação entre as duas primeiras colunas
+X_sim[:, 1] = X_sim[:, 0] * 0.99 + rng.normal(0, 0.01, n)
+
+y_sim = 2 * X_sim[:, 0] + 3 * X_sim[:, 1] + rng.normal(0, 0.5, n)
+
+model = LinearRegression().fit(X_sim, y_sim)
+coefs = model.coef_
+
+fig, ax = plt.subplots(figsize=(6, 3.5))
+ax.bar(range(p), coefs, color=COR_AZUL)
+ax.set_xticks(range(p))
+ax.set_xticklabels([f"feat_{i}" for i in range(p)])
+ax.set_title("Coeficientes instáveis por multicolinearidade (MLE puro)")
+ax.set_ylabel(r"Valor de $\hat{\beta}_j$")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Observe: o MLE não recupera algo perto de $[2, 3, 0, 0, 0]$ — ele distribui (ou infla) os coeficientes de forma instável entre as duas colunas redundantes, porque qualquer combinação $\hat\beta_0 + \hat\beta_1 \approx 5$ ajusta o treino igualmente bem, e o ruído decide qual combinação específica "vence". Uma pequena perturbação nos dados de treino mudaria drasticamente esses coeficientes — o modelo tem **alta variância**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+. . .
+
+- **MLE:** não recupera $[2, 3, 0, 0, 0]$ — qualquer combinação com $\hat\beta_0+\hat\beta_1\approx 5$ ajusta igualmente bem; o ruído decide qual "vence". **Alta variância.**
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Pausa Ativa 1 — Multicolinearidade e a Matriz $X^TX$
+
+Considere um conjunto de dados com duas colunas de atributos $x_0$ e $x_1$ perfeitamente colineares, isto é, $x_1 = c \cdot x_0$ para alguma constante $c \ne 0$, e um efeito verdadeiro $y = 2x_0 + 3x_1 + \epsilon$.
+
+- □ Se $x_1 = c \cdot x_0$ exatamente, a matriz $X^TX$ (restrita a essas duas colunas) tem determinante exatamente igual a zero, o que torna $(X^TX)^{-1}$ indefinida e a solução de mínimos quadrados deixa de ser única.
+- □ Qualquer par $(\hat\beta_0, \hat\beta_1)$ que satisfaça $\hat\beta_0 + c\hat\beta_1 = 2 + 3c$ produz exatamente o mesmo vetor de previsões $\hat{y}$ sobre os dados de treino, tornando esses infinitos pares indistinguíveis do ponto de vista da soma de quadrados residuais.
+- □ Adicionar uma pequena penalidade $\lambda\|\boldsymbol\beta\|^2$ à função de custo, mesmo com $\lambda$ muito pequeno, torna a matriz $X^TX + \lambda I$ estritamente definida positiva, restaurando a unicidade da solução mesmo sob colinearidade perfeita.
+- □ O problema de multicolinearidade descrito aqui só pode ocorrer quando o número de atributos $D$ é maior que o número de observações $N$; se $N > D$, a matriz $X^TX$ é sempre invertível, independentemente das correlações entre colunas.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Pausa Ativa 1 — Colinearidade Perfeita e a Matriz $X^TX$
+
+Duas colunas $x_0, x_1$ com $x_1 = c\cdot x_0$, efeito verdadeiro $y = 2x_0+3x_1+\epsilon$.
+
+- □ Colinearidade perfeita torna $\det(X^TX) = 0$ (restrito a essas colunas), e $(X^TX)^{-1}$ fica indefinida.
+- □ Qualquer $(\hat\beta_0,\hat\beta_1)$ com $\hat\beta_0+c\hat\beta_1 = 2+3c$ produz o mesmo $\hat{y}$ no treino.
+- □ Mesmo um $\lambda$ pequeno em $X^TX+\lambda I$ restaura a definição positiva estrita, mesmo sob colinearidade perfeita.
+- □ O problema só ocorre se $D > N$; com $N > D$, $X^TX$ é sempre invertível.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Pausa Ativa 1 — Resolução
+
+- ✔ Colunas proporcionais são linearmente dependentes; a submatriz correspondente de $X^TX$ tem posto deficiente, determinante zero.
+- ✔ A soma de quadrados residuais depende só da combinação $\hat\beta_0 x_0 + \hat\beta_1 x_1 = (\hat\beta_0+c\hat\beta_1)x_0$; qualquer par que preserve essa soma ajusta igual.
+- ✔ $X^TX+\lambda I$ soma $\lambda$ a todo autovalor de $X^TX$ (incluindo os autovalores nulos por colinearidade); para qualquer $\lambda>0$, todos os autovalores ficam estritamente positivos.
+- ✗ Falso. Multicolinearidade é sobre a relação **entre colunas** de $X$, não sobre a razão $N/D$; mesmo com $N \gg D$, colunas correlacionadas deixam $X^TX$ mal condicionada (perto de singular), ainda que tecnicamente invertível.
+:::
+:::
+# Regularização Frequentista: Ridge e Lasso
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para controlar a instabilidade do Bloco anterior, expandimos a função de custo com um termo de penalidade sobre a magnitude dos coeficientes:
+$$J(\boldsymbol\beta) = \underbrace{\|\mathbf{y} - X\boldsymbol\beta\|^2}_{\text{Perda (MSE)}} + \underbrace{\lambda \cdot \Omega(\boldsymbol\beta)}_{\text{Penalidade}}, \qquad \lambda \ge 0$$
+
+O hiperparâmetro $\lambda$ controla o compromisso: $\lambda=0$ recupera o MLE puro (Bloco anterior); $\lambda \to \infty$ força $\boldsymbol\beta \to \mathbf{0}$. Existem duas formas principais de definir $\Omega(\boldsymbol\beta)$:
+
+1. **Ridge Regression ($L_2$):** $\Omega(\boldsymbol\beta) = \|\boldsymbol\beta\|_2^2 = \sum_j \beta_j^2$.
+2. **Lasso Regression ($L_1$):** $\Omega(\boldsymbol\beta) = \|\boldsymbol\beta\|_1 = \sum_j |\beta_j|$.
+
+Segundo Hastie, Tibshirani & Friedman (ESL, §3.4, pp. 63–67): a regressão Ridge "encolhe os coeficientes de regressão em direção a zero" pela penalidade $L_2$, enquanto a Lasso "realiza seleção de variáveis ao forçar alguns coeficientes a serem exatamente zero" — a diferença central que o resto do bloco explica.
+
+### Ridge tem solução fechada — e ela resolve o Bloco 1 diretamente
+
+Diferentemente de Lasso, Ridge admite solução analítica. Derivamos: igualando o gradiente de $J(\boldsymbol\beta) = \|\mathbf{y}-X\boldsymbol\beta\|^2 + \lambda\|\boldsymbol\beta\|^2$ a zero,
+$$\nabla J(\boldsymbol\beta) = -2X^T(\mathbf{y} - X\boldsymbol\beta) + 2\lambda\boldsymbol\beta = \mathbf{0}$$
+$$-X^T\mathbf{y} + X^TX\boldsymbol\beta + \lambda\boldsymbol\beta = \mathbf{0} \implies (X^TX + \lambda I)\boldsymbol\beta = X^T\mathbf{y}$$
+$$\hat{\boldsymbol\beta}_{\text{Ridge}} = (X^TX + \lambda I)^{-1}X^T\mathbf{y}$$
+
+Esta é exatamente a resposta prometida no Bloco 1 (Pausa Ativa 1): somar $\lambda I$ desloca **todo** autovalor de $X^TX$ para cima em $\lambda$, tornando $X^TX + \lambda I$ estritamente definida positiva — logo invertível — **mesmo sob colinearidade perfeita**. Ridge não é só uma penalidade heurística: é, literalmente, o remédio algébrico para a singularidade que quebrava o MLE.
+
+Já **Lasso não tem solução fechada** — $|\beta_j|$ não é diferenciável em $\beta_j=0$, então não existe um sistema linear equivalente a resolver; o ajuste exige otimização numérica (coordenada a coordenada, ou métodos de gradiente proximal). A figura abaixo mostra a trajetória dos coeficientes de cada método, ajustados sobre o dataset-fio, conforme $\lambda$ cresce.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Expandindo o Objetivo: Ridge e Lasso
+
+$$J(\boldsymbol\beta) = \|\mathbf{y} - X\boldsymbol\beta\|^2 + \lambda \Omega(\boldsymbol\beta), \qquad \lambda \ge 0$$
+
+- $\lambda=0$: recupera o MLE puro. $\lambda\to\infty$: força $\boldsymbol\beta\to\mathbf{0}$.
+
+. . .
+
+- **Ridge ($L_2$):** $\Omega(\boldsymbol\beta) = \sum_j\beta_j^2$ — "encolhe os coeficientes... em direção a zero" (ESL, §3.4).
+- **Lasso ($L_1$):** $\Omega(\boldsymbol\beta) = \sum_j|\beta_j|$ — "força alguns coeficientes a serem exatamente zero" (ESL, §3.4).
+
+## Ridge Tem Solução Fechada
+
+- Igualando $\nabla J(\boldsymbol\beta) = \mathbf{0}$:
+  $$-2X^T(\mathbf{y}-X\boldsymbol\beta) + 2\lambda\boldsymbol\beta = \mathbf{0} \implies (X^TX+\lambda I)\boldsymbol\beta = X^T\mathbf{y}$$
+  $$\hat{\boldsymbol\beta}_{\text{Ridge}} = (X^TX + \lambda I)^{-1}X^T\mathbf{y}$$
+
+. . .
+
+- **A resposta da Pausa Ativa 1:** $\lambda I$ desloca todo autovalor de $X^TX$ em $+\lambda$ $\to$ sempre invertível, mesmo sob colinearidade perfeita.
+- **Lasso não tem solução fechada** — $|\beta_j|$ não é diferenciável em $0$; exige otimização numérica.
+
+## Trajetórias: A Assinatura Visual
+
+- **Ridge:** curvas encolhem suavemente, raramente tocam zero.
+- **Lasso:** curvas "batem" no eixo zero e permanecem — seleção automática de variáveis (explicado no Bloco 4).
+:::
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+# Visualização de trajetórias de coeficientes para Ridge vs Lasso
+# Faixas de lambda diferentes por método: Ridge só encolhe (nunca zera),
+# então precisa de um lambda bem maior para deixar a curva clara; Lasso
+# já satura em zero num lambda bem menor, e estender sua faixa até o
+# mesmo 10^4 só alongaria um platô vazio.
+alphas_ridge = np.logspace(-3, 4, 50)
+alphas_lasso = np.logspace(-3, 1, 50)
+coef_ridge = []
+coef_lasso = []
+
+for a in alphas_ridge:
+    r = Ridge(alpha=a).fit(Xtr, ytr)
+    coef_ridge.append(r.coef_)
+
+for a in alphas_lasso:
+    l = Lasso(alpha=a, max_iter=5000).fit(Xtr, ytr)
+    coef_lasso.append(l.coef_)
+
+coef_ridge = np.array(coef_ridge)
+coef_lasso = np.array(coef_lasso)
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4), sharey=True)
+ax1.plot(alphas_ridge, coef_ridge, color=COR_AZUL, alpha=0.8)
+ax1.set_xscale('log')
+ax1.set_title("Ridge ($L_2$): encolhe, não zera")
+ax1.set_xlabel(r"Regularização ($\lambda$)")
+ax1.set_ylabel("Valor do coeficiente")
+
+ax2.plot(alphas_lasso, coef_lasso, color=COR_LARANJA, alpha=0.8)
+ax2.set_xscale('log')
+ax2.set_title("Lasso ($L_1$): zera coeficientes")
+ax2.set_xlabel(r"Regularização ($\lambda$)")
+
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Observe a assinatura visual: as curvas do Ridge (esquerda) encolhem suavemente em direção a zero, mas raramente o atingem exatamente; as curvas do Lasso (direita) "batem" no eixo zero e permanecem ali conforme $\lambda$ cresce — coeficientes exatamente nulos, uma forma automática de seleção de variáveis.
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Pausa Ativa 2 — O Papel de $\lambda$ e a Fórmula Fechada
+
+Considere a solução de Ridge $\hat{\boldsymbol\beta}_{\text{Ridge}} = (X^TX + \lambda I)^{-1}X^T\mathbf{y}$.
+
+- □ Se $\lambda = 0$, recuperamos exatamente a solução de mínimos quadrados ordinários (MLE), assumindo que $X^TX$ seja invertível.
+- □ Aumentar $\lambda$ reduz a magnitude dos coeficientes, o que geralmente aumenta o viés do modelo, mas reduz a variância ao tornar a inversão da matriz menos sensível a pequenas perturbações nos dados.
+- □ A solução de Ridge é sempre única para qualquer $\lambda > 0$, mesmo que o número de atributos $D$ seja maior que o número de observações $N$ ($D > N$), cenário em que o MLE puro não teria solução única.
+- □ Como a penalidade de Ridge é quadrática, ela penaliza coeficientes grandes muito mais severamente do que a penalidade de Lasso, o que explica por que o Ridge raramente zera coeficientes.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Pausa Ativa 2 — $\lambda$ e a Solução de Ridge
+
+- □ $\lambda = 0 \to$ recupera o MLE (mínimos quadrados), se $X^TX$ for invertível.
+- □ $\lambda \uparrow \to$ coeficientes $\downarrow$ $\to$ maior viés, menor variância (estabilidade numérica).
+- □ $\lambda > 0 \to$ solução única mesmo se $D > N$ (onde MLE falha).
+- □ Penalidade quadrática ($L_2$) penaliza valores grandes mais fortemente que $L_1$, por isso raramente zera coeficientes.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Pausa Ativa 2 — Resolução
+
+- ✔ Verdadeiro — $\lambda=0$ remove o termo de regularização.
+- ✔ Verdadeiro — é o tradeoff fundamental: trocamos um pouco de precisão no treino (viés) por estabilidade na generalização (variância).
+- ✔ Verdadeiro — $\lambda I$ garante que a matriz seja definida positiva, independentemente de $N$ e $D$.
+- ✔ Verdadeiro — a derivada de $\beta^2$ é $2\beta$, que diminui linearmente conforme $\beta \to 0$, enquanto a derivada de $|\beta|$ é constante ($\pm 1$), mantendo a "pressão" para zerar o coeficiente mesmo quando ele já é pequeno.
+:::
+:::
+
+# A Ponte Bayesiana: De Penalidades a Priors
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Até agora, tratamos a regularização como a adição de um termo de "custo" para evitar que os pesos crescessem demais. No entanto, essa abordagem frequentista é, na verdade, um caso particular de um framework mais poderoso: a **Inferência Bayesiana**.
+
+No paradigma Bayesiano, não buscamos um único valor "correto" para $\boldsymbol\beta$, mas sim a sua distribuição de probabilidade a posteriori, dado os dados $\mathcal{D}$. Pelo Teorema de Bayes:
+$$p(\boldsymbol\beta \mid \mathcal{D}) = \frac{p(\mathcal{D} \mid \boldsymbol\beta) p(\boldsymbol\beta)}{p(\mathcal{D})}$$
+
+Onde $p(\mathcal{D} \mid \boldsymbol\beta)$ é a **verossimilhança** (o que os dados nos dizem) e $p(\boldsymbol\beta)$ é a **prior** (nossa crença prévia sobre os parâmetros antes de ver os dados). Se quisermos encontrar o valor mais provável de $\boldsymbol\beta$ (a moda da posterior), estamos realizando a estimativa **MAP** (*Maximum A Posteriori*):
+$$\hat{\boldsymbol\beta}_{\text{MAP}} = \arg\max_{\boldsymbol\beta} p(\boldsymbol\beta \mid \mathcal{D}) = \arg\max_{\boldsymbol\beta} [ \ln p(\mathcal{D} \mid \boldsymbol\beta) + \ln p(\boldsymbol\beta) ]$$
+
+Note que a constante de normalização $p(\mathcal{D})$ desaparece no logaritmo. Aqui está o salto conceitual: **a penalidade de regularização é, literalmente, o logaritmo negativo da prior**.
+
+### Derivação 1: Prior Gaussiana $\to$ Ridge
+
+Se assumirmos que cada coeficiente $\beta_j$ segue independentemente uma distribuição Gaussiana centrada em zero com variância $\tau^2$, temos $p(\beta_j) \propto \exp(-\frac{\beta_j^2}{2\tau^2})$. O logaritmo da prior para todos os coeficientes é:
+$$\ln p(\boldsymbol\beta) = \sum_{j=1}^D \ln \left( \frac{1}{\sqrt{2\pi\tau^2}} \exp\left(-\frac{\beta_j^2}{2\tau^2}\right) \right) = \text{const} - \frac{1}{2\tau^2} \sum_{j=1}^D \beta_j^2 = \text{const} - \frac{1}{2\tau^2} \|\boldsymbol\beta\|_2^2$$
+
+Combinando isso com a verossimilhança Gaussiana da Aula 5 ($\ln p(\mathcal{D} \mid \boldsymbol\beta) = -\frac{1}{2\sigma^2} \|\mathbf{y} - X\boldsymbol\beta\|^2 + \text{const}$), o objetivo MAP torna-se:
+$$\hat{\boldsymbol\beta}_{\text{MAP}} = \arg\max_{\boldsymbol\beta} \left[ -\frac{1}{2\sigma^2} \|\mathbf{y} - X\boldsymbol\beta\|^2 - \frac{1}{2\tau^2} \|\boldsymbol\beta\|_2^2 \right]$$
+Multiplicando por $-2\sigma^2$, obtemos exatamente a função de custo de Ridge:
+$$\hat{\boldsymbol\beta}_{\text{MAP}} = \arg\min_{\boldsymbol\beta} \left[ \|\mathbf{y} - X\boldsymbol\beta\|^2 + \frac{\sigma^2}{\tau^2} \|\boldsymbol\beta\|_2^2 \right] \implies \lambda = \frac{\sigma^2}{\tau^2}$$
+
+### Derivação 2: Prior de Laplace $\to$ Lasso
+
+Se, em vez de Gaussiana, assumirmos que $\beta_j$ segue uma distribuição de Laplace centrada em zero com parâmetro de escala $b$, temos $p(\beta_j) = \frac{1}{2b} \exp(-\frac{|\beta_j|}{b})$. O logaritmo da prior é:
+$$\ln p(\boldsymbol\beta) = \sum_{j=1}^D \ln \left( \frac{1}{2b} \exp\left(-\frac{|\beta_j|}{b}\right) \right) = \text{const} - \frac{1}{b} \sum_{j=1}^D |\beta_j| = \text{const} - \frac{1}{b} \|\boldsymbol\beta\|_1$$
+
+Novamente, combinando com a verossimilhança Gaussiana e multiplicando por $-2\sigma^2$:
+$$\hat{\boldsymbol\beta}_{\text{MAP}} = \arg\max_{\boldsymbol\beta} \left[ -\frac{1}{2\sigma^2} \|\mathbf{y} - X\boldsymbol\beta\|^2 - \frac{1}{b} \|\boldsymbol\beta\|_1 \right] \implies \hat{\boldsymbol\beta}_{\text{MAP}} = \arg\min_{\boldsymbol\beta} \left[ \|\mathbf{y} - X\boldsymbol\beta\|^2 + \frac{2\sigma^2}{b} \|\boldsymbol\beta\|_1 \right]$$
+Aqui, a penalidade de Lasso surge naturalmente com $\lambda = \frac{2\sigma^2}{b}$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Ponte Bayesiana: De Penalidades a Priors
+
+- **Paradigma Bayesiano:** não buscamos um valor único, mas a distribuição a posteriori $p(\boldsymbol\beta \mid \mathcal{D}) \propto p(\mathcal{D} \mid \boldsymbol\beta) p(\boldsymbol\beta)$.
+- **Estimativa MAP** (*Maximum A Posteriori*): a moda da posterior.
+  $$\hat{\boldsymbol\beta}_{\text{MAP}} = \arg\max_{\boldsymbol\beta} [ \ln p(\mathcal{D} \mid \boldsymbol\beta) + \ln p(\boldsymbol\beta) ]$$
+
+. . .
+
+- **O Salto Conceitual:** a penalidade de regularização $\lambda \Omega(\boldsymbol\beta)$ é, literalmente, o logaritmo negativo da prior $-\ln p(\boldsymbol\beta)$.
+
+## Prior Gaussiana $\to$ Ridge
+
+- Prior: $\beta_j \sim \mathcal{N}(0, \tau^2) \to p(\beta_j) \propto \exp(-\frac{\beta_j^2}{2\tau^2})$.
+- Log-prior: $\ln p(\boldsymbol\beta) \propto - \frac{1}{2\tau^2} \|\boldsymbol\beta\|_2^2$.
+- Combinando com verossimilhança Gaussiana ($\sigma^2$):
+  $$\text{Custo} = \|\mathbf{y} - X\boldsymbol\beta\|^2 + \frac{\sigma^2}{\tau^2} \|\boldsymbol\beta\|_2^2 \implies \lambda = \frac{\sigma^2}{\tau^2}$$
+
+## Prior de Laplace $\to$ Lasso
+
+- Prior: $\beta_j \sim \text{Laplace}(0, b) \to p(\beta_j) \propto \exp(-\frac{|\beta_j|}{b})$.
+- Log-prior: $\ln p(\boldsymbol\beta) \propto - \frac{1}{b} \|\boldsymbol\beta\|_1$.
+- Combinando com verossimilhança Gaussiana ($\sigma^2$):
+  $$\text{Custo} = \|\mathbf{y} - X\boldsymbol\beta\|^2 + \frac{2\sigma^2}{b} \|\boldsymbol\beta\|_1 \implies \lambda = \frac{2\sigma^2}{b}$$
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Pausa Ativa 3 — A Equivalência $\lambda = \sigma^2/\tau^2$
+
+Considere a relação $\lambda = \sigma^2/\tau^2$ derivada para a regressão Ridge.
+
+- □ Se a variância da prior $\tau^2$ for muito grande, $\lambda$ torna-se pequeno, o que significa que temos pouca crença prévia sobre a magnitude dos parâmetros e confiamos mais nos dados (MLE).
+- □ Se a variância do ruído $\sigma^2$ for muito grande, $\lambda$ aumenta, o que significa que os dados são pouco confiáveis e a estimativa MAP "se apoia" mais na prior para evitar overfitting.
+- □ A mesma estrutura de soma de log-densidades ($\ln p(\mathcal{D} \mid \boldsymbol\beta) + \ln p(\boldsymbol\beta)$) permite aplicar regularização $L_2$ ou $L_1$ a qualquer modelo, como a Regressão Logística, mesmo que não haja solução fechada.
+- □ A estimativa MAP é idêntica à média da distribuição a posteriori $p(\boldsymbol\beta \mid \mathcal{D})$ para qualquer escolha de prior, independentemente de a distribuição ser simétrica ou unimodal.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Pausa Ativa 3 — A Equivalência $\lambda = \sigma^2/\tau^2$
+
+- □ $\tau^2 \uparrow$ (prior espalhada) $\to \lambda \downarrow \to$ mais confiança nos dados (MLE).
+- □ $\sigma^2 \uparrow$ (dados ruidosos) $\to \lambda \uparrow \to$ mais confiança na prior.
+- □ A estrutura $\ln p(\mathcal{D} \mid \boldsymbol\beta) + \ln p(\boldsymbol\beta)$ permite regularizar qualquer modelo (ex.: Regressão Logística).
+- □ A estimativa MAP (moda) é sempre idêntica à média da posterior para qualquer prior.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Pausa Ativa 3 — Resolução
+
+- ✔ Verdadeiro — $\tau^2 \to \infty$ torna a prior "plana", recuperando o MLE.
+- ✔ Verdadeiro — se os dados são ruidosos, a verossimilhança é "achatada", e a prior domina a localização do máximo.
+- ✔ Verdadeiro — a regularização é a aplicação de uma prior; a forma da prior define a norma ($L_1, L_2, \dots$).
+- ✗ Falso — média e moda coincidem apenas para distribuições simétricas unimodais (como a Gaussiana). Para priors assimétricas ou multimodais, MAP e média divergem.
+:::
+::: `
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Intuição Geométrica
+
+- Minimizar sujeito a penalidade $\equiv$ minimizar restrito a uma **região viável**: círculo ($L_2$) ou diamante ($L_1$).
+:::
+
+::: {.fig-resize style="width: 40%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+# --- Configuração do gráfico de curvas de nível ---
+# Vamos desenhar curvas de nível elípticas ao redor de um ponto (ex: 1.5, 2)
+# para mostrar o contato com as regiões viáveis.
+x_center, y_center = 1.5, 2.0
+theta = np.linspace(0, 2*np.pi, 100)
+
+# Curvas de nível da verossimilhança (elipses centradas no MLE)
+# Representam o conjunto de parâmetros com o mesmo erro/loss
+ell_x = x_center + 0.6 * np.cos(theta)
+ell_y = y_center + 0.4 * np.sin(theta)
+
+# Região Ridge (L2): Círculo centrado na origem
+ridge_radius = 1.2
+ridge_x = ridge_radius * np.cos(theta)
+ridge_y = ridge_radius * np.sin(theta)
+
+# Região Lasso (L1): Diamante centrado na origem
+lasso_radius = 1.5
+lasso_x = np.sign(np.cos(theta)) * np.abs(np.cos(theta)) * lasso_radius
+lasso_y = np.sign(np.sin(theta)) * np.abs(np.sin(theta)) * lasso_radius
+
+fig, ax = plt.subplots(figsize=(6, 6))
+ax.plot(ell_x, ell_y, color=COR_CINZA, lw=2, label="Curvas de nível (Loss)")
+ax.plot(ridge_x, ridge_y, color=COR_AZUL, linestyle='--', lw=2, label="Região Ridge ($L_2$)")
+ax.plot(lasso_x, lasso_y, color=COR_LARANJA, linestyle='--', lw=2, label="Região Lasso ($L_1$)")
+
+# Destaque para o ponto de contato (exemplo visual)
+ax.scatter([x_center], [y_center], color='black', marker='x', s=100, label="$\hat{\\beta}_{\\text{MLE}}$")
+
+ax.axhline(0, color='black', lw=1)
+ax.axvline(0, color='black', lw=1)
+ax.set_xlim(-2.5, 3.5)
+ax.set_ylim(-2.5, 3.5)
+ax.set_aspect('equal')
+ax.legend(loc='upper right', fontsize=9)
+ax.set_title("Geometria da Regularização: Contato entre Loss e Restrição", pad=15)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O círculo do Ridge é suave em todo o seu contorno — o ponto de contato ocorre, genericamente, em algum lugar arbitrário, raramente exatamente sobre um eixo. O diamante do Lasso tem **vértices** exatamente sobre os eixos coordenados (onde um ou mais $\beta_j=0$); como vértices são pontos de não-diferenciabilidade da fronteira, o contato "prefere" esses pontos com muito mais frequência geométrica.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Círculo (Ridge):** suave em todo contorno — contato raramente sobre um eixo.
+- **Diamante (Lasso):** **vértices** sobre os eixos — contato "prefere" esses pontos (não-diferenciabilidade).
+
+## A Prova Algébrica: Soft-Thresholding em 1D
+
+- Caso 1D, ortonormal: $g(\beta) = \frac12(\beta-\hat\beta_{\text{MLE}})^2 + \lambda|\beta|$.
+
+. . .
+
+- **Se $\beta \ne 0$:** $\beta = \hat\beta_{\text{MLE}} - \lambda\,\text{sign}(\beta)$.
+- **Se $\beta = 0$:** a força do dado $|\hat\beta_{\text{MLE}}|$ deve ser $\le \lambda$ para o zero ser o ótimo.
+
+. . .
+
+- **Algoritmo de Soft-Thresholding:**
+  $$\beta^* = \text{sign}(\hat\beta_{\text{MLE}})\cdot\max(|\hat\beta_{\text{MLE}}|-\lambda,\ 0)$$
+- **Ridge em 1D:** $\beta^*_{\text{Ridge}} = \hat\beta_{\text{MLE}}/(1+\lambda)$ — zero **só se** $\hat\beta_{\text{MLE}}=0$.
+:::
+
+**E em múltiplas dimensões?**
+Quando temos muitos parâmetros $\boldsymbol\beta = [\beta_1, \beta_2, \dots, \beta_D]$, o Lasso (em sua forma de *Coordinate Descent*) aplica esse mesmo operador para **cada dimensão individualmente**, uma por uma. É por isso que o Lasso consegue "escolher" quais variáveis são importantes: ele aplica esse filtro de limiar ($\lambda$) em cada uma delas. Se a contribuição de uma variável para reduzir o erro for menor que $\lambda$, ela é zerada.
+
+Esse resultado prova que **sempre que $|\hat\beta_{\text{MLE}}| \le \lambda$, a solução regularizada é exatamente zero** — um intervalo inteiro de valores de $\hat\beta_{\text{MLE}}$ mapeia para o mesmo ponto $\beta^*=0$. Ridge, em contraste, tem solução fechada $\beta^*_{\text{Ridge}} = \hat\beta_{\text{MLE}}/(1+\lambda)$, que só atinge zero se $\hat\beta_{\text{MLE}}$ for exatamente zero.
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Pausa Ativa 4 — Soft-Thresholding e a Origem da Sparsity
+
+Considere o operador de soft-thresholding $\beta^* = \text{sign}(\hat\beta_{\text{MLE}})\cdot\max(|\hat\beta_{\text{MLE}}|-\lambda, 0)$ derivado para o caso 1D do Lasso.
+
+- □ Se $\hat\beta_{\text{MLE}} = 3$ e $\lambda = 5$, o operador de soft-thresholding produz $\beta^* = 0$, pois $|\hat\beta_{\text{MLE}}| = 3 \le \lambda = 5$.
+- □ Para qualquer valor fixo de $\hat\beta_{\text{MLE}} \ne 0$, existe sempre algum $\lambda > 0$ suficientemente grande que produz $\beta^* = 0$ pelo operador de soft-thresholding.
+- □ O operador de soft-thresholding do Lasso e a fórmula de encolhimento do Ridge em 1D, $\beta^*_{\text{Ridge}} = \hat\beta_{\text{MLE}}/(1+\lambda)$, produzem exatamente o mesmo valor de $\beta^*$ para qualquer $\lambda > 0$ fixo, diferindo apenas na notação.
+- □ A razão algébrica pela qual o Lasso consegue produzir $\beta^*$ exatamente zero, e o Ridge não, é que o subgradiente da penalidade $|\beta|$ em $\beta=0$ é um intervalo $[-1,1]$ (permitindo absorver qualquer $\hat\beta_{\text{MLE}}$ pequeno), enquanto a derivada de $\beta^2$ em $\beta=0$ é o único valor $0$, que só absorve $\hat\beta_{\text{MLE}}=0$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Pausa Ativa 4 — Soft-Thresholding e a Origem da Sparsity
+
+- □ Se $\hat\beta_{\text{MLE}}=3$ e $\lambda=5$, o soft-threshold produz $\beta^*=0$.
+- □ Para qualquer $\hat\beta_{\text{MLE}}\ne0$ fixo, sempre existe $\lambda>0$ grande o bastante que zera $\beta^*$.
+- □ Soft-thresholding (Lasso) e $\hat\beta_{\text{MLE}}/(1+\lambda)$ (Ridge) produzem o mesmo $\beta^*$ para qualquer $\lambda$ fixo.
+- □ A razão da sparsity exata é o subgradiente $[-1,1]$ de $|\beta|$ em $0$ (absorve qualquer $\hat\beta_{\text{MLE}}$ pequeno) vs. a derivada única $0$ de $\beta^2$ em $0$ (só absorve $\hat\beta_{\text{MLE}}=0$).
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Pausa Ativa 4 — Resolução
+
+- ✔ $|3|=3\le\lambda=5$, então $\beta^*=\text{sign}(3)\cdot\max(3-5,0)=\max(-2,0)=0$.
+- ✔ Basta tomar $\lambda \ge |\hat\beta_{\text{MLE}}|$; o operador satura em zero para todo $\lambda$ nessa faixa.
+- ✗ Falso — são funções distintas: soft-threshold é linear por partes com um platô exato em $0$; $\hat\beta_{\text{MLE}}/(1+\lambda)$ é uma reta que só toca $0$ na origem. Coincidem apenas no ponto trivial $\hat\beta_{\text{MLE}}=0$.
+- ✔ Exatamente a distinção provada no bloco: subgradiente-intervalo (Lasso) vs. derivada-pontual (Ridge) é a causa algébrica da sparsity exata.
+:::
+:::
+
+# Síntese, Limitações e Fechamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### Retomando as Perguntas de Abertura
+
+1. **Por que o MLE produz coeficientes instáveis ou infinitos?** Multicolinearidade deixa $X^TX$ quase singular (autovalores próximos de zero); separação perfeita deixa a verossimilhança ilimitada em certas direções. Em ambos os casos, o MLE não tem nenhuma força que restrinja $\boldsymbol\beta$ a valores razoáveis. Somar $\lambda I$ à matriz normal (Ridge) resolve a singularidade diretamente.
+2. **Qual a diferença estrutural entre $L_2$ e $L_1$?** Ridge tem solução fechada e encolhe coeficientes suavemente, sem nunca zerá-los exatamente (exceto no caso trivial); Lasso não tem solução fechada, mas seu operador de soft-thresholding produz zeros exatamente quando $|\hat\beta_{\text{MLE}}| \le \lambda$.
+3. **Por que regularizar equivale a assumir uma prior (MAP)?** Porque maximizar a log-posterior $\ln p(\mathcal{D}\mid\boldsymbol\beta) + \ln p(\boldsymbol\beta)$ é, algebricamente, minimizar a perda de treino somada a $-\ln p(\boldsymbol\beta)$ — e $-\ln p(\boldsymbol\beta)$ é, por construção, a penalidade.
+4. **Qual prior corresponde a qual penalidade, e por quê?** Prior Gaussiana $\mathcal{N}(0,\tau^2)$ produz Ridge ($\lambda=\sigma^2/\tau^2$); prior de Laplace $(0,b)$ produz Lasso ($\lambda=\sigma^2/b$). A diferença de esparsidade vem da geometria de cada log-prior: a Gaussiana é suave (parábola) em torno de zero, a Laplace tem um pico agudo (subgradiente-intervalo) — o mesmo mecanismo provado algebricamente no Bloco 4.
+
+### O que ainda falta
+
+Escolhemos $\lambda$ arbitrariamente nos gráficos de hoje — nunca discutimos **como escolher** o valor "certo" de $\lambda$ para um problema real, nem quantificamos formalmente o que "viés" e "variância" significam matematicamente. É exatamente esse o assunto da Aula 8: decompor o erro esperado de um estimador em viés ao quadrado, variância e erro irredutível, dando um critério formal (não só empírico) para escolher a intensidade certa de regularização.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .soluções-link}
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as Quatro Perguntas
+
+1. **MLE instável:** multicolinearidade ($X^TX$ quase singular) ou separação perfeita (verossimilhança ilimitada) — $\lambda I$ resolve a singularidade diretamente.
+2. **$L_2$ vs. $L_1$:** Ridge tem solução fechada, encolhe sem zerar; Lasso não tem solução fechada, mas soft-thresholding zera exatamente quando $|\hat\beta_{\text{MLE}}|\le\lambda$.
+
+. . .
+
+3. **MAP $\equiv$ regularização:** maximizar log-posterior = minimizar perda $+ (-\ln p(\boldsymbol\beta))$; a penalidade **é** a log-prior negada.
+4. **Priors:** Gaussiana $\to$ Ridge ($\lambda=\sigma^2/\tau^2$); Laplace $\to$ Lasso ($\lambda=\sigma^2/b$) — a esparsidade vem da geometria de cada log-prior.
+
+## Ponte para a Aula 8
+
+::: {.fragment}
+Escolhemos $\lambda$ arbitrariamente hoje — nunca formalizamos **como** escolher o valor certo, nem definimos matematicamente "viés" e "variância".
+:::
+
+::: {.fragment .callout-tip icon=false}
+**Aula 8:** decompor o erro esperado em viés², variância e erro irredutível — o critério formal para escolher $\lambda$.
+:::
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .soluções-link}
+:::
+
+- **Passo 1 — verossimilhança:** idêntico ao Passo 1 da Derivação 1 (só a prior muda).
+- **Passo 2 — prior de Laplace:** $\beta_j\sim\text{Laplace}(0,b)$ i.i.d., densidade $\tfrac{1}{2b}\exp(-|\beta_j|/b)$ $\implies$
+  $$\ln p(\boldsymbol\beta) = -D\ln(2b) - \tfrac{1}{b}\|\boldsymbol\beta\|_1$$
+
+. . .
+
+- **Atenção:** a Gaussiana tem $-\beta_j^2/(2\tau^2)$ (fator $2$ no denominador); a Laplace tem $-|\beta_j|/b$ (**sem** esse fator $2$) — essa assimetria é a origem do $2$ extra no próximo passo.
+- **Passos 3–4 — somar e multiplicar por $2\sigma^2$:**
+  $$\arg\min_{\boldsymbol\beta}\Big[\|\mathbf{y}-X\boldsymbol\beta\|^2 + \tfrac{2\sigma^2}{b}\|\boldsymbol\beta\|_1\Big] \;=\; \text{Lasso}, \quad \lambda = 2\sigma^2/b$$
+- "Prior Gaussiana $\to$ Ridge... prior de Laplace $\to$ Lasso" (PRML, §3.3.2) — a demonstração acima é exatamente por quê.
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Pausa Ativa 3 — A Equivalência MAP $\leftrightarrow$ Regularização
+
+Considere a identificação $\lambda = \sigma^2/\tau^2$ derivada para Ridge, onde $\sigma^2$ é a variância do ruído da verossimilhança e $\tau^2$ é a variância da prior Gaussiana sobre cada $\beta_j$.
+
+- □ Se dobrarmos a variância do ruído $\sigma^2$ (dados mais ruidosos), mantendo $\tau^2$ fixo, a identificação $\lambda = \sigma^2/\tau^2$ implica que o $\lambda$ efetivo aumenta, isto é, dados mais ruidosos justificam confiar mais na crença prévia e menos no ajuste aos dados.
+- □ A estimativa MAP com uma prior uniforme (constante, sem preferência por nenhum valor de $\boldsymbol\beta$) é matematicamente idêntica à estimativa de Máxima Verossimilhança, pois $\ln p(\boldsymbol\beta)$ torna-se uma constante que não afeta o argumento que maximiza a log-posterior.
+- □ Uma prior Gaussiana com média diferente de zero, $\beta_j \sim \mathcal{N}(\mu_0, \tau^2)$ com $\mu_0 \ne 0$, ainda produziria uma penalidade da forma Ridge padrão $\lambda\|\boldsymbol\beta\|^2$, sem nenhuma alteração na função objetivo.
+- □ A demonstração da Derivação 1 depende crucialmente de a verossimilhança ser gaussiana; se a verossimilhança fosse de outra família (por exemplo, Bernoulli, como na regressão logística da Aula 6), a mesma prior Gaussiana sobre $\boldsymbol\beta$ ainda produziria, pelo mesmo argumento algébrico de somar as log-densidades, um termo de penalidade $L_2$ somado à log-verossimilhança, ainda que a perda resultante não seja mais a soma de quadrados.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Pausa Ativa 3 — A Equivalência $\lambda = \sigma^2/\tau^2$
+
+- □ Dobrar $\sigma^2$ (mais ruído), com $\tau^2$ fixo, aumenta o $\lambda$ efetivo.
+- □ MAP com prior uniforme é idêntico ao MLE.
+- □ Uma prior Gaussiana com média $\mu_0\ne0$ ainda produz a penalidade Ridge padrão $\lambda\|\boldsymbol\beta\|^2$, sem alteração.
+- □ Trocar a verossimilhança gaussiana por Bernoulli (regressão logística), mantendo a prior Gaussiana sobre $\boldsymbol\beta$, ainda produz um termo de penalidade $L_2$ somado à log-verossimilhança.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Pausa Ativa 3 — Resolução
+
+- ✔ $\lambda=\sigma^2/\tau^2$ cresce com $\sigma^2$: mais ruído nos dados $\implies$ menos confiança no ajuste puro $\implies$ mais peso na prior.
+- ✔ Prior uniforme $\implies \ln p(\boldsymbol\beta)=$ constante $\implies$ não afeta o $\arg\max$; MAP colapsa exatamente no MLE.
+- ✗ Falso — uma prior com $\mu_0\ne0$ produziria $\ln p(\boldsymbol\beta) = -\frac{1}{2\tau^2}\|\boldsymbol\beta-\boldsymbol\mu_0\|^2+\text{const}$, uma penalidade que puxa $\boldsymbol\beta$ para $\boldsymbol\mu_0$, não para a origem — uma forma diferente de Ridge padrão.
+- ✔ A soma $\ln p(\mathcal{D}\mid\boldsymbol\beta) + \ln p(\boldsymbol\beta)$ sempre inclui o termo $-\frac{1}{2\tau^2}\|\boldsymbol\beta\|^2$ da prior, independente de qual verossimilhança compõe o primeiro termo — é exatamente esse princípio que generaliza MAP para GLMs regularizados além da regressão linear.
+:::
+:::
+
+# MAP e a Geometria da Sparsity
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Por que Lasso zera coeficientes exatamente, e Ridge apenas os encolhe? A intuição geométrica e a prova algébrica concordam — vamos ver as duas.
+
+### Intuição geométrica
+
+Minimizar $\|\mathbf{y}-X\boldsymbol\beta\|^2$ sujeito a uma penalidade é equivalente (por dualidade Lagrangiana) a minimizar a soma de quadrados restrita a uma **região viável**: $\|\boldsymbol\beta\|_2^2 \le t$ para Ridge (um **círculo/esfera**) ou $\|\boldsymbol\beta\|_1 \le t$ para Lasso (um **diamante**, com vértices sobre os eixos coordenados). A solução ótima é o primeiro ponto de contato entre as curvas de nível elípticas da verossimilhança e essa região viável, ilustrado na figura abaixo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Intuição Geométrica
+
+- Minimizar sujeito a penalidade $\equiv$ minimizar restrito a uma **região viável**: círculo ($L_2$) ou diamante ($L_1$).
+:::
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+# --- Configuração do gráfico de curvas de nível ---
+# Vamos desenhar curvas de nível elípticas ao redor de um ponto (ex: 1.5, 2)
+# para mostrar o contato com as regiões viáveis.
+x_center, y_center = 1.5, 2.0
+theta = np.linspace(0, 2*np.pi, 100)
+
+# Curvas de nível da verossimilhança (elipses centradas no MLE)
+# Representam o conjunto de parâmetros com o mesmo erro/loss
+ell_x = x_center + 0.6 * np.cos(theta)
+ell_y = y_center + 0.4 * np.sin(theta)
+
+# Região Ridge (L2): Círculo centrado na origem
+ridge_radius = 1.2
+ridge_x = ridge_radius * np.cos(theta)
+ridge_y = ridge_radius * np.sin(theta)
+
+# Região Lasso (L1): Diamante centrado na origem
+lasso_radius = 1.5
+lasso_x = np.sign(np.cos(theta)) * np.abs(np.cos(theta)) * lasso_radius
+lasso_y = np.sign(np.sin(theta)) * np.abs(np.sin(theta)) * lasso_radius
+
+fig, ax = plt.subplots(figsize=(6, 6))
+ax.plot(ell_x, ell_y, color=COR_CINZA, lw=2, label="Curvas de nível (Loss)")
+ax.plot(ridge_x, ridge_y, color=COR_AZUL, linestyle='--', lw=2, label="Região Ridge ($L_2$)")
+ax.plot(lasso_x, lasso_y, color=COR_LARANJA, linestyle='--', lw=2, label="Região Lasso ($L_1$)")
+
+# Destaque para o ponto de contato (exemplo visual)
+ax.scatter([x_center], [y_center], color='black', marker='x', s=100, label="$\hat{\\beta}_{\\text{MLE}}$")
+
+ax.axhline(0, color='black', lw=1)
+ax.axvline(0, color='black', lw=1)
+ax.set_xlim(-2.5, 3.5)
+ax.set_ylim(-2.5, 3.5)
+ax.set_aspect('equal')
+ax.legend(loc='upper right', fontsize=9)
+ax.set_title("Geometria da Regularização: Contato entre Loss e Restrição", pad=15)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O círculo do Ridge é suave em todo o seu contorno — o ponto de contato ocorre, genericamente, em algum lugar arbitrário, raramente exatamente sobre um eixo. O diamante do Lasso tem **vértices** exatamente sobre os eixos coordenados (onde um ou mais $\beta_j=0$); como vértices são pontos de não-diferenciabilidade da fronteira, o contato "prefere" esses pontos com muito mais frequência geométrica.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Círculo (Ridge):** suave em todo contorno — contato raramente sobre um eixo.
+- **Diamante (Lasso):** **vértices** sobre os eixos — contato "prefere" esses pontos (não-diferenciabilidade).
+
+## A Prova Algébrica: Soft-Thresholding em 1D
+
+- Caso 1D, ortonormal: $g(\beta) = \frac12(\beta-\hat\beta_{\text{MLE}})^2 + \lambda|\beta|$.
+
+. . .
+
+- **Se $\beta \ne 0$:** $\beta = \hat\beta_{\text{MLE}} - \lambda\,\text{sign}(\beta)$.
+- **Se $\beta = 0$:** a força do dado $|\hat\beta_{\text{MLE}}|$ deve ser $\le \lambda$ para o zero ser o ótimo.
+
+. . .
+
+- **Algoritmo de Soft-Thresholding:**
+  $$\beta^* = \text{sign}(\hat\beta_{\text{MLE}})\cdot\max(|\hat\beta_{\text{MLE}}|-\lambda,\ 0)$$
+- **Ridge em 1D:** $\beta^*_{\text{Ridge}} = \hat\beta_{\text{MLE}}/(1+\lambda)$ — zero **só se** $\hat\beta_{\text{MLE}}=0$.
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+**E em múltiplas dimensões?**
+Quando temos muitos parâmetros $\boldsymbol\beta = [\beta_1, \beta_2, \dots, \beta_D]$, o Lasso (em sua forma de *Coordinate Descent*) aplica esse mesmo operador para **cada dimensão individualmente**, uma por uma. É por isso que o Lasso consegue "escolher" quais variáveis são importantes: ele aplica esse filtro de limiar ($\lambda$) em cada uma delas. Se a contribuição de uma variável para reduzir o erro for menor que $\lambda$, ela é zerada.
+
+Esse resultado prova que **sempre que $|\hat\beta_{\text{MLE}}| \le \lambda$, a solução regularizada é exatamente zero** — um intervalo inteiro de valores de $\hat\beta_{\text{MLE}}$ mapeia para o mesmo ponto $\beta^*=0$. Ridge, em contraste, tem solução fechada $\beta^*_{\text{Ridge}} = \hat\beta_{\text{MLE}}/(1+\lambda)$, que só atinge zero se $\hat\beta_{\text{MLE}}$ for exatamente zero.
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
+## Pausa Ativa 4 — Soft-Thresholding e a Origem da Sparsity
+
+Considere o operador de soft-thresholding $\beta^* = \text{sign}(\hat\beta_{\text{MLE}})\cdot\max(|\hat\beta_{\text{MLE}}|-\lambda, 0)$ derivado para o caso 1D do Lasso.
+
+- □ Se $\hat\beta_{\text{MLE}} = 3$ e $\lambda = 5$, o operador de soft-thresholding produz $\beta^* = 0$, pois $|\hat\beta_{\text{MLE}}| = 3 \le \lambda = 5$.
+- □ Para qualquer valor fixo de $\hat\beta_{\text{MLE}} \ne 0$, existe sempre algum $\lambda > 0$ suficientemente grande que produz $\beta^* = 0$ pelo operador de soft-thresholding.
+- □ O operador de soft-thresholding do Lasso e a fórmula de encolhimento do Ridge em 1D, $\beta^*_{\text{Ridge}} = \hat\beta_{\text{MLE}}/(1+\lambda)$, produzem exatamente o mesmo valor de $\beta^*$ para qualquer $\lambda > 0$ fixo, diferindo apenas na notação.
+- □ A razão algébrica pela qual o Lasso consegue produzir $\beta^*$ exatamente zero, e o Ridge não, é que o subgradiente da penalidade $|\beta|$ em $\beta=0$ é um intervalo $[-1,1]$ (permitindo absorver qualquer $\hat\beta_{\text{MLE}}$ pequeno), enquanto a derivada de $\beta^2$ em $\beta=0$ é o único valor $0$, que só absorve $\hat\beta_{\text{MLE}}=0$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pergunta
+
+::: {.callout-tip}
+## Pausa Ativa 4 — Soft-Thresholding e a Origem da Sparsity
+
+- □ Se $\hat\beta_{\text{MLE}}=3$ e $\lambda=5$, o soft-threshold produz $\beta^*=0$.
+- □ Para qualquer $\hat\beta_{\text{MLE}}\ne0$ fixo, sempre existe $\lambda>0$ grande o bastante que zera $\beta^*$.
+- □ Soft-thresholding (Lasso) e $\hat\beta_{\text{MLE}}/(1+\lambda)$ (Ridge) produzem o mesmo $\beta^*$ para qualquer $\lambda$ fixo.
+- □ A razão da sparsity exata é o subgradiente $[-1,1]$ de $|\beta|$ em $0$ (absorve qualquer $\hat\beta_{\text{MLE}}$ pequeno) vs. a derivada única $0$ de $\beta^2$ em $0$ (só absorve $\hat\beta_{\text{MLE}}=0$).
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Resposta
+
+::: {.callout-tip}
+## Pausa Ativa 4 — Resolução
+
+- ✔ $|3|=3\le\lambda=5$, então $\beta^*=\text{sign}(3)\cdot\max(3-5,0)=\max(-2,0)=0$.
+- ✔ Basta tomar $\lambda \ge |\hat\beta_{\text{MLE}}|$; o operador satura em zero para todo $\lambda$ nessa faixa.
+- ✗ Falso — são funções distintas: soft-threshold é linear por partes com um platô exato em $0$; $\hat\beta_{\text{MLE}}/(1+\lambda)$ é uma reta que só toca $0$ na origem. Coincidem apenas no ponto trivial $\hat\beta_{\text{MLE}}=0$.
+- ✔ Exatamente a distinção provada no bloco: subgradiente-intervalo (Lasso) vs. derivada-pontual (Ridge) é a causa algébrica da sparsity exata.
+:::
+:::
+
+# Síntese, Limitações e Fechamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### Retomando as Perguntas de Abertura
+
+1. **Por que o MLE produz coeficientes instáveis ou infinitos?** Multicolinearidade deixa $X^TX$ quase singular (autovalores próximos de zero); separação perfeita deixa a verossimilhança ilimitada em certas direções. Em ambos os casos, o MLE não tem nenhuma força que restrinja $\boldsymbol\beta$ a valores razoáveis. Somar $\lambda I$ à matriz normal (Ridge) resolve a singularidade diretamente.
+2. **Qual a diferença estrutural entre $L_2$ e $L_1$?** Ridge tem solução fechada e encolhe coeficientes suavemente, sem nunca zerá-los exatamente (exceto no caso trivial); Lasso não tem solução fechada, mas seu operador de soft-thresholding produz zeros exatamente quando $|\hat\beta_{\text{MLE}}| \le \lambda$.
+3. **Por que regularizar equivale a assumir uma prior (MAP)?** Porque maximizar a log-posterior $\ln p(\mathcal{D}\mid\boldsymbol\beta) + \ln p(\boldsymbol\beta)$ é, algebricamente, minimizar a perda de treino somada a $-\ln p(\boldsymbol\beta)$ — e $-\ln p(\boldsymbol\beta)$ é, por construção, a penalidade.
+4. **Qual prior corresponde a qual penalidade, e por quê?** Prior Gaussiana $\mathcal{N}(0,\tau^2)$ produz Ridge ($\lambda=\sigma^2/\tau^2$); prior de Laplace $(0,b)$ produz Lasso ($\lambda=\sigma^2/b$). A diferença de esparsidade vem da geometria de cada log-prior: a Gaussiana é suave (parábola) em torno de zero, a Laplace tem um pico agudo (subgradiente-intervalo) — o mesmo mecanismo provado algebricamente no Bloco 4.
+
+### O que ainda falta
+
+Escolhemos $\lambda$ arbitrariamente nos gráficos de hoje — nunca discutimos **como escolher** o valor "certo" de $\lambda$ para um problema real, nem quantificamos formalmente o que "viés" e "variância" significam matematicamente. É exatamente esse o assunto da Aula 8: decompor o erro esperado de um estimador em viés ao quadrado, variância e erro irredutível, dando um critério formal (não só empírico) para escolher a intensidade certa de regularização.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .soluções-link}
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as Quatro Perguntas
+
+1. **MLE instável:** multicolinearidade ($X^TX$ quase singular) ou separação perfeita (verossimilhança ilimitada) — $\lambda I$ resolve a singularidade diretamente.
+2. **$L_2$ vs. $L_1$:** Ridge tem solução fechada, encolhe sem zerar; Lasso não tem solução fechada, mas soft-thresholding zera exatamente quando $|\hat\beta_{\text{MLE}}|\le\lambda$.
+
+. . .
+
+3. **MAP $\equiv$ regularização:** maximizar log-posterior = minimizar perda $+ (-\ln p(\boldsymbol\beta))$; a penalidade **é** a log-prior negada.
+4. **Priors:** Gaussiana $\to$ Ridge ($\lambda=\sigma^2/\tau^2$); Laplace $\to$ Lasso ($\lambda=\sigma^2/b$) — a esparsidade vem da geometria de cada log-prior.
+
+## Ponte para a Aula 8
+
+::: {.fragment}
+Escolhemos $\lambda$ arbitrariamente hoje — nunca formalizamos **como** escolher o valor certo, nem definimos matematicamente "viés" e "variância".
+:::
+
+::: {.fragment .callout-tip icon=false}
+**Aula 8:** decompor o erro esperado em viés², variância e erro irredutível — o critério formal para escolher $\lambda$.
+:::
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .soluções-link}
+:::

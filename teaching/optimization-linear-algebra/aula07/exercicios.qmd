@@ -1,0 +1,128 @@
+---
+title: "Exercícios — Aula 7: Convexidade e a Matriz Hessiana"
+subtitle: "Álgebra Linear e Otimização para Aprendizado de Máquina"
+date: "today"
+author: "Prof. Marcos Medeiros Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado das questões de Verdadeiro/Falso está em
+[`soluções.qmd`](soluções.qmd). Encontrou um erro numa questão? Corrija
+diretamente neste arquivo e abra um *pull request*.
+:::
+
+## Contexto e notação
+
+- **Conjunto convexo.** $C\subseteq\mathbb{R}^n$ é convexo se, para quaisquer $\mathbf{x},\mathbf{y}\in C$ e $\theta\in[0,1]$, $\theta\mathbf{x}+(1-\theta)\mathbf{y}\in C$. É **não convexo** se existem $\mathbf{x},\mathbf{y}\in C$ e $\theta\in[0,1]$ com $\theta\mathbf{x}+(1-\theta)\mathbf{y}\notin C$.
+- **Função convexa.** $f:\mathbb{R}^n\to\mathbb{R}$, definida em $\mathrm{dom}\,f\subseteq\mathbb{R}^n$, é convexa se $\mathrm{dom}\,f$ é convexo e $f(\theta\mathbf{x}+(1-\theta)\mathbf{y})\le\theta f(\mathbf{x})+(1-\theta)f(\mathbf{y})$ para todos $\mathbf{x},\mathbf{y}\in\mathrm{dom}\,f$ e $\theta\in[0,1]$. É **estritamente convexa** se a desigualdade é estrita sempre que $\mathbf{x}\ne\mathbf{y}$ e $0<\theta<1$.
+- **Gráfico, epígrafe e subnível.** O gráfico de $f$ é $\{(\mathbf{x},f(\mathbf{x}))\mid\mathbf{x}\in\mathrm{dom}\,f\}$; a epígrafe é $\mathrm{epi}\,f=\{(\mathbf{x},t)\mid\mathbf{x}\in\mathrm{dom}\,f,\ f(\mathbf{x})\le t\}\subseteq\mathbb{R}^{n+1}$; o subnível $c$ é $\{\mathbf{x}\in\mathrm{dom}\,f\mid f(\mathbf{x})\le c\}$. Vale: $f$ é convexa se, e somente se, $\mathrm{epi}\,f$ é convexo.
+- **Gradiente-linha.** $\nabla f(\mathbf{x})\in\mathbb{R}^{1\times n}$. **Condição de primeira ordem:** para $f$ diferenciável com domínio aberto e convexo, $f$ é convexa se, e somente se, $f(\mathbf{y})\ge f(\mathbf{x})+\nabla f(\mathbf{x})(\mathbf{y}-\mathbf{x})$ para todos $\mathbf{x},\mathbf{y}$.
+- **Hessiana.** $[\nabla^2f(\mathbf{x})]_{ij}=\partial^2f/\partial x_i\partial x_j$. Com $g(t)=f(\mathbf{x}+t\mathbf{v})$, vale $g''(0)=\mathbf{v}^T\nabla^2f(\mathbf{x})\mathbf{v}$. **Condição de segunda ordem:** para $f$ duas vezes diferenciável com domínio aberto e convexo, $f$ é convexa se, e somente se, $\nabla^2f(\mathbf{x})\succeq0$ para todo $\mathbf{x}$.
+- **Quadrática.** $f(\mathbf{x})=\tfrac12\mathbf{x}^TP\mathbf{x}+\mathbf{q}^T\mathbf{x}+r$, com $P$ simétrica, tem $\nabla^2f=P$ em todo ponto.
+- **Perda quadrática e Ridge.** Para $X\in\mathbb{R}^{N\times d}$ e $\mathbf{y}\in\mathbb{R}^N$, $L(\boldsymbol\beta)=\|X\boldsymbol\beta-\mathbf{y}\|^2$ e $L_\lambda(\boldsymbol\beta)=L(\boldsymbol\beta)+\lambda\|\boldsymbol\beta\|^2$, com $\lambda>0$. $\mathcal{N}(X)=\{\mathbf{v}\mid X\mathbf{v}=\mathbf{0}\}$ é o núcleo de $X$, e $\mathrm{cond}(A)=\mu_{\max}/\mu_{\min}$ para $A\succ0$ com autovalores $\mu$.
+
+## Questões discursivas
+
+1. **Operações com conjuntos e funções.** (a) Prove que a interseção de dois conjuntos convexos é convexa e dê um exemplo, em $\mathbb{R}$, de dois conjuntos convexos cuja união não é convexa. (b) Usando o teorema da epígrafe, prove que $f=\max\{f_1,f_2\}$ é convexa quando $f_1$ e $f_2$ são convexas. (c) Mostre, com um contraexemplo, que $\min\{f_1,f_2\}$ pode não ser convexa (sugestão: $f_1(x)=(x-1)^2$ e $f_2(x)=(x+1)^2$). Em qual passo o argumento de (b) falha para o mínimo?
+
+2. **O conjunto dos minimizadores.** Seja $f$ convexa e $m=\inf f$. (a) Prove que o conjunto $\{\mathbf{x}\in\mathrm{dom}\,f\mid f(\mathbf{x})=m\}$ é convexo (pode ser vazio). (b) Prove que, se $f$ é estritamente convexa, ela tem no máximo um minimizador. (c) Explique por que convexidade estrita não garante que exista minimizador, usando $f(x)=e^x$ em $\mathbb{R}$. Que hipótese adicional garante existência no caso $L_\lambda$ (ver Contexto)?
+
+3. **Para onde a Ridge aponta.** Suponha que $X$ tenha posto incompleto, de modo que os minimizadores de $L$ formam $\boldsymbol\beta^\star+\mathcal{N}(X)$. (a) Calcule $\nabla^2L_\lambda$ e mostre que é definida positiva para $\lambda>0$. (b) Mostre que o minimizador $\boldsymbol\beta_\lambda=(X^TX+\lambda I)^{-1}X^T\mathbf{y}$ é ortogonal a todo vetor de $\mathcal{N}(X)$ (sugestão: use que $X^T\mathbf{y}$ é ortogonal a $\mathcal{N}(X)$ e que $X^TX+\lambda I$ tem os mesmos autovetores que $X^TX$). (c) Discuta o que isso sugere sobre qual dos infinitos minimizadores de $L$ a Ridge escolhe quando $\lambda\to0^+$, e por que essa escolha é um critério nosso, não dos dados.
+
+## Questões de Verdadeiro/Falso
+
+Cada teste tem 4 itens sobre o mesmo tema. O teste só conta se os 4 itens forem julgados corretamente (em prova, deixar em branco custa 20% da questão).
+
+::: {.callout-note icon=false}
+## Teste 1 — Conjuntos convexos
+
+- □ O conjunto $\{\mathbf{x}\in\mathbb{R}^n\mid\|\mathbf{x}\|=1\}$ (a esfera unitária) é convexo.
+- □ O conjunto das matrizes simétricas $n\times n$ semidefinidas positivas é convexo.
+- □ Para um conjunto de treino $\{(\mathbf{x}_i,y_i)\}_{i=1}^N$ com $y_i\in\{-1,+1\}$, o conjunto dos pesos $\{\mathbf{w}\in\mathbb{R}^d\mid y_i\mathbf{w}^T\mathbf{x}_i\ge1\ \text{para todo } i\}$ é convexo.
+- □ Se $C_1$ e $C_2$ são não convexos, então $C_1\cap C_2$ é não convexo.
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — Funções convexas pela definição
+
+- □ $f(x)=\sqrt{|x|}$ é convexa em $\mathbb{R}$.
+- □ Se $f:\mathbb{R}\to\mathbb{R}$ é convexa, então $g(x)=f(2x+1)$ também é.
+- □ $f(x)=x^3$, com $\mathrm{dom}\,f=[0,\infty)$, é convexa.
+- □ O produto de duas funções convexas em $\mathbb{R}$ é sempre convexo.
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — Epígrafe, gráfico e subníveis
+
+- □ Se $f$ é convexa, então o seu **gráfico** $\{(\mathbf{x},f(\mathbf{x}))\}$ é um conjunto convexo.
+- □ Se $f$ é convexa, então o subnível $\{\mathbf{x}\in\mathrm{dom}\,f\mid f(\mathbf{x})\le c\}$ é convexo para todo $c\in\mathbb{R}$.
+- □ Se todos os subníveis de $f$ são convexos, então $f$ é convexa.
+- □ A perda *hinge* média de um SVM linear, $\frac1N\sum_{i=1}^N\max\{0,\,1-y_i\mathbf{w}^T\mathbf{x}_i\}$, é convexa em $\mathbf{w}$, embora não seja diferenciável em todo ponto.
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — A condição de primeira ordem
+
+- □ Se $f$ é convexa e diferenciável, o hiperplano tangente ao gráfico em qualquer ponto nunca fica acima do gráfico, em nenhum ponto do domínio.
+- □ Se $f$ é convexa e diferenciável, com $\mathrm{dom}\,f=\mathbb{R}^n$, e $\nabla f(\mathbf{x}_0)\ne\mathbf{0}$, então $\mathbf{x}_0$ não é minimizador global de $f$.
+- □ Na regressão logística, cuja perda (entropia cruzada média) é convexa e diferenciável nos pesos, um ponto em que o gradiente é exatamente nulo é um minimizador global.
+- □ Se $f$ é diferenciável e **não** convexa, então nenhum ponto de gradiente nulo é minimizador global de $f$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 5 — A Hessiana e a curvatura ao longo de uma reta
+
+- □ Se $g(t)=f(\mathbf{x}+t\mathbf{v})$, então $g''(0)=\mathbf{v}^T\nabla^2f(\mathbf{x})\mathbf{v}$.
+- □ Para $f(x_1,x_2)=x_1x_2$, a Hessiana é constante e $f$ é convexa.
+- □ Se $\nabla^2f(\mathbf{x})$ tem um autovalor negativo, existe uma direção $\mathbf{v}$ tal que $t\mapsto f(\mathbf{x}+t\mathbf{v})$ tem segunda derivada negativa em $t=0$.
+- □ A Hessiana de uma função $f:\mathbb{R}^n\to\mathbb{R}$ duas vezes **continuamente** diferenciável pode ser qualquer matriz $n\times n$, inclusive não simétrica.
+:::
+
+::: {.callout-note icon=false}
+## Teste 6 — A condição de segunda ordem
+
+- □ $f(x)=1/x^2$, com $\mathrm{dom}\,f=\mathbb{R}\setminus\{0\}$, tem $f''(x)>0$ em todo o domínio e, mesmo assim, não é convexa.
+- □ Se $\nabla^2f(\mathbf{x})\succ0$ para todo $\mathbf{x}$ num domínio aberto e convexo, então $f$ é estritamente convexa.
+- □ Se $f$ é estritamente convexa e duas vezes diferenciável, então $\nabla^2f(\mathbf{x})\succ0$ em todo $\mathbf{x}$.
+- □ A função *softplus*, $f(x)=\log(1+e^x)$, usada como ativação em redes neurais, é convexa em $\mathbb{R}$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 7 — Quadráticas e pontos críticos
+
+Nos itens abaixo, $f(\mathbf{x})=\tfrac12\mathbf{x}^TP\mathbf{x}+\mathbf{q}^T\mathbf{x}+r$ em $\mathbb{R}^2$, com $P$ simétrica.
+
+- □ Se $P\succeq0$ é singular, $f$ pode não ter nenhum minimizador.
+- □ Se $P$ tem autovalores $2$ e $-3$, $f$ tem exatamente um ponto crítico, e ele é uma sela.
+- □ Se $P$ tem autovalores $2$ e $0$, então $f$ tem infinitos minimizadores.
+- □ Se $P\succ0$ e $\mathbf{x}^\star$ é o minimizador, então $f(\mathbf{x})-f(\mathbf{x}^\star)=\tfrac12(\mathbf{x}-\mathbf{x}^\star)^TP(\mathbf{x}-\mathbf{x}^\star)$ para todo $\mathbf{x}$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 8 — A perda quadrática
+
+- □ $\nabla^2L(\boldsymbol\beta)=2X^TX$ para todo $\boldsymbol\beta$, qualquer que seja $\mathbf{y}$.
+- □ Se $X$ tem posto coluna completo, $L$ tem exatamente um minimizador.
+- □ Se $X$ tem posto incompleto, $L$ não tem minimizador.
+- □ Numa regressão polinomial de grau $10$ (com intercepto) ajustada a apenas $5$ pontos, $X^TX$ é definida positiva.
+:::
+
+::: {.callout-note icon=false}
+## Teste 9 — A regularização Ridge
+
+- □ Para todo $\lambda>0$, o menor autovalor de $\nabla^2L_\lambda=2(X^TX+\lambda I)$ é pelo menos $2\lambda$.
+- □ Se $X^TX$ tem autovalores $\mu_{\max}>\mu_{\min}>0$, então $\mathrm{cond}(X^TX+\lambda I)$ diminui quando $\lambda$ cresce.
+- □ Quando $X$ tem posto incompleto e $\lambda>0$, a solução Ridge $\boldsymbol\beta_\lambda$ é um dos minimizadores $\boldsymbol\beta^\star+\mathcal{N}(X)$ de $L$, escolhido para desempatar.
+- □ Na regressão logística com penalidade $\lambda\|\mathbf{w}\|^2$ e $\lambda>0$, o objetivo é estritamente convexo, mesmo quando os dados são linearmente separáveis.
+:::

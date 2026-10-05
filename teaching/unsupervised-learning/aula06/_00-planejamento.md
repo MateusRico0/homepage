@@ -9,18 +9,25 @@ população este ponto veio?", a pergunta passa a ser "que posição, num
 espaço de dimensão bem menor, resume este ponto sem perder o que
 importa?". A aula constrói essa ideia em três camadas, cada uma
 revisitando o mesmo objeto (o subespaço de maior variância dos dados)
-de um ângulo diferente: (1) a Análise de Componentes Principais (PCA)
+de um ângulo diferente. Abre com o autoencoder linear (rede rasa,
+ativação linear, gargalo de $M<D$ unidades), que torna concreto o
+espaço latente: o código são coordenadas num plano de dimensão $M$
+dentro do espaço dos dados, e os dados só determinam o plano, não os
+eixos (invariância por $\mathbf{G}$ invertível). A pergunta "que plano
+a rede aprende?" é então respondida por: (1) a Análise de Componentes Principais (PCA)
 clássica, puramente algébrica, via decomposição espectral da matriz de
 covariância amostral, apresentada nas suas duas formulações equivalentes
-(máxima variância projetada; mínimo erro de reconstrução); (2) a PCA
+(primeiro mínimo erro de reconstrução, que é o objetivo do autoencoder;
+depois máxima variância retida, ligadas por Pitágoras), o que fecha a
+prova de que o autoencoder linear aprende o subespaço de PCA; (2) a PCA
 Probabilística (PPCA), um modelo gerador de variável latente
 linear-Gaussiana (no mesmo espírito do GMM da Aula 4, mas com $z$
 contínuo em vez de categórico), cujo ajuste por máxima verossimilhança
-recupera a PCA clássica como caso particular; (3) o autoencoder linear
-(rede neural rasa, ativação linear, gargalo de $M<D$ unidades), provado
-equivalente ao mesmo subespaço de PCA.
+recupera a PCA clássica como caso particular.
 
-**Objetivos de aprendizagem:** (1) derivar a PCA por máxima variância e
+**Objetivos de aprendizagem:** (0) interpretar o espaço latente de um
+autoencoder linear como sistema de coordenadas de um plano e reconhecer
+o que é identificável (o plano) e o que não é (os eixos); (1) derivar a PCA por máxima variância e
 por mínimo erro de reconstrução, e demonstrar a equivalência das duas
 formulações; (2) formular a PPCA como modelo gerador linear-Gaussiano e
 derivar sua solução de máxima verossimilhança; (3) mostrar que a PCA
@@ -58,52 +65,61 @@ não linear da Aula 7).
 1. **Abertura — Revisão e Introdução** (~12 min) — revisão cuidadosa do
    que a Aula 5 deixou pronto (BIC, ELBO, EM como subida de
    coordenadas); Ideia Central (Ausubel): a mudança de eixo, variável
-   latente categórica $\to$ contínua, anunciada no fechamento da Aula 5;
-   roteiro explícito das 4 perguntas; problema motivador (o Breast
-   Cancer Wisconsin tem $30$ atributos — impossível visualizar
-   diretamente; como resumir cada paciente em $2$ números escolhidos
-   "corretamente", não arbitrariamente?); Pausa Ativa 1.
-2. **Problema-Fio: Qual Direção Resume Melhor?** (~10 min) — Inside-Out:
-   ilustração geométrica 2D (mesmo par `radius_worst`/`concave
-   points_worst` das Aulas 3–5, ambos padronizados), comparando a
-   variância dos dados projetados em duas direções candidatas (o eixo
-   bruto de um atributo vs. a direção a $45°$) — sem fórmula ainda, só a
-   pergunta geométrica que o Bloco 3 formaliza.
-3. **Mecanismo I: Formulação de Máxima Variância** (~15 min) —
-   desenvolvimento *principled*: premissas explícitas, Lagrangeano,
-   $Su_1=\lambda_1u_1$ — a direção ótima é o autovetor de maior
-   autovalor de $S$. Generalização para $M$ componentes por indução.
-   Aplicação ao Breast Cancer Wisconsin completo ($D=30$): autovalores,
-   variância explicada. Pausa Ativa 2.
-4. **Mecanismo II: Formulação de Erro Mínimo, e Sua Equivalência com a Anterior** (~15 min) —
-   segunda derivação (minimizar $J=\frac1N\sum_n\|\mathbf{x}_n-
-   \tilde{\mathbf{x}}_n\|^2$), chegando à mesma equação de autovetores —
-   Teorema de equivalência das duas formulações. Projeção real nos 2
-   primeiros componentes, mostrando que a estrutura benigno/maligno
-   (nunca usada no ajuste) emerge visualmente. Pausa Ativa 3.
-5. **Diagnóstico Teórico: PCA Probabilística (PPCA)** (~20 min) —
-   formulação do modelo gerador linear-Gaussiano
-   ($p(\mathbf{z})=\mathcal{N}(\mathbf{0},I)$,
-   $p(\mathbf{x}\mid\mathbf{z})=\mathcal{N}(\mathbf{Wz}+\boldsymbol\mu,
-   \sigma^2I)$), no mesmo espírito da variável latente da Aula 4;
-   solução de máxima verossimilhança
-   ($\mathbf{W}_{\mathrm{ML}}=\mathbf{U}_M(\mathbf{L}_M-\sigma^2I)^{1/2}
-   \mathbf{R}$); verificação numérica de que $\sigma^2_{\mathrm{ML}}$ é
-   a média dos autovalores descartados; caso-limite $\sigma^2\to0$
-   recupera a projeção ortogonal da PCA clássica. Pausa Ativa 4.
-6. **O Autoencoder Linear Compartilha o Mesmo Subespaço** (~15 min) —
-   Teorema (Bourlard & Kamp, 1988; Baldi & Hornik, 1989, via DLFC
-   §19.1.1), demonstrado por redução ao problema de erro mínimo já
-   provado no Bloco 4 (o objetivo de reconstrução do autoencoder linear
-   é, literalmente, o mesmo $J$); verificação numérica (autoencoder
-   linear via `MLPRegressor(activation="identity")`) comparando o erro
-   de reconstrução obtido com o ótimo teórico da PCA. Pausa Ativa 5.
-7. **Síntese, Fechamento e Ponte para a Aula 7** (~10 min) — as quatro
-   respostas convergem para o mesmo subespaço, vistas de quatro ângulos
-   (geométrico, algébrico, probabilístico, neural); retomar as perguntas
-   da Abertura; nomear a limitação central (só estrutura **linear**) —
-   ponte explícita para a Aula 7 (autoencoders não lineares e VAE,
-   retomando o ELBO da Aula 5 no cenário não linear).
+   latente categórica $\to$ contínua; roteiro das 4 perguntas; problema
+   motivador (mapa de correlação dos $30$ atributos: $44$ de $435$ pares
+   com $|r|>0{,}8$ — quantos números bastam, e quais?); Pausa Ativa 1.
+2. **Problema-Fio: Guardar Um Número, Reconstruir Dois** (~10 min) —
+   par `radius_worst`/`concave points_worst`: guardar a posição ao longo
+   de uma reta e reconstruir pelo ponto da reta; eixo bruto (retida
+   $1{,}00$, erro $1{,}00$) vs. $45°$ (retida $1{,}79$, erro $0{,}21$).
+   Motiva a aula inteira: o número guardado é um código latente
+   (autoencoder), qual reta erra menos (Mecanismo I), retida $+$ erro
+   $=2{,}00$ (Mecanismo II), o espalhamento em torno da reta como ruído
+   (PPCA, $\sigma^2_{\mathrm{ML}}=\lambda_2=0{,}21$).
+3. **O Autoencoder Linear: Comprimir, Codificar, Reconstruir** (~18 min)
+   — definição (DLFC §19.1.1); codificador $\mathbf{V}$, código latente
+   $\mathbf{z}_n=\mathbf{V}\mathbf{x}_n$, decodificador $\mathbf{W}$;
+   reconstruções no plano $\mathcal{C}(\mathbf{W})$, código $=$
+   coordenadas, colunas de $\mathbf{W}$ $=$ eixos; invariância
+   $(\mathbf{G}\mathbf{V},\mathbf{W}\mathbf{G}^{-1})$: os dados fixam o
+   plano, não os eixos; Teorema (Bourlard & Kamp; Baldi & Hornik)
+   só anunciado como pergunta ("qual plano?"), sem citar PCA ainda;
+   espaço latente do autoencoder treinado no Breast Cancer Wisconsin
+   (pesos com cosseno $\approx-0{,}58$). Pausa Ativa 2 (espaço latente: o
+   que os dados determinam).
+4. **Mecanismo I: O Melhor Plano Pelo Erro de Reconstrução** (~15 min) —
+   a partir do autoencoder: Suposição 1, pesos amarrados
+   ($\mathbf{W}=\mathbf{U}$, $\mathbf{V}=\mathbf{U}^T$); Suposição 2,
+   $\mathbf{U}$ com colunas ortonormais (base do plano); completar a base
+   de $\mathbb{R}^D$ e reconstrução geral com $z_{ni}$ e $b_i$ (PRML
+   §12.1.2). Passo 1 por Pitágoras na base: $z_{ni}=\mathbf{x}_n^T\mathbf{u}_i$
+   (o codificador amarrado era ótimo), $b_i=\bar{\mathbf{x}}^T\mathbf{u}_i$,
+   erro ortogonal; Passo 2, $J=\sum_{i>M}\mathbf{u}_i^T\mathbf{S}\mathbf{u}_i$;
+   Passo 3, $J=\mathrm{tr}(\mathbf{S})-$ variância retida.
+5. **Mecanismo II: O Melhor Plano Pela Variância Retida** (~15 min) —
+   PRML §12.1.1: Lagrangeano, $\mathbf{S}\mathbf{u}_1=\lambda_1\mathbf{u}_1$;
+   $\mathbf{S}$ como soma de posto 1 e indução em $M$ (ressalva Ky Fan);
+   autovalores no Breast Cancer Wisconsin; Teorema do erro mínimo como
+   junção ($J^\star=\sum_{i>M}\lambda_i$). Pausa Ativa 3.
+6. **De Volta ao Autoencoder: a Prova** (~10 min) — Teorema (Bourlard &
+   Kamp; Baldi & Hornik) enunciado agora que os componentes principais
+   existem; prova por redução; ressalva do DLFC sobre não linearidade
+   rasa e Pausa Ativa 4 (ativação não linear). Só nas notas: verificação
+   numérica (erro $0{,}367568$ vs. $0{,}367575$; ângulos principais;
+   $R^2>0{,}99999$ entre códigos), eixos canônicos da PCA e a projeção com
+   os $92{,}1\%$ sem rótulo.
+7. **PCA Como Gaussiana de Posto Reduzido (PPCA)** (~12 min) — Gaussiana
+   com covariância livre ($\mathbf{C}=\mathbf{S}$, $465$ números) vs.
+   covariância de posto $M$ mais ruído isotrópico
+   ($\mathbf{WW}^T+\sigma^2\mathbf{I}$); modelo gerador (o decodificador
+   com prior e ruído); resultado de Tipping & Bishop citado, lido como
+   $\mathbf{C}_{\mathrm{ML}}=\sum_{i\le M}\lambda_i\mathbf{u}_i\mathbf{u}_i^T+\sigma^2_{\mathrm{ML}}\sum_{i>M}\mathbf{u}_i\mathbf{u}_i^T$
+   (copia $\mathbf{S}$ em $M$ direções, achata as outras); figura dos
+   espectros de $\mathbf{S}$ e $\mathbf{C}_{\mathrm{ML}}$ ($60$ números);
+   $\sigma^2\to0$: Gaussiana de posto exatamente $M$ $=$ PCA. Pausa Ativa 5.
+8. **Síntese, Fechamento e Ponte para a Aula 7** (~10 min) — quatro
+   ângulos (neural, algébrico, geométrico, probabilístico); retomar as
+   perguntas; limitação linear; ponte para autoencoders profundos e VAE.
 
 **Exercícios finais:** 3 discursivas + 6 blocos de V/F (24 itens) —
 densidade um pouco menor que a Aula 5 (28 itens) porque esta aula, apesar
@@ -120,7 +136,7 @@ Aula 7.
 ### Fonte 1: PRML, §12.1.1 "Maximum variance formulation", pp. 561–562 (PDF pp. 581–582, offset +20 confirmado nesta sessão comparando o cabeçalho de página)
 
 **Uso pretendido:** derivação da PCA por máxima variância projetada
-(eq. 12.1–12.6), base do Bloco 3.
+(eq. 12.1–12.6), base do Mecanismo II.
 
 **Trecho (p. 561):**
 > "Consider a data set of observations {xn} where n = 1, . . . , N, and xn
@@ -163,7 +179,7 @@ Aula 7.
 ### Fonte 2: PRML, §12.1.2 "Minimum-error formulation", pp. 563–565 (PDF pp. 583–585)
 
 **Uso pretendido:** segunda derivação (erro de reconstrução), eq.
-12.11–12.18, base do Bloco 4 e da ponte ao autoencoder linear (Bloco 6).
+12.11–12.18, base do Mecanismo I e da prova do autoencoder linear.
 
 **Trecho (p. 564):**
 > "As our distortion measure, we shall use the squared distance between
@@ -189,7 +205,7 @@ Aula 7.
 **Uso pretendido:** formulação do modelo gerador linear-Gaussiano
 (eq. 12.31–12.33), covariância marginal (eq. 12.35–12.36), solução de
 máxima verossimilhança (eq. 12.43–12.47), e o caso-limite $\sigma^2\to0$
-recuperando a PCA clássica (eq. 12.48–12.50) — base do Bloco 5.
+recuperando a PCA clássica (eq. 12.48–12.50) — base do bloco da PPCA.
 
 **Trecho (p. 571):**
 > "We can formulate probabilistic PCA by first introducing an explicit
@@ -244,7 +260,7 @@ recuperando a PCA clássica (eq. 12.48–12.50) — base do Bloco 5.
 
 **Uso pretendido:** enunciado do teorema de equivalência
 autoencoder-linear/PCA (citando Bourlard & Kamp, 1988; Baldi & Hornik,
-1989), base do Bloco 6 — a prova em si é reconstruída nesta aula por
+1989), base do bloco do autoencoder — a prova em si é reconstruída nesta aula por
 redução ao problema de erro mínimo já demonstrado (Fonte 2), não copiada
 do livro (o DLFC enuncia o resultado sem demonstrá-lo: "it can be shown
 that...").

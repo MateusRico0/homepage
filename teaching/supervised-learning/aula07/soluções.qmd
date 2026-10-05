@@ -1,0 +1,125 @@
+---
+title: "Soluções — Regularização e Estimativa MAP Bayesiana"
+subtitle: "Aula 7 — Do Controle de Complexidade à Incerteza dos Parâmetros"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss]
+    toc: true
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+
+## Questões de Verdadeiro/Falso
+
+::: {.callout-note icon=false}
+## Teste 1 — Multicolinearidade e a Fórmula Fechada de Ridge
+
+- □ Se duas colunas de $X$ forem apenas aproximadamente correlacionadas (não exatamente colineares), a matriz $X^TX$ é tecnicamente invertível, mas seu número de condição (razão entre maior e menor autovalor) tende a ser muito alto, produzindo o mesmo sintoma prático de coeficientes instáveis observado no caso exatamente colinear.
+- □ Se, em vez de somar $\lambda I$, somássemos uma matriz diagonal com entradas diferentes para cada coeficiente, $\text{diag}(\lambda_1,\dots,\lambda_D)$, a solução ainda teria forma fechada $(X^TX+\text{diag}(\lambda_1,\dots,\lambda_D))^{-1}X^T\mathbf{y}$, mas a penalidade correspondente deixaria de ser a norma $L_2$ padrão $\|\boldsymbol\beta\|^2$.
+- □ O mesmo remédio algébrico (somar uma matriz diagonal positiva a uma Hessiana antes de invertê-la) também é útil como técnica de estabilização numérica do algoritmo IRLS da Aula 6, no cenário em que a matriz diagonal $R$ quase satura (probabilidades muito próximas de $0$ ou $1$).
+- □ Como Ridge sempre produz uma matriz invertível para $\lambda>0$, isso implica que aumentar $\lambda$ indefinidamente sempre melhora a qualidade preditiva do modelo em dados de teste.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 1 — Multicolinearidade e a Fórmula Fechada de Ridge
+
+- ✔ Verdadeiro — um autovalor pequeno (não necessariamente zero) já faz $(X^TX)^{-1}$ amplificar ruído; a instabilidade é uma questão de condicionamento, não só de singularidade exata.
+- ✔ Verdadeiro — a fórmula fechada continua válida com qualquer matriz diagonal positiva somada a $X^TX$; a penalidade correspondente passa a ser $\sum_j \lambda_j\beta_j^2$, uma soma ponderada, não mais $\lambda\|\boldsymbol\beta\|^2$.
+- ✔ Verdadeiro — somar uma pequena constante à diagonal de $R$ (ou de $X^TRX$) antes de resolver o sistema de Newton é uma técnica padrão de estabilização numérica quando a Hessiana se aproxima da singularidade, mesma lógica algébrica do Ridge.
+- ✗ Falso — $\lambda$ muito grande força $\boldsymbol\beta\to\mathbf{0}$, subajustando o modelo (alto viés); existe um ponto ótimo intermediário, não um "quanto maior, melhor" (tema formalizado na Aula 8).
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — Ridge, Lasso e o Compromisso Viés-Variância
+
+- □ No limite $\lambda\to\infty$, tanto Ridge quanto Lasso convergem para o modelo trivial $\boldsymbol\beta=\mathbf{0}$, que tem variância nula, mas viés igual à magnitude do próprio efeito verdadeiro que se deixou de capturar.
+- □ Se o processo gerador verdadeiro dos dados tivesse apenas dois coeficientes não nulos entre muitos atributos candidatos, o Lasso tenderia a recuperar essa estrutura esparsa com mais fidelidade do que o Ridge, que tende a manter todos os coeficientes não nulos, ainda que pequenos.
+- □ O mesmo compromisso entre viés e variância controlado por um hiperparâmetro de penalidade aparece na escolha da profundidade máxima de uma árvore de decisão: árvores mais rasas têm mais viés e menos variância, análogo a um $\lambda$ maior.
+- □ Como Ridge tem solução fechada e Lasso não, Ridge é sempre computacionalmente mais eficiente e deve ser preferido sempre que os dois métodos produzirem erro de teste equivalente.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 2 — Ridge, Lasso e o Compromisso Viés-Variância
+
+- ✔ Verdadeiro — $\boldsymbol\beta=\mathbf{0}$ é uma previsão determinística (variância zero entre reamostragens), mas seu viés é exatamente a magnitude do efeito real não capturado.
+- ✔ Verdadeiro — é a motivação prática central de Lasso: quando a estrutura verdadeira é esparsa, sua penalidade $L_1$ casa melhor com essa estrutura do que o encolhimento uniforme do Ridge.
+- ✔ Verdadeiro — profundidade de árvore, número de vizinhos em $k$-NN, grau de um polinômio: todos são hiperparâmetros de complexidade com o mesmo compromisso estrutural viés-variância.
+- ✗ Falso — eficiência computacional não é o único critério; interpretabilidade e seleção de variáveis (exclusivas do Lasso) frequentemente pesam mais do que o custo do ajuste numérico, mesmo com erro de teste equivalente.
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — A Estimativa MAP e o Teorema de Bayes
+
+- □ Se a distribuição a priori $p(\boldsymbol\beta)$ for extremamente concentrada (variância tendendo a zero) em torno de um valor específico $\boldsymbol\beta_0$, a estimativa MAP converge para $\boldsymbol\beta_0$, independentemente dos dados observados.
+- □ Se, em vez de maximizar a posterior $p(\boldsymbol\beta\mid\mathcal{D})$, calculássemos sua média (o valor esperado $\mathbb{E}[\boldsymbol\beta\mid\mathcal{D}]$), obteríamos necessariamente o mesmo valor que a estimativa MAP, pois toda distribuição de probabilidade tem média igual à moda.
+- □ O mesmo princípio de combinar uma verossimilhança com uma *prior* via o Teorema de Bayes, usado aqui para regularizar coeficientes de regressão, é a base do classificador Naive Bayes, em que uma *prior* sobre as classes é combinada com a verossimilhança dos atributos observados.
+- □ Como a estimativa MAP usa uma distribuição a priori, ela é sempre mais "subjetiva" e menos rigorosa cientificamente do que a estimativa de Máxima Verossimilhança, que não faz nenhuma suposição sobre os parâmetros.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 3 — A Estimativa MAP e o Teorema de Bayes
+
+- ✔ Verdadeiro — uma prior com variância $\to 0$ é, no limite, um ponto de massa em $\boldsymbol\beta_0$; nenhuma verossimilhança finita consegue deslocar a posterior para longe dele.
+- ✗ Falso — média e moda coincidem para distribuições simétricas unimodais (como a Gaussiana), mas não em geral (por exemplo, distribuições assimétricas); a afirmação de que isso vale "sempre" é falsa.
+- ✔ Verdadeiro — Naive Bayes calcula $p(C_k\mid\mathbf{x}) \propto p(\mathbf{x}\mid C_k)p(C_k)$, exatamente a estrutura verossimilhança × prior do Teorema de Bayes usada aqui para os parâmetros.
+- ✗ Falso — falsa dicotomia: o MLE também carrega suposições implícitas (a família da verossimilhança escolhida, por exemplo); "não ter prior explícita" não é o mesmo que "não fazer suposição nenhuma".
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — Prior Gaussiana e Ridge
+
+- □ Conforme a variância da prior $\tau^2$ tende a infinito, o $\lambda$ efetivo tende a zero, e a estimativa MAP converge para o MLE puro.
+- □ Se a variância do ruído $\sigma^2$ fosse muito pequena (dados quase sem ruído), mantendo $\tau^2$ fixo, a identificação $\lambda=\sigma^2/\tau^2$ implica que o $\lambda$ efetivo seria pequeno — confiaríamos mais no ajuste aos dados do que na prior.
+- □ O mesmo mecanismo de somar duas log-densidades gaussianas independentes (a da verossimilhança e a da prior) para obter uma penalidade quadrática também explica, pela mesma dedução algébrica, por que a soma de duas variáveis aleatórias gaussianas independentes é ela mesma gaussiana.
+- □ Como a prior Gaussiana usada tem média zero, a estimativa MAP resultante nunca pode produzir um coeficiente estimado positivo — apenas coeficientes negativos ou exatamente nulos.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 4 — Prior Gaussiana e Ridge
+
+- ✔ Verdadeiro — $\lambda=\sigma^2/\tau^2 \to 0$ quando $\tau^2\to\infty$; a prior "sem opinião" deixa de penalizar, recuperando o MLE.
+- ✔ Verdadeiro — $\lambda=\sigma^2/\tau^2$ decresce com $\sigma^2$ pequeno: dados confiáveis (pouco ruído) justificam confiar mais no ajuste do que na crença prévia.
+- ✗ Falso — são dois fatos matemáticos distintos que só compartilham "envolver gaussianas somadas"; a soma de log-densidades para formar uma penalidade (regra do produto de densidades $\to$ soma de logs) não é o mesmo argumento que a estabilidade da família gaussiana sob soma de variáveis aleatórias independentes.
+- ✗ Falso — a prior centrada em zero penaliza **magnitude** (positiva ou negativa) simetricamente; a verossimilhança (os dados) determina o sinal do coeficiente estimado normalmente, a prior só encolhe seu valor em direção a zero.
+:::
+
+::: {.callout-note icon=false}
+## Teste 5 — Prior de Laplace e Lasso
+
+- □ A log-densidade da prior de Laplace é proporcional a $-|\beta|/b$, que cresce linearmente com $|\beta|$, diferente da log-densidade Gaussiana, que decai quadraticamente — essa diferença de crescimento é o que, na derivação, produz o termo $\|\boldsymbol\beta\|_1$ em vez de $\|\boldsymbol\beta\|_2^2$.
+- □ Se usássemos uma prior de Laplace com escala $b$ muito grande (distribuição muito espalhada), o $\lambda$ efetivo ($=\sigma^2/b$) seria pequeno, aproximando novamente o resultado do MLE puro — o mesmo comportamento assintótico observado para a prior Gaussiana quando $\tau^2\to\infty$.
+- □ A prior de Laplace tem densidade mais concentrada perto de zero e caudas mais pesadas do que uma prior Gaussiana de mesma variância — essa combinação é uma razão estatística adicional (além da geométrica) pela qual Lasso tende a produzir tanto muitos coeficientes exatamente zero quanto alguns coeficientes grandes, enquanto Ridge distribui a magnitude de forma mais uniforme.
+- □ Como Ridge e Lasso surgem de *priors* com média zero, as duas penalidades sempre selecionam exatamente o mesmo subconjunto de variáveis como "mais importantes", diferindo apenas na magnitude final dos coeficientes.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 5 — Prior de Laplace e Lasso
+
+- ✔ Verdadeiro — é exatamente a Derivação 2 da aula: log-densidade linear em $|\beta|$ (Laplace) vs. quadrática em $\beta$ (Gaussiana) é a origem algébrica de $L_1$ vs. $L_2$.
+- ✔ Verdadeiro — mesmo padrão assintótico da prior Gaussiana: prior muito espalhada carrega pouca informação, então $\lambda$ efetivo cai e o MAP se aproxima do MLE.
+- ✔ Verdadeiro — é uma propriedade real da distribuição de Laplace (pico agudo + caudas pesadas), consistente com a explicação geométrica/algébrica de sparsity dada na aula.
+- ✗ Falso — Ridge não produz coeficientes exatamente zero (só encolhimento suave), então não pode "selecionar o mesmo subconjunto" que o Lasso — a própria noção de "subconjunto selecionado" só se aplica ao Lasso.
+:::
+
+::: {.callout-note icon=false}
+## Teste 6 — Geometria e Soft-Thresholding
+
+- □ No limite $\lambda\to0^+$, o operador de soft-thresholding converge para o próprio $\hat\beta_{\text{MLE}}$, recuperando o caso não regularizado.
+- □ Se a penalidade usada fosse $\|\boldsymbol\beta\|_1^{1{,}5}$ (uma norma fracionária entre $L_1$ e $L_2$) em vez de exatamente $\|\boldsymbol\beta\|_1$, a região viável correspondente ainda teria vértices exatos sobre os eixos coordenados, preservando a mesma propriedade de esparsidade exata do Lasso.
+- □ A mesma ideia de que "vértices de uma região viável favorecem soluções esparsas/extremas" aparece em Programação Linear, em que o ótimo de um problema com restrições poliédricas ocorre sempre em um vértice do politopo viável.
+- □ Como o Lasso produz coeficientes exatamente zero e o Ridge não, isso implica que o Lasso sempre tem erro de previsão menor do que o Ridge, em qualquer conjunto de dados.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 6 — Geometria e Soft-Thresholding
+
+- ✔ Verdadeiro — com $\lambda=0$: $\beta^*=\text{sign}(\hat\beta_{\text{MLE}})\cdot\max(|\hat\beta_{\text{MLE}}|,0)=\hat\beta_{\text{MLE}}$ (assumindo $\hat\beta_{\text{MLE}}\ne0$).
+- ✗ Falso — para expoente $p=1{,}5 \in (1,2)$, a bola $\|\boldsymbol\beta\|_p \le t$ é estritamente convexa e **suave** (sem vértices), igual em espírito ao círculo do Ridge; só $p=1$ exatamente produz vértices sobre os eixos.
+- ✔ Verdadeiro — é o mesmo princípio geométrico da teoria de Programação Linear: soluções ótimas de problemas com restrições poliédricas ocorrem em vértices (pontos extremos) do politopo viável.
+- ✗ Falso — sparsity exata não implica menor erro de previsão; se o processo gerador verdadeiro não for esparso, o encolhimento uniforme do Ridge pode generalizar melhor que a seleção abrupta do Lasso.
+:::

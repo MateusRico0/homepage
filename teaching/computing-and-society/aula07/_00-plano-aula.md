@@ -1,267 +1,300 @@
-## Resumo — Aula 6: Architecture, Energy, and the Material Cost of Digital Infrastructure
+## Resumo — Aula 7: Fairness Algorítmica — Definições, Métricas e Mitigação
 
-As Aulas 1–5 tratam software como prática sociotécnica em escalas
-progressivamente mais amplas: o mapa de atores de um sistema (Aula 1),
-a ética normativa e o Ciclo Ético (Aula 2), a responsabilidade
-profissional (Aula 3), os mecanismos estruturais e deliberados dentro
-de uma equipe de engenharia (Aula 4), e o kit metodológico que essa
-equipe usa para decidir o que construir, com seu duplo uso de entender
-ou direcionar o usuário (Aula 5). Esta aula muda de escala outra vez:
-sai do comportamento do usuário individual e vai para a **materialidade
-física da infraestrutura computacional** — energia, água, minerais,
-território — e para quem, concretamente, arca com esse custo quando
-ele não é o consumidor final do serviço digital.
+A Aula 6 mostrou **de onde vêm** os vieses que uma decisão automatizada herda: os
+quatro espaços de Varshney (construto, observado, bruto, preparado), os cinco
+vieses (social, de representação, temporal, de preparação, de envenenamento) e
+os direitos da LGPD sobre tratamento de dados — mas terminou deixando
+explicitamente de fora as **métricas de fairness e as estratégias de mitigação
+algorítmica**, "para a aula seguinte" (ver `../_progresso.md`, seção "Aula 6
+(renumerada)"). Esta é essa aula: sai de "o dado está enviesado" para "como
+medir matematicamente se uma decisão é injusta, e o que fazer a respeito".
 
-O fio condutor não é mais uma métrica de produto, é um **caso real e
-atual**: a expansão de data centers de Inteligência Artificial na
-América Latina, ancorada no artigo de pesquisa de Beatriz Cardoso
-Nascimento (aluna de graduação do Instituto de Computação da UNICAMP)
-e Marcos Medeiros Raimundo (2026, ainda não publicado em veículo
-formal — tratado como *manuscript*/*working paper*), "Digital
-Sovereignty in the Polycrisis: Technological Dependency, Invisible
-Infrastructure, and AI Sacrifice Zones in Latin America". O caso
-central é o projeto real **Scala AI City**, em Eldorado do Sul (RS):
-uma reserva de 5 GW de energia apesar da instabilidade elétrica
-regional e das enchentes catastróficas de 2024, marginalizando a
-comunidade Mbyá-Guarani da Tekoa Pekuruty. A aula usa esse caso como
-**problema motivador concreto** (Estratégia A, *Outside-In*) antes de
-introduzir o arcabouço teórico do artigo (soberania digital, policrise
-global, zonas de sacrifício digital, colonialismo verde) e, depois,
-conecta esse arcabouço de volta às leituras-base já aprovadas da
-disciplina (Van de Poel & Royakkers, Cap. 10 — Sustentabilidade; Maciel
-& Viterbo, Vol. 2, Cap. 14 — Sustentabilidade em Computação), que
-fornecem o vocabulário técnico de análise de ciclo de vida, TI Verde e
-diretivas de projeto que respondem diretamente às competências de
-"eficiência energética em arquitetura" e "ciclo de vida do lixo
-eletrônico" já fixadas na ementa desta disciplina.
+O eixo narrativo central é a palestra do próprio professor, **"Bias is Learned,
+Fairness is Taught"** (Marcos M. Raimundo, Instituto de Computação — UNICAMP),
+usada com o mesmo tratamento de autenticidade autoral já estabelecido na Aula 6
+com o artigo de Nascimento & Raimundo: não como mais uma citação de rodapé, mas
+como o fio que atravessa a aula inteira, com nome explícito. A aula também
+conecta, na síntese, com três publicações do próprio grupo de pesquisa do
+professor (M²FGB, ensemble de Pareto-ótimos, fairness de longo prazo com
+rótulos seletivos) — mostrando aos alunos que os conceitos formais
+apresentados não são só didáticos, são pesquisa ativa acontecendo no próprio
+Instituto de Computação.
 
-**Pré-requisitos:** nenhum bloco específico de aula anterior é
-pré-requisito direto de conteúdo (esta aula abre um domínio novo:
-materialidade física, não comportamento do usuário) — mas a aula
-retoma, na Abertura, a tese que atravessa as Aulas 4–5 ("uma escolha
-aparentemente só técnica tem consequência real fora do próprio
-código/comportamento do usuário") como ideia-ponte (Ausubel) para
-esticar essa mesma tese até o domínio material.
+**Mudança de escopo desta aula em relação à ementa atual do `../index.qmd`:**
+a Lesson 7 hoje descrita lá ("Automated Decision-Making, Optimization, AI, and
+Risk" — opacidade, XAI, gestão de risco) muda para **fairness algorítmica**
+(definições, métricas, trade-offs, mitigação), decisão confirmada explicitamente
+pelo usuário nesta sessão. Isso será refletido na Etapa 5 (atualização do
+`../index.qmd`), depois de aprovada a aula — só peço confirmação do texto
+exato da nova entrada antes de aplicar, como o processo já prevê.
 
-**Achado de correção de ementa, resolvido nesta sessão:** as duas
-leituras recomendadas já aprovadas da Lesson 6 citavam capítulos com
-numeração errada, no mesmo padrão de citação quebrada já documentado em
-outras aulas desta disciplina (ver `_progresso.md`, "Achado importante:
-citação quebrada"). Verificado por leitura direta do sumário de cada
-livro nesta sessão:
-- **Van de Poel & Royakkers (2011):** a ementa cita "Chapter 9:
-  Sustainability, Ethics, and Technology". O sumário real do livro
-  (`Ethics, Technology, and Engineering`, p. ix) mostra que esse
-  capítulo é o **Capítulo 10** (pp. 277–300); o Capítulo 9 real é "The
-  Distribution of Responsibility in Engineering" (pp. 249–276), sobre o
-  *problem of many hands* — tema diferente, sem relação direta com
-  sustentabilidade.
-- **Maciel & Viterbo (2020), Vol. 2:** a ementa cita "Capítulo 8:
-  Sustentabilidade em Computação". O sumário real do Vol. 2 mostra que
-  o capítulo com esse título é o **Capítulo 14** (pp. 175–204,
-  autoria de Vânia Neris, Kamila Rodrigues, Renata Rodrigues Oliveira e
-  Newton Galindo Jr.); o Capítulo 8 real do Vol. 2 é outro tema, sobre
-  cultura de dados abertos.
+**Estado da pasta `aula07/` encontrado nesta sessão (a limpar como parte desta
+sessão):** `index.qmd` já continha um rascunho sobre Risco/XAI/Accountability,
+mas informal — sem separação HTML/slides, sem citação literal de fonte, sem
+TikZ, com pausas ativas fora do padrão do `../../CLAUDE.md`. Os outros quatro
+arquivos da pasta (`_00-plano-aula.md` antigo, `_01-fontes.md`,
+`_03-respostas-pausas.md`, `exercicios.qmd`, `soluções.qmd`) são **sobras da
+Aula 6 antiga** (Scala AI City/arquitetura), duplicadas de uma renumeração —
+a Aula 6 já tem sua própria cópia corrente e atualizada dessas informações em
+`../aula06/`. Este plano os substitui todos.
 
-**Decisão de escopo desta sessão:** ao contrário das correções
-análogas já feitas em Lições 1, 2 e 3, **estas duas não foram
-aplicadas** ao `../index.qmd` — a instrução desta sessão limitou
-explicitamente as edições permitidas nesse arquivo a exatamente duas:
-transformar o título da Lesson 6 em link, e acrescentar a terceira
-leitura (Nascimento & Raimundo) à lista já existente, mantendo o texto
-das duas leituras originais intacto. As correções de numeração ficam
-**sinalizadas aqui e em `_progresso.md`**, no mesmo padrão já usado
-para a citação pendente da Aula 7 (Steen) — resolvidas só na citação
-usada dentro do próprio `aula06/index.qmd` (que cita corretamente Cap.
-14 e Capítulo 10), não na ementa pública da disciplina.
+**Pré-requisitos:** o dicionário de notações da Aula 6 (espaço do
+construto/observado/bruto/preparado; vieses social/representação/temporal/
+preparação/envenenamento) é pressuposto — a Revisão da Abertura o retoma, sem
+reexplicar cada viés em detalhe (já coberto lá), só o suficiente para ligar
+"dado enviesado" a "decisão automatizada discriminatória".
 
-**Objetivos de aprendizagem** (do `../index.qmd`, Lesson 6, texto já
-aprovado, tratado como contrato de escopo, exceto pela correção de
-numeração de capítulo acima):
-- **Objectives:** Analyze the environmental and material impacts of
-  technology, including the carbon footprint of data centers, energy
-  efficiency in system architecture, and the electronic waste
-  lifecycle and disposal.
-- **Expected Competencies:** Ability to assess energy consumption and
-  environmental lifecycle trade-offs when designing and deploying
-  computational infrastructure.
+**Estratégia Pedagógica:** Estratégia A (*Outside-In*) — a própria palestra-base
+já é estruturada assim (três casos reais de dano antes de qualquer formalismo:
+COMPAS, Amazon, saúde), e a disciplina já usou essa estratégia com sucesso
+nas Aulas 4 e 6 quando há um caso concreto rico o bastante para funcionar como
+problema motivador completo.
 
-**Leitura recomendada** (do `../index.qmd`, Lesson 6, com a terceira
-leitura adicionada nesta sessão): Maciel & Viterbo (2020), Vol. 2, Cap.
-14 "Sustentabilidade e Computação"; Van de Poel & Royakkers (2011),
-Cap. 10 "Sustainability, Ethics, and Technology"; **Nascimento &
-Raimundo (2026)**, "Digital Sovereignty in the Polycrisis:
-Technological Dependency, Invisible Infrastructure, and AI Sacrifice
-Zones in Latin America" (manuscrito/*working paper*, Instituto de
-Computação, UNICAMP).
+## Plano de aula — Aula 7 (carga horária nominal: ~90–95min)
 
-## Estratégia Pedagógica
+1. **Abertura — Da Origem do Viés à Decisão que Discrimina** (~10 min) —
+   Revisão cuidadosa da Aula 6 (os quatro espaços e os cinco vieses de
+   Varshney, em 1-2 frases cada, lembrando o porquê, não só o nome). Ideia
+   central (Ausubel): até aqui, viés era um problema de *entrada* (o dado já
+   vem torto); hoje ele vira um problema de *decisão* — e decisão se pode
+   medir, formalizar e corrigir. Roteiro explícito (4 perguntas, ver abaixo).
+   Problema motivador: os três casos reais da palestra-base — COMPAS
+   (justiça criminal), Amazon (recrutamento), algoritmo de saúde — cada um
+   com a métrica de dano relatada na fonte original. Pausa ativa 1.
 
-**Estratégia A (Outside-In)** — a única aula desta disciplina, até
-aqui, que reintroduz explicitamente o rótulo formal (usado nas
-disciplinas STEM desta pasta): o assunto se presta bem a essa lógica
-porque existe um **caso concreto, real e recente** (Scala AI City) rico
-o bastante para funcionar como problema motivador completo antes de
-qualquer conceito formal — do mesmo jeito que a Aula 4 abriu com o caso
-COBOL/ALGOL de Conway antes de formalizar a Lei de Conway. A progressão
-é: caso motivador concreto (Scala AI City, Eldorado do Sul) → a
-materialidade física que o caso expõe (energia, água, minerais) →
-arcabouço teórico que nomeia o mecanismo (soberania digital, policrise,
-zonas de sacrifício digital) → ampliação comparativa (outros casos
-latino-americanos) → síntese prática ligando de volta ao vocabulário
-técnico de projeto (ciclo de vida, TI Verde) que a ementa já previa →
-fechamento com uma ética territorial de síntese.
+2. **Intuição — Como uma Máquina "Aprende" uma Decisão** (~10 min) —
+   O princípio de máxima verossimilhança como o motor comum por trás dos
+   três casos da Abertura: $\max_f P_f(Y\mid X)$ (probabilidade condicional
+   do resultado $Y$ dado a evidência $X$). Exemplo-fio: empréstimo bancário
+   ($X$ = salário, dívida, posse de imóvel; $Y$ = bom/mau pagador). Sem
+   código — só a leitura da fórmula e o que cada símbolo significa, no
+   registro de prosa já usado nesta disciplina.
 
-## Plano de aula — Aula 6 (carga horária nominal: ~90–95min)
+3. **O Dado Sensível $Z$ e a Falha da "Cegueira Deliberada"** (~10 min) —
+   Introduz $Z$ (atributo sensível: raça, gênero etc.) como só mais um dado
+   que a máquina usa se ajudar a prever $Y$. "Fairness through unawareness"
+   (remover $Z$ explicitamente) falha porque o modelo reconstrói $Z$ a
+   partir de proxies correlacionados (ex.: CEP) — ponte direta com o bloco
+   de proxies/quase-identificadores já visto na Aula 6, agora aplicado à
+   decisão, não só ao dado. Fecha com a pergunta que o próximo bloco
+   responde: então como definir injustiça sem depender de "esconder" $Z$?
+   Pausa ativa 2.
 
-1. **Abertura — Da Nuvem Etérea à Materialidade do Concreto** (~8 min)
-   — Revisão: as Aulas 4–5 mostraram que uma escolha aparentemente "só
-   técnica" (arquitetura de requisitos, escolha de métrica) tem
-   consequência real fora do próprio código ou do comportamento do
-   usuário. Ideia central (Ausubel): hoje essa mesma tese se estica até
-   o domínio **material** — uma escolha de arquitetura de sistema
-   (onde hospedar, quantos servidores, como resfriar) tem custo físico
-   real, em energia, água, minerais e terra, que ninguém "decidiu"
-   explicitamente impor a quem paga esse custo. Roteiro explícito (5
-   perguntas, ver abaixo). Problema motivador: a Inteligência
-   Artificial é vendida como algo "etéreo", uma "nuvem" sem peso — mas
-   e se ela pesar, literalmente, gigawatts, litros de água e hectares
-   de terra indígena? Pausa ativa fechando o bloco.
+4. **Definindo (In)Justiça com Probabilidade: as Muitas Faces do Fairness**
+   (~18 min) — Bloco mais denso, desenvolvimento matemático *principled*
+   (premissa → passo a passo, sem fórmula pronta caindo do céu):
+   desigualdade de injustiça individual ($P(Y{=}0\mid X, Z{=}\text{branco}) >
+   P(Y{=}0\mid X, Z{=}\text{preto})$); disparidade de utilidade/*group
+   fairness* ($\Delta = |\mathbb{E}[U\mid Z{=}0] - \mathbb{E}[U\mid Z{=}1]|$);
+   **Paridade Demográfica** vs. **Igualdade de Oportunidade** (as duas
+   equações, com a crítica de cada uma vinda diretamente da fonte); **Teorema
+   da Impossibilidade** (nomeado formalmente: fora de casos muito
+   restritos, é matematicamente impossível satisfazer todas as métricas de
+   fairness ao mesmo tempo — escolher uma é uma escolha ética, não só
+   técnica). Pausa ativa 3.
 
-2. **A Materialidade Escondida: Energia, Água e Minerais por Trás da
-   Nuvem** (~10 min) — Desenvolve o problema motivador com o
-   vocabulário técnico da leitura de Maciel & Viterbo (2020, Cap. 14):
-   TI Verde como conjunto de práticas para reduzir o impacto ambiental
-   de recursos tecnológicos; a Tabela 14.1 do livro (diretivas
-   ambientais para soluções de TI) mostra que a construção e a
-   manutenção de hardware já demandam consumo de água, energia e
-   minerais antes mesmo de qualquer uso — e que o resfriamento
-   (*cooling*) de hardware é, especificamente, um dos pontos de maior
-   consumo de água e energia. Ponte imediata para o Bloco 3: é
-   exatamente esse resfriamento, em escala industrial, que está no
-   centro do caso Scala AI City.
+5. **Fairness Rawlsiana: Melhorando a Vida de Quem Está Pior** (~10 min) —
+   Do "igualar" ao "maximizar o mínimo": o Princípio da Diferença de John
+   Rawls, traduzido para linguagem de ML como um objetivo *maximin*
+   ($\max_f \min_z \mathbb{E}[U\mid Z{=}z]$). Conecta com pesquisa do
+   próprio grupo: **M²FGB** (Pereira, Valdrighi & Raimundo, 2025) — gradient
+   boosting com termo de fairness min-max. Nota de autoria explícita, mesmo
+   padrão da Aula 6.
 
-3. **Caso Central: Scala AI City e a Tekoa Pekuruty (Eldorado do Sul)**
-   (~15 min) — O caso motivador da Abertura, aprofundado com os dados
-   do artigo de Nascimento & Raimundo (2026): reserva de 5 GW de
-   energia em Eldorado do Sul (Rio Grande do Sul), apesar da
-   instabilidade elétrica regional e da vulnerabilidade a desastres
-   climáticos (as enchentes catastróficas de 2024 atingiram
-   exatamente essa região); o projeto marginaliza a comunidade
-   Mbyá-Guarani da Tekoa Pekuruty, priorizando o resfriamento de
-   servidores sobre direitos territoriais ancestrais. Nota explícita
-   de autoria: esta é uma pesquisa de uma aluna de graduação deste
-   próprio Instituto de Computação, orientada pelo professor — usada
-   deliberadamente como o eixo narrativo da aula, não como mais uma
-   citação de rodapé.
+6. **Fairness de Longo Prazo: o Problema dos Rótulos Seletivos** (~10 min) —
+   Fairness estática/pontual não basta por causa de *feedback loops*:
+   decisão de hoje ($t$) molda o dado de amanhã ($t{+}1$) — ex.: conceder
+   um empréstimo hoje melhora o score de crédito futuro do cliente; negar
+   impede esse ciclo positivo. O desafio dos **rótulos seletivos**: só
+   observamos o resultado (pagou/não pagou) de quem recebeu decisão
+   positiva. Conecta com **Long-term Fairness with Selective Labels**
+   (Valdrighi, Valera & Raimundo, ICML 2026) — nossa contribuição para
+   provar limites de discriminação mesmo sobre clientes cujo rótulo nunca
+   observamos. Pausa ativa 4.
 
-4. **Arcabouço Teórico: Soberania Digital, Policrise e Zonas de
-   Sacrifício Digital** (~15 min) — Nomeia formalmente os mecanismos
-   que o caso Scala AI City ilustra: **soberania digital** (a
-   capacidade de um Estado exercer autoridade sobre sua arquitetura
-   digital — quatro dimensões: infraestrutural, de dados, regulatória
-   e epistêmica); **policrise global** (crises climáticas, energéticas
-   e sociais causalmente entrelaçadas, não isoladas); **zonas de
-   sacrifício digital** (territórios onde a degradação ambiental e a
-   desapropriação social são tratadas como o preço aceitável da
-   integração tecnológica) — contrastadas explicitamente com
-   **redlining digital** (que segrega/exclui do serviço), já que zonas
-   de sacrifício operam por **inclusão predatória**: o território é
-   "incluído" no mapa da IA global não como beneficiário, mas como
-   sítio de extração.
+7. **Viés em Modelos de Imagem e Linguagem: Raça como Construto Social**
+   (~12 min) — Dois exemplos da própria palestra: (a) *stereotipagem
+   ocupacional* em modelos de linguagem (continuação de história sobre
+   "cirurgiã"/"babá" e o pronome default que o modelo escolhe) e (b) a
+   "brancura como padrão invisível" em legendagem de imagens — conecta
+   diretamente com a pesquisa do grupo, **"When AI Describes Race?"**
+   (Braz da Silva Segundo & Raimundo, 2026): modelos legendam pessoas não
+   brancas explicitamente ("um homem negro sorri") mas tratam pessoas
+   brancas como o padrão não marcado ("uma mulher de cabelo loiro"),
+   reforçando a ideia de que outras raças são um desvio do "normal". Fecha
+   nomeando que a IA não modela raça diretamente, mas o **construto social**
+   aprendido dos dados — abrindo, sem aprofundar tecnicamente (fora do
+   escopo desta disciplina), que esse construto pode ser localizado e
+   manipulado no espaço latente do modelo. **Pendência de fonte, sinalizada
+   abaixo.**
 
-5. **Ampliando o Olhar: Querétaro, Módulo Penco e o Greenwashing do
-   Pará** (~15 min) — Dois casos de contraste/amplitude do mesmo
-   artigo, mostrando que o padrão de Eldorado do Sul não é isolado:
-   Querétaro (México), onde centros de dados corporativos prosperam em
-   meio à fragilidade hídrica e elétrica local, com aumento de 151% nos
-   apagões entre 2014 e 2023; e o "Módulo Penco" (Chile), extração de
-   terras raras para hardware de IA em terreno de resistência histórica
-   Mapuche, rejeitado por 99% da população em consulta pública. Depois,
-   o caso da Coalizão LEAF no Pará: um acordo de R$ 1 bilhão de créditos
-   de carbono assinado sem consulta às comunidades indígenas e
-   quilombolas afetadas — violando o padrão de Consentimento Livre,
-   Prévio e Informado (CLPI) da Convenção 169 da OIT — como exemplo de
-   **colonialismo verde**: a narrativa de sustentabilidade usada para
-   obscurecer, não resolver, a externalização de custo ambiental.
+8. **Fechamento: Fairness Não É Plugin** (~10 min) — Síntese: ferramentas de
+   fairness prontas ("toolkits"), aplicadas sem entendimento profundo, criam
+   dívida técnica perigosa; definir fairness num contexto específico exige
+   modelagem matemática rigorosa, não só debate filosófico — mas o desafio
+   real é achar quem tenha o conhecimento técnico profundo *e* saiba
+   colaborar com especialistas de domínio, cientistas sociais e eticistas
+   para traduzir valores humanos num objetivo matemático válido (ponte para
+   a tese da disciplina inteira: computação como prática sociotécnica, não
+   neutra). Retomar as 4 perguntas da Abertura, uma frase cada. Ponte para a
+   Aula 8: hoje vimos o risco dentro do modelo/decisão; a próxima aula muda
+   de escala de novo, do algoritmo para o hardware que o sustenta — o custo
+   material e energético da infraestrutura por trás de cada decisão
+   automatizada que vimos hoje.
 
-6. **Da Crítica ao Projeto: Ciclo de Vida e TI Verde** (~15 min) —
-   Volta ao vocabulário técnico das duas leituras-base já aprovadas da
-   ementa, agora com o caso latino-americano como pano de fundo:
-   definição de Brundtland de desenvolvimento sustentável (Van de Poel
-   & Royakkers, Cap. 10) e as duas justiças que ela articula
-   (intergeracional e intrageracional) e o princípio do poluidor-pagador;
-   **análise de ciclo de vida** (produção → uso → descarte) como
-   ferramenta de projeto que mapeia o impacto ambiental de um sistema
-   computacional de ponta a ponta — a ferramenta certa para a
-   competência de "ciclo de vida do lixo eletrônico" da ementa; TI
-   Verde e a distinção "Verde Por Software" (sistemas que promovem
-   sustentabilidade) vs. "Verde No Software" (tornar o próprio software
-   mais sustentável). Ponte: essas ferramentas de projeto, aplicadas
-   civicamente, é o que uma resposta responsável ao padrão do Bloco 3
-   exigiria — mas o Bloco 3 mostrou que a decisão real (Scala AI City)
-   não passou por elas.
+## Fontes usadas — Aula 7
 
-7. **Síntese: Rumo a uma Ética Territorial** (~8 min) — O conceito de
-   ética territorial do artigo de Nascimento & Raimundo: tratar o
-   território não como jurisdição legal passiva, mas como entidade
-   multidimensional que une o ecossistema físico ao espaço culturalmente
-   apropriado; a soberania digital genuína depende de uma ética que
-   recuse deixar a expansão computacional apagar epistemologias e
-   realidades vividas das populações locais. Síntese prática: um
-   checklist de perguntas para avaliar uma decisão de infraestrutura
-   digital (quem paga o custo material, quem foi consultado, que
-   narrativa de sustentabilidade está sendo usada e para proteger o
-   quê).
+### Fonte central: "Bias is Learned, Fairness is Taught" (Raimundo, 2025)
 
-8. **Fechamento e Ponte para a Aula 7** (~8 min) — Retomar as cinco
-   perguntas da abertura, uma frase cada. O que fica em aberto: hoje
-   vimos que o custo material da IA é distribuído de forma desigual e
-   sistematicamente invisibilizado por narrativas de progresso e
-   sustentabilidade — mas essa mesma lógica de "um sistema aparentemente
-   neutro e técnico esconde uma desigualdade estrutural que ninguém
-   precisou 'decidir' explicitamente" se estende, na Aula 7, para dentro
-   do próprio algoritmo: os dados que treinam um sistema de IA carregam
-   uma história de viés que, sem auditoria, produz discriminação
-   automatizada da mesma forma silenciosa.
+Palestra do professor desta disciplina, Instituto de Computação — UNICAMP
+(`main_complete.tex`, extraído do zip `_Presentations____Fairness_is_Taught.zip`,
+`_fontes/Computação e Sociedade/`). Trechos citados literalmente, em inglês
+(tradução só no `index.qmd`, conforme `../../CLAUDE.md`):
 
-## Fontes usadas — Aula 6
+**Casos reais de dano (Bloco 1):**
+> "Criminal Justice (COMPAS): An algorithm used across the U.S. to predict
+> recidivism was found to be twice as likely to falsely flag Black defendants
+> as high-risk compared to white defendants with similar profiles."
+> "Employment (Amazon): An AI recruiting tool was scrapped after it was
+> discovered to be systematically penalizing resumes that included the word
+> 'women's,' effectively discriminating against female candidates."
+> "Healthcare: A widely used algorithm systematically underestimated the
+> health needs of the sickest Black patients, leading to millions receiving
+> less care than equally sick white patients."
+>
+> Fontes citadas na própria palestra (secundárias, sem PDF nesta sessão —
+> mesmo tratamento dado ao caso Amazon na Aula 6): Angwin, Larson, Mattu &
+> Kirchner (2016), "Machine Bias", *ProPublica*; Dastin (2018), "Amazon
+> scraps secret AI recruiting tool that showed bias against women",
+> *Reuters*; Obermeyer et al. (2019), "Dissecting racial bias in an
+> algorithm used to manage the health of populations", *Science*.
 
-Ver `_01-fontes.md` para os trechos literais completos, com verificação
-de offset de página de cada PDF. Resumo das fontes usadas:
+**Máxima verossimilhança e exemplo do empréstimo (Bloco 2):**
+> "Find the model f(x) that makes the data we've observed (X) the most
+> likely." [...] "Evidence (X): A person's financial data. Salary = \$2300,
+> Debt = \$5000, Owns a house [...] Outcome (Y): Will they be a good payer?"
 
-1. **Nascimento & Raimundo (2026)** — fonte central da aula (caso
-   motivador, arcabouço teórico inteiro): lida por completo (5 páginas
-   de texto + referências), PDF acessado via
-   `_fontes/Computação e Sociedade/Cloud/Digital_Sovereignty_in_the_Polycrisis.pdf`
-   (symlink de diretório já existente, sem novo symlink necessário).
-   Numeração impressa = numeração do PDF (offset 0, documento sem
-   pré-textual). **Verificação de venue:** o PDF não indica, em nenhum
-   lugar do próprio texto (cabeçalho, rodapé, ou primeira página), o
-   nome de um periódico ou anais de conferência — nenhuma marca d'água
-   de *venue*, nenhum cabeçalho de conferência, nenhum DOI. Tratado
-   como manuscrito/*working paper* não publicado, citado como
-   "Nascimento & Raimundo (2026)" sem afirmar veículo de publicação.
-2. **Van de Poel & Royakkers (2011)**, Cap. 10 "Sustainability, Ethics,
-   and Technology" (pp. 277–300) — definição de Brundtland (p. 283),
-   justiça intergeracional/intrageracional e princípio do
-   poluidor-pagador (p. 284), análise de ciclo de vida (p. 293).
-3. **Maciel & Viterbo (2020)**, Vol. 2, Cap. 14 "Sustentabilidade e
-   Computação" (pp. 175–204) — TI Verde (pp. 182–183), Obsolescência
-   Programada/e-waste (pp. 178–186), Tabela 14.1 de diretivas
-   ambientais para soluções de TI (pp. 193–195), distinção Verde Por
-   Software/Verde No Software (p. 187).
+**Dado sensível e cegueira deliberada (Bloco 3):**
+> "Even if we explicitly remove Z from the data, the model can often
+> reconstruct it from other correlated variables (proxies like zip code, for
+> example). This is known as the failure of 'fairness through unawareness'."
 
-## Nota sobre a heurística de Transferência de Domínio nesta aula
+**Definições de (in)justiça (Bloco 4):**
+> "P(Y=0 | X, Z=white) > P(Y=0 | X, Z=black)" [...] "Δ = |E[U(Yt,At)|Z=0] −
+> E[U(Yt,At)|Z=1]|" [...] "Demographic Parity: [...] Critique: Ignores
+> whether individuals are actually qualified." [...] "Equal Opportunity:
+> [...] Critique: Says nothing about how unqualified people are treated."
+> [...] "Except in highly constrained cases, it is mathematically impossible
+> to satisfy all major fairness metrics simultaneously."
 
-Seguindo a convenção já registrada em `_progresso.md` (Aula 4 e Aula
-5): os itens de V/F que usam a heurística 3 (Transferência de Domínio)
-permanecem dentro do território **computação/infraestrutura
-tecnológica**, nunca migrando para um domínio estapafúrdio ou
-decorativo. Nesta aula específica, isso significa: transferir entre
-diferentes casos reais de infraestrutura digital (outro data center,
-outro país, outro tipo de recurso natural em disputa), nunca para
-agropecuária, mineração não digital, ou qualquer outro domínio fora de
-tecnologia — mesmo quando o conceito em jogo (ex.: justiça
-intergeracional, ciclo de vida de um produto) tivesse, em princípio,
-aplicação mais ampla.
+**Fairness Rawlsiana (Bloco 5):**
+> "Social and economic inequalities are to be arranged so that they are...
+> to the greatest benefit of the least-advantaged members of society."
+> (John Rawls, citado na palestra) [...] "max_f (min_z E[U | Z=z])"
+
+**Fairness de longo prazo (Bloco 6):**
+> "Decisions made today (t) affect the data of tomorrow (t+1)." [...]
+> "Challenge of Selective Labels: We only see the outcome (e.g., loan
+> repayment) for those who received a positive decision."
+
+**Viés em imagem/linguagem e raça como construto (Bloco 7):**
+> "The model is statistically more likely to continue the story using
+> masculine pronouns ('He...')" [prompt sobre cirurgião] [...] "they will
+> describe a white person simply as 'a woman with blonde hair,' treating
+> whiteness as the invisible norm." [...] "AI don't model race directly but
+> the social construct learned from data."
+
+**Fechamento (Bloco 8):**
+> "Fairness is not a plugin. Simply applying off-the-shelf 'fairness
+> toolkits' without deep understanding creates a dangerous technical debt."
+> [...] "The critical challenge is finding experts who possess this deep
+> technical knowledge and can effectively collaborate with domain experts,
+> social scientists, and ethicists."
+
+**Uso pretendido:** eixo narrativo de toda a aula — cada bloco do plano acima
+usa um trecho específico como base, traduzido no `index.qmd`.
+
+---
+
+### Fonte 2: M²FGB — Pereira, Valdrighi & Raimundo (2025)
+
+"M²FGB: A Min-Max Gradient Boosting Framework for Subgroup Fairness",
+*Proceedings of the 2025 ACM Conference on Fairness, Accountability, and
+Transparency* (`publications/group/m2fgb-...qmd`, já publicado no site).
+
+**Trecho (abstract, único texto disponível nesta sessão):**
+> "we consider applying subgroup justice concepts to gradient-boosting
+> machines [...] Our approach expanded gradient-boosting methodologies to
+> explore a broader range of objective functions, which combines
+> conventional losses [...] and a min-max fairness term."
+
+**Uso pretendido:** Bloco 5, como aplicação concreta e publicada do objetivo
+*maximin* recém-formalizado — nota de autoria explícita (mesmo padrão da
+Aula 6).
+
+---
+
+### Fonte 3: Long-term Fairness with Selective Labels — Valdrighi, Valera & Raimundo (2026)
+
+*Forty-third International Conference on Machine Learning* (ICML 2026)
+(`publications/group/long-term-fairness-with-selective-labels.qmd`).
+
+**Trecho (abstract):**
+> "labels [...] are selective labels as they are only revealed based on
+> positive decisions [...] we introduce a novel framework that leverages
+> both the observed data and a label predictor model to estimate the true
+> fairness measure value."
+
+**Uso pretendido:** Bloco 6, como a pesquisa que resolve formalmente o
+problema dos rótulos seletivos introduzido pela palestra-base.
+
+---
+
+### Fonte 4: When AI Describes Race? — Braz da Silva Segundo & Raimundo (2026)
+
+*Algorithmic Fairness Across Alignment Procedures and Agentic Systems*
+(`publications/mraimundo/when-ai-describes-race-unveiling-racial-bias-in-vision-langu.qmd`).
+
+**Trecho (abstract):**
+> "certain racial groups are disproportionately referenced, with the white
+> race often being treated as the default while other races receive
+> explicit mentions at varying rates."
+
+**Uso pretendido:** Bloco 7, como o estudo publicado que fundamenta
+empiricamente (com um dataset brasileiro, TSE) o fenômeno de "brancura como
+padrão" já introduzido pela palestra-base.
+
+---
+
+## Pendência a resolver antes da Etapa 3 (montagem do `index.qmd`)
+
+**Bloco 7 — exemplo de manipulação de espaço latente (raça editável em
+imagens geradas).** A palestra-base traz uma tabela de imagens
+(`figs/latents/latents_man_*.png`) mostrando um rosto gerado com a raça
+alterada progressivamente ($\alpha=0$ a $\alpha=0.5$) via manipulação do
+vetor de embedding, mas **não cita um paper específico** para esse
+experimento no `.tex` — não é o mesmo trabalho de "Towards a Geometric
+Theory of Fairness" (que é sobre detectar mode collapse via variedade de
+Grassmann, tema diferente). Preciso confirmar com você: essa manipulação de
+espaço latente é de um paper específico (publicado ou em andamento, mesmo
+que ainda não esteja no site) que eu deva citar, ou é melhor eu tratar esse
+exemplo como ilustração conceitual da própria palestra, sem citação de paper
+à parte (mesmo tratamento dado ao *loop* de retroalimentação de policiamento
+preditivo na Aula 6, marcado lá como "extensão nossa")?
+
+## Pendência sobre a ementa da disciplina (Etapa 5, só depois da aula aprovada)
+
+Com a mudança de tema, as duas leituras hoje listadas para a Lesson 7 no
+`../index.qmd` (Van de Poel & Royakkers, Cap. 6 "Ethical Aspects of Technical
+Risks"; Steen, Cap. 5 "Value Sensitive Design and Responsible Innovation")
+não cobrem fairness. Steen Cap. 5 ainda tem uma ponte de conteúdo genuína (o
+bloco de Fechamento desta aula, sobre traduzir valores humanos em objetivo
+técnico, é essencialmente Value Sensitive Design aplicado) — posso propor
+mantê-lo como leitura complementar. Van de Poel Cap. 6 (risco técnico) perde
+a conexão direta com o novo tema — não tenho, na biblioteca desta disciplina,
+nenhum capítulo específico de fairness para substituí-lo (livros como
+*Fairness and Machine Learning*, fairmlbook.org, e *The Ethical Algorithm*,
+já citados na página do curso `ai-ethics`, não têm PDF disponível nesta
+sessão). Proposta: citar a própria palestra "Bias is Learned, Fairness is
+Taught" como leitura/assistida principal da Lesson 7. Decidimos isso na
+Etapa 5, não agora.

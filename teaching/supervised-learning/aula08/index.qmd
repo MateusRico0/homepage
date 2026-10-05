@@ -1,0 +1,1465 @@
+---
+title: "Aula 8: O Tradeoff Teórico Viés-Variância"
+subtitle: "Supervised Learning"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-10-04"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: homepage
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar, load_dataset
+disable_progress_bar()
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.linear_model import Ridge, LinearRegression
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+from sklearn.pipeline import make_pipeline
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
+import warnings
+warnings.filterwarnings("ignore")
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({
+    "figure.dpi": 130,
+    "font.size": 11,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "legend.frameon": True,
+    "legend.framealpha": 0.9,
+})
+
+COR_A = "#2b5c8f"    # Azul institucional
+COR_B = "#d95f02"    # Laranja quente
+COR_NEU = "#7570b3"  # Roxo
+COR_CINZA = "#7f7f7f"
+COR_VERDE = "#1b9e77"
+
+rng = np.random.default_rng(20261004)
+
+# Função geradora verdadeira do laboratório sintético
+def true_fun(x):
+    return np.sin(2 * np.pi * x)
+
+sigma_noise = 0.3
+
+# Carregamento do dataset real California Housing
+cal_df = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+X_cal = cal_df[["MedInc", "HouseAge", "AveRooms", "AveBedrms", "Population", "AveOccup", "Latitude", "Longitude"]].values
+y_cal = cal_df["MedHouseVal"].values
+
+# Amostra de trabalho rápida para experimentos de validação
+X_cal_sub, _, y_cal_sub, _ = train_test_split(X_cal, y_cal, train_size=2000, random_state=42)
+```
+
+# Revisão e Introdução
+
+## Revisão Cuidadosa: O Que a Aula 7 Deixou em Aberto
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Na Aula 7, estudamos a regularização de modelos lineares e sua equivalência com a inferência Maximum A Posteriori (MAP) Bayesiana:
+
+1. **Ridge ($L_2$):** Vimos que adicionar a penalidade $\lambda \|\boldsymbol\beta\|^2$ equivale a impor uma prior gaussiana $\boldsymbol\beta \sim \mathcal{N}(\mathbf{0}, \tau^2 \mathbf{I})$ com $\lambda = \sigma^2 / \tau^2$. Essa penalidade estabiliza a inversão de matrizes mal condicionadas somando $\lambda \mathbf{I}$ a $\mathbf{X}^T\mathbf{X}$, encolhendo os coeficientes suavemente em direção à origem.
+2. **Lasso ($L_1$):** Vimos que a penalidade $\lambda \|\boldsymbol\beta\|_1$ corresponde a uma prior de Laplace com bico pontiagudo na origem. O operador de *soft-thresholding* zera exatamente os coeficientes cujas estimativas de máxima verossimilhança caem no intervalo $[-\lambda, \lambda]$, produzindo esparsidade estrutural.
+
+Entretanto, encerramos a Aula 7 com uma pergunta fundamental em aberto: **como justificar formalmente o valor ideal de $\lambda$?** 
+
+Nos experimentos práticos da Aula 7 e na validação cruzada da Aula 4, selecionávamos $\lambda$ ou a profundidade da árvore olhando onde a curva de erro no conjunto de validação atingia o mínimo. Por exemplo, ao ajustar uma regressão Ridge com expansão polinomial no *California Housing*, varríamos uma grade $\lambda \in [10^{-3}, 10^4]$ e escolhíamos $\lambda \approx 10$ simplesmente porque o erro quadrático médio de teste era de $0{,}52$, enquanto em $\lambda = 10^{-3}$ subia para $0{,}75$ e em $\lambda = 10^4$ disparava para $1{,}10$. 
+
+Essa escolha, contudo, era puramente pragmática e empírica: não tínhamos uma teoria analítica que explicasse **por que** $\lambda = 10^{-3}$ falha por uma razão física (instabilidade aos dados de treino) e $\lambda = 10^4$ falha por outra razão totalmente diferente (rigidez excessiva). O que exatamente governa o aumento do erro quando o modelo é simples demais ou complexo demais? 
+
+Para responder a essa pergunta com rigor matemático, precisamos transitar da intuição empírica de *overfitting* versus *underfitting* para a **decomposição analítica do Erro Quadrático Médio Esperado**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Onde Paramos na Aula 7
+- **Ridge ($L_2$):** Penalidade $\lambda \|\boldsymbol\beta\|^2 \equiv$ prior Gaussiana. Resolve a multicolinearidade de $\mathbf{X}^T\mathbf{X}$ somando $\lambda \mathbf{I}$.
+- **Lasso ($L_1$):** Penalidade $\lambda \|\boldsymbol\beta\|_1 \equiv$ prior de Laplace. Produz esparsidade exata via *soft-thresholding*.
+:::
+
+::: {.fragment}
+- **A lacuna deixada:** Selecionamos $\lambda$ inspecionando curvas de erro de teste.
+  - *Exemplo da Aula 7:* Varremos $\lambda \in [10^{-3}, 10^4]$ e escolhemos $\lambda \approx 10$ porque o MSE de teste atingiu o menor valor ($0{,}52$).
+  - *O problema:* A escolha foi puramente empírica ("olhar onde o gráfico tem um vale"). Não explicamos por que $\lambda = 10^{-3}$ e $\lambda = 10^4$ falham por razões estatísticas completamente opostas.
+- **A pergunta teórica:** O que causa o formato em "U" do erro de teste? Como quantificar analiticamente o custo de escolher um modelo rígido demais ou flexível demais?
+:::
+:::
+
+## Ideia Central: O Estimador é uma Variável Aleatória
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A ideia central desta aula apoia-se em um princípio fundamental da teoria da estimação estatística: **o modelo ajustado $\hat{f}(x; \mathcal{D})$ não é uma função determinística fixa, mas sim uma variável aleatória condicionada ao conjunto de dados $\mathcal{D}$ sorteado pelo ambiente**.
+
+Sempre que coletamos um conjunto de treino de tamanho $N$, estamos retirando uma amostra aleatória $\mathcal{D} \sim P(X, Y)^N$. Se repetíssemos o experimento no dia seguinte com novos dados de mesmo tamanho, obteríamos um conjunto $\mathcal{D}'$ ligeiramente diferente, gerando parâmetros estimados $\hat{\boldsymbol\beta}'$ diferentes e uma função preditora $\hat{f}(x; \mathcal{D}')$ distinta.
+
+Ao avaliarmos o erro quadrático esperado sobre todas as possíveis realizações de conjuntos de treino $\mathcal{D}$ e sobre o ruído estocástico de teste $\epsilon$, o erro esperado decompõe-se exatamente em três componentes aditivos:
+$$\text{EMSE}(x) = \underbrace{(f(x) - \bar{f}(x))^2}_{\text{Viés ao Quadrado}} + \underbrace{\mathbb{E}_{\mathcal{D}}\left[(\hat{f}(x; \mathcal{D}) - \bar{f}(x))^2\right]}_{\text{Variância do Estimador}} + \underbrace{\sigma^2}_{\text{Erro Irredutível}}$$
+
+Aqui:
+- **$\bar{f}(x) = \mathbb{E}_{\mathcal{D}}[\hat{f}(x; \mathcal{D})]$ é o modelo médio:** o valor esperado da predição em $x$ se tivéssemos acesso a infinitos conjuntos de treino.
+- **O Viés mede a distância entre a verdade e o modelo médio:** $\text{Bias}(x) = f(x) - \bar{f}(x)$.
+- **A Variância é a variância estatística dessa variável aleatória $\hat{f}(x; \mathcal{D})$:** mede quanto as predições de modelos individuais oscilam em torno de sua própria média $\bar{f}(x)$.
+
+Essa decomposição revela um dilema inescapável: classes de modelos simples possuem alto viés estrutural e baixa variância; classes de modelos muito flexíveis eliminam o viés, mas amplificam descontroladamente a variância das estimativas.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Paradigma Amostral
+- O conjunto de dados $\mathcal{D} = \{(\mathbf{x}_n, y_n)\}_{n=1}^N$ é uma amostra estocástica de $P(X, Y)$.
+- Logo, o modelo ajustado $\hat{f}(x; \mathcal{D})$ é uma **variável aleatória**.
+:::
+
+::: {.fragment}
+- **O Modelo Médio e o Viés:** $\bar{f}(x) = \mathbb{E}_{\mathcal{D}}[\hat{f}(x; \mathcal{D})]$ é o modelo médio (esperança sobre todas as amostras $\mathcal{D}$).
+  - **Viés:** Mede a distância entre a função verdadeira e o modelo médio: $\text{Bias}(x) = f(x) - \bar{f}(x)$.
+- **A Variância:** É a **variância dessa variável aleatória** $\hat{f}(x; \mathcal{D})$ em torno de sua própria média:
+  $$\text{Var}(\hat{f}(x)) = \mathbb{E}_{\mathcal{D}}\left[(\hat{f}(x; \mathcal{D}) - \bar{f}(x))^2\right]$$
+- **A Decomposição Ortogonal:** $\text{Erro Esperado} = \text{Viés}^2 + \text{Variância} + \sigma^2$
+:::
+
+::: {.fragment .callout-important}
+## O Tradeoff Fundamental
+- Modelos rígidos: $\text{Viés}^2$ alto, $\text{Variância}$ baixa.
+- Modelos flexíveis: $\text{Viés}^2$ baixo, $\text{Variância}$ alta.
+- O ponto ótimo minimiza a soma dos dois termos, limitado inferiormente por $\sigma^2$.
+:::
+:::
+
+## Roteiro da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Estruturaremos a aula em torno de cinco perguntas condutoras:
+
+1. **Por que o modelo ajustado deve ser tratado como uma variável aleatória e o que é o estimador médio $\bar{f}(x)$?** Compreender a variabilidade de amostragem no espaço de funções.
+2. **Como derivar formalmente a decomposição do erro quadrático médio esperado (EMSE) e por que o termo cruzado se anula?** Provar a ortogonalidade estocástica entre viés, variância e ruído intrínseco.
+3. **De que maneira a complexidade da classe de hipóteses e o tamanho amostral $N$ modulam cada componente do erro?** Analisar a assimetria assintótica: por que mais dados reduzem variância, mas não eliminam o viés de especificação.
+4. **Como a regularização Ridge atua analiticamente como um mecanismo de injeção de viés para redução de variância?** Demonstrar o Teorema de Hoerl & Kennard (1970) e a superioridade de estimadores enviesados sobre o OLS.
+5. **Como utilizar curvas de aprendizado para diagnosticar se um sistema em produção sofre de limitação por viés ou por variância?** Definir ações corretivas precisas com base no comportamento assintótico das curvas de treino e validação.
+:::
+
+::: {.content-visible when-format="revealjs"}
+1. **O Estimador Estocástico:** Variabilidade de amostragem e a função média $\bar{f}(x)$.
+2. **A Derivação Formal do EMSE:** Expansão algébrica e o cancelamento do termo cruzado.
+3. **Complexidade e Tamanho Amostral:** Como capacidade e $N$ modulam viés e variância.
+4. **Regularização Ridge:** Demonstração analítica da redução de variância via Teorema de Hoerl & Kennard.
+5. **Diagnóstico Prático:** Curvas de aprendizado e estratégias de intervenção em modelos reais.
+:::
+
+## Problema Motivador: O Laboratório Sintético de Bishop
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para tornar a aleatoriedade de $\hat{f}(x; \mathcal{D})$ visível aos olhos antes de iniciarmos as deduções matemáticas, reproduziremos o experimento clássico de Christopher Bishop (PRML, §3.2).
+
+Considere a função geradora determinística:
+$$f(x) = \sin(2\pi x), \quad x \in [0, 1]$$
+Os dados observados são gerados adicionando ruído gaussiano homocedástico com $\sigma = 0{,}3$:
+$$y = f(x) + \epsilon, \quad \epsilon \sim \mathcal{N}(0, \sigma^2)$$
+
+Simulamos $L = 50$ conjuntos de treinamento independentes $\mathcal{D}_1, \dots, \mathcal{D}_{50}$, cada um contendo apenas $N = 25$ observações sorteadas aleatoriamente. Em cada um desses 50 conjuntos de dados, ajustamos três classes de modelos polinomiais de complexidades distintas:
+- **Grau 1 (Reta Linear):** Modelo rígido, subajustado (*underfitting*).
+- **Grau 3 (Polinômio Cúbico):** Complexidade bem calibrada com a curvatura da função seno.
+- **Grau 9 (Polinômio de Alta Ordem):** Modelo super-flexível com 10 coeficientes livres (*overfitting*).
+
+O gráfico a seguir exibe as 50 curvas ajustadas em cinza, a curva média empírica $\bar{f}(x) = \frac{1}{L}\sum_{l=1}^L \hat{f}_l(x)$ em vermelho, e a função verdadeira $f(x)$ em verde.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Cenário Experimental (PRML §3.2)
+- Função verdadeira: $f(x) = \sin(2\pi x)$, com ruído $\epsilon \sim \mathcal{N}(0, 0{,}3^2)$.
+- Geramos $L = 50$ conjuntos de treino independentes de tamanho $N = 25$.
+- Ajustamos polinômios de graus 1, 3 e 9 em cada um dos 50 conjuntos.
+:::
+
+::: {.fragment}
+- **Grau 1:** Retas cinzas parecidas (baixa variância), mas a média vermelha passa longe da curva verde (alto viés).
+- **Grau 3:** As retas acompanham o seno com moderação; a média vermelha quase sobrepõe o verde.
+- **Grau 9:** Cada curva cinza oscila descontroladamente para decorar o ruído de sua amostra (alta variância). No entanto, a média das 50 curvas aproxima-se surpreendentemente bem da função verdadeira!
+:::
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# Experimento clássico de Bishop: 50 réplicas com graus 1, 3 e 9
+x_plot = np.linspace(0, 1, 200)
+f_true = true_fun(x_plot)
+
+L = 50  # 50 réplicas
+N_pts = 25
+degrees = [1, 3, 9]
+
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.8), sharey=True)
+
+for ax_idx, deg in enumerate(degrees):
+    preds = np.zeros((L, len(x_plot)))
+    
+    for l in range(L):
+        # Gerar conjunto D_l
+        x_train = rng.uniform(0, 1, N_pts)
+        y_train = true_fun(x_train) + rng.normal(0, sigma_noise, N_pts)
+        
+        # Ajustar modelo polinomial
+        model = make_pipeline(PolynomialFeatures(deg), LinearRegression())
+        model.fit(x_train[:, np.newaxis], y_train)
+        
+        y_pred = model.predict(x_plot[:, np.newaxis])
+        preds[l, :] = y_pred
+        axes[ax_idx].plot(x_plot, y_pred, color=COR_CINZA, alpha=0.25, lw=1)
+        
+    # Estimador médio empírico
+    f_bar = np.mean(preds, axis=0)
+    
+    axes[ax_idx].plot(x_plot, f_true, color=COR_VERDE, lw=2.5, label="Verdade $f(x)$")
+    axes[ax_idx].plot(x_plot, f_bar, color=COR_B, lw=2.5, linestyle="--", label=r"Média $\bar{f}(x)$")
+    axes[ax_idx].set_title(f"Polinômio Grau {deg}")
+    axes[ax_idx].set_xlabel("$x$")
+    axes[ax_idx].set_ylim(-1.6, 1.6)
+
+axes[0].set_ylabel("$y$")
+axes[0].legend(loc="lower left", fontsize=9)
+plt.suptitle("50 Modelos Ajustados em Réplicas Independentes $\mathcal{D}_l$ ($N=25$)", y=1.03, weight="bold")
+plt.tight_layout()
+plt.show()
+```
+
+## Pausa Ativa 1: O Estimador como Variável Aleatória
+
+::: {.callout-tip}
+## A Reta Média e a Curvatura do Seno
+
+Observe o primeiro painel da figura anterior (Grau 1). Se calculássemos a média de não apenas 50, mas de **1 milhão de conjuntos de dados de treino independentes**, a reta média vermelha conseguiria se curvar para passar pelos picos e vales da função senoidal verde? O que esse fato revela sobre a natureza do viés?
+
+*Dica para discussão:* A média de funções lineares $y = a_l x + b_l$ pertence a qual classe de funções?
+:::
+
+::: {.callout-tip}
+## V ou F: Aleatoriedade de Estimadores
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O modelo ajustado $\hat{f}(x; \mathcal{D})$ é uma variável aleatória porque depende estocasticamente da amostra específica $\mathcal{D}$ sorteada da distribuição de dados.
+- □ O estimador médio teórico $\bar{f}(x) = \mathbb{E}_{\mathcal{D}}[\hat{f}(x; \mathcal{D})]$ varia a cada novo conjunto de dados de treino de tamanho $N$ coletado.
+- □ Em um problema prático real com uma única amostra estática de treino $\mathcal{D}_{\text{real}}$, podemos calcular analiticamente o viés exato sem fazer nenhuma hipótese sobre $f(x)$.
+- □ Se um estimador for perfeitamente não enviesado para qualquer $x$ ($\mathbb{E}_{\mathcal{D}}[\hat{f}(x)] = f(x)$), seu erro de predição em qualquer conjunto de teste será identicamente zero.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 1: Resposta
+
+::: {.callout-tip}
+## V ou F: Resposta
+- ✔ **V:** Como $\mathcal{D}$ é uma realização amostral aleatória de $P(X, Y)$, qualquer grandeza calculada a partir dele é uma variável aleatória.
+- ✗ **F:** O valor esperado sobre todos os possíveis conjuntos de treino é uma função determinística fixa para um dado algoritmo e tamanho $N$.
+- ✗ **F:** O cálculo exato do viés $(f(x) - \bar{f}(x))^2$ requer conhecer a função geradora verdadeira $f(x)$, que na prática é inobservável.
+- ✗ **F:** Mesmo com viés zero, o erro esperado ainda inclui a variância do estimador e o ruído estocástico irredutível $\sigma^2 > 0$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** A média de infinitas retas lineares é, obrigatoriamente, outra reta linear ($\bar{a}x + \bar{b}$). Por mais dados que coletemos, uma reta jamais se curvará. Essa incapacidade de aproximação é o **viés estrutural**, que é uma propriedade da classe de hipóteses $\mathcal{H}$, e não da quantidade de dados disponíveis.
+:::
+:::
+
+# Intuição — As Três Fontes de Erro
+
+## A Classe de Hipóteses $\mathcal{H}$
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para compreender rigorosamente a origem do viés e da variância, precisamos primeiro formalizar o conceito de **classe (ou espaço) de hipóteses**, denotada por $\mathcal{H}$.
+
+Em qualquer algoritmo de aprendizado supervisionado, não buscamos uma função arbitrária no espaço irrestrito de todas as funções matemáticas imagináveis (que é infinito e computacionalmente intratável). Em vez disso, delimitamos previamente uma família de funções candidatas parametrizadas $\mathcal{H} = \{h: \mathcal{X} \to \mathcal{Y}\}$. Por exemplo:
+- **Regressão Linear:** $\mathcal{H}_{\text{linear}} = \{ h(\mathbf{x}) = \mathbf{w}^T\mathbf{x} + b \mid \mathbf{w} \in \mathbb{R}^D, b \in \mathbb{R} \}$.
+- **Regressão Polinomial de Grau $M$:** $\mathcal{H}_M = \{ h(x) = \sum_{j=0}^M w_j x^j \mid w_j \in \mathbb{R} \}$.
+- **Árvores de Decisão:** $\mathcal{H}_{\text{tree}(d)} = \{ \text{árvores de decisão com profundidade máxima } \le d \}$.
+
+O processo de treinamento consiste em utilizar o conjunto amostral $\mathcal{D}$ para selecionar uma única hipótese particular $\hat{f} \in \mathcal{H}$ que minimiza a perda empírica observada (ou a perda penalizada). A escolha da classe $\mathcal{H}$ governa diretamente os dois polos do erro:
+1. **Se a função geradora verdadeira $f \notin \mathcal{H}$:** Mesmo que tivéssemos acesso a infinitos dados de treinamento ($N \to \infty$), o algoritmo jamais conseguirá reproduzir $f$. Essa distância permanente entre a verdade e a melhor projeção possível contida dentro de $\mathcal{H}$ é a causa primária do **viés estrutural**.
+2. **Se a classe $\mathcal{H}$ for ampla e hiperflexível:** Existem infinitas funções em $\mathcal{H}$ capazes de interpolar a amostra finita $\mathcal{D}$. Qualquer flutuação estocástica de ruído fará o algoritmo escolher uma hipótese $\hat{f} \in \mathcal{H}$ radicalmente diferente, dando origem à **alta variância**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Que É a Classe de Hipóteses $\mathcal{H}$?
+O conjunto de todas as funções candidatas que o algoritmo pode escolher:
+$$\mathcal{H} = \{ h: \mathcal{X} \to \mathcal{Y} \}$$
+:::
+
+::: {.fragment}
+- **Exemplos Canônicos:**
+  - $\mathcal{H}_1$: Família linear $\{w_0 + w_1 x\}$ (capacidade restrita).
+  $\mathcal{H}_{1,\lambda}$: Família linear com regularização Ridge $L_2$ com parâmetro de regularização $\lambda$.
+  - $\mathcal{H}_M$: Polinômios de grau $M$ $\{\sum_{j=0}^M w_j x^j\}$ (capacidade cresce com $M$).
+  - $\mathcal{H}_{\text{tree}(d)}$: Árvores de decisão de profundidade máxima $d$. 
+- **O Papel do Algoritmo:** Dado $\mathcal{D}$, escolher um membro específico $\hat{f} \in \mathcal{H}$.
+:::
+:::
+
+## Desconstruindo o Erro de Predição: As Três Fontes
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Antes de formalizarmos a álgebra da decomposição, vamos construir a intuição conceitual das três componentes fundamentais que constituem o erro de predição em qualquer problema de aprendizado supervisionado:
+
+1. **O Erro Irredutível ($\sigma^2$): A Barreira Informacional**
+   Mesmo que conhecêssemos com perfeição absoluta a função matemática exata do universo $f(x)$, quando uma nova observação de teste for gerada pelo ambiente, o valor observado será $y = f(x) + \epsilon$. O termo $\epsilon$ representa variáveis ocultas não medidas (ex.: microflutuações térmicas, turbulência do ar, imprecisão de sensores). Como $\mathbb{E}[\epsilon]=0$ e $\text{Var}(\epsilon)=\sigma^2$, qualquer predição determinística errará, em média quadrática, pelo menos $\sigma^2$. Trata-se da **taxa de erro de Bayes** para o problema de regressão. Nenhum algoritmo, por mais sofisticado que seja, pode ultrapassar essa barreira.
+
+2. **O Viés Estrutural ao Quadrado ($\text{Bias}^2$): O Erro de Hipótese**
+   O viés mede o erro de aproximação que cometeríamos mesmo se tivéssemos acesso a uma quantidade infinita de dados de treinamento. Ele quantifica a distância entre a função verdadeira $f(x)$ e a melhor aproximação que a classe de funções escolhida $\mathcal{H}$ é capaz de fornecer em média:
+   $$\text{Bias}(x) = f(x) - \bar{f}(x) = f(x) - \mathbb{E}_{\mathcal{D}}[\hat{f}(x; \mathcal{D})]$$
+   Se tentamos ajustar uma reta linear a uma parábola, o viés é alto. Se aumentamos a classe de hipóteses para permitir polinômios de ordem arbitrária ou redes neurais profundas, o viés tende a zero.
+
+3. **A Variância do Estimador ($\text{Var}$): A Sensibilidade à Amostra**
+   A variância mede a instabilidade da predição: quanto o modelo ajustado $\hat{f}(x; \mathcal{D})$ varia em torno de sua própria média $\bar{f}(x)$ dependendo de qual amostra aleatória específica $\mathcal{D}$ calhou de cair no conjunto de treino:
+   $$\text{Var}(x) = \mathbb{E}_{\mathcal{D}}\left[ \left(\hat{f}(x; \mathcal{D}) - \bar{f}(x)\right)^2 \right]$$
+   Modelos com muitos graus de liberdade (alta capacidade) têm variância enorme porque conseguem entortar seus parâmetros para se amoldar a ruídos acidentais da amostra.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## 1. Erro Irredutível ($\sigma^2$)
+- Origem: Variáveis não observadas e ruído intrínseco do sistema ($y = f(x) + \epsilon$).
+- Natureza: Limite termodinâmico/informacional dos dados. **Insuperável por qualquer modelo**.
+:::
+
+::: {.fragment}
+::: {.callout-note}
+## 2. Viés Estrutural ao Quadrado ($\text{Bias}^2$)
+- Origem: Restrições e rigidez da classe de hipóteses escolhida ($f(x) - \bar{f}(x)$).
+- Natureza: Persiste mesmo com infinitos dados de treino se o modelo for simples demais.
+:::
+:::
+
+::: {.fragment}
+::: {.callout-note}
+## 3. Variância do Estimador ($\text{Var}$)
+- Origem: Sensibilidade às flutuações e ruídos da amostra finita $\mathcal{D}$.
+- Natureza: Mede quanto o modelo muda se mudarmos o conjunto de treino de tamanho $N$.
+:::
+:::
+:::
+
+# Bloco 1: A Decomposição Formal do EMSE
+
+## O Modelo Gerador e as Hipóteses Estatísticas
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Vamos agora derivar matematicamente a decomposição exata do erro quadrático.
+
+Assumimos o modelo gerador estatístico padrão para um ponto de teste $(\mathbf{x}, y)$:
+$$y = f(\mathbf{x}) + \epsilon$$
+onde adotamos três premissas probabilísticas fundamentais:
+1. **Esperança do ruído nula:** $\mathbb{E}[\epsilon] = 0$.
+2. **Homocedasticidade:** $\text{Var}(\epsilon) = \mathbb{E}[\epsilon^2] = \sigma^2 < \infty$.
+3. **Independência estocástica:** O ruído do ponto de teste $\epsilon$ é estatisticamente independente do conjunto de dados de treinamento $\mathcal{D}$, o que implica que $\mathbb{E}_{\mathcal{D}, \epsilon}[\epsilon \cdot g(\mathcal{D})] = \mathbb{E}[\epsilon] \cdot \mathbb{E}[g(\mathcal{D})] = 0$ para qualquer função $g$.
+
+Seja $\hat{f}(\mathbf{x}; \mathcal{D})$ o estimador fornecido pelo algoritmo de aprendizado treinado sobre $\mathcal{D}$. Definimos o **estimador médio** como a esperança sobre a distribuição populacional de conjuntos de treino de tamanho $N$:
+$$\bar{f}(\mathbf{x}) \equiv \mathbb{E}_{\mathcal{D}}\left[\hat{f}(\mathbf{x}; \mathcal{D})\right]$$
+
+O **Erro Quadrático Médio Esperado** em um ponto fixo $\mathbf{x}$ é dado pela esperança conjunta sobre a variabilidade do conjunto de treino $\mathcal{D}$ e sobre a realização do ruído de teste $\epsilon$:
+$$\text{EMSE}(\mathbf{x}) = \mathbb{E}_{\mathcal{D}, \epsilon} \left[ \left( y - \hat{f}(\mathbf{x}; \mathcal{D}) \right)^2 \right]$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Hipóteses do Modelo Gerador
+$$y = f(\mathbf{x}) + \epsilon, \quad \mathbb{E}[\epsilon] = 0, \quad \mathbb{E}[\epsilon^2] = \sigma^2, \quad \epsilon \perp \mathcal{D}$$
+:::
+
+::: {.fragment}
+- **O Estimador Médio:** $\bar{f}(\mathbf{x}) = \mathbb{E}_{\mathcal{D}}[\hat{f}(\mathbf{x}; \mathcal{D})]$
+- **O Alvo de Análise:**
+  $$\text{EMSE}(\mathbf{x}) = \mathbb{E}_{\mathcal{D}, \epsilon} \left[ \left( y - \hat{f}(\mathbf{x}; \mathcal{D}) \right)^2 \right]$$
+- A esperança opera sobre dois processos estocásticos simultâneos: a amostragem de $\mathcal{D}$ e o sorteio de $\epsilon$.
+:::
+:::
+
+## A Derivação Formal do EMSE
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### Passo 1: Isolar o Ruído de Teste $\epsilon$
+Substituímos $y = f(\mathbf{x}) + \epsilon$ dentro do quadrado:
+$$\text{EMSE}(\mathbf{x}) = \mathbb{E}_{\mathcal{D}, \epsilon} \left[ \left( f(\mathbf{x}) + \epsilon - \hat{f}(\mathbf{x}; \mathcal{D}) \right)^2 \right] = \mathbb{E}_{\mathcal{D}, \epsilon} \left[ \left( [f(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D})] + \epsilon \right)^2 \right]$$
+
+Expandindo o binômio:
+$$\text{EMSE}(\mathbf{x}) = \mathbb{E}_{\mathcal{D}, \epsilon} \left[ \left( f(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D}) \right)^2 + 2\epsilon\left( f(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D}) \right) + \epsilon^2 \right]$$
+
+Aplicamos a linearidade da esperança:
+$$\text{EMSE}(\mathbf{x}) = \mathbb{E}_{\mathcal{D}} \left[ \left( f(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D}) \right)^2 \right] + 2 \mathbb{E}_{\mathcal{D}, \epsilon} \left[ \epsilon \left( f(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D}) \right) \right] + \mathbb{E}_{\epsilon}[\epsilon^2]$$
+
+Pela independência de $\epsilon$ em relação a $\mathcal{D}$ e como $\mathbb{E}[\epsilon]=0$:
+$$\mathbb{E}_{\mathcal{D}, \epsilon} \left[ \epsilon \left( f(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D}) \right) \right] = \underbrace{\mathbb{E}[\epsilon]}_{=0} \cdot \mathbb{E}_{\mathcal{D}}\left[ f(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D}) \right] = 0$$
+
+Como $\mathbb{E}[\epsilon^2] = \sigma^2$, obtemos:
+$$\text{EMSE}(\mathbf{x}) = \mathbb{E}_{\mathcal{D}} \left[ \left( f(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D}) \right)^2 \right] + \sigma^2$$
+
+---
+
+### Passo 2: O Artifício Fundamental — Somar e Subtrair $\bar{f}(\mathbf{x})$
+Agora nos concentramos no termo $\mathbb{E}_{\mathcal{D}} [ ( f(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D}) )^2 ]$.
+Somamos e subtraímos a predição média $\bar{f}(\mathbf{x})$ dentro do parêntese:
+$$f(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D}) = \left( f(\mathbf{x}) - \bar{f}(\mathbf{x}) \right) + \left( \bar{f}(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D}) \right)$$
+
+Elevando ao quadrado e aplicando a esperança sobre $\mathcal{D}$:
+$$\mathbb{E}_{\mathcal{D}} \left[ \left( [f(\mathbf{x}) - \bar{f}(\mathbf{x})] + [\bar{f}(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D})] \right)^2 \right] = \mathbb{E}_{\mathcal{D}} \left[ (f(\mathbf{x}) - \bar{f}(\mathbf{x}))^2 + (\bar{f}(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D}))^2 + 2(f(\mathbf{x}) - \bar{f}(\mathbf{x}))(\bar{f}(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D})) \right]$$
+
+---
+
+### Passo 3: O Cancelamento Rigoroso do Termo Cruzado
+Analisamos os três termos individualmente sob a esperança $\mathbb{E}_{\mathcal{D}}$:
+
+1. **Termo do Viés:**
+   O termo $(f(\mathbf{x}) - \bar{f}(\mathbf{x}))^2$ é **estritamente determinístico**: nem $f(\mathbf{x})$ nem a média teórica $\bar{f}(\mathbf{x})$ dependem da amostra particular $\mathcal{D}$. Portanto, a esperança de uma constante é a própria constante:
+   $$\mathbb{E}_{\mathcal{D}} \left[ (f(\mathbf{x}) - \bar{f}(\mathbf{x}))^2 \right] = (f(\mathbf{x}) - \bar{f}(\mathbf{x}))^2 \equiv \text{Bias}^2(\hat{f}(\mathbf{x}))$$
+
+2. **Termo da Variância:**
+   O termo $\mathbb{E}_{\mathcal{D}} [ (\hat{f}(\mathbf{x}; \mathcal{D}) - \bar{f}(\mathbf{x}))^2 ]$ é, pela definição axiomática da probabilidade, a **variância da variável aleatória $\hat{f}(\mathbf{x}; \mathcal{D})$**:
+   $$\mathbb{E}_{\mathcal{D}} \left[ (\hat{f}(\mathbf{x}; \mathcal{D}) - \bar{f}(\mathbf{x}))^2 \right] \equiv \text{Var}_{\mathcal{D}}(\hat{f}(\mathbf{x}))$$
+
+3. **Termo Cruzado:**
+   Como $(f(\mathbf{x}) - \bar{f}(\mathbf{x}))$ não depende de $\mathcal{D}$, podemos colocá-lo para fora do operador linear de esperança:
+   $$\mathbb{E}_{\mathcal{D}} \left[ 2(f(\mathbf{x}) - \bar{f}(\mathbf{x}))(\bar{f}(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D})) \right] = 2(f(\mathbf{x}) - \bar{f}(\mathbf{x})) \cdot \mathbb{E}_{\mathcal{D}}\left[ \bar{f}(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D}) \right]$$
+   Pela definição de $\bar{f}(\mathbf{x})$, temos:
+   $$\mathbb{E}_{\mathcal{D}}\left[ \bar{f}(\mathbf{x}) - \hat{f}(\mathbf{x}; \mathcal{D}) \right] = \bar{f}(\mathbf{x}) - \mathbb{E}_{\mathcal{D}}\left[\hat{f}(\mathbf{x}; \mathcal{D})\right] = \bar{f}(\mathbf{x}) - \bar{f}(\mathbf{x}) = 0$$
+   Logo, o termo cruzado anula-se identicamente!
+
+---
+
+### Teorema: A Decomposição Viés-Variância
+Juntando os resultados dos Passos 1, 2 e 3, obtemos a identidade canônica:
+$$\boxed{\text{EMSE}(\mathbf{x}) = \underbrace{\left( f(\mathbf{x}) - \mathbb{E}_{\mathcal{D}}[\hat{f}(\mathbf{x})] \right)^2}_{\text{Viés ao Quadrado}} + \underbrace{\mathbb{E}_{\mathcal{D}}\left[ \left( \hat{f}(\mathbf{x}) - \mathbb{E}_{\mathcal{D}}[\hat{f}(\mathbf{x})] \right)^2 \right]}_{\text{Variância do Estimador}} + \underbrace{\sigma^2}_{\text{Erro Irredutível}}}$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+Abreviando $f=f(\mathbf{x})$, $\hat f=\hat f(\mathbf{x};\mathcal{D})$ e $\bar f=\bar f(\mathbf{x})$:
+
+::: {.fragment}
+**Substituir** $y=f+\epsilon$: $\quad y-\hat f=(f-\hat f)+\epsilon$.
+:::
+
+::: {.fragment}
+**Expandir o quadrado:** $\quad (y-\hat f)^2=(f-\hat f)^2+2\epsilon(f-\hat f)+\epsilon^2$.
+:::
+
+::: {.fragment}
+**Linearidade da esperança:**
+$$
+\text{EMSE}=\mathbb{E}_{\mathcal{D}}\big[(f-\hat f)^2\big]+2\,\mathbb{E}_{\mathcal{D},\epsilon}\big[\epsilon(f-\hat f)\big]+\mathbb{E}_\epsilon[\epsilon^2].
+$$
+:::
+
+::: {.fragment}
+**Independência:** $\ \mathbb{E}[\epsilon(f-\hat f)]=\underbrace{\mathbb{E}[\epsilon]}_{0}\,\mathbb{E}_{\mathcal{D}}[f-\hat f]=0$ $\ $ e $\ \mathbb{E}[\epsilon^2]=\sigma^2$:
+$$
+\text{EMSE}=\mathbb{E}_{\mathcal{D}}\big[(f-\hat f)^2\big]+\sigma^2 .
+$$
+:::
+
+## Derivação — Somar e Subtrair $\bar f$
+
+Falta abrir $\mathbb{E}_{\mathcal{D}}[(f-\hat f)^2]$.
+
+::: {.fragment}
+**Somar e subtrair** $\bar f$: $\quad f-\hat f=\underbrace{(f-\bar f)}_{\text{não depende de }\mathcal{D}}+\underbrace{(\bar f-\hat f)}_{\text{flutua com }\mathcal{D}}$.
+:::
+
+::: {.fragment}
+**Expandir o quadrado:**
+$$
+(f-\hat f)^2=(f-\bar f)^2+(\bar f-\hat f)^2+2(f-\bar f)(\bar f-\hat f).
+$$
+:::
+
+::: {.fragment}
+**Esperança termo a termo:**
+$$
+\mathbb{E}_{\mathcal{D}}\big[(f-\hat f)^2\big]=\mathbb{E}_{\mathcal{D}}\big[(f-\bar f)^2\big]+\mathbb{E}_{\mathcal{D}}\big[(\bar f-\hat f)^2\big]+2\,\mathbb{E}_{\mathcal{D}}\big[(f-\bar f)(\bar f-\hat f)\big].
+$$
+:::
+
+## Derivação — Os Três Termos
+
+::: {.fragment}
+**1. Constante:** $(f-\bar f)^2$ não depende de $\mathcal{D}$, logo $\mathbb{E}_{\mathcal{D}}[(f-\bar f)^2]=(f-\bar f)^2=\text{Bias}^2$.
+:::
+
+::: {.fragment}
+**2. Definição de variância:** $\mathbb{E}_{\mathcal{D}}[(\hat f-\bar f)^2]=\text{Var}_{\mathcal{D}}(\hat f)$, pois $\bar f=\mathbb{E}_{\mathcal{D}}[\hat f]$.
+:::
+
+::: {.fragment}
+**3. Termo cruzado:** $(f-\bar f)$ sai da esperança:
+$$
+2(f-\bar f)\,\mathbb{E}_{\mathcal{D}}[\bar f-\hat f]=2(f-\bar f)\big(\bar f-\underbrace{\mathbb{E}_{\mathcal{D}}[\hat f]}_{=\bar f}\big)=0 .
+$$
+:::
+
+::: {.fragment}
+**Juntando com o passo anterior:**
+$$
+\boxed{\ \text{EMSE}(\mathbf{x})=\underbrace{(f-\bar f)^2}_{\text{Bias}^2}+\underbrace{\mathbb{E}_{\mathcal{D}}[(\hat f-\bar f)^2]}_{\text{Var}}+\underbrace{\sigma^2}_{\text{irredutível}}\ }
+$$
+:::
+
+:::
+
+## Pausa Ativa 2: A Decomposição Formal e o Termo Cruzado
+
+::: {.callout-tip}
+## Por Que o Termo Cruzado se Anula?
+
+Por que o termo $2(f(x) - \bar{f}(x))$ pôde ser retirado para fora da esperança $\mathbb{E}_{\mathcal{D}}$ no Passo 3 da dedução? O que aconteceria com a decomposição aditiva se utilizássemos a perda em valor absoluto $|y - \hat{f}(x)|$ no lugar da perda quadrática?
+
+*Dica para discussão:* A esperança de uma constante e a linearidade de normas euclidianas versus desigualdade triangular.
+:::
+
+::: {.callout-tip}
+## V ou F: Decomposição do EMSE
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O erro irredutível $\sigma^2 = \text{Var}(\epsilon)$ pode ser reduzido a zero se aumentarmos o tamanho amostral de treino para $N \to \infty$.
+- □ Na decomposição $\text{EMSE}(x) = \text{Bias}^2(x) + \text{Var}(x) + \sigma^2$, os três termos são garantidamente não negativos para qualquer $x$.
+- □ O termo cruzado envolvendo o ruído de teste $\epsilon$ anula-se porque $\epsilon$ tem esperança zero e é independente dos dados de treino $\mathcal{D}$.
+- □ A variância do estimador $\text{Var}_{\mathcal{D}}(\hat{f}(x))$ quantifica o desvio médio entre o modelo ajustado e a função verdadeira $f(x)$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 2: Resposta
+
+::: {.callout-tip}
+## V ou F: Resposta
+- ✗ **F:** $\sigma^2$ é o ruído estocástico inerente ao processo físico gerador; independe do tamanho amostral $N$.
+- ✔ **V:** Como são grandezas quadráticas $((f-\bar{f})^2$, $\mathbb{E}[(\hat{f}-\bar{f})^2]$ e $\mathbb{E}[\epsilon^2]$), os três termos são sempre $\ge 0$.
+- ✔ **V:** Pela independência estocástica, $\mathbb{E}[\epsilon \cdot g(\mathcal{D})] = \mathbb{E}[\epsilon] \mathbb{E}[g(\mathcal{D})] = 0 \cdot \mathbb{E}[g(\mathcal{D})] = 0$.
+- ✗ **F:** A discrepância em relação à verdade é a definição de **viés**; a variância mede a dispersão de $\hat{f}$ em torno de sua própria média $\bar{f}$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** $f(x) - \bar{f}(x)$ é constante em relação a $\mathcal{D}$ (não depende de qual amostra foi sorteada), logo sai da esperança. Sob a perda em valor absoluto $|y - \hat{f}|$, a desigualdade triangular $|a+b| \le |a| + |b|$ impede o cancelamento e destrói a decomposição aditiva pura, que é exclusiva de espaços pré-hilbertianos associados à perda quadrática $L_2$.
+:::
+:::
+
+# Bloco 2: Complexidade de Hipóteses e o Ponto Ótimo
+
+## Dinâmica da Complexidade: O Tradeoff em Formato de U
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O que determina a magnitude relativa de $\text{Bias}^2$ e $\text{Var}$? O fator primário é a **capacidade (ou flexibilidade) da classe de hipóteses $\mathcal{H}$**.
+
+Considere uma família de modelos parametrizada por um índice de capacidade $M$ (por exemplo, o grau de um polinômio ou a profundidade máxima de uma árvore de decisão):
+- **Modelos de Baixa Capacidade ($M$ pequeno):** O espaço de hipóteses $\mathcal{H}$ é excessivamente restritivo. Como o modelo não consegue expressar a riqueza funcional de $f(x)$, o **viés ao quadrado é elevado**. Em contrapartida, como o modelo possui poucos parâmetros livres para serem estimados, diferentes amostras de treino $\mathcal{D}_1$ e $\mathcal{D}_2$ produzem estimativas quase idênticas: a **variância é muito baixa**.
+- **Modelos de Alta Capacidade ($M$ grande):** O espaço de hipóteses $\mathcal{H}$ é vasto e flexível. O estimador médio $\bar{f}(x)$ consegue se aproximar quase perfeitamente da função verdadeira, fazendo o **viés tender a zero**. Por outro lado, o modelo tem tanta liberdade que ele se ajusta avidamente a qualquer flutuação de ruído acidental presente na amostra finita $\mathcal{D}$: a **variância explode**.
+
+Ao integrarmos o erro sobre toda a distribuição marginal de entradas $p(x)$:
+$$\text{EMSE}_{\text{total}} = \int \text{EMSE}(x) p(x) \, \mathrm{d}x = \int \text{Bias}^2(x) p(x) \, \mathrm{d}x + \int \text{Var}(x) p(x) \, \mathrm{d}x + \sigma^2$$
+observamos a célebre **curva em formato de U**: à medida que a complexidade $M$ cresce, o viés cai rapidamente no início, mas a partir de certo ponto a variância sobe a uma taxa superior, empurrando o erro de generalização de volta para cima.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Comportamento dos Componentes com a Capacidade $M$
+- $\text{Bias}^2(M)$: Função monotônica **decrescente** da capacidade do modelo.
+- $\text{Var}(M)$: Função monotônica **crescente** da capacidade do modelo.
+- $\sigma^2$: Linha horizontal invariante (piso absoluto).
+:::
+
+::: {.fragment}
+- **Região de Underfitting (Subajuste):** Dominada pelo viés. A capacidade do modelo é o gargalo.
+- **Região de Overfitting (Superajuste):** Dominada pela variância. A sensibilidade aos dados é o problema.
+- **O Ponto Ótimo $M^*$:** Onde a derivada da redução de viés anula exatamente o aumento marginal de variância:
+  $$\frac{\mathrm{d}\,\text{Bias}^2}{\mathrm{d}M} = -\frac{\mathrm{d}\,\text{Var}}{\mathrm{d}M}$$
+:::
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# Cálculo numérico empírico exato de Bias^2 e Variância vs Grau de Polinômio
+poly_degrees = np.arange(1, 13)
+n_sims = 100
+N_train = 25
+
+bias2_arr = []
+var_arr = []
+total_err_arr = []
+
+# Ponto de teste fixo ou grid denso
+x_eval = np.linspace(0, 1, 100)
+f_true_eval = true_fun(x_eval)
+
+for deg in poly_degrees:
+    preds_eval = np.zeros((n_sims, len(x_eval)))
+    for s in range(n_sims):
+        x_tr = rng.uniform(0, 1, N_train)
+        y_tr = true_fun(x_tr) + rng.normal(0, sigma_noise, N_train)
+        m = make_pipeline(PolynomialFeatures(deg), LinearRegression())
+        m.fit(x_tr[:, np.newaxis], y_tr)
+        preds_eval[s, :] = m.predict(x_eval[:, np.newaxis])
+        
+    f_bar_eval = np.mean(preds_eval, axis=0)
+    b2 = np.mean((f_bar_eval - f_true_eval)**2)
+    v = np.mean(np.var(preds_eval, axis=0))
+    
+    bias2_arr.append(b2)
+    var_arr.append(v)
+    total_err_arr.append(b2 + v + sigma_noise**2)
+
+fig, ax = plt.subplots(figsize=(7, 3.8))
+ax.plot(poly_degrees, bias2_arr, color=COR_A, marker='o', lw=2, label=r"Viés ao Quadrado ($\text{Bias}^2$)")
+ax.plot(poly_degrees, var_arr, color=COR_B, marker='s', lw=2, label=r"Variância ($\text{Var}$)")
+ax.axhline(sigma_noise**2, color=COR_CINZA, linestyle=':', lw=1.8, label=r"Ruído Irredutível ($\sigma^2$)")
+ax.plot(poly_degrees, total_err_arr, color=COR_NEU, marker='^', lw=2.5, label=r"Erro Total Esperado ($\text{EMSE}$)")
+
+ax.set_title("Decomposição Empírica do EMSE vs. Grau do Polinômio")
+ax.set_xlabel("Grau do Polinômio (Capacidade do Modelo)")
+ax.set_ylabel("Erro Quadrático Médio Integrado")
+ax.set_yscale("log")
+ax.set_xticks(poly_degrees)
+ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=2)
+plt.tight_layout()
+plt.show()
+```
+
+## O Efeito do Tamanho Amostral $N$
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Viés e variância reagem de formas muito diferentes à quantidade de dados
+de treinamento $N$. Para a variância existe uma conta exata no caso da
+regressão linear por mínimos quadrados (OLS, Aula 5), que mostra de onde
+vem a regra "mais dados, menos variância" e quanto a capacidade do
+modelo pesa nela.
+
+**Premissas (desenho fixo).** Os $N$ pontos de entrada estão fixos e
+formam a matriz de projeto $X\in\mathbb{R}^{N\times p}$, com posto $p$
+(colunas linearmente independentes; $p$ conta o intercepto e as
+funções de base). Só as respostas são aleatórias:
+$\mathbf{y}=\mathbf{f}+\boldsymbol\epsilon$, com
+$\mathbf{f}=(f(\mathbf{x}_1),\dots,f(\mathbf{x}_N))^T$ fixo,
+$\mathbb{E}[\boldsymbol\epsilon]=\mathbf{0}$ e
+$\text{Cov}(\boldsymbol\epsilon)=\sigma^2 I_N$ (ruídos independentes e
+homocedásticos). A variância abaixo é sobre o sorteio do ruído, com os
+$\mathbf{x}_n$ fixos (ESL §7.3, p. 224).
+
+**Passo 1 — o ajuste é uma matriz vezes $\mathbf{y}$.** As equações
+normais dão $\hat{\boldsymbol\beta}=(X^TX)^{-1}X^T\mathbf{y}$, logo os
+valores ajustados são
+$$
+\hat{\mathbf{y}}=X\hat{\boldsymbol\beta}=\underbrace{X(X^TX)^{-1}X^T}_{H}\,\mathbf{y}=H\mathbf{y}.
+$$
+$H$ é a **matriz chapéu** ("põe o chapéu" em $\mathbf{y}$): a projeção
+ortogonal no espaço-coluna de $X$ da Aula 5.
+
+**Passo 2 — duas propriedades de $H$.** Ela é simétrica ($H^T=H$) e
+idempotente:
+$H^2=X(X^TX)^{-1}\underbrace{X^TX(X^TX)^{-1}}_{I_p}X^T=H$ (projetar duas
+vezes é o mesmo que projetar uma). E o seu traço é $p$, pela propriedade
+cíclica $\mathrm{tr}(AB)=\mathrm{tr}(BA)$:
+$$
+\mathrm{tr}(H)=\mathrm{tr}\big(X(X^TX)^{-1}X^T\big)=\mathrm{tr}\big((X^TX)^{-1}X^TX\big)=\mathrm{tr}(I_p)=p .
+$$
+
+**Passo 3 — a covariância dos ajustes.** Como $\mathbf{f}$ é fixo,
+$\text{Cov}(\mathbf{y})=\text{Cov}(\boldsymbol\epsilon)=\sigma^2I_N$.
+Uma matriz fixa vezes um vetor aleatório tem
+$\text{Cov}(H\mathbf{y})=H\,\text{Cov}(\mathbf{y})\,H^T$, então
+$$
+\text{Cov}(\hat{\mathbf{y}})=H(\sigma^2I_N)H^T=\sigma^2HH^T=\sigma^2H^2=\sigma^2H .
+$$
+
+**Passo 4 — somar as variâncias.** A variância de cada $\hat y_n$ está
+na diagonal de $\text{Cov}(\hat{\mathbf{y}})$, e a soma da diagonal é o
+traço:
+$$
+\sum_{n=1}^N\text{Var}(\hat y_n)=\mathrm{tr}\big(\text{Cov}(\hat{\mathbf{y}})\big)=\sigma^2\,\mathrm{tr}(H)=\sigma^2p
+\qquad\Longrightarrow\qquad
+\frac1N\sum_{n=1}^N\text{Var}(\hat y_n)=\sigma^2\,\frac{p}{N}.
+$$
+É a mesma expressão da ESL (eq. 7.12, p. 224), aqui com a demonstração.
+
+Essa conta revela duas propriedades estruturais:
+
+1. **A variância média é $\sigma^2p/N$: proporcional à capacidade $p$ e
+   a $1/N$.** Dobrar os dados corta a variância pela metade (o
+   desvio-padrão cai com $1/\sqrt N$); dobrar o número de parâmetros a
+   dobra. Com $N\to\infty$ e $p$ fixo, ela vai a zero. A conta é exata,
+   não assintótica, mas vale para modelos lineares nos parâmetros e
+   como média sobre os pontos de treino.
+2. **O viés de especificação é imune a $N$.** Se a classe de modelos é
+   estruturalmente inadequada (por exemplo, uma reta para uma função
+   com curvatura), mesmo com bilhões de observações o estimador converge
+   para a melhor aproximação dentro de $\mathcal{H}$, mas não se curva. O
+   viés estrutural não diminui com a adição de dados.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+Conta exata para OLS (ESL §7.3, p. 224). **Desenho fixo:** $X\in\mathbb{R}^{N\times p}$ fixa, posto $p$; $\mathbf{y}=\mathbf{f}+\boldsymbol\epsilon$, $\text{Cov}(\boldsymbol\epsilon)=\sigma^2I_N$.
+
+::: {.fragment}
+**Passo 1 — o ajuste é uma matriz vezes $\mathbf{y}$:**
+$\quad\hat{\mathbf{y}}=X(X^TX)^{-1}X^T\mathbf{y}=H\mathbf{y}$ (matriz chapéu: a projeção da Aula 5).
+:::
+
+::: {.fragment}
+**Passo 2 — propriedades de $H$:** simétrica; $H^2=X(X^TX)^{-1}\underbrace{X^TX(X^TX)^{-1}}_{I_p}X^T=H$;
+$$
+\mathrm{tr}(H)=\mathrm{tr}\big((X^TX)^{-1}X^TX\big)=\mathrm{tr}(I_p)=p\qquad(\mathrm{tr}(AB)=\mathrm{tr}(BA)).
+$$
+:::
+
+## Variância Média $=\sigma^2p/N$
+
+::: {.fragment}
+**Passo 3 — covariância dos ajustes:** $\text{Cov}(H\mathbf{y})=H\,\text{Cov}(\mathbf{y})\,H^T$, e $\text{Cov}(\mathbf{y})=\sigma^2I_N$:
+$$
+\text{Cov}(\hat{\mathbf{y}})=\sigma^2HH^T=\sigma^2H^2=\sigma^2H .
+$$
+:::
+
+::: {.fragment}
+**Passo 4 — somar a diagonal (traço):**
+$$
+\sum_{n}\text{Var}(\hat y_n)=\sigma^2\,\mathrm{tr}(H)=\sigma^2p
+\quad\Longrightarrow\quad
+\frac1N\sum_{n}\text{Var}(\hat y_n)=\sigma^2\frac{p}{N}\quad\text{(ESL eq. 7.12)}.
+$$
+:::
+
+::: {.fragment}
+- Proporcional à capacidade $p$ e a $1/N$: dobrar $N$ corta a variância pela metade (o desvio-padrão cai com $1/\sqrt N$).
+- **O viés não cai com $N$:** uma reta continua sem se curvar com bilhões de pontos — o estimador converge para a melhor aproximação dentro de $\mathcal{H}$.
+:::
+
+:::
+
+## Pausa Ativa 3: Capacidade de Hipóteses e Tamanho Amostral $N$
+
+::: {.callout-tip}
+## O Destino dos Componentes quando $N \to \infty$
+
+Se tivermos um orçamento limitado e precisarmos decidir entre:
+- (A) Coletar mais dados de treino para um modelo linear simples ($p=2$);
+- (B) Coletar mais dados de treino para uma rede neural profunda com milhões de parâmetros ($p=10^7$).
+
+Em qual dos dois cenários a coleta de dados adicionais trará maior redução percentual no erro de predição? Por quê?
+:::
+
+::: {.callout-tip}
+## V ou F: Dinâmica de Capacidade e Dados
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Aumentar a capacidade de um modelo tende a reduzir monotonicamente o viés ao quadrado e aumentar a variância do estimador.
+- □ Se um modelo possui alto viés estrutural, coletar dados em abundância fará seu viés convergir para zero.
+- □ O erro esperado atinge seu valor ótimo exatamente quando o viés e a variância são ambos rigorosamente iguais a zero.
+- □ Para a regressão linear ordinária OLS com $p$ parâmetros, a variância média do estimador escala proporcionalmente com $p/N$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 3: Resposta
+
+::: {.callout-tip}
+## V ou F: Resposta
+- ✔ **V:** Uma classe mais flexível aproxima melhor a verdade (menor viés), mas sofre mais com flutuações amostrais (maior variância).
+- ✗ **F:** O viés decorre da incapacidade do espaço de hipóteses $\mathcal{H}$; adicionar dados não altera as limitações estruturais da classe.
+- ✗ **F:** Na prática com ruído $\sigma^2 > 0$, o piso mínimo inalcançável é $\sigma^2$, e viés e variância movem-se em direções opostas.
+- ✔ **V:** Pela conta da matriz chapéu, $\frac{1}{N}\sum_n \text{Var}(\hat{y}_n) = \sigma^2\,\mathrm{tr}(H)/N = \sigma^2 \frac{p}{N}$ (exata, com desenho fixo).
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** No cenário (B). A rede neural possui viés baixo e variância inicialmente astronômica decorrente de seus milhões de graus de liberdade. Como a variância decresce com $O(1/N)$, fornecer dados em abundância ataca exatamente o componente dominante que estava prejudicando o modelo. No cenário (A), o modelo linear já tem variância quase nula; o erro é dominado por viés, que não responde à adição de dados.
+:::
+:::
+
+# Bloco 3: Conexão com Regularização e MAP (Aula 7)
+
+## Ridge: A Injeção Deliberada de Viés para Abater Variância
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Na Aula 7, derivamos o estimador de regressão Ridge adicionando a penalidade $\lambda \|\boldsymbol\beta\|^2$:
+$$\hat{\boldsymbol\beta}_{\text{Ridge}} = \left( \mathbf{X}^T\mathbf{X} + \lambda \mathbf{I} \right)^{-1} \mathbf{X}^T \mathbf{y}$$
+
+Vamos agora calcular explicitamente o **viés** e a **variância** desse estimador sob o modelo linear verdadeiro $\mathbf{y} = \mathbf{X}\boldsymbol\beta^* + \boldsymbol\epsilon$:
+
+### 1. Esperança e Viés do Estimador Ridge
+Tomando a esperança sobre a distribuição do ruído $\boldsymbol\epsilon$:
+$$\mathbb{E}[\hat{\boldsymbol\beta}_{\text{Ridge}}] = \mathbb{E}\left[ \left( \mathbf{X}^T\mathbf{X} + \lambda \mathbf{I} \right)^{-1} \mathbf{X}^T (\mathbf{X}\boldsymbol\beta^* + \boldsymbol\epsilon) \right] = \left( \mathbf{X}^T\mathbf{X} + \lambda \mathbf{I} \right)^{-1} \mathbf{X}^T \mathbf{X} \boldsymbol\beta^*$$
+
+Seja $\mathbf{W}_\lambda = (\mathbf{X}^T\mathbf{X} + \lambda \mathbf{I})^{-1} \mathbf{X}^T\mathbf{X}$. 
+- Se $\lambda = 0$ (OLS), temos $\mathbf{W}_0 = \mathbf{I}$, recuperando $\mathbb{E}[\hat{\boldsymbol\beta}_{\text{OLS}}] = \boldsymbol\beta^*$ (o estimador OLS é não enviesado).
+- Mas se $\lambda > 0$, os autovalores de $\mathbf{W}_\lambda$ são da forma $\frac{s_i^2}{s_i^2 + \lambda} < 1$, onde $s_i$ são os valores singulares de $\mathbf{X}$.
+Portanto, $\mathbb{E}[\hat{\boldsymbol\beta}_{\text{Ridge}}] \neq \boldsymbol\beta^*$. O estimador Ridge é **deliberadamente enviesado**, encolhendo os coeficientes em direção a zero. O viés é estritamente crescente com $\lambda$.
+
+### 2. Matriz de Covariância (Variância) do Estimador Ridge
+Como a única parte estocástica de $\hat{\boldsymbol\beta}_{\text{Ridge}}$ provém de $\boldsymbol\epsilon$, e $\text{Cov}(\mathbf{y}) = \sigma^2 \mathbf{I}$:
+$$\text{Cov}(\hat{\boldsymbol\beta}_{\text{Ridge}}) = \sigma^2 \left( \mathbf{X}^T\mathbf{X} + \lambda \mathbf{I} \right)^{-1} \mathbf{X}^T\mathbf{X} \left( \mathbf{X}^T\mathbf{X} + \lambda \mathbf{I} \right)^{-1}$$
+
+Comparando com a covariância do OLS:
+$$\text{Cov}(\hat{\boldsymbol\beta}_{\text{OLS}}) = \sigma^2 \left( \mathbf{X}^T\mathbf{X} \right)^{-1}$$
+
+Pela álgebra de matrizes semidefinidas positivas, para qualquer $\lambda > 0$:
+$$\text{Cov}(\hat{\boldsymbol\beta}_{\text{Ridge}}) \prec \text{Cov}(\hat{\boldsymbol\beta}_{\text{OLS}})$$
+A variância de $\hat{\boldsymbol\beta}_{\text{Ridge}}$ é **estritamente menor** que a do estimador OLS em todas as direções!
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## As Equações Fechadas de Ridge
+$$\mathbb{E}[\hat{\boldsymbol\beta}_{\text{Ridge}}] = (\mathbf{X}^T\mathbf{X} + \lambda \mathbf{I})^{-1}\mathbf{X}^T\mathbf{X} \boldsymbol\beta^* \quad \Longrightarrow \quad \text{Enviesado se } \lambda > 0$$
+$$\text{Cov}(\hat{\boldsymbol\beta}_{\text{Ridge}}) = \sigma^2 (\mathbf{X}^T\mathbf{X} + \lambda \mathbf{I})^{-1} \mathbf{X}^T\mathbf{X} (\mathbf{X}^T\mathbf{X} + \lambda \mathbf{I})^{-1} \quad \prec \quad \text{Cov}(\hat{\boldsymbol\beta}_{\text{OLS}})$$
+:::
+
+::: {.fragment}
+- **O Dilema de Gauss-Markov:** OLS é o melhor estimador linear *não enviesado* (BLUE).
+- **A Virada Conceitual:** Quem disse que queremos viés zero? Queremos **menor erro total**!
+- Ao injetar uma quantidade microscópica de viés, podemos colapsar a variância desproporcionalmente.
+:::
+:::
+
+## O Teorema de Hoerl & Kennard (1970)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Arthur Hoerl e Robert Kennard (1970) provaram um teorema que estabelece a fundamentação teórica de toda a regularização moderna:
+
+> **Teorema da Existência de Ridge (Hoerl & Kennard, 1970):**
+> Se $\mathbf{X}^T\mathbf{X}$ possui autovalores estritamente positivos e $\|\boldsymbol\beta^*\| < \infty$, então **sempre existe um valor de regularização $\lambda > 0$** tal que o Erro Quadrático Médio do estimador Ridge é estritamente menor do que o Erro Quadrático Médio do estimador de Mínimos Quadrados Ordinários:
+> $$\text{MSE}(\hat{\boldsymbol\beta}_{\text{Ridge}}(\lambda)) < \text{MSE}(\hat{\boldsymbol\beta}_{\text{OLS}})$$
+
+A prova matemática apoia-se no cálculo da derivada da soma $\text{MSE}(\lambda) = \text{Bias}^2(\lambda) + \text{Var}(\lambda)$ avaliada no ponto $\lambda = 0$:
+$$\left. \frac{\mathrm{d}\,\text{Bias}^2(\lambda)}{\mathrm{d}\lambda} \right|_{\lambda = 0} = 0, \quad \text{enquanto} \quad \left. \frac{\mathrm{d}\,\text{Var}(\lambda)}{\mathrm{d}\lambda} \right|_{\lambda = 0} = -2\sigma^2 \sum_{i=1}^p \frac{1}{s_i^4} < 0$$
+
+Como a taxa de variação inicial do viés ao quadrado em torno de zero é **nula** e a taxa de redução de variância é **estritamente negativa**, a derivada inicial do erro total é negativa: $\left.\frac{\mathrm{d}\,\text{MSE}}{\mathrm{d}\lambda}\right|_{\lambda=0} < 0$. Logo, qualquer perturbação positiva infinitesimal $\lambda > 0$ reduz o erro total garantidamente!
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-important}
+## O Ganho de Primeira Ordem
+Sempre existe $\lambda > 0$ tal que $\text{MSE}(\hat{\boldsymbol\beta}_{\text{Ridge}}) < \text{MSE}(\hat{\boldsymbol\beta}_{\text{OLS}})$.
+:::
+
+::: {.fragment}
+- **A Prova em Uma Linha (derivadas em $\lambda=0$):**
+  $$\left. \frac{\mathrm{d}\,\text{Bias}^2}{\mathrm{d}\lambda} \right|_{\lambda=0} = 0 \quad \text{e} \quad \left. \frac{\mathrm{d}\,\text{Var}}{\mathrm{d}\lambda} \right|_{\lambda=0} < 0 \quad \Longrightarrow \quad \left. \frac{\mathrm{d}\,\text{MSE}}{\mathrm{d}\lambda} \right|_{\lambda=0} < 0$$
+- O ganho inicial de variância é de primeira ordem; a perda de viés é de segunda ordem.
+- É matematicamente irracional manter $\lambda = 0$ em problemas sujeitos a ruído estocástico!
+:::
+:::
+
+## Demonstração Empírica no California Housing
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para observar o teorema operando em dados reais, aplicamos a regressão Ridge combinada com expansão polinomial de grau 2 nos 8 atributos do *California Housing* ($D=44$ parâmetros após expansão).
+
+Variamos $\lambda$ ao longo de seis ordens de magnitude ($10^{-3}$ a $10^4$). No gráfico abaixo, decompomos o erro empírico em conjunto de teste: para $\lambda$ muito pequeno, a multicolinearidade de $\mathbf{X}^T\mathbf{X}$ inflaciona a variância; para $\lambda$ excessivo, o modelo subajusta por excesso de viés. O ponto ótimo de $\lambda$ atinge exatamente o mínimo do Erro Quadrático Médio de teste.
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# Experimento com California Housing variando lambda
+scaler = StandardScaler()
+X_norm = scaler.fit_transform(X_cal_sub)
+
+# Expansão polinomial de grau 2
+poly = PolynomialFeatures(degree=2, include_bias=False)
+X_poly = poly.fit_transform(X_norm)
+
+X_train, X_test, y_train, y_test = train_test_split(X_poly, y_cal_sub, test_size=0.3, random_state=42)
+
+lambdas = np.logspace(-2, 4, 30)
+train_errors = []
+test_errors = []
+
+for lam in lambdas:
+    ridge = Ridge(alpha=lam)
+    ridge.fit(X_train, y_train)
+    train_errors.append(mean_squared_error(y_train, ridge.predict(X_train)))
+    test_errors.append(mean_squared_error(y_test, ridge.predict(X_test)))
+
+fig, ax = plt.subplots(figsize=(6.5, 3.6))
+ax.plot(lambdas, train_errors, color=COR_A, lw=2, label="Erro de Treino")
+ax.plot(lambdas, test_errors, color=COR_B, lw=2.5, label="Erro de Teste (Generalização)")
+
+opt_idx = np.argmin(test_errors)
+opt_lam = lambdas[opt_idx]
+ax.axvline(opt_lam, color=COR_CINZA, linestyle="--", alpha=0.8, label=f"$\lambda^* = {opt_lam:.1f}$ (Ótimo)")
+
+ax.set_xscale("log")
+ax.set_title("O Tradeoff no California Housing (Polinômio Grau 2, $p=44$)")
+ax.set_xlabel(r"Força de Regularização Ridge ($\lambda$)")
+ax.set_ylabel("Mean Squared Error (MSE)")
+ax.legend()
+plt.tight_layout()
+plt.show()
+```
+
+## Pausa Ativa 4: Ridge e a Injeção Deliberada de Viés
+
+::: {.callout-tip}
+## Por Que Aceitar Viés se OLS é BLUE?
+
+O Teorema de Gauss-Markov afirma categoricamente que o estimador OLS é o Melhor Estimador Linear Não Enviesado (BLUE). Por que essa garantia formal não impede que o estimador Ridge atinja um erro de predição estritamente menor no mundo real?
+
+*Dica para discussão:* Qual é a restrição que o acrônimo BLUE impõe à classe de estimadores considerados?
+:::
+
+::: {.callout-tip}
+## V ou F: Ridge e o Teorema de Hoerl & Kennard
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O estimador de regressão Ridge $\hat{\boldsymbol\beta}_{\text{Ridge}}$ é não enviesado para qualquer valor de penalidade $\lambda > 0$.
+- □ A matriz de covariância do estimador Ridge satisfaz $\text{Cov}(\hat{\boldsymbol\beta}_{\text{Ridge}}) \prec \text{Cov}(\hat{\boldsymbol\beta}_{\text{OLS}})$ para qualquer $\lambda > 0$.
+- □ O Teorema de Hoerl & Kennard (1970) prova que sempre existe um valor $\lambda > 0$ tal que o erro quadrático total do Ridge é estritamente menor que o do OLS.
+- □ Aumentar indefinidamente a força de regularização $\lambda \to \infty$ faz o erro de predição do modelo convergir para zero.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 4: Resposta
+
+::: {.callout-tip}
+## V ou F: Resposta
+- ✗ **F:** $\mathbb{E}[\hat{\boldsymbol\beta}_{\text{Ridge}}] = (\mathbf{X}^T\mathbf{X}+\lambda\mathbf{I})^{-1}\mathbf{X}^T\mathbf{X}\boldsymbol\beta^* \neq \boldsymbol\beta^*$ para $\lambda > 0$; ele encolhe coeficientes deliberadamente.
+- ✔ **V:** Como $(\mathbf{X}^T\mathbf{X}+\lambda\mathbf{I})^{-1} \prec (\mathbf{X}^T\mathbf{X})^{-1}$, a variância é menor em todas as direções.
+- ✔ **V:** Em $\lambda=0$, a derivada do viés é nula e a da variância é estritamente negativa, garantindo redução de MSE para algum $\lambda > 0$.
+- ✗ **F:** Quando $\lambda \to \infty$, todos os coeficientes $\boldsymbol\beta \to \mathbf{0}$, gerando subajuste catastrófico com viés explosivo.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** O Teorema de Gauss-Markov restringe sua busca apenas a estimadores **não enviesados** ($\text{Bias} = 0$). O Ridge abandona essa restrição desnecessária: ao aceitar uma dose mínima de viés, ele ganha uma redução gigantesca de variância, vencendo o OLS na soma $\text{Bias}^2 + \text{Var}$.
+:::
+:::
+
+# Bloco 4: Curvas de Aprendizado e Diagnóstico Prático
+
+## Diagnóstico Prático por Curvas de Aprendizado
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A decomposição $\text{Bias}^2+\text{Var}+\sigma^2$ é uma ferramenta
+teórica: para calcular cada termo seria preciso conhecer $f$ e sortear
+muitos conjuntos de treino. Na prática temos **um** conjunto de dados. A
+pergunta deste bloco é como, com ele, descobrir se um modelo está
+limitado por viés ou por variância — e, portanto, o que fazer a seguir.
+A ferramenta padrão é a **curva de aprendizado**.
+
+**Definição.** Fixe a família de modelos e todos os hiperparâmetros.
+Para uma grade de tamanhos $N_1<N_2<\dots<N_K$ (em geral espaçada em
+escala log):
+
+1. sorteie (ou subamostre) $N$ pontos de treino e ajuste $\hat f_N$;
+2. calcule o **erro de treino**, nos próprios pontos usados no ajuste,
+   $$\overline{\text{err}}(N)=\frac1N\sum_{n\in\text{treino}}\big(y_n-\hat f_N(\mathbf{x}_n)\big)^2;$$
+3. calcule o **erro de validação**, num conjunto que o ajuste não viu,
+   $$\text{Err}_{\text{val}}(N)=\frac1{N_{\text{val}}}\sum_{n\in\text{val}}\big(y_n-\hat f_N(\mathbf{x}_n)\big)^2;$$
+4. repita para vários sorteios (ou dobras de validação cruzada, Aula 4)
+   e resuma por média ou mediana.
+
+A curva de aprendizado é o gráfico de $\overline{\text{err}}(N)$ e
+$\text{Err}_{\text{val}}(N)$ contra $N$ (ESL §7.10.1, Fig. 7.8, p. 243).
+No `scikit-learn`, `sklearn.model_selection.learning_curve` faz os
+passos 1–4 com validação cruzada.
+
+**O que cada curva estima.** O erro de validação é uma estimativa
+honesta do erro esperado de um modelo treinado com $N$ pontos: em média
+sobre os sorteios, é a decomposição do Bloco 1 integrada sobre $p(x)$,
+$\text{Bias}^2+\text{Var}(N)+\sigma^2$, agora vista como função de $N$.
+O erro de treino é **otimista**: os mesmos pontos servem para ajustar e
+para avaliar, e o ajuste se acomoda ao ruído deles (o $\hat R(\theta)$
+otimista da Aula 4). A pergunta é **quanto** otimista — e, para OLS,
+há uma resposta exata.
+
+### Quanto o treino é otimista: uma conta exata
+
+Use as mesmas premissas de desenho fixo do Bloco 2 ($X$ fixa de posto
+$p$, $\mathbf{y}=\mathbf{f}+\boldsymbol\epsilon$,
+$\text{Cov}(\boldsymbol\epsilon)=\sigma^2I_N$, $\hat{\mathbf{y}}=H\mathbf{y}$).
+
+**Passo 1 — os resíduos de treino.**
+$\mathbf{y}-\hat{\mathbf{y}}=(I-H)\mathbf{y}=(I-H)\mathbf{f}+(I-H)\boldsymbol\epsilon$.
+A matriz $I-H$ também é simétrica e idempotente (projeção no
+complemento ortogonal do espaço-coluna), com
+$\mathrm{tr}(I-H)=N-p$.
+
+**Passo 2 — a esperança do erro de treino.** Expandindo
+$\|(I-H)\mathbf{f}+(I-H)\boldsymbol\epsilon\|^2$, o termo cruzado tem
+esperança zero porque $\mathbb{E}[\boldsymbol\epsilon]=\mathbf{0}$, e o
+termo do ruído é
+$\mathbb{E}[\boldsymbol\epsilon^T(I-H)^T(I-H)\boldsymbol\epsilon]=\mathbb{E}[\boldsymbol\epsilon^T(I-H)\boldsymbol\epsilon]=\sigma^2\,\mathrm{tr}(I-H)$.
+Dividindo por $N$:
+$$
+\mathbb{E}\big[\overline{\text{err}}\big]=\underbrace{\tfrac1N\|(I-H)\mathbf{f}\|^2}_{B}+\sigma^2\Big(1-\frac pN\Big).
+$$
+$B$ é o viés ao quadrado médio nos pontos de treino: $\mathbb{E}[\hat{\mathbf y}]=H\mathbf f$,
+logo $\mathbf f-\mathbb{E}[\hat{\mathbf y}]=(I-H)\mathbf f$.
+
+**Passo 3 — o erro em respostas novas.** Meça o mesmo ajuste em
+respostas novas $y'_n=f(\mathbf{x}_n)+\epsilon'_n$, nos mesmos
+$\mathbf{x}_n$, com ruído $\epsilon'$ independente do de treino (o
+"erro dentro da amostra", ESL eq. 7.18, p. 228). Agora o ruído não foi
+visto pelo ajuste, e a decomposição do Bloco 1 em cada ponto, somada com
+a variância $\sigma^2p$ do Bloco 2, dá
+$$
+\mathbb{E}\big[\text{Err}_{\text{in}}\big]=\sigma^2+B+\sigma^2\frac pN .
+$$
+
+**Passo 4 — o gap.** Subtraindo:
+$$
+\mathbb{E}\big[\text{Err}_{\text{in}}\big]-\mathbb{E}\big[\overline{\text{err}}\big]=2\sigma^2\frac{p}{N}
+\qquad\text{(ESL eq. 7.24, p. 229).}
+$$
+O viés $B$ aparece igual nas duas curvas e se cancela: **a distância
+entre as curvas mede a variância, não o viés**. E o gap cresce com a
+capacidade $p$ e fecha com $1/N$.
+
+Essa conta é exata para o erro em respostas novas **nos mesmos
+$\mathbf{x}_n$**. O erro de validação usa entradas novas, e aí entra um
+pouco a mais quando o modelo é mal especificado ou $N$ é pequeno; a
+segunda figura abaixo mostra que, num modelo bem especificado, o gap de
+validação acompanha $2\sigma^2p/N$ de perto.
+
+### A forma típica das curvas
+
+A conta explica o desenho que se vê na prática:
+
+1. **O treino começa baixo e sobe.** Com $N$ pequeno o modelo se
+   acomoda ao ruído; $\sigma^2(1-p/N)$ cresce com $N$.
+2. **A validação começa alta e desce.** A variância $\sigma^2p/N$ cai
+   com $N$.
+3. **As duas convergem para o mesmo patamar,** $\sigma^2+B_\infty$, em
+   que $B_\infty$ é o viés da melhor aproximação dentro de
+   $\mathcal{H}$ (a parte que mais dados não removem).
+4. **A altura desse patamar acima de $\sigma^2$ mede o viés;** a
+   distância entre as curvas, num dado $N$, mede a variância.
+
+A figura mostra os três casos no laboratório sintético
+($f(x)=\sin 2\pi x$, $\sigma^2=0{,}09$), com a mediana de 100 sorteios
+por ponto. A linha pontilhada é o piso $\sigma^2$; a tracejada, o
+patamar $\sigma^2+B_\infty$, calculado ajustando cada modelo a uma
+amostra enorme.
+
+- **Grau 1 (alto viés):** o gap é pequeno desde o início ($p=2$), e as
+  duas curvas se encontram por volta de $N\approx150$ num patamar
+  $\approx0{,}29$, muito acima de $\sigma^2$ ($B_\infty\approx0{,}20$).
+  Daí em diante, mais dados não mudam nada.
+- **Grau 3 (bom ajuste):** patamar $\approx\sigma^2$
+  ($B_\infty\approx0{,}004$) e gap que fecha rápido.
+- **Grau 10 (alta variância):** o treino fica bem abaixo de $\sigma^2$
+  com $N$ pequeno (o modelo decora o ruído) e a validação fica muito
+  acima (com $N=15$, fora da escala do gráfico); o gap é grande, mas
+  fecha com $N$, e o patamar final é $\sigma^2$, porque o viés é quase
+  nulo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+Com **um** conjunto de dados, como saber se o modelo é limitado por viés ou por variância?
+
+::: {.fragment}
+**Curva de aprendizado** (ESL §7.10.1, Fig. 7.8, p. 243). Família e hiperparâmetros fixos; para cada $N$ numa grade:
+
+1. ajustar $\hat f_N$ com $N$ pontos;
+2. erro de **treino** $\overline{\text{err}}(N)$, nos pontos do ajuste;
+3. erro de **validação** $\text{Err}_{\text{val}}(N)$, em pontos não vistos;
+4. repetir (sorteios ou dobras de CV, Aula 4) e resumir.
+:::
+
+::: {.fragment}
+- $\text{Err}_{\text{val}}(N)$ estima $\text{Bias}^2+\text{Var}(N)+\sigma^2$ (Bloco 1, como função de $N$).
+- $\overline{\text{err}}(N)$ é **otimista** (Aula 4): ajusta e avalia nos mesmos pontos. Quanto?
+:::
+
+## Quanto o Treino É Otimista (OLS, Desenho Fixo)
+
+Mesmas premissas do Bloco 2: $\hat{\mathbf y}=H\mathbf y$, $\text{Cov}(\boldsymbol\epsilon)=\sigma^2I_N$.
+
+::: {.fragment}
+**Passo 1:** $\mathbf y-\hat{\mathbf y}=(I-H)\mathbf f+(I-H)\boldsymbol\epsilon$; $\ I-H$ é projeção, com $\mathrm{tr}(I-H)=N-p$.
+:::
+
+::: {.fragment}
+**Passo 2 — treino:** termo cruzado com esperança zero; $\mathbb{E}[\boldsymbol\epsilon^T(I-H)\boldsymbol\epsilon]=\sigma^2(N-p)$:
+$$
+\mathbb{E}[\overline{\text{err}}]=\underbrace{\tfrac1N\|(I-H)\mathbf f\|^2}_{B\ (\text{viés}^2)}+\sigma^2\Big(1-\frac pN\Big).
+$$
+:::
+
+::: {.fragment}
+**Passo 3 — respostas novas nos mesmos $\mathbf x_n$** (ESL eq. 7.18): $\ \mathbb{E}[\text{Err}_{\text{in}}]=\sigma^2+B+\sigma^2\dfrac pN$.
+:::
+
+::: {.fragment .callout-important}
+**Gap** $=2\sigma^2\dfrac pN$ (ESL eq. 7.24, p. 229). O viés $B$ se cancela: **a distância entre as curvas mede variância**; o gap cresce com $p$ e fecha com $1/N$.
+:::
+
+## A Forma Típica das Curvas
+
+- Treino **sobe** ($\sigma^2(1-p/N)$); validação **desce** ($\sigma^2p/N$).
+- As duas convergem para $\sigma^2+B_\infty$, com $B_\infty$ o viés da melhor aproximação em $\mathcal{H}$.
+
+::: {.fragment .callout-important}
+**Altura do patamar acima de $\sigma^2$ $=$ viés. Distância entre as curvas $=$ variância.**
+:::
+
+::: {.fragment}
+Laboratório sintético, mediana de 100 sorteios: grau 1 (patamar $\approx0{,}29$, $B_\infty\approx0{,}20$), grau 3 ($\approx\sigma^2$), grau 10 (gap grande que fecha com $N$).
+:::
+
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# Curvas de aprendizado no laboratório sintético: graus 1, 3 e 10
+rng_lc = np.random.default_rng(8)
+N_grid = np.array([15, 20, 30, 45, 70, 100, 150, 220, 330, 500])
+graus_lc = [(1, "Grau 1: alto viés"), (3, "Grau 3: bom ajuste"), (10, "Grau 10: alta variância")]
+x_grade = np.linspace(0, 1, 2001)
+
+def ajusta_poly(grau, x, y):
+    return make_pipeline(PolynomialFeatures(grau), LinearRegression()).fit(x[:, None], y)
+
+curvas = {}
+for grau, _ in graus_lc:
+    x_big = rng_lc.uniform(0, 1, 200_000)
+    m_big = ajusta_poly(grau, x_big, true_fun(x_big))
+    B_inf = np.mean((m_big.predict(x_grade[:, None]) - true_fun(x_grade))**2)
+    tr_med, va_med = [], []
+    for n_pts in N_grid:
+        tr, va = [], []
+        for _ in range(100):
+            x_tr = rng_lc.uniform(0, 1, n_pts)
+            y_tr = true_fun(x_tr) + rng_lc.normal(0, sigma_noise, n_pts)
+            x_va = rng_lc.uniform(0, 1, 1000)
+            y_va = true_fun(x_va) + rng_lc.normal(0, sigma_noise, 1000)
+            m = ajusta_poly(grau, x_tr, y_tr)
+            tr.append(mean_squared_error(y_tr, m.predict(x_tr[:, None])))
+            va.append(mean_squared_error(y_va, m.predict(x_va[:, None])))
+        tr_med.append(np.median(tr)); va_med.append(np.median(va))
+        if grau == 10 and n_pts == 20:
+            va_g10_n20 = np.array(va)
+    curvas[grau] = (np.array(tr_med), np.array(va_med), B_inf)
+
+media_g10_n20 = f"{va_g10_n20.mean():.1f}".replace(".", ",")
+mediana_g10_n20 = f"{np.median(va_g10_n20):.2f}".replace(".", ",")
+
+fig, axes = plt.subplots(1, 3, figsize=(14, 4.0), sharey=True)
+for ax, (grau, titulo) in zip(axes, graus_lc):
+    tr_med, va_med, B_inf = curvas[grau]
+    ax.plot(N_grid, tr_med, color=COR_A, marker="o", ms=4, lw=2, label="treino")
+    ax.plot(N_grid, va_med, color=COR_B, marker="s", ms=4, lw=2, label="validação")
+    ax.axhline(sigma_noise**2, color=COR_CINZA, ls=":", lw=1.8, label=r"piso $\sigma^2$")
+    ax.axhline(sigma_noise**2 + B_inf, color=COR_NEU, ls="--", lw=1.6,
+               label=r"patamar $\sigma^2+B_\infty$")
+    ax.set_xscale("log")
+    ax.set_xticks([15, 30, 100, 300, 500])
+    ax.set_xticklabels(["15", "30", "100", "300", "500"])
+    ax.minorticks_off()
+    ax.set_title(titulo)
+    ax.set_xlabel("tamanho do treino $N$ (escala log)")
+    ax.set_ylim(0, 0.45)
+axes[0].set_ylabel("MSE (mediana de 100 sorteios)")
+axes[0].legend(fontsize=9, loc="upper right")
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A segunda figura confere a conta do gap no modelo de grau 3 ($p=4$),
+agora com a **média** de 400 sorteios por ponto: em azul, o gap em
+respostas novas nos mesmos $\mathbf{x}_n$ (o caso exato da conta); em
+laranja, o gap de validação, com entradas novas; em cinza, a previsão
+$2\sigma^2p/N$. O primeiro segue a teoria em todo $N$; o segundo fica um
+pouco acima com $N$ pequeno e encosta nela à medida que $N$ cresce.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Gap Medido Contra $2\sigma^2p/N$
+
+Grau 3 ($p=4$), média de 400 sorteios: gap em respostas novas nos mesmos $\mathbf x_n$ (exato) e gap de validação (entradas novas), contra a previsão.
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# Gap entre validação e treino vs. a previsão 2 sigma^2 p / N (grau 3)
+rng_gap = np.random.default_rng(9)
+N_gap = np.array([10, 15, 20, 30, 45, 70, 100, 150, 220, 330, 500])
+grau_gap = 3
+p_gap = grau_gap + 1
+gap_in, gap_val = [], []
+for n_pts in N_gap:
+    g_in, g_val = [], []
+    for _ in range(400):
+        x_tr = rng_gap.uniform(0, 1, n_pts)
+        y_tr = true_fun(x_tr) + rng_gap.normal(0, sigma_noise, n_pts)
+        m = ajusta_poly(grau_gap, x_tr, y_tr)
+        yhat_tr = m.predict(x_tr[:, None])
+        err_tr = np.mean((y_tr - yhat_tr)**2)
+        y_novo = true_fun(x_tr) + rng_gap.normal(0, sigma_noise, n_pts)
+        g_in.append(np.mean((y_novo - yhat_tr)**2) - err_tr)
+        x_va = rng_gap.uniform(0, 1, 1000)
+        y_va = true_fun(x_va) + rng_gap.normal(0, sigma_noise, 1000)
+        g_val.append(np.mean((y_va - m.predict(x_va[:, None]))**2) - err_tr)
+    gap_in.append(np.mean(g_in)); gap_val.append(np.mean(g_val))
+
+fig, ax = plt.subplots(figsize=(7.4, 3.8))
+N_fino = np.linspace(N_gap[0], N_gap[-1], 400)
+ax.plot(N_fino, 2 * sigma_noise**2 * p_gap / N_fino, color=COR_CINZA, lw=2.2,
+        label=r"previsão $2\sigma^2p/N$")
+ax.plot(N_gap, gap_in, "o", color=COR_A, ms=6, label=r"gap em respostas novas, mesmos $x_n$")
+ax.plot(N_gap, gap_val, "s", color=COR_B, ms=6, label="gap de validação (entradas novas)")
+ax.set_xscale("log"); ax.set_yscale("log")
+ax.set_xticks([10, 30, 100, 300, 500]); ax.set_xticklabels(["10", "30", "100", "300", "500"])
+ax.set_xlabel("tamanho do treino $N$ (escala log)")
+ax.set_ylabel("erro de teste − erro de treino")
+ax.set_title("O gap fecha como $1/N$: grau 3, $p=4$")
+ax.legend(fontsize=9)
+plt.tight_layout()
+plt.show()
+```
+
+## Lendo uma Curva de Aprendizado
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Com a forma típica em mãos, a leitura de uma curva real se resume a três
+perguntas, sempre no tamanho $N$ que você tem hoje:
+
+1. **Onde está o patamar?** Compare o erro de validação com o erro que
+   seria aceitável (o alvo). Se treino e validação já estão próximos e
+   ambos acima do alvo, o problema é **viés**: o modelo não consegue
+   representar o fenômeno.
+2. **Qual é o gap?** Uma distância grande entre treino e validação é
+   **variância**: o modelo se acomoda à amostra. Pela conta acima, ela
+   escala com $p/N$.
+3. **A validação ainda está caindo?** A inclinação da curva de validação
+   no $N$ atual diz quanto vale coletar mais dados. Se ela já está
+   plana, mais dados não ajudam; se ainda desce, ajudam. A mesma
+   inclinação explica um efeito da Aula 4: com $k$ dobras, a validação
+   cruzada treina com $N(k-1)/k$ pontos e, se a curva ainda tem
+   inclinação nesse trecho, superestima o erro (ESL §7.10.1, p. 243).
+
+| O que a curva mostra | Diagnóstico | O que ajuda | O que não ajuda |
+|---|---|---|---|
+| Treino e validação próximos, planos e altos | Alto viés | Mais capacidade, novos atributos, menos regularização | Mais dados |
+| Treino baixo, gap grande, validação ainda caindo | Alta variância | Mais dados, mais regularização, menos capacidade | Mais capacidade |
+| Treino alto **e** gap grande | Viés e variância | Mais capacidade **com** regularização; depois mais dados | Só um dos remédios |
+| Validação plana, próxima do alvo, gap pequeno | Bom ajuste | Parar; gastar o esforço em outro lugar | — |
+
+**Cuidados na prática.**
+
+- **$\sigma^2$ é desconhecido.** "Patamar alto" é relativo: compare com
+  uma referência — o erro de um especialista humano, um modelo de
+  referência ou o ruído estimado por medições repetidas.
+- **As curvas são ruidosas com $N$ pequeno.** Repita os sorteios (ou
+  use as dobras da validação cruzada) e mostre a variação. Ajustes
+  quase degenerados podem dominar a média: no grau 10 com $N=20$, a
+  média do erro de validação nos 100 sorteios da figura é
+  `{python} media_g10_n20`, puxada por poucos ajustes degenerados,
+  enquanto a mediana é `{python} mediana_g10_n20`.
+- **A validação precisa vir da mesma distribuição que a produção.** Um
+  gap que **não** fecha com $N$ não é variância: costuma ser mudança de
+  distribuição entre treino e validação, ou vazamento de dados (Aula 4).
+- **Hiperparâmetros fixos.** A curva vale para uma configuração; mudou
+  $\lambda$ ou o grau, refaça a curva.
+- **Custo.** Cada ponto da curva exige vários ajustes; use uma grade
+  em escala log e poucos tamanhos.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+Três perguntas, no $N$ que você tem hoje:
+
+::: {.fragment}
+1. **Onde está o patamar?** Treino e validação juntos e acima do alvo $\Rightarrow$ **viés**.
+2. **Qual é o gap?** Distância grande $\Rightarrow$ **variância** ($\propto p/N$).
+3. **A validação ainda cai?** Inclinação no $N$ atual $=$ valor de mais dados. (Também explica por que CV com $k$ dobras superestima o erro quando a curva ainda tem inclinação — ESL §7.10.1, p. 243.)
+:::
+
+## Sintoma $\to$ Ação
+
+| O que a curva mostra | Diagnóstico | Ajuda | Não ajuda |
+|---|---|---|---|
+| Juntas, planas e altas | Alto viés | Mais capacidade, atributos, menos regularização | Mais dados |
+| Treino baixo, gap grande, validação caindo | Alta variância | Mais dados, regularização, menos capacidade | Mais capacidade |
+| Treino alto **e** gap grande | Os dois | Capacidade **com** regularização; depois dados | Um remédio só |
+| Plana, perto do alvo, gap pequeno | Bom ajuste | Parar | — |
+
+## Cuidados na Prática
+
+- **$\sigma^2$ é desconhecido:** compare com uma referência (especialista humano, modelo de referência, medições repetidas).
+- **Ruído com $N$ pequeno:** repita sorteios/dobras; prefira mediana ou intervalos (grau 10, $N=20$: média de validação `{python} media_g10_n20`, mediana `{python} mediana_g10_n20`).
+- **Mesma distribuição da produção:** gap que **não** fecha com $N$ não é variância — é mudança de distribuição ou vazamento (Aula 4).
+- **Hiperparâmetros fixos** por curva; **grade log** em $N$ para controlar o custo.
+
+:::
+
+## Pausa Ativa 5: Diagnóstico de Curvas de Aprendizado
+
+::: {.callout-tip}
+## Decisão de Engenharia em Produção
+
+Você é o líder técnico de um projeto de inteligência artificial. Seu modelo atual possui um erro de treino de $1\%$ e um erro de validação de $25\%$. A equipe propõe duas ações concorrentes:
+- Engenheiro A: *"Vamos coletar mais $100.000$ exemplos rotulados a um custo de R\$ 50.000."*
+- Engenheiro B: *"Vamos dobrar a profundidade da nossa rede neural para que ela consiga aprender padrões mais sutis."*
+
+Qual proposta tem fundamentação teórica sólida e qual piorará o problema?
+:::
+
+::: {.callout-tip}
+## V ou F: Diagnóstico Prático
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Em um cenário de alto viés (*underfitting*), tanto o erro de treino quanto o de validação convergem para patamares elevados com lacuna mínima.
+- □ Se um modelo sofre de alta variância (*overfitting*), a intervenção recomendada é aumentar a capacidade do espaço de hipóteses.
+- □ O erro de treinamento de um modelo supervisionado é tipicamente uma estimativa otimista (subestimada) do verdadeiro erro de generalização.
+- □ Na presença de ruído estocástico $\sigma^2 > 0$, o erro de validação com $N \to \infty$ pode atingir zero se usarmos um estimador não paramétrico.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 5: Resposta
+
+::: {.callout-tip}
+## V ou F: Resposta
+- ✔ **V:** A rigidez do modelo impede ajuste adequado tanto dentro quanto fora da amostra.
+- ✗ **F:** Aumentar a capacidade agrava a variância; o correto é regularizar, podar atributos ou adicionar dados.
+- ✔ **V:** Os parâmetros foram otimizados especificamente para aquela amostra finita, gerando viés de otimismo (*training optimism*).
+- ✗ **F:** Nenhum modelo pode transpor a barreira de Bayes $\sigma^2 > 0$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** A proposta do Engenheiro A está correta. A lacuna gritante ($1\%$ vs. $25\%$) é a assinatura inconfundível de **alta variância (overfitting)**. Mais dados fornecem a âncora necessária para estabilizar o estimador e fechar o gap. A proposta do Engenheiro B aumentaria ainda mais a capacidade, explodindo a variância e tornando o modelo ainda mais instável.
+:::
+:::
+
+# Fechamento
+
+## Retomando as 5 Perguntas da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Ao final desta análise, podemos responder com rigor formal às cinco questões do nosso roteiro:
+
+1. **Por que o modelo ajustado deve ser tratado como uma variável aleatória?**
+   Porque $\hat{f}(x; \mathcal{D})$ é função determinística de uma amostra estocástica $\mathcal{D} \sim P(X, Y)^N$. Cada novo conjunto de treino gera um modelo diferente; o estimador médio $\bar{f}(x) = \mathbb{E}_{\mathcal{D}}[\hat{f}(x)]$ é a média assintótica dessas infinitas realizações.
+2. **Como derivar formalmente a decomposição do EMSE e por que o termo cruzado se anula?**
+   Expandindo $(y - \hat{f})^2 = ([f - \bar{f}] + [\bar{f} - \hat{f}] + \epsilon)^2$. O termo cruzado anula-se identicamente porque $f(x) - \bar{f}(x)$ é determinístico e a esperança da flutuação $\mathbb{E}_{\mathcal{D}}[\bar{f}(x) - \hat{f}(x; \mathcal{D})]$ é rigorosamente zero por definição.
+3. **De que maneira a complexidade e o tamanho amostral modulam cada componente?**
+   A capacidade de hipóteses reduz o viés ao quadrado e aumenta a variância. Mais dados de treino ($N$) atenuam a variância com taxa $O(1/N)$, mas não eliminam o viés de especificação estrutural da classe de funções.
+4. **Como a regularização Ridge atua analiticamente como injeção de viés?**
+   Ridge encolhe os coeficientes via $(\mathbf{X}^T\mathbf{X} + \lambda \mathbf{I})^{-1}\mathbf{X}^T\mathbf{X}$, introduzindo viés deliberadamente. Pelo Teorema de Hoerl & Kennard, como a derivada do viés em $\lambda=0$ é nula e a da variância é negativa, sempre existe $\lambda > 0$ com menor erro total que o OLS.
+5. **Como utilizar curvas de aprendizado para diagnosticar modelos?**
+   Alto viés manifesta-se por convergência precoce para erros de treino e validação elevados sem gap; alta variância manifesta-se por erro de treino ínfimo com grande abismo persistente para a validação.
+:::
+
+::: {.content-visible when-format="revealjs"}
+1. **Estimador Estocástico:** Dependência estocástica de $\mathcal{D}$.
+2. **Decomposição do EMSE:** $\text{EMSE} = \text{Bias}^2 + \text{Var} + \sigma^2$, com termo cruzado nulo por construção.
+3. **Complexidade e $N$:** Capacidade move viés e variância em direções opostas; $N$ reduz variância em $O(1/N)$ mas não altera o viés.
+4. **Teorema de Hoerl & Kennard:** Ridge aceita viés infinitesimal para abater variância de primeira ordem.
+5. **Diagnóstico Prático:** Platô alto sem gap = viés; abismo entre treino e validação = variância.
+:::
+
+## O Que Fica em Aberto: O Dilema em Classificação 0-1
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A elegante decomposição aditiva linear $\text{Bias}^2 + \text{Var} + \sigma^2$ derivada nesta aula é estritamente válida para a **perda quadrática** (típica de regressão). 
+
+Em problemas de classificação binária sob a perda 0-1 (taxa de erro de classificação), Domingos (2000) e Friedman (1997) demonstraram que o viés e a variância **não se somam linearmente, mas interagem de forma multiplicativa**:
+- Se um classificador tem viés correto (a probabilidade predita média está no lado correto do limiar de decisão $0{,}5$), aumentar a variância pode **reduzir** a taxa de erro final!
+- Em contrapartida, se o viés estiver incorreto, qualquer variância adicionada degrada o desempenho exponencialmente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## A Não Linearidade da Perda 0-1
+- A decomposição aditiva $\text{Bias}^2 + \text{Var} + \sigma^2$ é exclusiva da perda quadrática.
+- Em classificação $0-1$, viés e variância interagem de forma **multiplicativa** através do limiar de decisão de Bayes (Friedman, 1997; Domingos, 2000).
+:::
+:::
+
+## Ponte para a Parte 3: A Teoria de Ensembles
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Com esta aula, encerramos a **Parte 2 do curso** (A História Linear e Paramétrica). A decomposição viés-variância fornece o vocabulário analítico indispensável para compreendermos a **Parte 3: Modelos Avançados e Otimização**.
+
+Nas próximas aulas, veremos que as duas grandes famílias de métodos de ensemble atacam lados opostos dessa decomposição:
+1. **Bagging e Random Forests (Aula 9):** Partem de árvores profundas com **baixo viés e alta variância**, combinando suas predições por média aritmética para abater a variância sem aumentar o viés.
+2. **Boosting e AdaBoost / Gradient Boosting (Aula 10):** Partem de modelos simples (*stumps*) com **alto viés e baixa variância**, ajustando resíduos sequencialmente para derrubar o viés iterativamente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## As Duas Estratégias Complementares de Ensemble
+- **Aula 9 (Bagging e Random Forests):**
+  - Alvo: **Redução de Variância**.
+  - Ponto de partida: Modelos de alta capacidade (árvores profundas).
+  - Mecanismo: Média de variáveis aleatórias descorrelacionadas.
+- **Aula 10 (Gradient Boosting):**
+  - Alvo: **Redução de Viés**.
+  - Ponto de partida: Modelos de alto viés (árvores rasas / *stumps*).
+  - Mecanismo: Ajuste sequencial de pseudo-resíduos no espaço de funções.
+:::
+:::
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
