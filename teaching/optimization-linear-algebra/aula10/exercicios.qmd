@@ -1,0 +1,136 @@
+---
+title: "Exercícios — Aula 10: Grafos de Computação e Diferenciação Automática"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado das questões de Verdadeiro/Falso está em
+[`soluções.qmd`](soluções.qmd). Encontrou um erro numa questão? Corrija
+diretamente neste arquivo e abra um *pull request*.
+:::
+
+## Contexto e notação
+
+Nesta lista, consideramos programas computacionais representados por Grafos Acíclicos Direcionados (DAGs) $G = (V, E)$, onde os nós $v_i$ representam variáveis intermediárias avaliadas a partir de operações elementares $v_i = \phi_i(\{v_j\}_{j \in \text{Pa}(i)})$.
+
+- **Nós de Entrada:** $x_1, \dots, x_d$, denotados $v_{1-d}, \dots, v_0$.
+- **Nó de Saída:** Perda escalar $\mathcal{L} = v_M$.
+- **Modo Forward (Tangente / Pushforward):** Avalia as derivadas direcionais no sentido natural do fluxo de dados:
+  $$\dot{v}_i := \frac{\partial v_i}{\partial x_k} = \sum_{j \in \text{Pa}(i)} \frac{\partial \phi_i}{\partial v_j} \dot{v}_j$$
+  Custo para obter o gradiente completo $\nabla \mathcal{L} \in \mathbb{R}^d$: $\mathcal{O}(d \cdot C_{\text{eval}})$.
+- **Modo Reverse (Adjunto / Pullback / Backpropagation Generalizado):** Avalia as variáveis adjuntas contra o fluxo a partir da saída final:
+  $$\bar{v}_i := \frac{\partial \mathcal{L}}{\partial v_i} = \sum_{k \in \text{Ch}(i)} \bar{v}_k \frac{\partial \phi_k}{\partial v_i}$$
+  com inicialização $\bar{v}_M = 1{,}0$. Custo para obter o gradiente completo: $\mathcal{O}(C_{\text{eval}})$, limitado pelo Teorema de Baur-Strassen ($C_{\text{grad}} \le 5 C_{\text{eval}}$).
+- **Activation Checkpointing:** Estratégia de recomputação de ativações que divide uma rede de $L$ camadas em $\sqrt{L}$ blocos, reduzindo o footprint de memória de $\mathcal{O}(L)$ para $\mathcal{O}(\sqrt{L})$ com um aumento de aproximadamente $33\%$ no tempo de execução.
+
+---
+
+## Questões discursivas
+
+1. **Demonstração Algébrica da Passagem Reversa e Teorema de Baur-Strassen.**
+   Considere o circuito aritmético que calcula a função escalar de três variáveis $f(x_1, x_2, x_3) = (x_1 x_2 + \sin(x_3)) \cdot \exp(x_1 x_2)$.
+   (a) Decomponha a função em uma sequência de nós intermediários $v_1, v_2, \dots, v_M$ utilizando operações atômicas $\{+, \times, \sin, \exp\}$.
+   (b) Escreva as equações explícitas da passagem reversa para todas as variáveis adjuntas $\bar{v}_i$, demonstrando como a subexpressão $u = x_1 x_2$ é aproveitada sem duplicação de cálculo (*common subexpression sharing*).
+   (c) Conte o número de operações aritméticas elementares na passagem direta e na passagem reversa, verificando que a razão entre elas obedece à cota de Baur-Strassen ($\le 5$).
+
+2. **Dilema das Diferenças Finitas: Análise do Cancelamento Subtrativo.**
+   Seja $f: \mathbb{R} \to \mathbb{R}$ uma função suave avaliada em precisão de máquina $\epsilon_{\text{mach}} \approx 10^{-16}$. Deseja-se aproximar $f'(x)$ pela diferença finita central $D_h(x) = \frac{f(x+h) - f(x-h)}{2h}$.
+   (a) Utilizando a expansão de Taylor de $f(x+h)$ e $f(x-h)$ até a terceira ordem, deduza a expressão analítica do erro de truncamento de $D_h(x)$.
+   (b) Suponha que o erro de avaliação de ponto flutuante de $f$ seja limitado por $|\tilde{f}(x) - f(x)| \le \epsilon_{\text{mach}} |f(x)|$. Mostre que o erro total de aproximação é limitado por $E(h) \approx C_1 h^2 + \frac{\epsilon_{\text{mach}} |f(x)|}{h}$.
+   (c) Encontre o valor de $h^\star$ que minimiza $E(h)$ e determine a ordem de magnitude do erro mínimo alcançável.
+
+3. **Trade-off Tempo-Espaço no Activation Checkpointing.**
+   Considere uma rede neural profunda com $L$ camadas sequenciais idênticas, onde cada camada requer 1 unidade de memória para armazenar suas ativações e 1 unidade de tempo para executar a passagem direta (e 2 unidades de tempo para a passagem reversa).
+   (a) Sem checkpointing, qual é o consumo de pico de memória e o tempo total de execução para completar uma iteração de treinamento?
+   (b) Dividindo a rede em $k$ segmentos iguais e armazenando apenas as ativações nos limites dos segmentos, determine o consumo de memória em função de $k$ e $L$.
+   (c) Prove que a escolha ótima de $k$ é $k^\star = \sqrt{L}$, e calcule a fração percentual de tempo adicional despendida na recomputação.
+
+---
+
+## Questões de Verdadeiro/Falso
+
+::: {.callout-note icon=false}
+## Teste 1 — Os Quatro Paradigmas da Diferenciação
+
+- □ A diferenciação analítica manual implementada em código estático possui a menor sobrecarga de memória em tempo de execução entre todos os métodos.
+- □ A diferenciação simbólica decompõe o programa em números de ponto flutuante e acumula derivadas através de variáveis adjuntas locais.
+- □ A técnica de diferenciação automática avalia derivadas com precisão exata de máquina sem introduzir erro de truncamento dependente de um passo $h$.
+- □ O fenômeno do inchaço de expressões (*expression swell*) ocorre em sistemas de álgebra simbólica quando a regra da cadeia e do produto replicam subexpressões compartilhadas repetidamente.
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — Instabilidade Numérica e Diferenças Finitas
+
+- □ O erro da aproximação por diferença finita progressiva simples $\frac{f(x+h)-f(x)}{h}$ é governado assintoticamente por um erro de truncamento de ordem $\mathcal{O}(h^2)$.
+- □ Para qualquer função diferenciável em computador real, quanto menor for a escolha do passo $h > 0$, mais precisa será a derivada calculada por diferenças finitas.
+- □ O cancelamento subtrativo catastrófico ocorre quando subtraímos dois números de ponto flutuante quase idênticos, eliminando os dígitos mais significativos da mantissa.
+- □ O cálculo do vetor gradiente $\nabla f \in \mathbb{R}^d$ via diferenças finitas centrais exige exatamente $2d$ avaliações da função original.
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — Grafos Acíclicos Direcionados (DAGs) e Topologia
+
+- □ Em um Grafo Acíclico Direcionado (DAG) computacional, cada nó representa uma operação ou variável e cada aresta direcionada indica a dependência de fluxo de dados.
+- □ A existência de ciclos direcionados em um grafo de computação é compatível com a construção de uma ordenação topológica bem definida.
+- □ A ordenação topológica de um DAG pode ser construída linearmente no número de nós e arestas utilizando uma Busca em Profundidade (DFS).
+- □ Em um grafo computacional, a passagem direta (*forward pass*) avalia os nós na ordem topológica natural, enquanto a passagem reversa avalia os nós na ordem topológica inversa.
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — Modo Forward (Diferenciação Tangente)
+
+- □ No modo forward de autodiff, a variável tangente $\dot{v}_i$ representa a taxa de variação de $v_i$ em relação a uma variável de entrada selecionada.
+- □ O modo forward de diferenciação automática não exige o armazenamento prévio dos nós intermediários em memória após o uso na passagem direta.
+- □ Para calcular a matriz Jacobiana completa de uma função $\mathbf{f}: \mathbb{R}^n \to \mathbb{R}^m$, o modo forward exige exatamente $m$ passagens pelo grafo.
+- □ O modo forward é computacionalmente mais eficiente do que o modo reverso quando o número de variáveis de entrada é muito menor do que o número de saídas ($n \ll m$).
+:::
+
+::: {.callout-note icon=false}
+## Teste 5 — Modo Reverse (Diferenciação Adjunta)
+
+- □ A variável adjunta $\bar{v}_i$ no modo reverso é formalmente definida como a derivada parcial da saída final $\mathcal{L}$ em relação à variável intermediária $v_i$.
+- □ A semente inicial da passagem reversa para uma função com saída escalar $\mathcal{L}$ é sempre fixada como $\bar{\mathcal{L}} = 1{,}0$.
+- □ Se um nó intermediário $v_i$ possuir múltiplos nós filhos no grafo, sua variável adjunta total $\bar{v}_i$ é obtida multiplicando as sensibilidades recebidas de cada filho.
+- □ O algoritmo clássico de *Backpropagation* utilizado em Redes Neurais é uma instância particular do modo reverso de diferenciação automática aplicado a grafos em camadas.
+:::
+
+::: {.callout-note icon=false}
+## Teste 6 — O Teorema de Baur-Strassen e Complexidade
+
+- □ O Teorema de Baur-Strassen garante que o cálculo do gradiente completo de uma função escalar no modo reverso custa no máximo 5 vezes o tempo de avaliar a função direta.
+- □ A cota de complexidade do Teorema de Baur-Strassen depende logaritmicamente da dimensão do espaço de entrada $d$.
+- □ Em termos de memória, o modo reverso de autodiff consome espaço estritamente constante $\mathcal{O}(1)$ em relação à profundidade do grafo.
+- □ A complexidade de tempo do modo reverso para uma função vetorial $\mathbf{f}: \mathbb{R}^n \to \mathbb{R}^m$ escala linearmente com a dimensão de saída $m$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 7 — Arquitetura de Motores de Autodiff e Acumulação
+
+- □ Em motores de autodiff reverso como PyTorch e Micrograd, o gradiente de cada nó deve ser acumulado com o operador de adição `+=` para suportar grafos com bifurcações e reutilização de variáveis.
+- □ A chamada do método `.backward()` em um nó não-escalar exige o fornecimento explícito de um vetor de pesos para compor a projeção Jacobiano-vetor (*Vector-Jacobian Product* - VJP).
+- □ Se uma variável intermediária for criada sem que seu gradiente seja computado, o grafo de computação é quebrado e nenhum nó anterior poderá receber derivadas.
+- □ O comando `torch.no_grad()` reduz o uso de memória durante a inferência porque impede o armazenamento de tensores intermediários e closures de retropropagação.
+:::
+
+::: {.callout-note icon=false}
+## Teste 8 — Complexidade de Memória e Activation Checkpointing
+
+- □ A fita de execução (*tape*) do modo reverso necessita armazenar todas as ativações intermediárias da passagem direta que participam como operandos nas derivadas locais.
+- □ A técnica de *Activation Checkpointing* reduz o footprint de memória de uma rede de $L$ camadas de $\mathcal{O}(L)$ para $\mathcal{O}(\sqrt{L})$.
+- □ O ganho de memória do *Activation Checkpointing* é obtido ao descartar as ativações intermediárias e recalculá-las localmente sob demanda durante a passagem reversa.
+- □ A aplicação de *Activation Checkpointing* reduz a precisão matemática dos gradientes calculados devido a erros adicionais de truncamento na recomputação.
+:::
+

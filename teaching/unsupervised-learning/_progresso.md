@@ -15,8 +15,9 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 | `aula04` | 4 — GMM e o algoritmo EM | A | Breast Cancer 2D | publicada |
 | `aula05` | 5 — Modelos variacionais, GMM bayesiano e seleção de modelos | A | Breast Cancer 2D + duas luas | publicada |
 | `aula06` | 6 — PCA, PPCA e autoencoders lineares | B | Breast Cancer (30 atributos) | publicada |
-| `aula07` | 7 — Autoencoders não lineares e VAE | A | Breast Cancer + MNIST | publicada |
+| `aula07` | 7 — Autoencoders profundos e VAE | A | Breast Cancer + MNIST | publicada |
 | `aula08` | 8 — Redução para visualização: MDS e t-SNE | A | Breast Cancer + MNIST | publicada |
+| `aula09` | 9 — Redes Bayesianas e Modelos Gráficos Probabilísticos (PGMs) para Mineração de Itens Frequentes | A | Cestas de compras sintético controlado + Adult Census | publicada |
 
 ## Fio condutor (o que cada aula deixa para a seguinte)
 
@@ -26,8 +27,9 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 - **4:** GMM com latente categórica $z$, responsabilidades, EM (E/M), K-Means como caso-limite. **Ponte:** a verossimilhança de treino sempre prefere $K$ maior; sem priori em $\theta$, não há como penalizar a complexidade.
 - **5:** seleção bayesiana de modelos (evidência = Occam), KL e decomposição da evidência, GMM bayesiano completo (Normal-Wishart + Dirichlet, $\alpha_0$ fixo), ELBO dissecado, ELPD e *double-dipping*, Silhueta + Dunn (inclusive DBSCAN via $k$-NN) e PPC quantitativo (KS em projeções, MMD). **Ponte:** a latente foi sempre categórica; a Aula 6 passa a uma latente contínua.
 - **6:** latente contínua. Ordem: Problema-Fio 2D (guardar um número, reconstruir dois) → autoencoder linear (código latente = coordenadas num plano; invariância por $\mathbf{G}$: os dados fixam o plano, não os eixos) → Mecanismo I (erro mínimo, com pesos amarrados e base ortonormal; erro $=\mathrm{tr}\,\mathbf{S}-$ variância retida) → Mecanismo II (máxima variância, Lagrange, indução) → prova por redução do teorema do autoencoder → PPCA como Gaussiana de posto reduzido ($\sigma^2\to0$ recupera a PCA). Resultados: $\lambda_1$ explica 44,27%; um limiar no PC1 dá 92,1% sem rótulo. **Ponte:** *deep autoencoder* e VAE; a posterior perde a forma fechada, e o ELBO da Aula 5 volta com o *reparameterization trick*.
-- **7:** Autoencoders não lineares e VAE. Reconstrução em manifolds curvos, gargalos e regularização de espaço latente via KL com priori $\mathcal{N}(\mathbf{0}, \mathbf{I})$. *Reparameterization trick* ($\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$) permitindo backpropagation. **Ponte:** na visualização em 2D, reconstrução global falha por *crowding*; é preciso focar em vizinhanças locais (MDS e t-SNE na Aula 8).
+- **7:** *Deep autoencoder* e VAE. Proposição (nossa): decoder afim $\Rightarrow$ reconstruções num subespaço afim de dim. $\le M$ (explica DLFC p. 565: AE raso = PCA); profundo curva (arco 2D), ganha no MNIST, sobreajusta no Breast Cancer (treino $\div3$, teste pior). Gap generativo (invariância por reparametrização do latente). VAE = PPCA com $\mathbf{g}(\mathbf{z},\mathbf{w})$; posterior intratável $\to$ inferência amortizada; $\mathcal{L}_n=\mathbb{E}_q[\ln p(\mathbf{x}_n\mid\mathbf{z})]-\mathrm{KL}(q\|p(\mathbf{z}))$ derivado da Aula 5, KL Gaussiana fechada, minimizadores dependem de $\beta\sigma^2$; folga ELBO medida por amostragem por importância; reparametrização vs. *score function* (variância medida). **Ponte:** mapas 2D do AE/VAE são subprodutos da reconstrução; para visualizar, otimizar posições diretamente (MDS, t-SNE) $\to$ *crowding problem*.
 - **8:** Redução para visualização. Geometria de hiperesferas e o *crowding problem* ($r^D$ vs $r^2$). MDS métrico e o viés do *Stress* em favor de distâncias longas. SNE probabilístico, busca binária de $\sigma_i$ via Perplexidade $2^{H(P_i)}$ e assimetria da divergência KL ($p_{ij} \parallel q_{ij}$). t-SNE: quebra de simetria de famílias de densidade adotando a cauda pesada de Student-$t$ ($\nu=1$ / Cauchy) no mapa 2D, aliviando a pressão de volume. Dinâmica de forças (mola atrativa e repulsão eletrostática). As 4 armadilhas de interpretação: distâncias inter-cluster espúrias, áreas sem relação com densidade/variância original, alucinação em ruído e ausência de projeção paramétrica. **Ponte:** encerramento da Parte 2 (espaço latente); início da Parte 3 com Modelos Gráficos Probabilísticos (PGMs) e mineração de itens frequentes (Aula 9).
+- **9:** Início da Parte 3 (dados categóricos/esparsos). Transição de métricas contínuas para estruturas discretas de dependência. Suporte $s(I)$, Confiança $c(A \Rightarrow B)$ e *Lift*. Antimonotonicidade do suporte ($A \subseteq B \implies s(B) \le s(A)$) e poda combinatorial do Apriori. Falhas do *Lift*: comutatividade estrita ($\text{Lift}(A \Rightarrow B) \equiv \text{Lift}(B \Rightarrow A)$) e vulnerabilidade ao Paradoxo de Simpson por causas comuns latentes. Redes Bayesianas (DAGs) e fatoração conjunta $p(\mathbf{x}) = \prod_k p(x_k \mid \text{pa}_k)$ (redução de $2^K-1$ para $O(K \cdot 2^m)$). As 3 estruturas canônicas: cadeia ($A \to B \to C$) e causa comum ($A \leftarrow B \to C$) bloqueadas pelo intermediário condicionado; colisor ($A \to C \leftarrow B$) aberto por condicionamento (*explaining away*). $d$-separação geral (Pearl, 1988) e Cobertura de Markov $\text{MB}(X_i) = \text{pa} \cup \text{ch} \cup \text{co-pais}$. Limite observacional: classes de equivalência de Markov (I-equivalência: mesmo esqueleto e v-structures) e CPDAGs. **Ponte:** de grafos discretos para recomendação em matrizes esparsas massivas via SVD e NMF (Aula 10).
 
 ## Dicionário de notações
 
@@ -71,11 +73,28 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 | *Double-dipping* / viés de otimismo | Viés de estimar o ELPD usando os próprios dados de treino — reutilizar pontos de ajuste na avaliação | 5 |
 | Índice de Dunn | $\min$ distância inter-cluster / $\max$ diâmetro intra-cluster (Dunn, 1974) — geométrico, livre de distribuição, sensível a extremos | 5 |
 | PPC quantitativo, MMD, teste *sliced* | Checagem preditiva a posteriori com números: projeções aleatórias + KS (Massey, 1951) e *Maximum Mean Discrepancy* com kernel RBF (Gretton et al., 2012) | 5 |
+| $\mathbf{f}(\cdot,\boldsymbol\phi)$, $\mathbf{g}(\cdot,\mathbf{w})$ | Encoder ($\mathbb{R}^D\to\mathbb{R}^M$) e decoder ($\mathbb{R}^M\to\mathbb{R}^D$) do autoencoder; $\boldsymbol\phi$ e $\mathbf{w}$ separados como no DLFC | 7 |
+| $q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)$ | Encoder do VAE: Gaussiana diagonal $\prod_j\mathcal{N}(\mu_j(\mathbf{x}),\sigma_j^2(\mathbf{x}))$, posterior aproximada amortizada | 7 |
+| $\sigma^2$ vs. $\sigma_{nj}$ | **Atenção:** $\sigma^2$ sem índice = variância do ruído do decoder (como na PPCA); $\sigma_{nj}$ = desvio-padrão do encoder (ponto $n$, coordenada $j$) | 7 |
+| $\mathcal{L}_n(\mathbf{w},\boldsymbol\phi)$ | ELBO por ponto do VAE, $\mathbb{E}_q[\ln p(\mathbf{x}_n\mid\mathbf{z},\mathbf{w})]-\mathrm{KL}(q\|p(\mathbf{z}))$ (DLFC 19.14) | 7 |
+| $\beta$ | Peso do termo KL ($\beta$-VAE); só o produto $\beta\sigma^2$ afeta os minimizadores | 7 |
+| $\boldsymbol\epsilon$, reparametrização | $\mathbf{z}=\boldsymbol\mu+\boldsymbol\sigma\odot\boldsymbol\epsilon$, $\boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\mathbf{I})$; contraste: estimador *score function* $f\,\nabla_{\boldsymbol\phi}\ln q$ | 7 |
 | $\sigma_M(\mathbf{Y})$, *Stress* | Função de perda do MDS (discrepância quadrática entre distâncias originais e no mapa) | 8 |
 | $p_{j|i}$, $p_{ij}$ | Probabilidade de vizinhança na alta dimensão (condicional via kernel gaussiano com $\sigma_i$ local / conjunta simetrizada) | 8 |
 | $\text{Perp}(P_i) = 2^{H(P_i)}$ | Perplexidade da distribuição condicional $P_i$ (número efetivo de vizinhos por ponto) | 8 |
 | $q_{ij}$ | Probabilidade conjunta no mapa 2D do t-SNE (kernel Student-$t$ com 1 grau de liberdade / Cauchy) | 8 |
 | *Crowding problem* | Confinamento e colapso de pontos no centro de mapas 2D devido ao gargalo volumétrico entre $r^D$ e $r^2$ | 8 |
+| $s(I)$ | Suporte do itemset $I$: frequência conjunta empírica $P(\bigwedge_{j \in I} x_j = 1)$ | 9 |
+| $c(A \Rightarrow B)$ | Confiança da regra de associação: probabilidade condicional empírica $P(B \mid A)$ | 9 |
+| $\text{Lift}(A \Rightarrow B)$ | Razão de associação $\frac{P(A \cap B)}{P(A)P(B)}$; métrica estritamente simétrica e comutativa | 9 |
+| $\text{pa}_k$ | Conjunto de nós pais da variável $x_k$ em um Grafo Acíclico Direcionado (DAG) | 9 |
+| Fatoração DAG: $\prod_k p(x_k \mid \text{pa}_k)$ | Fatoração da probabilidade conjunta sob uma Rede Bayesiana direcionada (PRML §8.1) | 9 |
+| $A \perp\!\!\!\perp B \mid C$ | Independência condicional: $p(A, B \mid C) = p(A \mid C)p(B \mid C)$ | 9 |
+| Cadeia, Causa Comum, Colisor | As 3 geometrias canônicas: cadeia e causa comum são bloqueadas pelo intermediário; colisor é aberto | 9 |
+| *Explaining away* | Fenômeno no colisor ($A \to C \leftarrow B$) onde condicionar no efeito comum $C$ induz dependência negativa entre as causas | 9 |
+| $d$-separação | Critério gráfico geral de bloqueio de caminhos em DAGs (Pearl, 1988; PRML §8.2.2) | 9 |
+| $\text{MB}(X_i)$ | Cobertura de Markov (*Markov Blanket*): $\text{pa} \cup \text{ch} \cup \text{co-pais}$, menor conjunto que isola $X_i$ do restante | 9 |
+| I-equivalência, CPDAG | Classes de equivalência de Markov (mesmo esqueleto e v-structures) e grafo misto essencial | 9 |
 
 ## Pendências
 
@@ -83,3 +102,4 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 - **Aula 1:** falta o par DLFC para as fontes (só PRML).
 - **Quantidade de testes:** Aulas 1–3 têm 12 testes (a regra é 6–10).
 - **Nomes legados:** `_03-respostas-pausas.md` (Aulas 2 e 3) e `_00-planejamento.md`/`_01-respostas.md` (Aulas 4–6).
+- **Vírgula decimal em `$`{python} brl(x)`$`:** a saída inline do Quarto escapa a vírgula (`0\,998`, que o MathJax mostra como espaço). Afeta pelo menos a Aula 6. Corrigido na Aula 7: número isolado fica fora de `$…$`; expressão mista usa o *helper* `mm()` (Markdown gerado em Python, vírgula como `{,}`).

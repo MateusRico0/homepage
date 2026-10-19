@@ -1,5 +1,5 @@
 ---
-title: "Exercícios — Aula 7: Autoencoders e VAEs"
+title: "Exercícios — Aula 7: Autoencoders Profundos e o Autoencoder Variacional"
 subtitle: "Aprendizado Não Supervisionado"
 date: "today"
 author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
@@ -22,49 +22,218 @@ O gabarito comentado das questões de Verdadeiro/Falso está em
 diretamente neste arquivo e abra um *pull request*.
 :::
 
+::: {.callout-tip icon=false}
 ## Contexto e notação
-Considere um Autoencoder (AE) com entrada $\mathbf{x} \in \mathbb{R}^D$, espaço latente $\mathbf{z} \in \mathbb{R}^M$ ($M < D$) e reconstrução $\mathbf{\hat{x}}$. No caso do Variational Autoencoder (VAE), o encoder fornece a média $\boldsymbol\mu$ e o desvio padrão $\boldsymbol\sigma$ de uma distribuição $q(\mathbf{z}|\mathbf{x})$, e a amostragem é feita via $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$ com $\boldsymbol\epsilon \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$.
+
+- **Dados:** $\mathbf{x}_1,\dots,\mathbf{x}_N\in\mathbb{R}^D$. A **PCA com
+  $M$ componentes** reconstrói cada ponto pela projeção ortogonal sobre o
+  subespaço afim de dimensão $M$ que passa pela média e é gerado pelos
+  $M$ autovetores da covariância amostral com maiores autovalores. Entre
+  todos os subespaços afins de dimensão $\le M$, esse é o que minimiza a
+  soma dos quadrados das distâncias dos pontos até ele.
+- **Autoencoder (AE):** encoder $\mathbf{f}(\cdot,\boldsymbol\phi):\mathbb{R}^D\to\mathbb{R}^M$
+  e decoder $\mathbf{g}(\cdot,\mathbf{w}):\mathbb{R}^M\to\mathbb{R}^D$,
+  com $M<D$, treinados minimizando
+  $E=\tfrac12\sum_n\|\mathbf{g}(\mathbf{f}(\mathbf{x}_n))-\mathbf{x}_n\|^2$.
+  Um AE é **raso** quando é uma rede $D$-$M$-$D$ com uma única camada
+  oculta, e **profundo** quando encoder e decoder têm camadas ocultas não
+  lineares.
+- **Modelo gerador não linear:** $p(\mathbf{z})=\mathcal{N}(\mathbf{0},\mathbf{I}_M)$
+  e $p(\mathbf{x}\mid\mathbf{z},\mathbf{w})=\mathcal{N}(\mathbf{g}(\mathbf{z},\mathbf{w}),\sigma^2\mathbf{I}_D)$,
+  com $\sigma^2>0$ fixo. Com $\mathbf{g}(\mathbf{z})=\mathbf{W}\mathbf{z}+\boldsymbol\mu$,
+  é a **PPCA**, cuja posterior é
+  $p(\mathbf{z}\mid\mathbf{x})=\mathcal{N}(\mathbf{B}^{-1}\mathbf{W}^T(\mathbf{x}-\boldsymbol\mu),\sigma^2\mathbf{B}^{-1})$,
+  com $\mathbf{B}=\mathbf{W}^T\mathbf{W}+\sigma^2\mathbf{I}_M$.
+- **VAE:** o modelo gerador acima com $\mathbf{g}$ uma rede neural, mais
+  um encoder
+  $q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)=\prod_j\mathcal{N}(z_j\mid\mu_j(\mathbf{x},\boldsymbol\phi),\sigma_j^2(\mathbf{x},\boldsymbol\phi))$.
+  Os parâmetros são ajustados maximizando $\sum_n\mathcal{L}_n$, com
+  $\mathcal{L}_n=\mathbb{E}_{q(\mathbf{z}\mid\mathbf{x}_n)}[\ln p(\mathbf{x}_n\mid\mathbf{z},\mathbf{w})]-\mathrm{KL}(q(\mathbf{z}\mid\mathbf{x}_n,\boldsymbol\phi)\,\|\,p(\mathbf{z}))$
+  (o ELBO). Para qualquer $q$ normalizada vale
+  $\ln p(\mathbf{x}_n\mid\mathbf{w})=\mathcal{L}_n+\mathrm{KL}(q\,\|\,p(\mathbf{z}\mid\mathbf{x}_n,\mathbf{w}))$.
+  No **$\beta$-VAE**, o termo KL é multiplicado por $\beta>0$.
+- **KL:** $\mathrm{KL}(q\|p)=-\int q\ln\{p/q\}\ge0$, com igualdade se e só
+  se $q=p$.
+- **Estimadores de** $\nabla_{\boldsymbol\phi}\mathbb{E}_{q(\mathbf{z}\mid\boldsymbol\phi)}[f(\mathbf{z})]$:
+  o *score function*, $f(\mathbf{z})\nabla_{\boldsymbol\phi}\ln q(\mathbf{z}\mid\boldsymbol\phi)$
+  com $\mathbf{z}\sim q$; e o de **reparametrização**, que escreve
+  $\mathbf{z}=\boldsymbol\mu+\boldsymbol\sigma\odot\boldsymbol\epsilon$
+  com $\boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\mathbf{I})$ e
+  calcula $\nabla_{\boldsymbol\phi}f(\boldsymbol\mu+\boldsymbol\sigma\odot\boldsymbol\epsilon)$.
 
 ## Questões discursivas
 
-1. Explique por que a imposição de um gargalo ($M < D$) é necessária para que o Autoencoder aprenda representações úteis dos dados, em vez de apenas a função identidade.
-2. No VAE, qual a função do termo de Divergência KL na função de custo? O que aconteceria com a geometria do espaço latente se esse termo fosse removido (mantendo apenas o erro de reconstrução)?
-3. Descreva matematicamente o *reparameterization trick* e explique por que ele é essencial para o treinamento de VAEs via backpropagation.
+1. **Decoder afim.** Considere um autoencoder cujo decoder é afim,
+   $\mathbf{g}(\mathbf{z})=\mathbf{B}\mathbf{z}+\mathbf{c}$ com
+   $\mathbf{B}\in\mathbb{R}^{D\times M}$, e cujo encoder $\mathbf{f}$ é
+   uma função qualquer.
+   (a) Mostre que todas as reconstruções pertencem a um subespaço afim
+   de dimensão $\le M$.
+   (b) Conclua que o erro $E$ é maior ou igual ao erro de reconstrução
+   da PCA com $M$ componentes.
+   (c) Use (a)–(b) para explicar por que um autoencoder raso com
+   unidades ocultas sigmoides e saída linear não obtém erro menor que o
+   da PCA, e diga onde as camadas não lineares precisam estar para que
+   isso mude.
+2. **O ELBO do VAE.** Partindo de
+   $\ln p(\mathbf{x}\mid\mathbf{w})=\mathcal{L}+\mathrm{KL}(q\|p(\mathbf{z}\mid\mathbf{x},\mathbf{w}))$,
+   com $\mathcal{L}=\int q\ln\{p(\mathbf{x},\mathbf{z}\mid\mathbf{w})/q\}\,\mathrm{d}\mathbf{z}$:
+   (a) mostre, passo a passo, que
+   $\mathcal{L}=\mathbb{E}_q[\ln p(\mathbf{x}\mid\mathbf{z},\mathbf{w})]-\mathrm{KL}(q\|p(\mathbf{z}))$;
+   (b) com o decoder Gaussiano do contexto, escreva $-\mathcal{L}$ como
+   erro quadrático esperado mais KL mais uma constante, identificando o
+   peso do erro quadrático;
+   (c) calcule $\mathrm{KL}(\mathcal{N}(\mu,s^2)\,\|\,\mathcal{N}(0,1))$
+   e explique o que acontece com esse termo quando $s\to0$ e por que
+   isso impede o VAE de se reduzir a um autoencoder determinístico;
+   (d) mostre que, num $\beta$-VAE, os parâmetros ótimos dependem de
+   $\beta$ e $\sigma^2$ apenas pelo produto $\beta\sigma^2$.
+3. **Gradiente de uma esperança.** Seja
+   $J(\boldsymbol\phi)=\mathbb{E}_{q(\mathbf{z}\mid\boldsymbol\phi)}[f(\mathbf{z})]$.
+   (a) Explique por que estimar $J$ por uma média de $f(\mathbf{z}^{(l)})$
+   com $\mathbf{z}^{(l)}\sim q$ e derivar essa média não fornece
+   $\nabla_{\boldsymbol\phi}J$.
+   (b) Demonstre a identidade do *score function*,
+   $\nabla_{\boldsymbol\phi}J=\mathbb{E}_q[f(\mathbf{z})\nabla_{\boldsymbol\phi}\ln q(\mathbf{z}\mid\boldsymbol\phi)]$,
+   indicando a hipótese de regularidade usada.
+   (c) Mostre que, se $\epsilon\sim\mathcal{N}(0,1)$ e $\sigma>0$, então
+   $\mu+\sigma\epsilon\sim\mathcal{N}(\mu,\sigma^2)$, e use isso para
+   escrever $\nabla_{\boldsymbol\phi}J$ como esperança em
+   $\boldsymbol\epsilon$ quando $q$ é Gaussiana diagonal.
+   (d) Num modelo com variável latente categórica de $K$ valores,
+   qual dos dois estimadores continua aplicável? Existe alternativa sem
+   amostragem quando $K$ é pequeno?
 
 ## Questões de Verdadeiro/Falso
 
 ::: {.callout-note icon=false}
-## Teste 1 — Autoencoders Tradicionais
+## Teste 1 — Onde Está a Não Linearidade
 
-- □ Um Autoencoder linear com gargalo $M$ aprende o mesmo subespaço que a PCA.
-- □ A função de ativação ReLU impede que o AE aprenda a função identidade.
-- □ O objetivo principal de um AE é a modelagem da densidade de probabilidade dos dados.
-- □ A hipótese do manifold sugere que dados de alta dimensão residem em variedades de baixa dimensão.
+- □ Num autoencoder raso $D$-$M$-$D$ com unidades ocultas sigmoides e
+  saída linear, o conjunto de todas as reconstruções possíveis está
+  contido num subespaço afim de dimensão no máximo $M$.
+- □ Num autoencoder cujo encoder tem várias camadas ocultas não lineares
+  e cujo decoder é uma única camada afim, o erro de reconstrução de
+  treino pode ficar abaixo do erro da PCA com o mesmo $M$.
+- □ Num autoencoder com várias camadas ocultas, todas com ativação
+  linear, sendo uma delas de largura $M$, o menor erro de treino possível
+  coincide com o da PCA com $M$ componentes.
+- □ Se um autoencoder profundo atinge erro de treino menor que a PCA com
+  o mesmo $M$, então os dados estão necessariamente próximos de uma
+  variedade curva.
 :::
 
 ::: {.callout-note icon=false}
-## Teste 2 — Gap Generativo e VAE
+## Teste 2 — Capacidade e Sobreajuste
 
-- □ O AE tradicional é um modelo generativo porque consegue reconstruir a entrada.
-- □ No VAE, o encoder mapeia a entrada para um ponto único no espaço latente.
-- □ A continuidade do espaço latente no VAE permite a interpolação suave entre amostras.
-- □ O decoder de um VAE é condicionado a amostras de uma distribuição latente.
+Num conjunto com $D=30$ atributos padronizados, $455$ pontos de treino e
+$114$ de teste, com $M=2$: a PCA tem erro quadrático médio $0{,}36$ no
+treino e $0{,}31$ no teste; um autoencoder profundo com cerca de $8\,000$
+parâmetros tem $0{,}10$ no treino e $0{,}46$ no teste.
+
+- □ Os números indicam que o autoencoder ajustou particularidades dos
+  pontos de treino que não se repetem nos pontos de teste.
+- □ Aumentar a largura das camadas ocultas do autoencoder tende a
+  reduzir o erro de teste nesse cenário.
+- □ Comparar apenas os erros de treino dos dois métodos daria uma
+  estimativa sem viés de qual deles reconstrói melhor dados novos.
+- □ Com $M=D=30$, a PCA reconstruiria tanto os pontos de treino quanto
+  os de teste com erro zero.
 :::
 
 ::: {.callout-note icon=false}
-## Teste 3 — ELBO e Regularização
+## Teste 3 — O Espaço Latente do Autoencoder Determinístico
 
-- □ O termo de reconstrução no ELBO do VAE busca maximizar a fidelidade do dado.
-- □ A Divergência KL força o espaço latente a se assemelhar a uma Gaussiana padrão.
-- □ Se o coeficiente $\beta$ da KL for muito alto, o modelo tende a ignorar a entrada e gerar amostras borradas.
-- □ O ELBO é uma cota inferior para a evidência (log-verossimilhança marginal).
+- □ Treinar um autoencoder determinístico define, para cada configuração
+  de pesos, uma densidade de probabilidade $p(\mathbf{x})$ sobre os
+  dados.
+- □ Se $(\mathbf{f},\mathbf{g})$ minimiza o erro de reconstrução e
+  $\mathbf{h}:\mathbb{R}^M\to\mathbb{R}^M$ é invertível, com
+  $\mathbf{h}\circ\mathbf{f}$ e $\mathbf{g}\circ\mathbf{h}^{-1}$
+  representáveis pelas redes, então
+  $(\mathbf{h}\circ\mathbf{f},\mathbf{g}\circ\mathbf{h}^{-1})$ também
+  minimiza o erro.
+- □ Ajustar uma Gaussiana aos códigos de treino de um autoencoder
+  garante que todo código sorteado dela será decodificado num dado
+  plausível.
+- □ Um autoencoder *denoising*, treinado com entradas corrompidas por
+  ruído e alvos limpos, aprende a mapear pontos próximos da variedade
+  dos dados de volta para ela.
 :::
 
 ::: {.callout-note icon=false}
-## Teste 4 — Reparameterization Trick
+## Teste 4 — Modelo Gerador e PPCA
 
-- □ O truque da reparametrização move a estocasticidade para fora do grafo de computação da rede.
-- □ Sem o reparameterization trick, o gradiente do erro de reconstrução fluiria normalmente para o encoder.
-- □ A variável $\boldsymbol\epsilon$ no truque da reparametrização deve ser amostrada de uma distribuição dependente de $\mathbf{x}$.
-- □ O truque transforma a amostragem em uma operação determinística de soma e multiplicação.
+- □ Com $\mathbf{g}(\mathbf{z})=\mathbf{W}\mathbf{z}+\boldsymbol\mu$, o
+  modelo gerador do contexto é a PPCA e $p(\mathbf{x})$ é Gaussiana com
+  covariância $\mathbf{W}\mathbf{W}^T+\sigma^2\mathbf{I}$.
+- □ Com $\mathbf{g}$ uma rede neural com ativações não lineares,
+  $p(\mathbf{x}\mid\mathbf{w})$ continua Gaussiana, só que com média e
+  covariância dadas pela rede.
+- □ Sem o ruído ($\sigma^2\to0$), um modelo com $\mathbf{g}$ não linear e
+  $M<D$ atribui densidade zero a quase todos os pontos reais, o que
+  inviabiliza o ajuste por máxima verossimilhança.
+- □ Na PPCA, a covariância da posterior $p(\mathbf{z}\mid\mathbf{x})$
+  varia de um ponto $\mathbf{x}$ para outro.
+:::
+
+::: {.callout-note icon=false}
+## Teste 5 — Inferência Amortizada
+
+- □ No VAE, o encoder $q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)$ é a
+  posterior exata $p(\mathbf{z}\mid\mathbf{x},\mathbf{w})$ calculada pelo
+  teorema de Bayes.
+- □ Uma única rede que leva $\mathbf{x}$ a
+  $(\boldsymbol\mu,\ln\boldsymbol\sigma^2)$ substitui $N$ otimizações
+  separadas de distribuições $q_n(\mathbf{z}_n)$, uma por ponto.
+- □ Depois da convergência do treino, a folga
+  $\ln p(\mathbf{x}\mid\mathbf{w})-\mathcal{L}$ é zero, como depois do
+  passo E do algoritmo EM.
+- □ Num encoder Gaussiano diagonal, produzir $\ln\sigma_j^2$ com saída
+  linear e tomar a exponencial garante variâncias positivas sem
+  restringir os valores positivos que $\sigma_j^2$ pode assumir.
+:::
+
+::: {.callout-note icon=false}
+## Teste 6 — O ELBO do VAE
+
+- □ O termo KL que aparece em $\mathcal{L}_n$ compara
+  $q(\mathbf{z}\mid\mathbf{x}_n,\boldsymbol\phi)$ com a posterior
+  $p(\mathbf{z}\mid\mathbf{x}_n,\mathbf{w})$.
+- □ Para qualquer $q$ normalizada,
+  $\mathcal{L}_n\le\ln p(\mathbf{x}_n\mid\mathbf{w})$.
+- □ Com o decoder Gaussiano do contexto, maximizar $\mathcal{L}_n$
+  equivale a minimizar
+  $\tfrac{1}{2\sigma^2}\mathbb{E}_q\|\mathbf{x}_n-\mathbf{g}(\mathbf{z},\mathbf{w})\|^2+\mathrm{KL}(q\|p(\mathbf{z}))$.
+- □ Como a constante $\tfrac D2\ln(2\pi\sigma^2)$ do log da Gaussiana não
+  depende de $(\mathbf{w},\boldsymbol\phi)$, o valor escolhido para
+  $\sigma^2$ não afeta os parâmetros ótimos.
+:::
+
+::: {.callout-note icon=false}
+## Teste 7 — A KL Gaussiana e o Coeficiente $\beta$
+
+- □ Para $q=\mathcal{N}(\mu,s^2)$ com $s\ne1$ e $p=\mathcal{N}(0,1)$,
+  $\mathrm{KL}(q\|p)=\mathrm{KL}(p\|q)$.
+- □ Para $\mu$ fixo, $\tfrac12(\mu^2+s^2-1-\ln s^2)$ é minimizado quando
+  $s\to0$.
+- □ Num $\beta$-VAE com decoder Gaussiano, o par $(\beta=2,\;\sigma^2=0{,}05)$
+  leva aos mesmos parâmetros ótimos que o par $(\beta=1,\;\sigma^2=0{,}1)$.
+- □ Com $\beta$ muito grande, o encoder tende a produzir
+  $q(\mathbf{z}\mid\mathbf{x})\approx p(\mathbf{z})$ para todo
+  $\mathbf{x}$, e a reconstrução se degrada.
+:::
+
+::: {.callout-note icon=false}
+## Teste 8 — Reparametrização e *Score Function*
+
+- □ Se $\epsilon\sim\mathcal{N}(0,1)$ e $\sigma>0$, então
+  $\mu+\sigma\epsilon\sim\mathcal{N}(\mu,\sigma^2)$.
+- □ O estimador *score function* exige que $f$ seja diferenciável em
+  $\mathbf{z}$.
+- □ O truque da reparametrização aplica-se diretamente a uma variável
+  latente categórica, como o indicador de componente de um GMM.
+- □ Com uma amostra por ponto, o estimador por reparametrização
+  costuma ter variância bem menor que o *score function* para o mesmo
+  gradiente.
 :::

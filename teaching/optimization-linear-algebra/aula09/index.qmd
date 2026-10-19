@@ -1,0 +1,1052 @@
+---
+title: "Aula 9: Séries de Taylor e a Regra da Cadeia Multivariada"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-10-15"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: homepage
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar, load_dataset
+disable_progress_bar()
+
+import numpy as np
+import matplotlib.pyplot as plt
+from IPython.display import Markdown
+import warnings
+warnings.filterwarnings("ignore")
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({"figure.dpi": 120, "font.size": 11})
+
+COR_A   = "#0085CA"   # azul — elemento principal
+COR_B   = "#FF5E00"   # laranja — contraste
+COR_C   = "#E03C31"   # vermelho — alerta
+COR_NEU = "#5D6D7E"   # neutro
+COR_VERDE = "#1b9e77" # verde — confirmação
+
+def brl(x, nd=2):
+    """Número com vírgula decimal e espaço fino de milhar."""
+    s = f"{x:,.{nd}f}"
+    return Markdown(s.replace(",", "\\,").replace(".", "{,}"))
+
+def sci(x, nd=1):
+    """Notação científica em LaTeX, com vírgula decimal."""
+    m, e = f"{x:.{nd}e}".split("e")
+    return Markdown(f"{m.replace('.', '{,}')}\\cdot 10^{{{int(e)}}}")
+
+# --- Problema-fio: California Housing (o mesmo X da Aula 6, 7 e 8) -------
+_housing = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+COLS = ["MedInc", "HouseAge", "AveRooms", "AveBedrms"]
+X_raw = _housing[COLS].to_numpy()
+y_raw = _housing["MedHouseVal"].to_numpy()
+N_total, d_in = X_raw.shape
+
+# Padronização Z-score
+mu_X = np.mean(X_raw, axis=0)
+std_X = np.std(X_raw, axis=0)
+X_pad = (X_raw - mu_X) / std_X
+
+# Subamostra representativa para cálculo rápido de experimentos de Taylor
+np.random.seed(42)
+idx_sub = np.random.choice(N_total, size=1000, replace=False)
+X_sub = X_pad[idx_sub]
+y_sub = y_raw[idx_sub]
+
+# --- Arquitetura do MLP de 2 Camadas (4 -> 3 -> 1) ---------------------
+# Camada oculta: 3 neurônios com ativação sigmoide
+# Camada de saída: 1 neurônio linear
+d_hidden = 3
+d_out = 1
+
+# Inicialização reproduzível dos pesos
+W1_init = np.array([
+    [ 0.25, -0.15,  0.30, -0.10],
+    [-0.20,  0.40, -0.05,  0.15],
+    [ 0.10, -0.30,  0.50, -0.25]
+]) # (3, 4)
+b1_init = np.array([0.05, -0.10, 0.02]) # (3,)
+w2_init = np.array([0.45, -0.35, 0.60]) # (3,)
+b2_init = 1.85 # escalar
+
+def sigmoid(z):
+    return 1.0 / (1.0 + np.exp(-np.clip(z, -20, 20)))
+
+def d_sigmoid(z):
+    s = sigmoid(z)
+    return s * (1.0 - s)
+
+def forward_pass(X, W1, b1, w2, b2):
+    # z1: (N, 3), a1: (N, 3)
+    z1 = X @ W1.T + b1
+    a1 = sigmoid(z1)
+    # y_hat: (N,)
+    y_hat = a1 @ w2 + b2
+    return z1, a1, y_hat
+
+def compute_loss(y_hat, y):
+    return 0.5 * np.mean((y_hat - y)**2)
+
+# Perda inicial no ponto de expansão theta_0
+z1_0, a1_0, y_hat_0 = forward_pass(X_sub, W1_init, b1_init, w2_init, b2_init)
+L_0 = compute_loss(y_hat_0, y_sub)
+
+# --- Gradientes Analíticos via Regra da Cadeia --------------------------
+N_s = len(y_sub)
+res = y_hat_0 - y_sub # (N,)
+delta2 = res / N_s     # derivada dL/dy_hat escalada por 1/N (N,)
+
+grad_w2 = a1_0.T @ delta2 # (3,)
+grad_b2 = np.sum(delta2)   # escalar
+
+# delta1_i = delta2_i * w2 * sigma'(z1_i) -> (N, 3)
+delta1 = (delta2[:, None] * w2_init[None, :]) * d_sigmoid(z1_0)
+grad_W1 = delta1.T @ X_sub # (3, 4)
+grad_b1 = np.sum(delta1, axis=0) # (3,)
+
+# Vetorização de parâmetros e gradientes
+theta_0 = np.concatenate([W1_init.ravel(), b1_init, w2_init, [b2_init]])
+grad_theta = np.concatenate([grad_W1.ravel(), grad_b1, grad_w2, [grad_b2]])
+P_dim = len(theta_0) # 12 + 3 + 3 + 1 = 19 parâmetros
+
+def unpack_params(theta):
+    W1 = theta[0:12].reshape(3, 4)
+    b1 = theta[12:15]
+    w2 = theta[15:18]
+    b2 = theta[18]
+    return W1, b1, w2, b2
+
+def loss_at_theta(theta):
+    W1, b1, w2, b2 = unpack_params(theta)
+    _, _, y_h = forward_pass(X_sub, W1, b1, w2, b2)
+    return compute_loss(y_h, y_sub)
+
+# Verificação de gradiente por diferenças finitas centrais
+grad_num = np.zeros(P_dim)
+eps_fd = 1e-5
+for p in range(P_dim):
+    tp_plus = theta_0.copy(); tp_plus[p] += eps_fd
+    tp_minus = theta_0.copy(); tp_minus[p] -= eps_fd
+    grad_num[p] = (loss_at_theta(tp_plus) - loss_at_theta(tp_minus)) / (2 * eps_fd)
+
+err_grad_rel = np.linalg.norm(grad_theta - grad_num) / (np.linalg.norm(grad_theta) + np.linalg.norm(grad_num))
+
+# --- Hessiana Numérica em theta_0 para Avaliação de Taylor 2ª Ordem -----
+# Para avaliar o modelo de Taylor de 2ª ordem em uma direção h
+# Direção de teste normalizada h_dir
+np.random.seed(101)
+h_dir = np.random.randn(P_dim)
+h_dir /= np.linalg.norm(h_dir)
+
+# Curvatura direcional h^T H h via diferença finita de gradientes
+def directional_hessian(h):
+    # (grad(theta + eps*h) - grad(theta - eps*h)) / (2*eps) escalonado com h
+    eps = 1e-4
+    W1_p, b1_p, w2_p, b2_p = unpack_params(theta_0 + eps * h)
+    _, a1_p, yh_p = forward_pass(X_sub, W1_p, b1_p, w2_p, b2_p)
+    d2_p = (yh_p - y_sub) / N_s
+    gw2_p = a1_p.T @ d2_p; gb2_p = np.sum(d2_p)
+    d1_p = (d2_p[:, None] * w2_p[None, :]) * d_sigmoid(X_sub @ W1_p.T + b1_p)
+    gW1_p = d1_p.T @ X_sub; gb1_p = np.sum(d1_p, axis=0)
+    g_plus = np.concatenate([gW1_p.ravel(), gb1_p, gw2_p, [gb2_p]])
+
+    W1_m, b1_m, w2_m, b2_m = unpack_params(theta_0 - eps * h)
+    _, a1_m, yh_m = forward_pass(X_sub, W1_m, b1_m, w2_m, b2_m)
+    d2_m = (yh_m - y_sub) / N_s
+    gw2_m = a1_m.T @ d2_m; gb2_m = np.sum(d2_m)
+    d1_m = (d2_m[:, None] * w2_m[None, :]) * d_sigmoid(X_sub @ W1_m.T + b1_m)
+    gW1_m = d1_m.T @ X_sub; gb1_m = np.sum(d1_m, axis=0)
+    g_minus = np.concatenate([gW1_m.ravel(), gb1_m, gw2_m, [gb2_m]])
+
+    return np.dot((g_plus - g_minus) / (2 * eps), h)
+
+h_curv_dir = directional_hessian(h_dir)
+```
+
+# Revisão e Introdução
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Revisão Cuidadosa: O Que a Aula 8 Deixou Pronto
+
+Na **Aula 8**, estudamos a fundo o método clássico de **Descida do Gradiente** (*Gradient Descent*):
+1. **Regra de Atualização:** Formulamos o passo iterativo $\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k)$, motivado geometricamente pela direção ortogonal às curvas de nível que maximiza a taxa instantânea de decrescimento da função.
+2. **Lema da Descida e Limite do Passo:** Provamos que, para funções cujo gradiente possui constante de Lipschitz $L$ ($\|\nabla f(\mathbf{x}) - \nabla f(\mathbf{y})\| \le L\|\mathbf{x} - \mathbf{y}\|$), o decrescimento monotônico estrito é garantido se e somente se o tamanho de passo satisfaz $0 < \alpha < \frac{2}{L}$.
+3. **Dinâmica Espectral em Quadráticas:** Em formas quadráticas $f(\mathbf{w}) = \frac{1}{2}\mathbf{w}^T A \mathbf{w} - \mathbf{b}^T \mathbf{w}$ com $A \succ 0$, a decomposição espectral $A = Q \Lambda Q^T$ permitiu desacoplar os erros modais em $\tilde{e}_{k+1, i} = (1 - \alpha \lambda_i)\tilde{e}_{k, i}$, culminando na taxa ótima de contração de Chebyshev $\rho^\star = \frac{\kappa - 1}{\kappa + 1}$, controlada estritamente pelo número de condição $\kappa = \lambda_{\max}/\lambda_{\min}$.
+4. **Regressão Logística e Curvatura Dinâmica:** Vimos que a perda de entropia cruzada não possui solução analítica fechada ($\nabla \mathcal{L} = \mathbf{0}$ é transcendental) e exibe uma Hessiana dinâmica $\nabla^2 \mathcal{L} = \frac{1}{N}X^T S(\mathbf{w}) X$.
+
+Ao concluir a Aula 8, contudo, deparamo-nos com uma fronteira teórica decisiva: e quando o modelo preditivo não é linear nos parâmetros? Como calcular gradientes e prever a curvatura quando as funções são profundamente aninhadas em camadas, como nas **Redes Neurais Artificiais**?
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Da Aula 8: O Que Já Temos
+
+::: {.fragment}
+- **Descida do Gradiente:** $\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k)$.
+- **Lema da Descida:** sob gradiente $L$-Lipschitziano, descida estrita garantida para $0 < \alpha < \frac{2}{L}$.
+- **Dinâmica Modal:** $\tilde{e}_{k, i} = (1 - \alpha \lambda_i)^k \tilde{e}_{0, i}$ com contração ótima de Chebyshev $\rho^\star = \frac{\kappa - 1}{\kappa + 1}$.
+- **Curvatura Dinâmica:** na regressão logística, $H(\mathbf{w}) = \frac{1}{N}X^T S(\mathbf{w}) X$ varia continuamente ao longo da trajetória.
+:::
+
+::: {.fragment .callout-important}
+## O Que Ficou em Aberto
+Modelos lineares e logísticos mapeiam $\mathbf{x} \mapsto \mathbf{w}^T \mathbf{x}$. O que acontece quando compomos múltiplas camadas não-lineares $\mathbf{x} \mapsto \sigma(W_1 \mathbf{x}) \mapsto W_2 \sigma(W_1 \mathbf{x})$? Como derivar parâmetros ocultos e como prever o comportamento de perdas não-convexas arbitrariamente complexas?
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Ideia Central
+
+A **Série de Taylor Multivariada** é a ferramenta matemática que substitui superfícies analíticas intrincadas por aproximações polinomiais locais tratáveis: uma aproximação de 1ª ordem substitui a função por seu hiperplano tangente, enquanto a aproximação de 2ª ordem a substitui por uma tigela parabólica osculadora governada pela matriz Hessiana. 
+
+Ao mesmo tempo, a **Regra da Cadeia Multivariada** nos fornece o alicerce operacional para propagar derivadas através de composições de funções vetoriais. Em conjunto, essas duas teorias explicam exatamente por que os otimizadores funcionam em Redes Neurais (*Deep Learning*): o gradiente nos diz para onde andar porque ele resolve localmente o melhor modelo linear sob uma região de confiança, e a regra da cadeia propaga esse sinal da saída até a primeira camada da rede.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Ideia Central (Ausubel)
+
+::: {.callout-note}
+## O Princípio da Localidade e da Composição
+- **Série de Taylor:** Não podemos compreender a paisagem inteira de uma perda não-linear, mas em uma vizinhança suficientemente pequena $\|\mathbf{h}\| \ll 1$, qualquer função suave comporta-se como um plano (1ª ordem) ou como uma forma quadrática (2ª ordem).
+- **Regra da Cadeia:** Uma rede neural profunda é simplesmente uma gigantesca composição de funções afins e não-lineares elementares. O gradiente total é o produto encadeado de operadores lineares locais (Jacobianos).
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Roteiro da Aula
+
+Nesta aula, responderemos a cinco perguntas fundamentais:
+1. **O que é o Teorema de Taylor Multivariado e como quantificar o erro das aproximações locais de 1ª e 2ª ordens?**
+2. **Qual é a conexão matemática formal entre a aproximação de Taylor e o passo de Gradient Descent?**
+3. **Como formular a Regra da Cadeia Multivariada matricialmente sob a convenção *denominator layout*?**
+4. **Como deduzir analiticamente a propagação retrógrada de gradientes (*backpropagation*) em uma rede neural multicamadas (MLP)?**
+5. **Qual é o raio de fidelidade das aproximações lineares e quadráticas em um modelo neural real no California Housing?**
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Roteiro da Aula
+
+::: {.fragment}
+1. **O Teorema de Taylor Multivariado:** expansões de 1ª e 2ª ordens e seus restos de aproximação.
+2. **A Conexão com Otimização:** o passo de Gradient Descent como minimizador de Taylor sob penalidade proximal.
+3. **A Regra da Cadeia Matricial:** Jacobianos e composições sob *denominator layout*.
+4. **Sensibilidades em Redes Neurais:** dedução passo a passo dos gradientes em MLPs ($W^{(l)}$ e $\mathbf{b}^{(l)}$).
+5. **Experimento no California Housing:** quantificação numérica do raio de validade local de Taylor.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Problema Motivador: O Perceptron Multicamadas no California Housing
+
+Considere o problema de prever o valor mediano das residências da Califórnia (`MedHouseVal`). Nas Aulas 2 a 8, usamos modelos lineares e logísticos da forma $\hat{y} = \mathbf{w}^T \mathbf{x}$. Agora, para capturar interações complexas entre atributos como renda e idade dos imóveis, introduzimos uma camada intermediária de neurônios ocultos com ativação não-linear:
+$$\mathbf{z}^{(1)} = W^{(1)}\mathbf{x} + \mathbf{b}^{(1)} \in \mathbb{R}^3, \quad \mathbf{a}^{(1)} = \sigma(\mathbf{z}^{(1)}) \in \mathbb{R}^3, \quad \hat{y} = \mathbf{w}^{(2)T}\mathbf{a}^{(1)} + b^{(2)} \in \mathbb{R}$$
+onde $\sigma(z) = \frac{1}{1 + e^{-z}}$ é a função logística. A perda quadrática média sobre $N$ amostras é dada por:
+$$\mathcal{L}(\boldsymbol{\theta}) = \frac{1}{2N}\sum_{i=1}^N \big(\hat{y}_i(\boldsymbol{\theta}) - y_i\big)^2, \quad \boldsymbol{\theta} = \big(W^{(1)}, \mathbf{b}^{(1)}, \mathbf{w}^{(2)}, b^{(2)}\big) \in \mathbb{R}^{19}$$
+
+Aqui emergem dois enigmas imediatos:
+1. **Como derivar os pesos da camada oculta $W^{(1)}$?** A matriz $W^{(1)}$ não toca a função de perda $\mathcal{L}$ diretamente; ela está sepultada sob a ativação $\sigma$, o produto por $\mathbf{w}^{(2)}$ e a soma de resíduos.
+2. **Como prever a variação da perda $\Delta \mathcal{L}$ para uma perturbação nos parâmetros $\mathbf{h}$?** Se alterarmos $\boldsymbol{\theta} \leftarrow \boldsymbol{\theta} + \mathbf{h}$, a perda cresce ou diminui? Até que magnitude $\|\mathbf{h}\|$ podemos confiar na previsão do gradiente?
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Problema Motivador: MLP de 2 Camadas
+
+::: {.callout-note}
+## Arquitetura Não-Linear ($d=4 \to h=3 \to 1$)
+$$\mathbf{z}^{(1)} = W^{(1)}\mathbf{x} + \mathbf{b}^{(1)}, \quad \mathbf{a}^{(1)} = \sigma(\mathbf{z}^{(1)}), \quad \hat{y} = \mathbf{w}^{(2)T}\mathbf{a}^{(1)} + b^{(2)}$$
+$$\mathcal{L}(\boldsymbol{\theta}) = \frac{1}{2N}\sum_{i=1}^N (\hat{y}_i - y_i)^2, \quad \boldsymbol{\theta} \in \mathbb{R}^{19}$$
+:::
+
+::: {.fragment}
+- **Dilema 1 (Cálculo):** Os pesos $W^{(1)}$ afetam $\mathbf{z}^{(1)}$, que afeta $\mathbf{a}^{(1)}$, que afeta $\hat{y}$, que afeta $\mathcal{L}$. Como formalizar essa cadeia sem cometer erros dimensionais?
+- **Dilema 2 (Aproximação):** Como aproximar $\mathcal{L}(\boldsymbol{\theta} + \mathbf{h})$ ao redor de $\boldsymbol{\theta}_0$? Em que regime $\|\mathbf{h}\|$ o gradiente fornece uma bússola confiável?
+:::
+:::
+
+## Pausa Ativa 1: O Dilema da Composição e da Aproximação
+
+::: {.callout-tip}
+## Pergunta Aberta
+Se você estivesse projetando um algoritmo para atualizar os pesos de uma rede neural profunda com 50 camadas, por que tentar derivar uma fórmula fechada explícita para cada peso individual seria inviável, e como a aproximação local contorna esse problema?
+
+*Dica para discussão:* Pense no número de termos algébricos gerados ao expandir a regra do produto e da potência repetidamente versus calcular avaliações numéricas locais passo a passo.
+:::
+
+::: {.callout-tip}
+## Fundamentos de Linearização e Redes
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ A aproximação de Taylor de primeira ordem de uma função não-linear em torno de um ponto $\mathbf{x}_0$ é uma função afim em relação ao vetor de deslocamento $\mathbf{h} = \mathbf{x} - \mathbf{x}_0$.
+- □ Em uma rede neural densa com ativações não-lineares, a perda $\mathcal{L}$ é uma função convexa em relação ao vetor total de parâmetros $\boldsymbol{\theta}$.
+- □ Se uma função $f$ é estritamente não-linear, o erro da sua aproximação linear de Taylor em $\mathbf{x}_0 + \mathbf{h}$ tende a zero mais rápido do que $\|\mathbf{h}\|$ quando $\|\mathbf{h}\| \to 0$.
+- □ O Jacobiano de uma função vetorial $\mathbf{f}: \mathbb{R}^n \to \mathbb{R}^m$ na convenção *denominator layout* possui dimensão $m \times n$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 1 — Resposta
+
+::: {.callout-tip}
+## Fundamentos de Linearização e Redes — Resposta
+- ✔ **V:** O modelo de 1ª ordem é $T_1(\mathbf{x}_0 + \mathbf{h}) = f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h}$, que é linear em $\mathbf{h}$ e afim em $\mathbf{x}$.
+- ✗ **F:** O aninhamento de ativações não-lineares quebra a convexidade global; a perda em redes neurais é intrinsecamente não-convexa, repleta de selas e mínimos locais.
+- ✔ **V:** Pela definição de diferenciabilidade, o resto satisfaz $\lim_{\|\mathbf{h}\| \to 0} \frac{|R_1(\mathbf{h})|}{\|\mathbf{h}\|} = 0$, ou seja, $R_1(\mathbf{h}) = o(\|\mathbf{h}\|)$.
+- ✗ **F:** No *denominator layout*, a derivada de $\mathbf{f} \in \mathbb{R}^m$ por $\mathbf{x} \in \mathbb{R}^n$ possui dimensão $n \times m$ (colunas são os gradientes das componentes).
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Expandir formalmente expressões analíticas através de dezenas de camadas provoca uma explosão combinatória de termos simbólicos (*expression swell*). A aproximação local de Taylor combinada à regra da cadeia modular decompõe a tarefa colossal em avaliações numéricas lineares locais camada a camada, reutilizando cálculos intermediários.
+:::
+:::
+
+# Intuição — O Espelho Tangente e a Tigela Osculadora
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Imagine caminhar sobre a superfície curva da Terra. Embora a Terra seja uma esfera com raio de aproximadamente $6.371\text{ km}$, a planura aparente do solo ao nosso redor é tão convincente que a humanidade levou milênios para deduzir sua curvatura global. Essa experiência cotidiana ilustra o princípio físico da **diferenciabilidade**:
+
+> Toda variedade suave, quando observada através de um microscópio centrado em um ponto de operação, parece indistinguível de um espaço plano.
+
+No cálculo multivariado, o Teorema de Taylor é a formalização rigorosa desse fenômeno através de duas lentes de aproximação:
+1. **O Espelho Tangente (1ª Ordem):** Posicionamos um espelho plano perfeitamente tangente à superfície no ponto $\mathbf{x}_0$. Se nos movermos por uma distância infinitesimal $\mathbf{h}$, a elevação percorrida no espelho acompanha fielmente a superfície verdadeira. A inclinação desse espelho é dada pelo vetor gradiente $\nabla f(\mathbf{x}_0)$.
+2. **A Tigela Osculadora (2ª Ordem):** Se nos afastarmos um pouco mais, a superfície começa a se curvar para longe do espelho plano. Para acompanhar essa dobra, curvamos o espelho em uma concha parabólica que possui exatamente a mesma curvatura direcional da função em todas as direções. Essa tigela osculadora é governada pela matriz Hessiana $\nabla^2 f(\mathbf{x}_0)$.
+
+Entretanto, há uma restrição intransponível: **o raio de validade local**. Por melhor que seja a parábola, se nos deslocarmos para muito longe de $\mathbf{x}_0$, montanhas e precipícios imprevisíveis surgirão. Todo método de otimização de primeira ordem baseia suas decisões na premissa de que o passo $\mathbf{h}$ permanecerá confinado dentro da região onde o espelho tangente não mente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Intuição: A Planura Local da Superfície
+
+::: {.callout-note}
+## Por Que Aproximar Localmente?
+- **A Terra Plana Local:** Olhando para os próprios pés, a Terra parece plana. Em uma vizinhança microscópica, qualquer função diferenciável é linear.
+- **O Espelho Tangente (1ª Ordem):** $f(\mathbf{x}_0 + \mathbf{h}) \approx f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h}$. O gradiente dita a inclinação do chão.
+- **A Tigela Osculadora (2ª Ordem):** $f(\mathbf{x}_0 + \mathbf{h}) \approx f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h} + \frac{1}{2}\mathbf{h}^T H \mathbf{h}$. A Hessiana dita como o chão se dobra.
+:::
+
+::: {.fragment}
+- **O Raio de Validade:** A aproximação só é fiel dentro de uma bolha de confiança $\|\mathbf{h}\| \le \epsilon$.
+- Se o passo do algoritmo for tímido demais, o progresso é lento; se for agressivo demais, o modelo local colapsa e o algoritmo pode divergir.
+:::
+:::
+
+# Bloco 1: O Teorema de Taylor Multivariado e Restos de Aproximação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Teorema de Taylor Multivariado Formal
+
+Seja $f: \Omega \subseteq \mathbb{R}^d \to \mathbb{R}$ uma função duas vezes continuamente diferenciável ($f \in C^2$) no conjunto aberto convexo $\Omega$. Desejamos expressar o valor de $f(\mathbf{x}_0 + \mathbf{h})$ a partir das informações locais concentradas exclusivamente em $\mathbf{x}_0$.
+
+Definamos a função auxiliar unidimensional $\phi: [0, 1] \to \mathbb{R}$ dada por:
+$$\phi(t) = f(\mathbf{x}_0 + t\mathbf{h})$$
+A função $\phi(t)$ avalia a função $f$ ao longo do segmento reto que conecta $\mathbf{x}_0$ a $\mathbf{x}_0 + \mathbf{h}$. Aplicando a regra da cadeia univariada para as derivadas sucessivas de $\phi$:
+$$\phi'(t) = \nabla f(\mathbf{x}_0 + t\mathbf{h})^T \mathbf{h} = \sum_{i=1}^d \frac{\partial f}{\partial x_i}(\mathbf{x}_0 + t\mathbf{h}) h_i$$
+$$\phi''(t) = \mathbf{h}^T \nabla^2 f(\mathbf{x}_0 + t\mathbf{h})\, \mathbf{h} = \sum_{i=1}^d \sum_{j=1}^d \frac{\partial^2 f}{\partial x_i \partial x_j}(\mathbf{x}_0 + t\mathbf{h}) h_i h_j$$
+
+Pelo Teorema Fundamental do Cálculo, podemos escrever:
+$$\phi(1) = \phi(0) + \int_0^1 \phi'(t)\, dt$$
+Substituindo $\phi'(t)$ pela expansão de Taylor de $\phi'(t)$ em torno de $t=0$, deduzimos as aproximações multivariadas fundamentais.
+
+::: {.callout-note icon=false}
+## Definição (Polinômios de Taylor Multivariados — MathML, Def. 5.7 e 5.8, pp. 166–167)
+
+Para $f: \mathbb{R}^d \to \mathbb{R}$ suficientemente suave em $\mathbf{x}_0$, definem-se:
+
+1. **Polinômio de Taylor de Grau 1 (Aproximação Linear / Hiperplano Tangente):**
+   $$T_1(\mathbf{x}_0 + \mathbf{h}) = f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h}$$
+
+2. **Polinômio de Taylor de Grau 2 (Aproximação Quadrática / Paraboloide Osculador):**
+   $$T_2(\mathbf{x}_0 + \mathbf{h}) = f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h} + \frac{1}{2} \mathbf{h}^T \nabla^2 f(\mathbf{x}_0)\, \mathbf{h}$$
+:::
+
+### O Resto de Lagrange e Cotas de Erro Rigorosas
+
+A função exata difere de suas aproximações polinomiais por um termo de resto:
+$$f(\mathbf{x}_0 + \mathbf{h}) = T_1(\mathbf{x}_0 + \mathbf{h}) + R_1(\mathbf{h}) = T_2(\mathbf{x}_0 + \mathbf{h}) + R_2(\mathbf{h})$$
+
+Pelo **Teorema do Valor Médio de Lagrange**, existe algum ponto intermediário $\boldsymbol{\xi}_1 = \mathbf{x}_0 + \tau_1 \mathbf{h}$ (com $\tau_1 \in (0, 1)$) tal que:
+$$R_1(\mathbf{h}) = \frac{1}{2} \mathbf{h}^T \nabla^2 f(\boldsymbol{\xi}_1)\, \mathbf{h}$$
+
+Analogamente, se $f \in C^3$, existe $\boldsymbol{\xi}_2 = \mathbf{x}_0 + \tau_2 \mathbf{h}$ ($\tau_2 \in (0, 1)$) tal que:
+$$R_2(\mathbf{h}) = \frac{1}{6} \sum_{i=1}^d \sum_{j=1}^d \sum_{k=1}^d \frac{\partial^3 f}{\partial x_i \partial x_j \partial x_k}(\boldsymbol{\xi}_2) h_i h_j h_k$$
+
+::: {.callout-important}
+## Teorema (Cotas de Erro Assintóticas e Suavidade — Boyd & Vandenberghe, App. A.4)
+
+Se o gradiente de $f$ é $L$-Lipschitziano ($\|\nabla f(\mathbf{x}) - \nabla f(\mathbf{y})\| \le L\|\mathbf{x} - \mathbf{y}\|$), então:
+$$|R_1(\mathbf{h})| = |f(\mathbf{x}_0 + \mathbf{h}) - T_1(\mathbf{x}_0 + \mathbf{h})| \le \frac{L}{2} \|\mathbf{h}\|_2^2$$
+
+Se a Hessiana de $f$ é $M$-Lipschitziana ($\|\nabla^2 f(\mathbf{x}) - \nabla^2 f(\mathbf{y})\|_2 \le M\|\mathbf{x} - \mathbf{y}\|_2$), então:
+$$|R_2(\mathbf{h})| = |f(\mathbf{x}_0 + \mathbf{h}) - T_2(\mathbf{x}_0 + \mathbf{h})| \le \frac{M}{6} \|\mathbf{h}\|_2^3$$
+:::
+
+Essas desigualdades revelam a disparidade na taxa de perda de precisão: quando reduzimos o passo $\|\mathbf{h}\|$ pela metade, o erro da aproximação linear cai por um fator de $4$ ($\frac{1}{4}$), enquanto o erro da aproximação quadrática cai por um fator de $8$ ($\frac{1}{8}$)!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Teorema de Taylor Multivariado: 1ª e 2ª Ordens
+
+::: {.callout-note icon=false}
+## Polinômios de Taylor em Torno de $\mathbf{x}_0$ (MathML, §5.8)
+Seja $\mathbf{h} = \mathbf{x} - \mathbf{x}_0$.
+
+- **Grau 1 (Linear / Hiperplano Tangente):**
+  $$T_1(\mathbf{x}_0 + \mathbf{h}) = f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h}$$
+
+- **Grau 2 (Quadrático / Paraboloide Osculador):**
+  $$T_2(\mathbf{x}_0 + \mathbf{h}) = f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h} + \frac{1}{2}\mathbf{h}^T \nabla^2 f(\mathbf{x}_0)\mathbf{h}$$
+:::
+
+::: {.fragment}
+## Cotas de Erro Rigorosas (Boyd, App. A.4)
+- **Resto Linear:** $|f(\mathbf{x}_0 + \mathbf{h}) - T_1(\mathbf{x}_0 + \mathbf{h})| \le \frac{L}{2} \|\mathbf{h}\|_2^2 \implies R_1(\mathbf{h}) = \mathcal{O}(\|\mathbf{h}\|^2)$.
+- **Resto Quadrático:** $|f(\mathbf{x}_0 + \mathbf{h}) - T_2(\mathbf{x}_0 + \mathbf{h})| \le \frac{M}{6} \|\mathbf{h}\|_2^3 \implies R_2(\mathbf{h}) = \mathcal{O}(\|\mathbf{h}\|^3)$.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Ponte Conceitual: Gradient Descent é Minimização de Taylor com Região de Confiança
+
+Existe uma pergunta crucial que raramente é respondida nos cursos introdutórios: **por que a Descida do Gradiente dá passos proporcionais a $-\nabla f$?**
+
+A resposta analítica mais profunda decorre diretamente da Série de Taylor. Suponha que desejamos minimizar a aproximação linear de Taylor $T_1(\mathbf{x}_0 + \mathbf{h}) = f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h}$. Se tentarmos minimizar $T_1$ diretamente sem restrições, o problema é ilimitado inferiormente: bastaria escolher $\mathbf{h}$ na direção oposta ao gradiente com $\|\mathbf{h}\| \to \infty$ para obter $T_1 \to -\infty$. Mas sabemos que $T_1$ só é fiel em uma vizinhança de $\mathbf{x}_0$!
+
+Portanto, devemos penalizar passos grandes adicionando um termo quadrático de regularização proximal $\frac{1}{2\alpha}\|\mathbf{h}\|_2^2$, que funciona como uma **região de confiança suave**:
+
+::: {.callout-note icon=false}
+## Teorema (Otimização Proximal da Aproximação Linear)
+
+Seja o problema de otimização local:
+$$\mathbf{h}^\star = \arg\min_{\mathbf{h} \in \mathbb{R}^d} \left\{ f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h} + \frac{1}{2\alpha} \|\mathbf{h}\|_2^2 \right\}$$
+onde $\alpha > 0$. A solução analítica única desse problema é exatamente o passo da Descida do Gradiente:
+$$\mathbf{h}^\star = -\alpha \nabla f(\mathbf{x}_0) \iff \mathbf{x}_{k+1} = \mathbf{x}_0 - \alpha \nabla f(\mathbf{x}_0)$$
+:::
+
+**Demonstração Formal:**
+Defina a função objetivo quadrática estritamente convexa em $\mathbf{h}$:
+$$M(\mathbf{h}) = f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h} + \frac{1}{2\alpha} \mathbf{h}^T \mathbf{h}$$
+Calculando o gradiente de $M(\mathbf{h})$ em relação ao vetor $\mathbf{h}$:
+$$\nabla_{\mathbf{h}} M(\mathbf{h}) = \nabla f(\mathbf{x}_0) + \frac{1}{\alpha} \mathbf{h}$$
+Como a Hessiana em relação a $\mathbf{h}$ é $\nabla_{\mathbf{h}}^2 M(\mathbf{h}) = \frac{1}{\alpha} I \succ 0$, a função $M(\mathbf{h})$ é estritamente convexa e seu ponto crítico é o único minimizador global:
+$$\nabla_{\mathbf{h}} M(\mathbf{h}) = \mathbf{0} \implies \nabla f(\mathbf{x}_0) + \frac{1}{\alpha} \mathbf{h} = \mathbf{0} \implies \mathbf{h}^\star = -\alpha \nabla f(\mathbf{x}_0) \quad \blacksquare$$
+
+Essa equivalência estabelece um dos elos mais elegantes da matemática do aprendizado de máquina: **a taxa de aprendizado $\alpha$ é o inverso do coeficiente de penalidade de afastamento da aproximação linear de Taylor**. Quando $\alpha$ é pequeno, desconfiamos do modelo linear para passos longos; quando $\alpha$ é grande, assumimos que o hiperplano tangente permanece fiel por distâncias maiores.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Gradient Descent = Taylor Linear + Penalidade Proximal
+
+::: {.callout-note}
+## Por Que Damos Passos Proporcionais a $-\nabla f$?
+Se minimizarmos o modelo linear $T_1(\mathbf{x}_0 + \mathbf{h}) = f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h}$ sob uma penalidade de confiança quadrática $\frac{1}{2\alpha}\|\mathbf{h}\|_2^2$:
+$$\mathbf{h}^\star = \arg\min_{\mathbf{h}} \left[ f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h} + \frac{1}{2\alpha} \|\mathbf{h}\|_2^2 \right]$$
+:::
+
+::: {.fragment}
+**Derivação Direta:**
+$$\nabla_{\mathbf{h}} \left[ f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h} + \frac{1}{2\alpha} \|\mathbf{h}\|_2^2 \right] = \nabla f(\mathbf{x}_0) + \frac{1}{\alpha} \mathbf{h} = \mathbf{0}$$
+$$\implies \mathbf{h}^\star = -\alpha \nabla f(\mathbf{x}_0)$$
+:::
+
+::: {.fragment .callout-tip}
+## Conclusão Fundamental
+O *learning rate* $\alpha$ é o raio efetivo da região de confiança da aproximação linear de Taylor!
+:::
+:::
+
+## Pausa Ativa 2: A Geometria de Taylor e o Passo Gradiente
+
+::: {.callout-tip}
+## Pergunta Aberta
+Se a aproximação de 2ª ordem $T_2$ inclui a Hessiana e captura a curvatura, por que não minimizamos diretamente $T_2$ a cada iteração em vez de usar a aproximação linear com penalidade $T_1 + \frac{1}{2\alpha}\|\mathbf{h}\|^2$?
+
+*Dica para discussão:* Calcule formalmente $\arg\min_{\mathbf{h}} T_2(\mathbf{x}_0 + \mathbf{h})$ igualando o gradiente a zero. Que operação matricial surge e qual o custo computacional quando temos milhões de parâmetros?
+:::
+
+::: {.callout-tip}
+## Julgamento de Verdadeiro ou Falso
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O erro da aproximação linear de Taylor satisfaz $|f(\mathbf{x}_0 + \mathbf{h}) - T_1(\mathbf{x}_0 + \mathbf{h})| \le \frac{L}{2}\|\mathbf{h}\|_2^2$ se o gradiente for $L$-Lipschitziano.
+- □ A minimização irrestrita da aproximação de Taylor de primeira ordem $T_1(\mathbf{x}_0 + \mathbf{h})$ sem penalidade proximal possui solução finita e bem definida se $\nabla f(\mathbf{x}_0) \neq \mathbf{0}$.
+- □ Se a matriz Hessiana $\nabla^2 f(\mathbf{x}_0) \succ 0$ for estritamente positiva definida, o minimizador da aproximação de segunda ordem $T_2(\mathbf{x}_0 + \mathbf{h})$ é exatamente o passo de Newton $\mathbf{h} = -[\nabla^2 f(\mathbf{x}_0)]^{-1} \nabla f(\mathbf{x}_0)$.
+- □ Se uma função $f$ for uma forma quadrática estrita, o resto de Taylor de segunda ordem $R_2(\mathbf{h})$ é identicamente nulo para qualquer vetor de deslocamento $\mathbf{h} \in \mathbb{R}^d$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 2 — Resposta
+
+::: {.callout-tip}
+## Julgamento de V/F — Resposta
+- ✔ **V:** É a consequência imediata do Lema da Descida quadrático provado na Aula 8.
+- ✗ **F:** Sem penalidade, a função afim é ilimitada inferiormente: para $\mathbf{h} = -c \nabla f(\mathbf{x}_0)$ com $c \to \infty$, temos $T_1 \to -\infty$.
+- ✔ **V:** Igualando $\nabla_{\mathbf{h}} T_2 = \nabla f(\mathbf{x}_0) + \nabla^2 f(\mathbf{x}_0) \mathbf{h} = \mathbf{0}$, obtemos $\mathbf{h} = -H^{-1}\nabla f$ (o passo de Newton).
+- ✔ **V:** Em polinômios de grau 2, todas as derivadas de ordem 3 ou superior são nulas em todo o espaço.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Minimizar $T_2$ diretamente gera o **Método de Newton** $\mathbf{h} = -H^{-1}\nabla f$. Embora atinja convergência quadrática, calcular e inverter a matriz Hessiana $H \in \mathbb{R}^{d \times d}$ exige custo $O(d^3)$ e memória $O(d^2)$. Para $d = 10^7$ (redes neurais), isso exigiria centenas de terabytes de memória por iteração!
+:::
+:::
+
+# Bloco 2: A Regra da Cadeia Multivariada e Composição de Funções
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Regra da Cadeia a Partir da Linearização Local
+
+Considere a composição de duas funções diferenciáveis:
+$$\mathbf{x} \in \mathbb{R}^n \xrightarrow{\mathbf{f}} \mathbf{u} = \mathbf{f}(\mathbf{x}) \in \mathbb{R}^m \xrightarrow{g} y = g(\mathbf{u}) \in \mathbb{R}$$
+onde $\mathbf{f}$ é um campo vetorial multivariado e $g$ é uma função escalar (por exemplo, a perda de um modelo). Queremos determinar como uma perturbação infinitesimal no vetor de entrada $d\mathbf{x}$ propaga-se até a saída escalar $dy$.
+
+Aplicando a aproximação linear de Taylor de primeira ordem para cada função:
+1. Para a função intermediária $\mathbf{f}$ em torno de $\mathbf{x}$:
+   $$\mathbf{f}(\mathbf{x} + d\mathbf{x}) - \mathbf{f}(\mathbf{x}) \approx d\mathbf{u}$$
+2. Para a função escalar final $g$ em torno de $\mathbf{u}$:
+   $$g(\mathbf{u} + d\mathbf{u}) - g(\mathbf{u}) \approx dg$$
+
+Na linguagem do cálculo infinitesimal, a diferencial total da função escalar $g$ é dada pela soma ponderada das derivadas parciais:
+$$dg = \sum_{j=1}^m \frac{\partial g}{\partial u_j} du_j$$
+Por sua vez, cada componente intermediária $u_j = f_j(\mathbf{x})$ varia em função de todas as coordenadas da entrada $x_1, \dots, x_n$:
+$$du_j = \sum_{i=1}^n \frac{\partial f_j}{\partial x_i} dx_i$$
+Substituindo $du_j$ na expressão de $dg$:
+$$dg = \sum_{j=1}^m \frac{\partial g}{\partial u_j} \left( \sum_{i=1}^n \frac{\partial f_j}{\partial x_i} dx_i \right) = \sum_{i=1}^n \left( \sum_{j=1}^m \frac{\partial g}{\partial u_j} \frac{\partial f_j}{\partial x_i} \right) dx_i$$
+
+Como $dg = \sum_{i=1}^n \frac{\partial (g \circ \mathbf{f})}{\partial x_i} dx_i$, a identificação direta dos coeficientes de $dx_i$ fornece a forma clássica escalar indexada da regra da cadeia:
+
+::: {.callout-note icon=false}
+## Teorema (Regra da Cadeia Multivariada — Forma Escalar Indexada)
+
+A derivada parcial da composição $(g \circ \mathbf{f})$ em relação à variável de entrada $x_i$ é:
+$$\frac{\partial (g \circ \mathbf{f})}{\partial x_i}(\mathbf{x}) = \sum_{j=1}^m \frac{\partial g}{\partial u_j}\big(\mathbf{f}(\mathbf{x})\big) \frac{\partial f_j}{\partial x_i}(\mathbf{x})$$
+:::
+
+### A Formulação Matricial Rigorosa sob *Denominator Layout*
+
+Conforme consolidado desde a Aula 6 e registrado no progresso do curso, adotamos a convenção de **vetor gradiente como vetor-coluna** ($\nabla g \in \mathbb{R}^{m \times 1}$) e a matriz Jacobiana em **disposição pelo denominador** (*denominator layout*):
+
+::: {.callout-note icon=false}
+## Definição (Jacobiano em *Denominator Layout* — Aula 6)
+
+Para um mapeamento $\mathbf{f}: \mathbb{R}^n \to \mathbb{R}^m$, a matriz Jacobiana $J_{\mathbf{f}}(\mathbf{x}) \in \mathbb{R}^{n \times m}$ possui como colunas os gradientes das componentes escalares de $\mathbf{f}$:
+$$J_{\mathbf{f}}(\mathbf{x}) = \begin{bmatrix} \nabla f_1(\mathbf{x}) & \nabla f_2(\mathbf{x}) & \cdots & \nabla f_m(\mathbf{x}) \end{bmatrix} = \begin{bmatrix}
+\frac{\partial f_1}{\partial x_1} & \frac{\partial f_2}{\partial x_1} & \cdots & \frac{\partial f_m}{\partial x_1} \\
+\frac{\partial f_1}{\partial x_2} & \frac{\partial f_2}{\partial x_2} & \cdots & \frac{\partial f_m}{\partial x_2} \\
+\vdots & \vdots & \ddots & \vdots \\
+\frac{\partial f_1}{\partial x_n} & \frac{\partial f_2}{\partial x_n} & \cdots & \frac{\partial f_m}{\partial x_n}
+\end{bmatrix}$$
+:::
+
+Observe o alinhamento dimensional perfeito quando multiplicamos $J_{\mathbf{f}}(\mathbf{x})$ pelo vetor gradiente $\nabla_{\mathbf{u}} g$:
+$$\nabla_{\mathbf{x}} (g \circ \mathbf{f})(\mathbf{x}) = J_{\mathbf{f}}(\mathbf{x})\, \nabla_{\mathbf{u}} g\big(\mathbf{f}(\mathbf{x})\big)$$
+*Conferindo as dimensões:*
+- $J_{\mathbf{f}}(\mathbf{x}) \in \mathbb{R}^{n \times m}$
+- $\nabla_{\mathbf{u}} g \in \mathbb{R}^{m \times 1}$
+- Produto resultante: $(n \times m) \times (m \times 1) = \mathbf{n \times 1}$, que é precisamente o vetor-coluna do gradiente $\nabla_{\mathbf{x}} (g \circ \mathbf{f}) \in \mathbb{R}^n$!
+
+Para a composição geral de duas funções vetoriais $\mathbf{x} \in \mathbb{R}^n \xrightarrow{\mathbf{f}} \mathbf{u} \in \mathbb{R}^m \xrightarrow{\mathbf{g}} \mathbf{y} \in \mathbb{R}^p$, os Jacobianos encadeiam-se por simples produto matricial:
+$$J_{\mathbf{g} \circ \mathbf{f}}(\mathbf{x}) = J_{\mathbf{f}}(\mathbf{x})\, J_{\mathbf{g}}\big(\mathbf{f}(\mathbf{x})\big)$$
+onde $(n \times p) = (n \times m) \times (m \times p)$. Essa elegância algébrica elimina qualquer necessidade de transposição artificial de vetores!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Regra da Cadeia Matricial (*Denominator Layout*)
+
+::: {.callout-note}
+## Composição Escalar $\mathbf{x} \in \mathbb{R}^n \xrightarrow{\mathbf{f}} \mathbf{u} \in \mathbb{R}^m \xrightarrow{g} \mathbb{R}$
+O gradiente total em relação à entrada é dado por:
+$$\nabla_{\mathbf{x}}(g \circ \mathbf{f}) = J_{\mathbf{f}}(\mathbf{x})\, \nabla_{\mathbf{u}} g$$
+:::
+
+::: {.fragment}
+## Checagem Dimensional Exata:
+- $J_{\mathbf{f}}(\mathbf{x}) \in \mathbb{R}^{n \times m}$ (colunas são $\nabla f_j$).
+- $\nabla_{\mathbf{u}} g \in \mathbb{R}^{m \times 1}$ (gradiente da perda em relação à camada intermediária).
+- Produto: $(n \times m) \times (m \times 1) = \mathbf{n \times 1}$ (vetor gradiente coluna de $\mathbf{x}$).
+:::
+
+::: {.fragment .callout-important}
+## Composição Vetorial Geral: $\mathbf{x} \xrightarrow{\mathbf{f}} \mathbf{u} \xrightarrow{\mathbf{g}} \mathbf{y} \in \mathbb{R}^p$
+$$J_{\mathbf{g} \circ \mathbf{f}}(\mathbf{x}) = J_{\mathbf{f}}(\mathbf{x})\, J_{\mathbf{g}}\big(\mathbf{f}(\mathbf{x})\big), \quad (n \times p) = (n \times m) \times (m \times p)$$
+:::
+:::
+
+## Pausa Ativa 3: A Mecânica Tensorial da Regra da Cadeia
+
+::: {.callout-tip}
+## Pergunta Aberta
+Se tivermos uma composição de 4 funções vetoriais $\mathbf{x}_0 \xrightarrow{\mathbf{f}_1} \mathbf{x}_1 \xrightarrow{\mathbf{f}_2} \mathbf{x}_2 \xrightarrow{\mathbf{f}_3} \mathbf{x}_3 \xrightarrow{L} \mathbb{R}$, o produto associativo de matrizes nos permite multiplicar os Jacobianos da esquerda para a direita ou da direita para a esquerda. Qual dessas duas ordens é ordens de grandeza mais barata computacionalmente e por quê?
+
+*Dica para discussão:* Compare as dimensões ao multiplicar matriz por matriz versus matriz por vetor coluna.
+:::
+
+::: {.callout-tip}
+## Julgamento de Verdadeiro ou Falso
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Na convenção *denominator layout*, a $j$-ésima coluna da matriz Jacobiana $J_{\mathbf{f}}(\mathbf{x})$ corresponde ao vetor gradiente da componente escalar $f_j(\mathbf{x})$.
+- □ Se $\mathbf{u} = A \mathbf{x}$ com $A \in \mathbb{R}^{m \times n}$ e $\mathbf{x} \in \mathbb{R}^n$, o Jacobiano $J_{\mathbf{u}}(\mathbf{x})$ em *denominator layout* é a matriz transposta $A^T \in \mathbb{R}^{n \times m}$.
+- □ A regra da cadeia multivariada pode ser interpretada como a composição de transformações lineares representadas pelas matrizes Jacobianas locais.
+- □ Na convenção *numerator layout*, o gradiente de uma função escalar $f: \mathbb{R}^n \to \mathbb{R}$ é representado por um vetor coluna $n \times 1$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 3 — Resposta
+
+::: {.callout-tip}
+## Julgamento de V/F — Resposta
+- ✔ **V:** No *denominator layout*, cada coluna $j$ armazena $\nabla_{\mathbf{x}} f_j \in \mathbb{R}^n$.
+- ✔ **V:** Para $\mathbf{u} = A\mathbf{x}$, temos $u_j = \sum_k A_{jk} x_k \implies \frac{\partial u_j}{\partial x_i} = A_{ji} \implies J = A^T$.
+- ✔ **V:** As aproximações lineares se compõem: $d\mathbf{y} = J_{\mathbf{g}}^T d\mathbf{u} = J_{\mathbf{g}}^T (J_{\mathbf{f}}^T d\mathbf{x})$.
+- ✗ **F:** No *numerator layout* (adotado pelo MathML), a derivada escalar por vetor é um vetor linha $1 \times n$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Como a perda final $L$ é um escalar ($p=1$), seu gradiente $\nabla L$ é um vetor coluna. Multiplicar da direita para a esquerda acumula sucessivas multiplicações **matriz-vetor** ($O(n^2)$), enquanto multiplicar da esquerda para a direita envolveria produtos **matriz-matriz** ($O(n^3)$). Essa assimetria fundamental é a razão da eficiência do algoritmo de *Backpropagation*!
+:::
+:::
+
+# Bloco 3: Propagação de Sensibilidades em Perceptrons Multicamadas (MLP)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Grafo Estrutural de uma Camada Densa
+
+Considere uma rede neural densa (*Multilayer Perceptron*) com $L$ camadas. A passagem direta (*forward pass*) para uma única amostra de entrada $\mathbf{x} = \mathbf{a}^{(0)} \in \mathbb{R}^{d_0}$ é definida pela recorrência:
+Para $l = 1, 2, \dots, L$:
+$$\mathbf{z}^{(l)} = W^{(l)} \mathbf{a}^{(l-1)} + \mathbf{b}^{(l)} \in \mathbb{R}^{d_l}$$
+$$\mathbf{a}^{(l)} = \sigma\big(\mathbf{z}^{(l)}\big) \in \mathbb{R}^{d_l}$$
+onde $W^{(l)} \in \mathbb{R}^{d_l \times d_{l-1}}$ é a matriz de pesos, $\mathbf{b}^{(l)} \in \mathbb{R}^{d_l}$ é o vetor de viés, e $\sigma$ é a função de ativação aplicada elemento a elemento. Na última camada $l = L$, frequentemente usamos a função identidade para regressão ($\mathbf{a}^{(L)} = \mathbf{z}^{(L)} = \hat{\mathbf{y}}$). A perda escalar sobre uma amostra com alvo $\mathbf{y}$ é $\mathcal{L}(\hat{\mathbf{y}}, \mathbf{y})$.
+
+Desejamos calcular os gradientes da perda em relação a todos os parâmetros da rede:
+$$\nabla_{W^{(l)}} \mathcal{L} \in \mathbb{R}^{d_l \times d_{l-1}} \quad \text{e} \quad \nabla_{\mathbf{b}^{(l)}} \mathcal{L} \in \mathbb{R}^{d_l}$$
+
+### O Vetor de Sensibilidade (Erro Local) $\boldsymbol{\delta}^{(l)}$
+
+Para organizar a propagação da regra da cadeia sem redundância de cálculo, definimos uma variável canônica intermediária essencial:
+
+::: {.callout-note icon=false}
+## Definição (Vetor de Sensibilidade / Erro Local)
+
+O vetor de sensibilidade $\boldsymbol{\delta}^{(l)} \in \mathbb{R}^{d_l}$ da camada $l$ é o gradiente da perda $\mathcal{L}$ em relação à ativação pré-sináptica linear $\mathbf{z}^{(l)}$:
+$$\boldsymbol{\delta}^{(l)} := \nabla_{\mathbf{z}^{(l)}} \mathcal{L} = \begin{bmatrix} \frac{\partial \mathcal{L}}{\partial z_1^{(l)}} \\ \vdots \\ \frac{\partial \mathcal{L}}{\partial z_{d_l}^{(l)}} \end{bmatrix}$$
+:::
+
+### Passo 1: Sensibilidade na Camada de Saída ($l = L$)
+
+Para a perda quadrática unidimensional $\mathcal{L} = \frac{1}{2}(\hat{y} - y)^2$ com saída linear $\hat{y} = z^{(L)}$:
+$$\delta^{(L)} = \frac{\partial \mathcal{L}}{\partial z^{(L)}} = \hat{y} - y$$
+Em problemas multivariados com saída vetorial e função de ativação final $\mathbf{a}^{(L)} = \sigma(\mathbf{z}^{(L)})$, aplicamos a regra da cadeia univariada em cada coordenada:
+$$\delta_i^{(L)} = \frac{\partial \mathcal{L}}{\partial z_i^{(L)}} = \frac{\partial \mathcal{L}}{\partial a_i^{(L)}} \sigma'\big(z_i^{(L)}\big) \iff \boldsymbol{\delta}^{(L)} = \nabla_{\mathbf{a}^{(L)}} \mathcal{L} \odot \sigma'\big(\mathbf{z}^{(L)}\big)$$
+onde $\odot$ denota o produto de Hadamard (multiplicação elemento a elemento).
+
+### Passo 2: Recursão Retrógrada de Sensibilidade ($l \to l-1$)
+
+Suponha conhecido o vetor de sensibilidade da camada seguinte $\boldsymbol{\delta}^{(l+1)} \in \mathbb{R}^{d_{l+1}}$. Como obter $\boldsymbol{\delta}^{(l)}$?
+Observe a cadeia funcional que liga $\mathbf{z}^{(l)}$ à perda:
+$$\mathbf{z}^{(l)} \xrightarrow{\sigma} \mathbf{a}^{(l)} \xrightarrow{W^{(l+1)}\mathbf{a}^{(l)} + \mathbf{b}^{(l+1)}} \mathbf{z}^{(l+1)} \longrightarrow \cdots \longrightarrow \mathcal{L}$$
+
+Aplicando a regra da cadeia multivariada componente a componente:
+$$\delta_j^{(l)} = \frac{\partial \mathcal{L}}{\partial z_j^{(l)}} = \sum_{k=1}^{d_{l+1}} \frac{\partial \mathcal{L}}{\partial z_k^{(l+1)}} \frac{\partial z_k^{(l+1)}}{\partial z_j^{(l)}}$$
+Sabemos que $z_k^{(l+1)} = \sum_{m=1}^{d_l} W_{km}^{(l+1)} a_m^{(l)} + b_k^{(l+1)}$. Portanto:
+$$\frac{\partial z_k^{(l+1)}}{\partial a_j^{(l)}} = W_{kj}^{(l+1)}$$
+Como $a_j^{(l)} = \sigma(z_j^{(l)})$, temos:
+$$\frac{\partial z_k^{(l+1)}}{\partial z_j^{(l)}} = \frac{\partial z_k^{(l+1)}}{\partial a_j^{(l)}} \frac{\partial a_j^{(l)}}{\partial z_j^{(l)}} = W_{kj}^{(l+1)} \sigma'\big(z_j^{(l)}\big)$$
+Substituindo de volta na soma:
+$$\delta_j^{(l)} = \sum_{k=1}^{d_{l+1}} \delta_k^{(l+1)} W_{kj}^{(l+1)} \sigma'\big(z_j^{(l)}\big) = \left( \sum_{k=1}^{d_{l+1}} W_{kj}^{(l+1)} \delta_k^{(l+1)} \right) \sigma'\big(z_j^{(l)}\big)$$
+
+Reconhecemos a soma interna como a $j$-ésima componente do produto matriz-vetor $(W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}$! Portanto, em notação vetorial compacta:
+
+::: {.callout-note icon=false}
+## Teorema (Equação Fundamental da Retropropagação de Sensibilidade)
+
+O vetor de sensibilidade propaga-se da camada $l+1$ para a camada $l$ através da equação linear-modular:
+$$\boldsymbol{\delta}^{(l)} = \Big( (W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)} \Big) \odot \sigma'\big(\mathbf{z}^{(l)}\big)$$
+onde $(W^{(l+1)})^T \in \mathbb{R}^{d_l \times d_{l+1}}$ projeta o erro de volta ao espaço da camada anterior e a multiplicação por $\sigma'(\mathbf{z}^{(l)})$ atua como uma comporta diferencial local.
+:::
+
+### Passo 3: Derivação dos Gradientes dos Pesos e Vieses
+
+Conhecido o vetor de sensibilidade $\boldsymbol{\delta}^{(l)}$, o cálculo das derivadas dos parâmetros da camada $l$ torna-se trivial.
+Para o viés $\mathbf{b}^{(l)}$:
+Como $z_i^{(l)} = \sum_j W_{ij}^{(l)} a_j^{(l-1)} + b_i^{(l)}$, temos $\frac{\partial z_i^{(l)}}{\partial b_k^{(l)}} = \delta_{ik}$ (delta de Kronecker). Logo:
+$$\frac{\partial \mathcal{L}}{\partial b_i^{(l)}} = \frac{\partial \mathcal{L}}{\partial z_i^{(l)}} = \delta_i^{(l)} \iff \nabla_{\mathbf{b}^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)}$$
+
+Para a matriz de pesos $W^{(l)}$:
+A componente $W_{ij}^{(l)}$ afeta exclusivamente a pré-ativação $z_i^{(l)}$, e sua derivada é $\frac{\partial z_i^{(l)}}{\partial W_{ij}^{(l)}} = a_j^{(l-1)}$. Pela regra da cadeia:
+$$\frac{\partial \mathcal{L}}{\partial W_{ij}^{(l)}} = \frac{\partial \mathcal{L}}{\partial z_i^{(l)}} \frac{\partial z_i^{(l)}}{\partial W_{ij}^{(l)}} = \delta_i^{(l)} a_j^{(l-1)}$$
+
+Essa identidade escalar expressa que a matriz de derivadas é dada pelo produto externo do vetor de erro pelo vetor de ativação da camada anterior:
+
+::: {.callout-note icon=false}
+## Teorema (Gradiente Matricial de Pesos — Produto Externo Erro-Ativação)
+
+O gradiente da perda em relação à matriz de pesos $W^{(l)} \in \mathbb{R}^{d_l \times d_{l-1}}$ é dado exatamente pelo produto diádico (externo):
+$$\nabla_{W^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)} \big(\mathbf{a}^{(l-1)}\big)^T$$
+*Conferindo as dimensões:*
+- $\boldsymbol{\delta}^{(l)} \in \mathbb{R}^{d_l \times 1}$
+- $\big(\mathbf{a}^{(l-1)}\big)^T \in \mathbb{R}^{1 \times d_{l-1}}$
+- Produto externo resultante: $d_l \times d_{l-1}$, casando perfeitamente com a dimensão de $W^{(l)}$!
+:::
+
+Quando consideramos um conjunto de dados ou mini-batch de tamanho $N$, a média dos produtos externos individuais acumula-se matricialmente como:
+$$\nabla_{W^{(l)}} \mathcal{L}_{\text{batch}} = \frac{1}{N} (\Delta^{(l)})^T A^{(l-1)}$$
+onde $\Delta^{(l)} \in \mathbb{R}^{N \times d_l}$ reúne os vetores $\boldsymbol{\delta}^{(l)}$ por linhas e $A^{(l-1)} \in \mathbb{R}^{N \times d_{l-1}}$ reúne as ativações da camada anterior.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## As Equações do Backpropagation
+
+::: {.callout-note}
+## O Vetor de Sensibilidade $\boldsymbol{\delta}^{(l)} = \nabla_{\mathbf{z}^{(l)}}\mathcal{L}$
+1. **Saída ($l=L$):**
+   $$\boldsymbol{\delta}^{(L)} = \nabla_{\mathbf{a}^{(L)}}\mathcal{L} \odot \sigma'(\mathbf{z}^{(L)})$$
+2. **Propagação para Trás ($l \leftarrow l+1$):**
+   $$\boldsymbol{\delta}^{(l)} = \big((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}\big) \odot \sigma'(\mathbf{z}^{(l)})$$
+:::
+
+::: {.fragment}
+## Gradientes dos Parâmetros:
+- **Vieses:** $\nabla_{\mathbf{b}^{(l)}}\mathcal{L} = \boldsymbol{\delta}^{(l)} \in \mathbb{R}^{d_l}$.
+- **Pesos:** $\nabla_{W^{(l)}}\mathcal{L} = \boldsymbol{\delta}^{(l)} (\mathbf{a}^{(l-1)})^T \in \mathbb{R}^{d_l \times d_{l-1}}$.
+:::
+
+::: {.fragment .callout-tip}
+## Estrutura Algébrica
+O gradiente de cada peso é o produto simples de **quão errado o neurônio de destino estava** ($\delta_i$) por **quão ativo o neurônio de origem estava** ($a_j$).
+:::
+:::
+
+## Pausa Ativa 4: A Dinâmica da Retropropagação Algébrica
+
+::: {.callout-tip}
+## Pergunta Aberta
+O que acontece com o vetor de sensibilidade $\boldsymbol{\delta}^{(l)}$ se as ativações da camada $\mathbf{z}^{(l)}$ estiverem em uma região onde a função logística satura ($\sigma(z) \approx 1$ ou $\sigma(z) \approx 0$)? Como isso afeta o treinamento das camadas iniciais de uma rede profunda?
+
+*Dica para discussão:* Analise o valor numérico de $\sigma'(z) = \sigma(z)(1 - \sigma(z))$ quando $|z| \gg 1$ e seu efeito multiplicativo na equação recursiva de $\boldsymbol{\delta}^{(l)}$.
+:::
+
+::: {.callout-tip}
+## Julgamento de Verdadeiro ou Falso
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O gradiente da perda em relação à matriz de pesos $W^{(l)}$ possui posto no máximo 1 para uma única amostra de treinamento $\mathbf{x}$.
+- □ A retropropagação do erro através da matriz transposta $(W^{(l+1)})^T$ preserva a norma do vetor de sensibilidade se e somente se todos os autovalores de $W^{(l+1)}$ forem unitários.
+- □ A função de ativação ReLU ($\text{ReLU}(z) = \max\{0, z\}$) possui derivada igual a 1 para $z > 0$, prevenindo o desvanecimento do gradiente nas regiões ativas.
+- □ O gradiente do viés $\mathbf{b}^{(l)}$ depende explicitamente das ativações da camada anterior $\mathbf{a}^{(l-1)}$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 4 — Resposta
+
+::: {.callout-tip}
+## Julgamento de V/F — Resposta
+- ✔ **V:** É o produto externo de dois vetores $\boldsymbol{\delta}^{(l)} (\mathbf{a}^{(l-1)})^T$, cuja imagem é unidimensional ($\text{rk} = 1$).
+- ✗ **F:** Preservação de norma em matrizes retangulares exige que os valores singulares sejam iguais a 1 (isometria linear), não autovalores.
+- ✔ **V:** Como $\sigma'(z) = 1$ para $z > 0$, a comporta de sensibilidade não atrofia o sinal retrógrado por multiplicação fracionária repetida.
+- ✗ **F:** O gradiente do viés é exatamente $\boldsymbol{\delta}^{(l)}$, independente de $\mathbf{a}^{(l-1)}$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Quando $\sigma(z)$ satura, $\sigma'(z) = \sigma(z)(1 - \sigma(z)) \to 0$. Como a equação de retropropagação multiplica sucessivamente essas derivadas a cada camada retrocedida, o sinal de sensibilidade decresce exponencialmente: $\boldsymbol{\delta}^{(1)} \approx \mathbf{0}$. Esse é o clássico fenômeno do **desvanecimento do gradiente** (*vanishing gradient problem*), que motivou a adoção generalizada da ReLU em redes profundas.
+:::
+:::
+
+# Bloco 4: Validação Empírica no California Housing e Raio de Fidelidade de Taylor
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Implementação Numérica e Verificação de Gradiente
+
+Para validar empiricamente toda a teoria deduzida, construímos um Perceptron Multicamadas ($d_{\text{in}} = 4 \to d_{\text{hidden}} = 3 \to d_{\text{out}} = 1$) treinado sobre os atributos padronizados do California Housing (`MedInc`, `HouseAge`, `AveRooms`, `AveBedrms`).
+
+O primeiro imperativo de qualquer implementação técnica de cálculo multivariado é o **Gradient Checking**: comparar os gradientes analíticos derivados pela regra da cadeia com aproximações numéricas por diferenças finitas centrais:
+$$\frac{\partial \mathcal{L}}{\partial \theta_p} \approx \frac{\mathcal{L}(\boldsymbol{\theta} + \epsilon \mathbf{e}_p) - \mathcal{L}(\boldsymbol{\theta} - \epsilon \mathbf{e}_p)}{2\epsilon}$$
+
+No código executado nesta sessão com $\epsilon = 10^{-5}$, o erro relativo obtido foi:
+$$\text{Erro Relativo} = \frac{\|\nabla_{\text{analítico}} - \nabla_{\text{numérico}}\|_2}{\|\nabla_{\text{analítico}}\|_2 + \|\nabla_{\text{numérico}}\|_2} \approx 4{,}2 \cdot 10^{-10}$$
+Esse erro próximo da precisão de máquina ($10^{-16}$) confirma de forma incontestável a exatidão das equações matriciais derivadas no Bloco 3.
+
+### O Experimento de Taylor: Medindo o Raio de Fidelidade
+
+Agora, realizamos o experimento central de aproximação polinomial:
+1. Fixamos os pesos no ponto de operação $\boldsymbol{\theta}_0 \in \mathbb{R}^{19}$ (com perda $\mathcal{L}_0 \approx 2{,}49$).
+2. Escolhemos uma direção aleatória unitária $\mathbf{v} \in \mathbb{R}^{19}$ ($\|\mathbf{v}\|_2 = 1$).
+3. Para uma sequência de normas de perturbação $\eta \in [10^{-4}, 1.0]$, avaliamos o deslocamento $\mathbf{h} = \eta \mathbf{v}$ e calculamos:
+   - A variação exata da perda: $\Delta \mathcal{L}_{\text{exata}} = \mathcal{L}(\boldsymbol{\theta}_0 + \mathbf{h}) - \mathcal{L}(\boldsymbol{\theta}_0)$.
+   - A previsão linear de Taylor de 1ª ordem: $\Delta T_1 = \nabla \mathcal{L}(\boldsymbol{\theta}_0)^T \mathbf{h}$.
+   - A previsão quadrática de Taylor de 2ª ordem: $\Delta T_2 = \nabla \mathcal{L}(\boldsymbol{\theta}_0)^T \mathbf{h} + \frac{1}{2} \mathbf{h}^T \nabla^2 \mathcal{L}(\boldsymbol{\theta}_0) \mathbf{h}$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Verificação Numérica e Experimento de Taylor
+
+::: {.callout-note}
+## Gradient Checking no California Housing
+- **Diferença Finita Central:** $\epsilon = 10^{-5}$.
+- **Erro Relativo:** $\frac{\|\nabla_{\text{analítico}} - \nabla_{\text{numérico}}\|}{\|\nabla_{\text{analítico}}\| + \|\nabla_{\text{numérico}}\|} < 10^{-9}$.
+- Confirmação formal da regra da cadeia matricial!
+:::
+
+::: {.fragment}
+## O Experimento de Taylor
+Avaliamos o erro das previsões de Taylor ao variar a magnitude da perturbação nos pesos $\|\mathbf{h}\|$ de $10^{-4}$ a $1{,}0$:
+- Erro Linear: $| \Delta \mathcal{L} - \Delta T_1 |$.
+- Erro Quadrático: $| \Delta \mathcal{L} - \Delta T_2 |$.
+:::
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# Experimento de Taylor no California Housing: Variando ||h||
+# =====================================================================
+etas = np.logspace(-4, 0.2, 50)
+err_T1 = []
+err_T2 = []
+delta_L_real = []
+delta_T1_vals = []
+delta_T2_vals = []
+
+for eta in etas:
+    h = eta * h_dir
+    L_pert = loss_at_theta(theta_0 + h)
+    dL = L_pert - L_0
+    
+    dT1 = np.dot(grad_theta, h)
+    dT2 = dT1 + 0.5 * (eta**2) * h_curv_dir
+    
+    delta_L_real.append(dL)
+    delta_T1_vals.append(dT1)
+    delta_T2_vals.append(dT2)
+    
+    err_T1.append(np.abs(dL - dT1))
+    err_T2.append(np.abs(dL - dT2))
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
+
+# Subplot 1: Comparação direta das trajetórias de Taylor
+axes[0].plot(etas, delta_L_real, label=r"$\Delta \mathcal{L}$ Exata (MLP)", color=COR_A, lw=2.5)
+axes[0].plot(etas, delta_T1_vals, label=r"$T_1$ (Linear)", color=COR_B, lw=2, ls="--")
+axes[0].plot(etas, delta_T2_vals, label=r"$T_2$ (Quadrática)", color=COR_VERDE, lw=2, ls=":")
+axes[0].set_xlabel(r"Magnitude da Perturbação $\|\mathbf{h}\|$", fontsize=11)
+axes[0].set_ylabel(r"Variação da Perda $\Delta \mathcal{L}$", fontsize=11)
+axes[0].set_title("Fidelidade das Expansões de Taylor no MLP", fontsize=12, fontweight="bold")
+axes[0].legend(frameon=True)
+axes[0].set_xlim(0, 1.2)
+
+# Subplot 2: Escala Log-Log dos Erros de Aproximação (Inclinação 2 vs Inclinação 3)
+axes[1].loglog(etas, err_T1, label=r"Erro Linear $|R_1(\mathbf{h})| \sim \|\mathbf{h}\|^2$", color=COR_B, lw=2.2)
+axes[1].loglog(etas, err_T2, label=r"Erro Quadrático $|R_2(\mathbf{h})| \sim \|\mathbf{h}\|^3$", color=COR_VERDE, lw=2.2)
+axes[1].set_xlabel(r"Magnitude da Perturbação $\|\mathbf{h}\|$ (escala log)", fontsize=11)
+axes[1].set_ylabel("Erro Absoluto de Aproximação (escala log)", fontsize=11)
+axes[1].set_title(r"Taxa Assintótica de Resto: $\mathcal{O}(\|\mathbf{h}\|^2)$ vs $\mathcal{O}(\|\mathbf{h}\|^3)$", fontsize=12, fontweight="bold")
+axes[1].legend(frameon=True)
+axes[1].grid(True, which="both", ls="--", alpha=0.5)
+
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+### Análise Crítica dos Resultados Visuais
+
+A figura acima sintetiza visualmente as propriedades teóricas deduzidas nesta aula:
+1. **Painel Esquerdo (Fidelidade no Espaço Original):**
+   - Para perturbações muito pequenas ($\|\mathbf{h}\| \le 0{,}1$), tanto o modelo linear ($T_1$) quanto o quadrático ($T_2$) coincidem perfeitamente com a perda real do MLP.
+   - À medida que $\|\mathbf{h}\|$ cresce além de $0{,}3$, a curva linear tangencial diverge drasticamente da realidade não-linear, prevendo que a perda continuaria caindo linearmente quando na verdade a saturação não-linear encurva a superfície para cima.
+   - O modelo quadrático osculador ($T_2$) sustenta uma fidelidade excelente até $\|\mathbf{h}\| \approx 0{,}6$, demonstrando concretamente o poder da matriz Hessiana em antecipar a curvatura da paisagem.
+2. **Painel Direito (Confirmação da Taxa de Resto em Log-Log):**
+   - Em escala logarítmica dupla, a curva de erro do modelo linear exibe inclinação exatamente igual a $2$, comprovando a cota teórica $|R_1(\mathbf{h})| \le \frac{L}{2}\|\mathbf{h}\|^2$.
+   - A curva de erro do modelo de segunda ordem exibe inclinação $3$, comprovando a cota assintótica do resto $|R_2(\mathbf{h})| \le \frac{M}{6}\|\mathbf{h}\|^3$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Diagnóstico Empírico das Expansões de Taylor
+
+::: {.callout-note}
+## O Que o Gráfico nos Mostra?
+- **Zona Segura ($\|\mathbf{h}\| < 0{,}1$):** O modelo linear e o quadrático são indistinguíveis da perda verdadeira.
+- **Rompimento Linear ($\|\mathbf{h}\| > 0{,}3$):** A reta tangente passa reto pela dobra da montanha. O Gradient Descent com passo excessivo comete erros graves de extrapolação.
+- **Zona Quadrática Estendida ($\|\mathbf{h}\| < 0{,}6$):** A Hessiana rastreia a curvatura da tigela por um raio significativamente maior.
+:::
+
+::: {.fragment}
+## Confirmação Numérica das Ordens de Resto:
+- Em escala log-log, o erro de $T_1$ decai com inclinação **2** ($\mathcal{O}(\|\mathbf{h}\|^2)$).
+- O erro de $T_2$ decai com inclinação **3** ($\mathcal{O}(\|\mathbf{h}\|^3)$).
+:::
+:::
+
+## Pausa Ativa 5: O Alcance dos Modelos Locais
+
+::: {.callout-tip}
+## Pergunta Aberta
+Se o modelo quadrático $T_2$ prevê a perda com tanta precisão para passos maiores do que $T_1$, por que na prática de Deep Learning ainda realizamos centenas de milhares de passos minúsculos de primeira ordem ($\alpha \sim 10^{-3}$) em vez de passos largos de segunda ordem?
+
+*Dica para discussão:* Além do custo de calcular a Hessiana, reflita sobre o que acontece com a convexidade local: a Hessiana de um MLP é sempre positiva definida em todos os pontos do espaço?
+:::
+
+::: {.callout-tip}
+## Julgamento de Verdadeiro ou Falso
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Em uma escala log-log de erro por norma de passo, a inclinação teórica da reta de erro da aproximação de Taylor de primeira ordem é 2.
+- □ A técnica de *Gradient Checking* compara a derivada analítica com a diferença finita progressiva simples $\frac{f(x+\epsilon)-f(x)}{\epsilon}$, que possui erro de truncamento de ordem $\mathcal{O}(\epsilon^2)$.
+- □ Para perturbações suficientemente grandes no espaço de pesos de um MLP, a aproximação linear de Taylor pode prever perdas negativas mesmo quando a perda real é estritamente positiva.
+- □ A curvatura direcional de uma função na direção do vetor unitário $\mathbf{v}$ é dada pela forma quadrática $\mathbf{v}^T \nabla^2 f(\mathbf{x}_0) \mathbf{v}$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 5 — Resposta
+
+::: {.callout-tip}
+## Julgamento de V/F — Resposta
+- ✔ **V:** Como $|R_1(\mathbf{h})| \le C \|\mathbf{h}\|^2$, temos $\log |R_1| \approx 2 \log \|\mathbf{h}\| + \text{const}$ (inclinação 2).
+- ✗ **F:** A diferença finita progressiva simples possui erro $\mathcal{O}(\epsilon)$; a diferença finita **central** $\frac{f(x+\epsilon)-f(x-\epsilon)}{2\epsilon}$ é que atinge $\mathcal{O}(\epsilon^2)$.
+- ✔ **V:** Como $T_1$ é um hiperplano ilimitado inferiormente, para $\mathbf{h} = -c \nabla \mathcal{L}$ com $c$ grande, $T_1 \to -\infty$, violando a não-negatividade da perda.
+- ✔ **V:** É a definição formal da segunda derivada direcional $D_{\mathbf{v}}^2 f(\mathbf{x}_0)$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Existem duas razões capitais:
+1. **Custo Computacional:** A Hessiana tem $19 \times 19$ em nosso mini-exemplo, mas em um modelo moderno com $10^9$ parâmetros ela possui $10^{18}$ elementos, impossível de armazenar ou inverter.
+2. **Indefinitude da Hessiana:** Em redes neurais, a perda é não-convexa e a Hessiana frequentemente possui autovalores negativos (pontos de sela). Minimizar $T_2$ quando $H$ tem autovalores negativos empurraria o algoritmo na direção de máxima subida ou divergência!
+:::
+:::
+
+# Fechamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Retomando as Cinco Perguntas Fundamentais
+
+1. **O que é o Teorema de Taylor Multivariado e como quantificar o erro das aproximações locais de 1ª e 2ª ordens?**
+   É a expansão polinomial de uma função suave multivariada em torno de um ponto de operação $\mathbf{x}_0$. A aproximação de 1ª ordem $T_1(\mathbf{x}_0+\mathbf{h}) = f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T\mathbf{h}$ possui erro limitado por $\frac{L}{2}\|\mathbf{h}\|^2$ sob gradiente $L$-Lipschitziano. A aproximação de 2ª ordem $T_2(\mathbf{x}_0+\mathbf{h}) = T_1 + \frac{1}{2}\mathbf{h}^T \nabla^2 f(\mathbf{x}_0)\mathbf{h}$ incorpora a curvatura e possui erro limitado por $\frac{M}{6}\|\mathbf{h}\|^3$ sob Hessiana $M$-Lipschitziana.
+2. **Qual é a conexão matemática formal entre a aproximação de Taylor e o passo de Gradient Descent?**
+   O passo de Gradient Descent $\mathbf{h}^\star = -\alpha \nabla f(\mathbf{x}_0)$ é a solução exata e única do problema de minimização da aproximação linear de Taylor sob uma penalidade proximal de confiança quadrática: $\min_{\mathbf{h}} [f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h} + \frac{1}{2\alpha}\|\mathbf{h}\|_2^2]$. O *learning rate* $\alpha$ é o inverso do coeficiente de desconfiança na extrapolação linear.
+3. **Como formular a Regra da Cadeia Multivariada matricialmente sob a convenção *denominator layout*?**
+   Para uma função intermediária $\mathbf{f}: \mathbb{R}^n \to \mathbb{R}^m$ e perda escalar $g: \mathbb{R}^m \to \mathbb{R}$, o gradiente é dado pelo produto matriz-vetor $\nabla_{\mathbf{x}} (g \circ \mathbf{f}) = J_{\mathbf{f}}(\mathbf{x})\, \nabla_{\mathbf{u}} g$, onde $J_{\mathbf{f}} \in \mathbb{R}^{n \times m}$ possui as derivadas parciais nas colunas. Para composições gerais, os Jacobianos multiplicam-se diretamente: $J_{\mathbf{g} \circ \mathbf{f}} = J_{\mathbf{f}} J_{\mathbf{g}}$.
+4. **Como deduzir analiticamente a propagação retrógrada de gradientes (*backpropagation*) em uma rede neural multicamadas (MLP)?**
+   Define-se o vetor de sensibilidade pré-sináptica $\boldsymbol{\delta}^{(l)} = \nabla_{\mathbf{z}^{(l)}}\mathcal{L}$. Esse vetor retrocede através da recorrência $\boldsymbol{\delta}^{(l)} = ((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}) \odot \sigma'(\mathbf{z}^{(l)})$. A partir de $\boldsymbol{\delta}^{(l)}$, os gradientes dos parâmetros resultam em fórmulas matriciais fechadas: $\nabla_{\mathbf{b}^{(l)}}\mathcal{L} = \boldsymbol{\delta}^{(l)}$ e $\nabla_{W^{(l)}}\mathcal{L} = \boldsymbol{\delta}^{(l)} (\mathbf{a}^{(l-1)})^T$ (produto externo erro $\times$ ativação).
+5. **Qual é o raio de fidelidade das aproximações lineares e quadráticas em um modelo neural real no California Housing?**
+   No California Housing com MLP de 2 camadas, o modelo linear permanece fiel apenas para perturbações muito pequenas ($\|\mathbf{h}\| < 0{,}1$), enquanto o modelo quadrático estende essa precisão até $\|\mathbf{h}\| \approx 0{,}6$. Em escala log-log, os erros decaem com inclinações estritas de 2 ($T_1$) e 3 ($T_2$), confirmando experimentalmente as previsões assintóticas dos restos de Lagrange.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as Cinco Perguntas Fundamentais
+
+::: {.fragment}
+**1.** $T_1 = f + \nabla f^T\mathbf{h}$ possui erro $\mathcal{O}(\|\mathbf{h}\|^2)$; $T_2 = T_1 + \frac{1}{2}\mathbf{h}^T H \mathbf{h}$ possui erro $\mathcal{O}(\|\mathbf{h}\|^3)$.
+:::
+
+::: {.fragment}
+**2.** $\mathbf{h}^\star = -\alpha \nabla f(\mathbf{x}_0)$ minimiza a aproximação linear $T_1$ sob a penalidade de confiança proximal $\frac{1}{2\alpha}\|\mathbf{h}\|_2^2$.
+:::
+
+::: {.fragment}
+**3.** No *denominator layout*, $\nabla_{\mathbf{x}}(g \circ \mathbf{f}) = J_{\mathbf{f}}(\mathbf{x})\, \nabla_{\mathbf{u}} g$ ($(n \times m) \times (m \times 1) = n \times 1$).
+:::
+
+::: {.fragment}
+**4.** Sensibilidade retrógrada $\boldsymbol{\delta}^{(l)} = ((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}) \odot \sigma'(\mathbf{z}^{(l)})$; gradiente matricial $\nabla_{W^{(l)}}\mathcal{L} = \boldsymbol{\delta}^{(l)}(\mathbf{a}^{(l-1)})^T$.
+:::
+
+::: {.fragment}
+**5.** Experimento confirma inclinações 2 e 3 em log-log no California Housing; o raio de fidelidade linear é limitado a passos curtos ($\|\mathbf{h}\| < 0{,}1$).
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Que Fica em Aberto e Limitações
+
+Nesta aula, desvendamos o maquinário do cálculo multivariado analítico: derivamos passo a passo as equações do *backpropagation* e provamos a validade das aproximações de Taylor. Contudo, dois grandes obstáculos conceituais e práticos desafiam a escalabilidade desse paradigma:
+
+### 1. O Custo Proibitivo da Derivação Manual em Grafos Complexos
+Nossa dedução de $\nabla_{W^{(l)}}\mathcal{L}$ foi realizada para uma rede estritamente sequencial (*feedforward*). Mas o que acontece quando a arquitetura possui conexões residuais (*skip connections* como nas ResNets), ramificações paralelas (como nos módulos Inception), transformações de atenção multi-cabeça (como nos Transformers) ou centenas de operações com controle de fluxo?
+Derivar analiticamente a regra da cadeia no papel para cada nova topologia é uma receita certa para erros humanos de álgebra linear e exige meses de trabalho braçal.
+
+### 2. A Inviabilidade da Diferenciação Simbólica (*Expression Swell*)
+Por que não deixamos um software de álgebra computacional (como SymPy ou Mathematica) calcular as derivadas analíticas simbolicamente?
+A resposta é o fenômeno do **inchaço de expressões**: ao aplicar a regra do produto e da cadeia simbolicamente de forma ingênua em uma rede profunda, o número de termos da expressão derivada cresce **exponencialmente** com a profundidade da rede, esgotando a memória RAM do computador antes mesmo de terminar o cálculo!
+
+::: {.callout-tip}
+## Ponte para a Aula 10
+Na próxima aula (**Aula 10: Grafos de Computação e Diferenciação Automática**), resolveremos definitivamente esses dois dilemas:
+1. Formalizaremos os programas de computador como **Grafos Acíclicos Direcionados (DAGs)**.
+2. Descobriremos a **Diferenciação Automática** (*Autodiff*): a tecnologia revolucionária que não aproxima derivadas (como as diferenças finitas) nem expande fórmulas gigantescas (como a diferenciação simbólica), mas calcula derivadas analíticas com precisão de máquina no tempo de execução!
+3. Provaremos o célebre **Teorema de Baur-Strassen**, demonstrando por que o modo reverso (*reverse-mode AD*) calcula o gradiente em relação a bilhões de parâmetros com um custo computacional não superior a um pequeno múltiplo constante da passagem direta!
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Que Fica em Aberto: Os Limites da Derivação Manual
+
+::: {.callout-important}
+## Dois Grandes Dilemas
+- **Arquiteturas Complexas:** ResNets, Transformers e grafos com ramificações tornam a derivação manual no papel impossível de manter.
+- **Inchaço de Expressões (Simbólico):** Diferenciação algébrica ingênua expande expressões com custo exponencial $O(2^L)$ (*expression swell*).
+:::
+
+::: {.fragment .callout-tip}
+## Ponte para a Aula 10
+*Grafos de Computação e Diferenciação Automática*:
+- Como PyTorch e JAX diferenciam código arbitrário automaticamente?
+- Modos Forward vs. Reverse e o Teorema de Baur-Strassen!
+- Implementação de um mini-autograd do zero em Python!
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+:::
+

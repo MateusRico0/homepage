@@ -1,8 +1,8 @@
 ---
-title: "Aula 7: O Mundo Não Linear — Autoencoders e VAEs"
+title: "Aula 7: Autoencoders Profundos e o Autoencoder Variacional"
 subtitle: "Aprendizado Não Supervisionado"
 author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
-date: "2026-09-30"
+date: "2026-10-07"
 lang: pt-BR
 format:
   html:
@@ -55,20 +55,27 @@ execute:
 #| fig-align: center
 
 # =====================================================================
-# SETUP GLOBAL
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks.
+# Os treinos ficam em cache (joblib) em aula07/_cache/: o primeiro render
+# leva ~2 min; os seguintes, segundos, enquanto o código cacheado não mudar.
 # =====================================================================
 from huggingface_hub.utils import logging as hf_logging
 hf_logging.set_verbosity_error()
 from datasets import disable_progress_bar, load_dataset
 disable_progress_bar()
 
+import os
+from IPython.display import Markdown
+from joblib import Memory
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
-import torch.optim as optim
+from scipy.stats import norm
 from sklearn.preprocessing import StandardScaler
-import pandas as pd
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import NearestNeighbors
 
 plt.style.use('seaborn-v0_8-whitegrid')
 plt.rcParams.update({
@@ -80,412 +87,2557 @@ plt.rcParams.update({
     "legend.framealpha": 0.9,
 })
 
-rng = np.random.default_rng(20260930)
+rng = np.random.default_rng(20261007)
+torch.manual_seed(0)
 
-# Paleta visual
-COR_AZUL    = "#1B365D"
-COR_LARANJA = "#D9531E"
-COR_VERM    = "#C0392B"
-COR_VERDE   = "#27AE60"
-COR_CINZA   = "#7F8C8D"
+# --- Paleta visual consistente com o curso --------------------------
+COR_AZUL    = "#1B365D"  # Azul institucional
+COR_LARANJA = "#D9531E"  # Laranja de contraste
+COR_VERM    = "#C0392B"  # Vermelho de erro/destaque
+COR_VERDE   = "#27AE60"  # Verde de acerto/probabilidade
+COR_CINZA   = "#7F8C8D"  # Cinza de apoio
+
 
 def brl(x, nd=2):
+    """Número em notação decimal brasileira (vírgula)."""
     return f"{x:.{nd}f}".replace(".", ",")
 
-# Datasets
-# 1. Breast Cancer (Fio de compressão)
-ds_bc = load_dataset("scikit-learn/breast-cancer-wisconsin")["train"].to_pandas()
-ds_bc = ds_bc.drop(columns=["id", "Unnamed: 32"])
-X_bc = ds_bc.drop(columns=["diagnosis"]).values
-scaler_bc = StandardScaler()
-X_bc_scaled = scaler_bc.fit_transform(X_bc)
 
-# 2. MNIST (Fio de geração)
-ds_mnist = load_dataset("ylecun/mnist", split="train").with_format("numpy")
-X_mnist = np.asarray(ds_mnist["image"], dtype=np.float32).reshape(-1, 784) / 255.0
-# Subamostra para agilizar a aula
-X_mnist_sub = X_mnist[rng.choice(X_mnist.shape[0], 10000, replace=False)]
+def bm(x, nd=2):
+    """Número com vírgula decimal pronto para dentro de LaTeX ({,})."""
+    return brl(x, nd).replace(",", "{,}")
+
+
+def mm(tex):
+    """Expressão LaTeX inline gerada inteira em Python: a saída inline do
+    Quarto escapa vírgulas e pontos dentro de $...$ (0,5 vira 0\\,5)."""
+    return Markdown(f"${tex}$")
+
+
+def milhar(n):
+    """Inteiro com ponto como separador de milhar."""
+    return f"{int(n):,}".replace(",", ".")
+
+
+def pct(x, nd=1):
+    """Fração -> porcentagem com vírgula decimal."""
+    return brl(100 * x, nd)
+
+
+def mlp(sizes, act=nn.Tanh, last_act=None):
+    """Perceptron multicamadas: afim -> ativação -> ... -> afim (-> last_act)."""
+    camadas = []
+    for i in range(len(sizes) - 1):
+        camadas.append(nn.Linear(sizes[i], sizes[i + 1]))
+        if i < len(sizes) - 2:
+            camadas.append(act())
+    if last_act is not None:
+        camadas.append(last_act())
+    return nn.Sequential(*camadas)
+
+
+def treina_cheio(model, X, passos, lr):
+    """Treino em lote cheio (dataset pequeno), erro quadrático médio."""
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    Xt = torch.tensor(X, dtype=torch.float32)
+    for _ in range(passos):
+        opt.zero_grad()
+        perda = ((model(Xt) - Xt) ** 2).mean()
+        perda.backward()
+        opt.step()
+    return model
+
+
+def aplica(f, X):
+    with torch.no_grad():
+        return f(torch.as_tensor(X, dtype=torch.float32)).numpy()
+
+
+def mse(A, B):
+    return float(np.mean((A - B) ** 2))
+
+
+# Cache em disco: cada função decorada com @memoria.cache só reexecuta se o
+# próprio código ou os argumentos (inclusive os arrays de dados) mudarem.
+# ATENÇÃO: mudanças FORA dessas funções (mlp, treina_cheio, classes AE/VAE)
+# não invalidam o cache; nesse caso, apague a pasta aula07/_cache/.
+memoria = Memory(os.path.abspath("_cache"), verbose=0)
+
+
+def pesos(model):
+    return {k: v.detach().clone() for k, v in model.state_dict().items()}
+
+
+def com_pesos(model, w):
+    model.load_state_dict(w)
+    return model
+
+
+# =====================================================================
+# 1. ARCO SINTÉTICO (isola o ponto geométrico), D = 2, M = 1
+# =====================================================================
+n_arc = 400
+theta = rng.uniform(0, np.pi, n_arc)
+X_arc = np.c_[np.cos(theta), np.sin(theta)] + 0.04 * rng.standard_normal((n_arc, 2))
+X_arc = X_arc - X_arc.mean(0)
+
+pca_arc = PCA(1).fit(X_arc)
+R_arc_pca = pca_arc.inverse_transform(pca_arc.transform(X_arc))
+
+
+@memoria.cache
+def treina_arco(X):
+    torch.manual_seed(0)
+    raso = treina_cheio(nn.Sequential(nn.Linear(2, 1), nn.Tanh(), nn.Linear(1, 2)),
+                        X, passos=3000, lr=1e-2)
+    torch.manual_seed(0)
+    prof = treina_cheio(nn.Sequential(mlp([2, 32, 32, 1]), mlp([1, 32, 32, 2])),
+                        X, passos=4000, lr=3e-3)
+    return pesos(raso), pesos(prof)
+
+
+w_raso_arc, w_prof_arc = treina_arco(X_arc)
+ae_raso_arc = com_pesos(nn.Sequential(nn.Linear(2, 1), nn.Tanh(), nn.Linear(1, 2)), w_raso_arc)
+enc_arc, dec_arc = mlp([2, 32, 32, 1]), mlp([1, 32, 32, 2])
+ae_prof_arc = com_pesos(nn.Sequential(enc_arc, dec_arc), w_prof_arc)
+
+R_arc_raso = aplica(ae_raso_arc, X_arc)
+R_arc_prof = aplica(ae_prof_arc, X_arc)
+err_arc_pca = np.mean(np.sum((X_arc - R_arc_pca) ** 2, 1))
+err_arc_raso = np.mean(np.sum((X_arc - R_arc_raso) ** 2, 1))
+err_arc_prof = np.mean(np.sum((X_arc - R_arc_prof) ** 2, 1))
+
+# Conjunto de TODAS as reconstruções possíveis de cada modelo (imagem do decoder)
+_t = pca_arc.transform(X_arc)[:, 0]
+curva_pca = pca_arc.inverse_transform(np.linspace(_t.min(), _t.max(), 200)[:, None])
+_h = aplica(lambda x: ae_raso_arc[1](ae_raso_arc[0](x)), X_arc)[:, 0]
+curva_raso = aplica(ae_raso_arc[2], np.linspace(_h.min(), _h.max(), 200)[:, None])
+_z = aplica(enc_arc, X_arc)[:, 0]
+curva_prof = aplica(dec_arc, np.linspace(_z.min(), _z.max(), 400)[:, None])
+
+# =====================================================================
+# 2. BREAST CANCER WISCONSIN (30 atributos), M = 2, treino/teste 80/20
+# =====================================================================
+ds = load_dataset("scikit-learn/breast-cancer-wisconsin")["train"].to_pandas()
+ds = ds.drop(columns=["id", "Unnamed: 32"])
+y_bc = (ds["diagnosis"] == "M").values.astype(int)  # só para AVALIAR
+X_bc = ds.drop(columns=["diagnosis"]).values
+perm = rng.permutation(len(X_bc))
+n_tr_bc = int(0.8 * len(X_bc))
+tr, te = perm[:n_tr_bc], perm[n_tr_bc:]
+sc_bc = StandardScaler().fit(X_bc[tr])
+Xtr_bc, Xte_bc = sc_bc.transform(X_bc[tr]), sc_bc.transform(X_bc[te])
+n_te_bc = len(te)
+
+pca_bc = PCA(2).fit(Xtr_bc)
+bc_pca_tr = mse(Xtr_bc, pca_bc.inverse_transform(pca_bc.transform(Xtr_bc)))
+bc_pca_te = mse(Xte_bc, pca_bc.inverse_transform(pca_bc.transform(Xte_bc)))
+
+
+@memoria.cache
+def treina_bc(X):
+    torch.manual_seed(0)
+    raso = treina_cheio(nn.Sequential(nn.Linear(30, 2), nn.Tanh(), nn.Linear(2, 30)),
+                        X, passos=4000, lr=1e-2)
+    torch.manual_seed(0)
+    prof = treina_cheio(nn.Sequential(mlp([30, 64, 32, 2]), mlp([2, 32, 64, 30])),
+                        X, passos=4000, lr=3e-3)
+    return pesos(raso), pesos(prof)
+
+
+w_raso_bc, w_prof_bc = treina_bc(Xtr_bc)
+ae_raso_bc = com_pesos(nn.Sequential(nn.Linear(30, 2), nn.Tanh(), nn.Linear(2, 30)), w_raso_bc)
+bc_raso_tr, bc_raso_te = mse(Xtr_bc, aplica(ae_raso_bc, Xtr_bc)), mse(Xte_bc, aplica(ae_raso_bc, Xte_bc))
+
+enc_bc, dec_bc = mlp([30, 64, 32, 2]), mlp([2, 32, 64, 30])
+ae_prof_bc = com_pesos(nn.Sequential(enc_bc, dec_bc), w_prof_bc)
+bc_prof_tr, bc_prof_te = mse(Xtr_bc, aplica(ae_prof_bc, Xtr_bc)), mse(Xte_bc, aplica(ae_prof_bc, Xte_bc))
+n_par_bc = sum(p.numel() for p in ae_prof_bc.parameters())
+
+Z_bc_pca = pca_bc.transform(sc_bc.transform(X_bc))
+Z_bc_prof = aplica(enc_bc, sc_bc.transform(X_bc))
+acc_bc = {}
+for nome, Z in [("pca", Z_bc_pca), ("prof", Z_bc_prof)]:
+    clf = LogisticRegression().fit(Z[tr], y_bc[tr])
+    acc_bc[nome] = clf.score(Z[te], y_bc[te])
+dif_pac_bc = int(round(abs(acc_bc["prof"] - acc_bc["pca"]) * n_te_bc))
+
+# =====================================================================
+# 3. MNIST: 20 000 imagens de treino, 2 000 de teste, M = 2
+# =====================================================================
+@memoria.cache
+def carrega_mnist():
+    d_tr = load_dataset("ylecun/mnist", split="train").with_format("numpy")
+    d_te = load_dataset("ylecun/mnist", split="test").with_format("numpy")
+    return (np.asarray(d_tr["image"], dtype=np.uint8).reshape(-1, 784), np.asarray(d_tr["label"]),
+            np.asarray(d_te["image"], dtype=np.uint8).reshape(-1, 784), np.asarray(d_te["label"]))
+
+
+Xm, ym, Xmt, ymt = carrega_mnist()
+Xm = Xm.astype(np.float32) / 255.0
+Xmt = Xmt.astype(np.float32) / 255.0
+_s = rng.choice(len(Xm), 20000, replace=False)
+Xm, ym = Xm[_s], ym[_s]
+_s = rng.choice(len(Xmt), 2000, replace=False)
+Xmt, ymt = Xmt[_s], ymt[_s]
+N_mn, N_mnt = len(Xm), len(Xmt)
+
+pca_mn = PCA(2).fit(Xm)
+R_mn_pca = pca_mn.inverse_transform(pca_mn.transform(Xmt))
+mn_pca_te = mse(Xmt, R_mn_pca)
+
+
+class AE(nn.Module):
+    def __init__(self, M=2):
+        super().__init__()
+        self.enc = mlp([784, 512, 256, M], nn.ReLU)
+        self.dec = mlp([M, 256, 512, 784], nn.ReLU, nn.Sigmoid)
+
+    def forward(self, x):
+        return self.dec(self.enc(x))
+
+
+class VAE(nn.Module):
+    def __init__(self, M=2):
+        super().__init__()
+        self.corpo = nn.Sequential(mlp([784, 512, 256], nn.ReLU), nn.ReLU())
+        self.mu = nn.Linear(256, M)       # média: saída linear
+        self.logvar = nn.Linear(256, M)   # ln sigma^2: saída linear (sigma^2 = exp)
+        self.dec = mlp([M, 256, 512, 784], nn.ReLU, nn.Sigmoid)
+
+    def encode(self, x):
+        h = self.corpo(x)
+        return self.mu(h), self.logvar(h)
+
+
+SIG2 = 0.1  # variância do ruído do decoder, p(x|z) = N(g(z), SIG2 * I)
+
+
+@memoria.cache
+def treina_mnist(X, tipo, beta=1.0, epocas=30, sig2=SIG2):
+    torch.manual_seed(0)
+    model = AE() if tipo == "ae" else VAE()
+    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+    Xt = torch.tensor(X)
+    g = torch.Generator().manual_seed(1)
+    for _ in range(epocas):
+        ordem = torch.randperm(len(Xt), generator=g)
+        for i in range(0, len(Xt), 128):
+            xb = Xt[ordem[i:i + 128]]
+            opt.zero_grad()
+            if tipo == "ae":
+                perda = ((model(xb) - xb) ** 2).sum(1).mean()
+            else:
+                mu, lv = model.encode(xb)
+                z = mu + torch.exp(0.5 * lv) * torch.randn_like(mu)   # reparametrização
+                rec = ((model.dec(z) - xb) ** 2).sum(1) / (2 * sig2)
+                kl = 0.5 * (mu ** 2 + lv.exp() - 1 - lv).sum(1)
+                perda = (rec + beta * kl).mean()
+            perda.backward()
+            opt.step()
+    return pesos(model)
+
+
+ae_mn = com_pesos(AE(), treina_mnist(Xm, "ae"))
+with torch.no_grad():
+    R_mn_ae = ae_mn(torch.tensor(Xmt)).numpy()
+    Z_ae = ae_mn.enc(torch.tensor(Xm)).numpy()
+mn_ae_te = mse(Xmt, R_mn_ae)
+ae_lo, ae_hi = np.percentile(Z_ae, 1, 0), np.percentile(Z_ae, 99, 0)
+
+BETAS = [0.0, 1.0, 20.0]
+vaes, vae_stats, Mu_b = {}, {}, {}
+for b in BETAS:
+    v = com_pesos(VAE(), treina_mnist(Xm, "vae", beta=b))
+    vaes[b] = v
+    with torch.no_grad():
+        mu, lv = v.encode(torch.tensor(Xmt))
+        R = v.dec(mu).numpy()
+        Mu_b[b] = v.encode(torch.tensor(Xm))[0].numpy()
+        vae_stats[b] = dict(
+            mse=mse(Xmt, R),
+            kl=0.5 * (mu ** 2 + lv.exp() - 1 - lv).sum(1).mean().item(),
+            sig=torch.exp(0.5 * lv).mean().item(),
+            mu_dp=float(mu.std(0).mean()),
+        )
+vae = vaes[1.0]
+Mu = Mu_b[1.0]
+
+# --- Gap generativo: amostras longe de qualquer código de treino ---------
+def frac_longe(Z, S, fator=10):
+    d_viz = NearestNeighbors(n_neighbors=2).fit(Z).kneighbors(Z)[0][:, 1]
+    d = NearestNeighbors(n_neighbors=1).fit(Z).kneighbors(S)[0][:, 0] / np.median(d_viz)
+    return float(np.mean(d > fator))
+
+S_ae = rng.multivariate_normal(Z_ae.mean(0), np.cov(Z_ae.T), 2000)   # Gaussiana ajustada aos códigos
+S_vae = rng.standard_normal((2000, 2))                                # priori do VAE
+longe_ae, longe_vae = frac_longe(Z_ae, S_ae), frac_longe(Mu, S_vae)
+with torch.no_grad():
+    amostras_ae = ae_mn.dec(torch.tensor(S_ae[:16], dtype=torch.float32)).numpy()
+    amostras_vae = vae.dec(torch.tensor(S_vae[:16], dtype=torch.float32)).numpy()
+
+# --- Interpolação de um "1" até um "7" (teste) --------------------------
+i1, i7 = int(np.where(ymt == 1)[0][0]), int(np.where(ymt == 7)[0][0])
+t_int = np.linspace(0, 1, 10)[:, None]
+with torch.no_grad():
+    za = ae_mn.enc(torch.tensor(Xmt[[i1, i7]])).numpy()
+    zv = vae.encode(torch.tensor(Xmt[[i1, i7]]))[0].numpy()
+    interp_ae = ae_mn.dec(torch.tensor((1 - t_int) * za[0] + t_int * za[1], dtype=torch.float32)).numpy()
+    interp_vae = vae.dec(torch.tensor((1 - t_int) * zv[0] + t_int * zv[1], dtype=torch.float32)).numpy()
+
+# --- Grade decodificada pelo VAE nos quantis da priori -------------------
+q_grade = norm.ppf(np.linspace(0.05, 0.95, 15))
+Zg = np.array([[a, b] for b in q_grade[::-1] for a in q_grade], dtype=np.float32)
+with torch.no_grad():
+    grade_vae = vae.dec(torch.tensor(Zg)).numpy()
+
+# --- ln p(x) por amostragem por importância vs. ELBO (300 imagens de teste) ---
+K_is, n_is = 1000, 300
+with torch.no_grad():
+    x = torch.tensor(Xmt[:n_is])
+    mu, lv = vae.encode(x)
+    dp = torch.exp(0.5 * lv)
+    eps = torch.randn(K_is, *mu.shape, generator=torch.Generator().manual_seed(2))
+    lw = []
+    for e in eps.split(100):          # em blocos: K_is x n_is x 784 inteiro ocuparia ~1 GB
+        z = mu + dp * e
+        xh = vae.dec(z.reshape(-1, 2)).reshape(len(e), n_is, 784)
+        lpx_z = -((xh - x) ** 2).sum(-1) / (2 * SIG2) - 0.5 * 784 * np.log(2 * np.pi * SIG2)
+        lpz = -0.5 * (z ** 2).sum(-1) - np.log(2 * np.pi)
+        lq = -0.5 * (e ** 2).sum(-1) - torch.log(dp).sum(-1) - np.log(2 * np.pi)
+        lw.append(lpx_z + lpz - lq)
+    lw = torch.cat(lw)
+    elbo_te = lw.mean(0).mean().item()
+    lnp_is = (torch.logsumexp(lw, 0) - np.log(K_is)).mean().item()
+folga = lnp_is - elbo_te
+
+# --- Variância dos dois estimadores de gradiente (uma imagem de teste) ---
+n_rep = 10000
+x0 = torch.tensor(Xmt[:1])
+with torch.no_grad():
+    mu0, lv0 = vae.encode(x0)
+    dp0 = torch.exp(0.5 * lv0)
+torch.manual_seed(3)
+# Uma linha por repetição, todas numa passada: f_i só depende de m_i, então o
+# gradiente de sum(f) em relação a m dá, linha a linha, cada estimativa com L = 1.
+m = mu0.repeat(n_rep, 1).requires_grad_(True)
+e = torch.randn_like(m)
+z = m + dp0 * e
+f = -((vae.dec(z) - x0) ** 2).sum(1) / (2 * SIG2)          # ln p(x|z) a menos de constante
+f.sum().backward()
+g_path = m.grad.numpy().copy()
+with torch.no_grad():
+    g_score = (f[:, None] * (z - mu0) / dp0 ** 2).numpy()
+dp_path, dp_score = g_path[:, 0].std(), g_score[:, 0].std()
+media_path, media_score = g_path[:, 0].mean(), g_score[:, 0].mean()
+ep_path, ep_score = dp_path / np.sqrt(n_rep), dp_score / np.sqrt(n_rep)
+razao_dp = dp_score / dp_path
+z_medias = abs(media_score - media_path) / np.sqrt(ep_path ** 2 + ep_score ** 2)
+
+
+def mosaico(imgs, ncol, pad=2):
+    """(n, 784) -> imagem única com ncol colunas."""
+    n = len(imgs)
+    nlin = int(np.ceil(n / ncol))
+    out = np.zeros((nlin * (28 + pad) - pad, ncol * (28 + pad) - pad))
+    for k in range(n):
+        i, j = divmod(k, ncol)
+        out[i * (28 + pad):i * (28 + pad) + 28, j * (28 + pad):j * (28 + pad) + 28] = imgs[k].reshape(28, 28)
+    return out
+
+
+idx_ex = [int(np.where(ymt == d)[0][0]) for d in range(10)]
 ```
 
 # Revisão e Introdução
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Na aula anterior, vimos que a PCA e a PPCA definem um subespaço linear onde a variância é maximizada. Provamos que um Autoencoder (AE) com ativações lineares e um gargalo de dimensão $M$ converge para o mesmo subespaço da PCA. No entanto, a natureza linear da PCA é limitante: se os dados residem em uma estrutura curva (um *manifold*), a projeção linear "achata" a geometria e perde informações essenciais.
 
-**Ideia Central:** Para capturar estruturas complexas, precisamos de não linearidade. Ao introduzir funções de ativação (como ReLU ou Sigmoide) e camadas profundas, transformamos o AE em uma ferramenta capaz de aprender representações comprimidas de variedades não lineares. Mas isso traz um novo problema: a perda da interpretabilidade geométrica e a incapacidade de gerar novos dados.
+## Revisão Cuidadosa: O Que as Aulas 5 e 6 Deixaram Prontos
 
-**Roteiro da Aula:**
-1. **Autoencoders (AE):** Como a compressão não linear funciona e a hipótese do manifold.
-2. **O Gap Generativo:** Por que AEs não servem para gerar dados (o problema do espaço latente "buracado").
-3. **Variational Autoencoders (VAE):** A transição de pontos para distribuições.
-4. **O ELBO no VAE:** Como a regularização via KL impede o colapso do espaço latente.
-5. **Reparameterization Trick:** A solução matemática para treinar VAEs via gradiente.
+Esta aula se apoia em três resultados. Vale relembrar não só o que cada um
+diz, mas por que vale, porque é exatamente o mecanismo de cada um que
+deixa de funcionar hoje.
 
-**Problema Motivador:** Imagine que queremos comprimir as imagens do MNIST. Um AE linear (PCA) consegue reduzir a dimensão, mas se tentarmos interpolar entre dois dígitos no espaço latente, o resultado será uma mancha borrada. Um VAE, por outro lado, garante que o espaço latente seja contínuo, permitindo que "naveguemos" suavemente entre as formas dos dígitos.
-:::
+**1. Autoencoder linear $\equiv$ PCA (Aula 6).** Um autoencoder é uma
+rede $D$-$M$-$D$ treinada para reproduzir a própria entrada, minimizando
+$E(\mathbf{w})=\tfrac12\sum_n\|\mathbf{y}(\mathbf{x}_n,\mathbf{w})-\mathbf{x}_n\|^2$.
+Com ativações lineares, a rede inteira calcula
+$\mathbf{x}\mapsto\mathbf{A}\mathbf{x}$, com $\mathbf{A}=\mathbf{W}\mathbf{V}$
+de posto no máximo $M$. Assim, toda reconstrução mora num subespaço de
+dimensão $\le M$, e o melhor subespaço possível, no sentido do erro
+quadrático, é o subespaço principal (Mecanismos I e II da Aula 6). Os
+pesos podem ser qualquer base desse subespaço (a invariância por
+$\mathbf{G}$). Na mesma aula ficou registrada uma ressalva do DLFC
+(§19.1.1, p. 565, tradução livre): *"mesmo com unidades ocultas não
+lineares, a solução de erro mínimo é novamente dada pela projeção sobre
+o subespaço dos componentes principais (Bourlard e Kamp, 1988)"*. Trocar
+a ativação, sozinho, não resolve. Hoje veremos onde a não linearidade
+precisa estar.
 
-::: {.content-visible when-format="revealjs"}
-## Revisão: O Mundo Linear
+**2. PPCA: um modelo gerador com posterior fechada (Aula 6).** A PPCA
+conta uma história de como cada ponto nasce: sorteia-se
+$\mathbf{z}\sim\mathcal{N}(\mathbf{0},\mathbf{I})$ em $\mathbb{R}^M$ e
+faz-se $\mathbf{x}=\mathbf{W}\mathbf{z}+\boldsymbol\mu+\boldsymbol\epsilon$,
+com $\boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\sigma^2\mathbf{I})$.
+Como tudo é linear e Gaussiano, tudo também tem forma fechada. A marginal é
+$p(\mathbf{x})=\mathcal{N}(\boldsymbol\mu,\mathbf{C})$, com
+$\mathbf{C}=\mathbf{W}\mathbf{W}^T+\sigma^2\mathbf{I}$. A posterior,
+pelo resultado para modelos linear-Gaussianos (PRML §12.2, eq. 12.42, p. 573), é
 
-- **PCA $\equiv$ PPCA $\equiv$ Linear AE.**
-- Todos buscam o mesmo subespaço de dimensão $M$.
-- **Limitação:** Não capturam curvatura. Se o dado é um "S", a PCA vê apenas a projeção plana.
+$$
+p(\mathbf{z}\mid\mathbf{x})=\mathcal{N}\!\left(\mathbf{z}\;\middle|\;\mathbf{B}^{-1}\mathbf{W}^T(\mathbf{x}-\boldsymbol\mu),\;\sigma^2\mathbf{B}^{-1}\right),
+\qquad \mathbf{B}=\mathbf{W}^T\mathbf{W}+\sigma^2\mathbf{I}_M .
+$$
 
-## Ideia Central: Além da Linearidade
+(O PRML chama $\mathbf{B}$ de $\mathbf{M}$. Trocamos a letra porque $M$
+é a dimensão latente.) O PRML observa, na mesma página (tradução livre):
+*"a média da posterior depende de $\mathbf{x}$, enquanto a covariância da
+posterior não depende"*. Em outras palavras, a PPCA já tem um "encoder"
+exato: uma função linear de $\mathbf{x}$, que sai do próprio modelo por
+Bayes, sem treino adicional.
 
-- **Objetivo:** Aprender a geometria intrínseca dos dados (Manifold Learning).
-- **Ferramenta:** Redes Neurais Profundas $\to$ Não linearidade $\to$ Flexibilidade.
-- **Desafio:** Como garantir que o espaço comprimido seja útil para *gerar* novos dados?
+**3. A decomposição do ELBO (Aula 5).** Para qualquer distribuição
+normalizada $q(\mathbf{H})$ sobre as variáveis não observadas,
+
+$$
+\ln p(\mathbf{X})=\mathcal{L}(q)+\mathrm{KL}\big(q\,\|\,p(\mathbf{H}\mid\mathbf{X})\big),
+\qquad
+\mathcal{L}(q)=\int q(\mathbf{H})\ln\frac{p(\mathbf{X},\mathbf{H})}{q(\mathbf{H})}\,\mathrm{d}\mathbf{H}.
+$$
+
+A identidade vem de escrever
+$\ln p(\mathbf{X})=\ln p(\mathbf{X},\mathbf{H})-\ln p(\mathbf{H}\mid\mathbf{X})$,
+somar e subtrair $\ln q(\mathbf{H})$ e integrar contra $q$. Como
+$\mathrm{KL}\ge0$, o ELBO é cota inferior de $\ln p(\mathbf{X})$, com
+igualdade se e só se $q$ é a posterior exata. O EM (Aula 4) é a
+alternância que se apoia nisso. O passo E faz $q$ igual à posterior, e a
+folga zera. O passo M maximiza $\mathcal{L}$ nos parâmetros. No GMM, o
+passo E são as responsabilidades. Na PPCA, é a Gaussiana acima. Nos dois
+casos, o passo E foi possível porque a posterior tinha forma fechada.
+
+## Ideia Central
+
+A aula inteira é uma única troca: **substituir a transformação linear
+$\mathbf{W}\mathbf{z}+\boldsymbol\mu$ por uma rede neural
+$\mathbf{g}(\mathbf{z},\mathbf{w})$**. Essa troca tem duas consequências,
+uma desejada e outra que precisaremos contornar.
+
+- **A desejada:** o conjunto de reconstruções possíveis deixa de ser um
+  plano e pode curvar-se para acompanhar dados que vivem numa variedade
+  curva. É o *deep autoencoder*, uma PCA não linear.
+- **A que precisa ser contornada:** com $\mathbf{g}$ não linear, a
+  marginal $p(\mathbf{x})$ e a posterior $p(\mathbf{z}\mid\mathbf{x})$
+  perdem a forma fechada, e o passo E exato do EM deixa de existir. O
+  ELBO da Aula 5 deixa de ser uma ferramenta de análise e passa a ser o
+  próprio objetivo de treino, com $q$ dada por uma segunda rede. É o
+  *Variational Autoencoder* (VAE).
 
 ## Roteiro da Aula
 
-1. **Autoencoders (AE):** Compressão e Manifolds.
-2. **O Gap Generativo:** Por que AEs falham ao gerar?
-3. **VAEs:** De pontos a distribuições.
-4. **ELBO:** Equilíbrio entre Fidelidade e Regularização.
-5. **Reparameterization Trick:** O "pulo do gato" do gradiente.
+1. **Onde a não linearidade precisa estar para que a reconstrução se
+   curve, e quando essa flexibilidade compensa?** Veremos que o AE raso
+   não sai do plano por um motivo geométrico simples, e que o *deep AE*
+   ganha no MNIST mas sobreajusta no Breast Cancer.
+2. **Por que um bom compressor não é um bom gerador?** O espaço latente
+   do AE não tem escala, forma nem densidade definidas, e o decoder não
+   é controlado fora dos códigos de treino.
+3. **Como o VAE estende a PPCA quando a posterior deixa de ter forma
+   fechada?** Mesmo modelo gerador com $\mathbf{g}$ não linear, encoder
+   como posterior aproximada (inferência amortizada) e ELBO como
+   objetivo, decomposto em reconstrução menos KL.
+4. **Como se calcula o gradiente de uma esperança sob uma distribuição
+   que depende dos próprios parâmetros?** Pelo *reparameterization
+   trick*, comparado ao estimador *score function*, com a variância
+   medida.
 
 ## Problema Motivador
 
-**Pergunta:** Se eu comprimir um dígito '1' e um '7' em um espaço latente, o que existe exatamente no meio deles?
+Cada imagem do MNIST tem $28\times28=784$ pixels. Queremos guardar
+**dois números** por imagem e, a partir deles, reconstruir os $784$
+pixels. A figura compara, em $10$ imagens de teste (uma por dígito), a
+reconstrução da PCA com $M=2$ e a de um autoencoder profundo com o mesmo
+gargalo $M=2$, treinado em `{python} milhar(N_mn)`
+imagens.
 
-- **AE Tradicional:** Provavelmente ruído ou um vazio.
-- **VAE:** Um dígito que parece a transição suave de '1' para '7'.
+O erro quadrático médio por pixel, nas `{python} milhar(N_mnt)`
+imagens de teste, é `{python} brl(mn_pca_te, 4)` para a PCA e
+`{python} brl(mn_ae_te, 4)` para o autoencoder profundo. Com dois
+números, a PCA produz borrões em que só se distinguem "algo vertical" e
+"algo redondo". O autoencoder já reconstrói dígitos reconhecíveis na
+maioria dos casos. Os dois guardam a mesma quantidade de informação, e a
+diferença está na forma da superfície sobre a qual as reconstruções podem
+cair.
+
+Agora uma segunda pergunta, que não é sobre comprimir: se sortearmos dois
+números quaisquer e os passarmos pelo decoder, sai um dígito? Responder
+essa pergunta ocupa a segunda metade da aula.
+
 :::
 
-::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+::: {.content-visible when-format="revealjs"}
+
+## Da Aula 6: O Que Já Temos
+
+::: {.fragment}
+**Autoencoder linear $\equiv$ PCA.** Rede $D$-$M$-$D$ linear calcula
+$\mathbf{A}\mathbf{x}$, $\mathrm{posto}(\mathbf{A})\le M$ $\Rightarrow$
+reconstruções num subespaço de dim. $\le M$ $\Rightarrow$ o melhor é o
+**subespaço principal**.
+:::
+
+::: {.fragment .callout-warning}
+DLFC §19.1.1, p. 565 (tradução livre): *"mesmo com unidades ocultas não
+lineares, a solução de erro mínimo é novamente dada pela projeção sobre
+o subespaço dos componentes principais"*. Trocar a ativação não basta.
+:::
+
+::: {.fragment}
+**PPCA:** $\mathbf{z}\sim\mathcal{N}(\mathbf{0},\mathbf{I})$,
+$\mathbf{x}=\mathbf{W}\mathbf{z}+\boldsymbol\mu+\boldsymbol\epsilon$,
+$\boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\sigma^2\mathbf{I})$.
+Tudo linear-Gaussiano $\Rightarrow$ posterior fechada (PRML eq. 12.42):
+$$
+p(\mathbf{z}\mid\mathbf{x})=\mathcal{N}\!\left(\mathbf{B}^{-1}\mathbf{W}^T(\mathbf{x}-\boldsymbol\mu),\;\sigma^2\mathbf{B}^{-1}\right),
+\quad \mathbf{B}=\mathbf{W}^T\mathbf{W}+\sigma^2\mathbf{I}_M.
+$$
+- Um "encoder" exato, **linear** em $\mathbf{x}$, saído de Bayes; covariância não depende de $\mathbf{x}$.
+:::
+
+## Da Aula 5: O ELBO
+
+::: {.fragment}
+Para **qualquer** $q(\mathbf{H})$ normalizada:
+$$
+\ln p(\mathbf{X})=\mathcal{L}(q)+\mathrm{KL}\big(q\,\|\,p(\mathbf{H}\mid\mathbf{X})\big),
+\qquad
+\mathcal{L}(q)=\int q\ln\frac{p(\mathbf{X},\mathbf{H})}{q}\,\mathrm{d}\mathbf{H}.
+$$
+
+- Origem: $\ln p(\mathbf{X})=\ln p(\mathbf{X},\mathbf{H})-\ln p(\mathbf{H}\mid\mathbf{X})$; $\pm\ln q$; integrar contra $q$.
+- $\mathrm{KL}\ge0$ $\Rightarrow$ $\mathcal{L}\le\ln p(\mathbf{X})$, igualdade sse $q=$ posterior.
+:::
+
+::: {.fragment}
+- **EM:** (1) passo E faz $q=$ posterior (folga zero); (2)  passo M maximiza $\mathcal{L}$.
+- GMM: responsabilidades. PPCA: a Gaussiana acima.
+:::
+
+::: {.fragment .callout-important}
+Nos dois casos o passo E só existiu porque a **posterior tinha forma fechada**.
+:::
+
+## Ideia Central e Roteiro
+
+::: {.fragment}
+**Uma única troca:** $\mathbf{W}\mathbf{z}+\boldsymbol\mu\;\longrightarrow\;\mathbf{g}(\mathbf{z},\mathbf{w})$ (rede neural).
+
+- **Desejada:** reconstruções numa superfície **curva** $\to$ *deep autoencoder*.
+- **A contornar:** $p(\mathbf{x})$ e $p(\mathbf{z}\mid\mathbf{x})$ perdem a forma fechada $\to$ o ELBO vira **objetivo de treino** $\to$ VAE.
+:::
+
+::: {.fragment}
+1. Onde a não linearidade precisa estar para curvar a reconstrução? Quando compensa?
+2. Por que um bom compressor não é um bom gerador?
+3. Como o VAE estende a PPCA sem posterior fechada?
+4. Como derivar uma esperança sob uma distribuição que depende dos parâmetros?
+:::
+
+## Problema Motivador: Dois Números por Imagem
+
+- MNIST: $784$ pixels por imagem. Guardar **$2$ números**, reconstruir os $784$.
+- PCA ($M=2$) contra autoencoder profundo ($M=2$), `{python} milhar(N_mn)` imagens de treino.
+
+::: {.fragment}
+- Erro médio por pixel (teste): PCA `{python} brl(mn_pca_te, 4)`; autoencoder profundo `{python} brl(mn_ae_te, 4)`.
+- Mesma quantidade de informação guardada, mas a **forma** da superfície de reconstruções é diferente.
+:::
+
+::: {.fragment .callout-important}
+Segunda pergunta: sorteando $2$ números quaisquer e passando pelo decoder, **sai um dígito**?
+:::
+
+:::
+
+::: {.fig-resize style="width: 75%; margin: 0 auto;"}
 ```{python}
 #| echo: false
-# Visualização simples de um manifold sintético (S-curve) para motivar
-from sklearn.datasets import make_s_curve
-X_s, _ = make_s_curve(n_samples=1000, noise=0.1, random_state=42)
-
-fig, ax = plt.subplots(1, 2, figsize=(10, 4), subplot_kw={'projection': '3d'})
-ax[0].scatter(X_s[:, 0], X_s[:, 1], X_s[:, 2], c=X_s[:, 2], cmap='viridis', s=10)
-ax[0].set_title("Dados no Espaço Original (3D)")
-ax[1].scatter(X_s[:, 0], X_s[:, 1], c=X_s[:, 2], cmap='viridis', s=10)
-ax[1].set_title("Projeção Linear (2D) - Perda de Estrutura")
+fig, axes = plt.subplots(3, 1, figsize=(9, 3.4))
+for ax, imgs, nome in zip(axes, [Xmt[idx_ex], R_mn_pca[idx_ex], R_mn_ae[idx_ex]],
+                          ["original", "PCA, M=2", "AE profundo, M=2"]):
+    ax.imshow(mosaico(np.clip(imgs, 0, 1), 10), cmap="gray_r", vmin=0, vmax=1)
+    ax.set_xticks([]); ax.set_yticks([]); ax.grid(False)
+    ax.set_ylabel(nome, rotation=0, ha="right", va="center", fontsize=10)
+axes[0].set_title("Reconstruções de imagens de teste com 2 números por imagem")
 plt.tight_layout()
 plt.show()
 ```
 :::
 
-## Pausa Ativa
+## Pausa — O Que Restringe a Reconstrução
 
 ::: {.callout-tip}
-## O que define um "Manifold"?
+## Se o decoder fosse uma função afim de $\mathbf{z}$, $\hat{\mathbf{x}}=\mathbf{B}\mathbf{z}+\mathbf{c}$, que forma teria o conjunto de todas as reconstruções possíveis, por mais complicado que fosse o encoder?
 
-Se os dados de alta dimensão (ex: 784 pixels) residem em um manifold de baixa dimensão (ex: 10 dimensões), o que acontece com a distância euclidiana entre dois pontos próximos no manifold quando medida no espaço original?
+Pense no conjunto $\{\mathbf{B}\mathbf{z}+\mathbf{c}:\mathbf{z}\in\mathbb{R}^M\}$ e no que o encoder
+pode e não pode mudar nele.
 :::
 
 ::: {.callout-tip}
 ## Julgue V ou F
 
-- □ Um Autoencoder linear é matematicamente equivalente a uma PCA.
-- □ A função de ativação ReLU introduz a não linearidade necessária para aprender manifolds.
-- □ Aumentar a dimensão do gargalo ($M$) sempre melhora a generalização do modelo.
-- □ O objetivo de um AE é minimizar a distância entre a entrada e a reconstrução.
+- □ No MNIST com $M=2$, a PCA reconstrói pior que o autoencoder profundo
+  porque a PCA não minimiza o erro quadrático de reconstrução.
+- □ Um autoencoder com várias camadas ocultas, todas com ativação linear,
+  tem erro mínimo de treino igual ao da PCA com o mesmo $M$, qualquer
+  que seja o número de camadas.
+- □ Um erro de reconstrução de treino menor garante que o código de $M$
+  números resume melhor também imagens que a rede nunca viu.
+- □ Na PPCA, a incerteza sobre $\mathbf{z}$ depois de observar
+  $\mathbf{x}$ (a covariância da posterior) é a mesma para todos os
+  pontos.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## Pausa Ativa — Resposta
+## Pausa — Resposta
 
 ::: {.callout-tip}
 ## Julgue V ou F — Resposta
 
-- ✔ Verdadeiro — Provado na Aula 6.
-- ✔ Verdadeiro — Quebras a linearidade da projeção.
-- ✗ Falso — Gargalos muito grandes levam ao "mapeamento identidade" (overfitting).
-- ✔ Verdadeiro — Geralmente via MSE (Mean Squared Error).
+- ✗ A PCA minimiza o erro quadrático, mas **entre reconstruções
+  lineares** (sobre um subespaço). O autoencoder procura numa classe
+  maior de funções; a diferença é de classe, não de critério.
+- ✔ Composição de mapas lineares é linear; com gargalo $M$, o posto do
+  produto é $\le M$. Cai no Teorema da Aula 6.
+- ✗ Erro de treino é avaliado nos mesmos pontos usados no ajuste (o
+  *double-dipping* da Aula 5). Veremos o contraexemplo no Breast Cancer.
+- ✔ PRML eq. 12.42: covariância $\sigma^2\mathbf{B}^{-1}$, que não
+  depende de $\mathbf{x}$; só a média depende.
 :::
 
 ::: {.fragment}
-**Voltando à pergunta:** A distância euclidiana no espaço original pode ser enganosa. Dois pontos podem estar próximos no manifold (seguindo a curvatura), mas distantes no espaço original (em linha reta através do "vazio"). O AE tenta aprender a métrica intrínseca do manifold.
+**Voltando à pergunta:** um subespaço **afim** $\mathbf{c}+\mathcal{C}(\mathbf{B})$
+de dimensão $\le M$, um "plano". O encoder só escolhe **em que ponto do
+plano** cada $\mathbf{x}$ cai; não pode curvar o plano. A curvatura tem
+de vir do decoder.
 :::
 
 :::
 
-# Intuição — O Gargalo e o Manifold
+# Intuição — Curvar a Variedade
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-A premissa fundamental dos Autoencoders é a **Hipótese do Manifold**: dados do mundo real, embora representados em espaços de altíssima dimensão, tendem a concentrar-se em subvariedades (manifolds) de dimensão muito menor. 
 
-Um Autoencoder opera criando um "estrangulamento" (bottleneck). Ao forçar a rede a comprimir a entrada $\mathbf{x} \in \mathbb{R}^D$ em um vetor latente $\mathbf{z} \in \mathbb{R}^M$ (com $M \ll D$), obrigamos o modelo a descartar o ruído e reter apenas as características essenciais para a reconstrução. Se a rede for profunda e não linear, ela não aprende apenas um plano (como a PCA), mas uma superfície curva que "envolve" os dados.
+## A Hipótese da Variedade
+
+A razão para esperar que poucos números bastem é a **hipótese da
+variedade**: dados reais de alta dimensão não preenchem o espaço
+$\mathbb{R}^D$, mas se concentram perto de uma variedade (*manifold*) de
+dimensão bem menor. O DLFC (Cap. 16, p. 496) dá um exemplo concreto.
+Tome um único dígito manuscrito e gere muitas imagens transladando-o e
+girando-o dentro de um quadro maior. Cada imagem tem milhares de pixels,
+mas o conjunto inteiro tem só três graus de liberdade (dois de translação
+e um de rotação). E essa variedade é curva (tradução livre): *"a variedade
+será não linear porque, por exemplo, se transladarmos o dígito passando
+por um pixel específico, o valor desse pixel vai de zero (branco) a um
+(preto) e de volta a zero, o que é claramente uma função não linear da
+posição do dígito"*.
+
+A PCA só sabe representar variedades planas. Se a variedade dos dados
+curva, um plano de dimensão $M$ ou não acompanha a curvatura (erro alto)
+ou precisa de muitas dimensões para cobri-la.
+
+## Um Arco em Duas Dimensões
+
+O ponto geométrico fica nítido no menor caso possível. São $400$ pontos
+sobre um arco de circunferência em $\mathbb{R}^2$, com um pouco de ruído.
+A variedade tem dimensão $1$ (a posição ao longo do arco), então guardamos
+**um número** por ponto ($M=1$). A figura mostra, para três modelos, o
+conjunto de **todas** as reconstruções possíveis (a imagem do decoder)
+como uma linha laranja.
+
+- **PCA:** reta pelo centro dos dados. Erro médio `{python} brl(err_arc_pca, 4)`.
+- **AE raso** $2$-$1$-$2$ com ativação $\tanh$ no gargalo e saída
+  linear: erro `{python} brl(err_arc_raso, 4)`. É o mesmo da PCA, e a
+  imagem do decoder é um segmento de reta. É a ressalva do DLFC, agora
+  visível.
+- **AE profundo** ($2$-$32$-$32$-$1$-$32$-$32$-$2$, $\tanh$): erro
+  `{python} brl(err_arc_prof, 4)`. A imagem do decoder é uma curva que
+  acompanha o arco.
+
+A diferença entre o segundo e o terceiro modelo não está em "ter ou não
+ter não linearidade", porque os dois têm. Está em **onde** ela está: no
+AE raso, entre o código e a saída só há uma camada afim; no profundo, há
+camadas não lineares entre $\mathbf{z}$ e $\hat{\mathbf{x}}$.
+
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## O Gargalo (Bottleneck)
 
-- **Encoder:** $\mathbf{z} = f_{\phi}(\mathbf{x})$ (Compressão).
-- **Decoder:** $\mathbf{\hat{x}} = g_{\theta}(\mathbf{z})$ (Reconstrução).
-- **Restrição:** $\dim(\mathbf{z}) \ll \dim(\mathbf{x})$.
-- **Força:** A rede deve aprender a representação mais eficiente possível para minimizar o erro.
+## A Hipótese da Variedade
 
-## A Hipótese do Manifold
+- Dados reais de alta dimensão **não preenchem** $\mathbb{R}^D$: concentram-se perto de uma variedade de dimensão bem menor.
+- DLFC (p. 496): um dígito transladado e girado num quadro maior. Milhares de pixels, **3 graus de liberdade**.
 
-- Dados reais não preenchem o espaço $\mathbb{R}^D$ uniformemente.
-- Eles residem em "folhas" ou "curvas" de baixa dimensão.
-- **Exemplo:** Uma imagem de um rosto é apenas uma combinação de rotação, expressão e iluminação (poucos graus de liberdade), apesar de ter milhares de pixels.
+::: {.fragment .callout-note}
+DLFC, p. 496 (tradução livre): *"a variedade será não linear porque, se
+transladarmos o dígito passando por um pixel, o valor desse pixel vai de
+zero (branco) a um (preto) e de volta a zero"*.
 :::
 
-# Bloco 1: Autoencoders (AE) Tradicionais
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-Um Autoencoder tradicional é treinado para minimizar a função de custo de reconstrução, tipicamente o Erro Quadrático Médio (MSE):
-$$J(\phi, \theta) = \frac{1}{N} \sum_{n=1}^N \|\mathbf{x}_n - g_{\theta}(f_{\phi}(\mathbf{x}_n))\|^2$$
-
-**O Risco do Mapeamento Identidade:** Se $M \ge D$, a rede pode simplesmente aprender a função identidade ($\mathbf{z} = \mathbf{x}$), copiando os pixels sem aprender nada sobre a estrutura dos dados. Para evitar isso, devemos:
-1. Manter $M < D$ (Undercomplete AE).
-2. Adicionar ruído à entrada (Denoising AE).
-3. Forçar a esparsidade no gargalo (Sparse AE).
-
-No nosso dataset de Breast Cancer, um AE não linear consegue capturar correlações complexas entre os atributos que a PCA ignora, resultando em um erro de reconstrução menor para a mesma dimensão de gargalo.
+::: {.fragment}
+- A PCA só representa variedades **planas**: numa variedade curva, ou erra muito, ou precisa de muitas dimensões.
 :::
 
-::: {.content-visible when-format="revealjs"}
-## Autoencoders (AE) Tradicionais
+## Um Arco, Um Número por Ponto
 
-- **Objetivo:** $\min_{\phi, \theta} \mathbb{E} [\|\mathbf{x} - \text{dec}(\text{enc}(\mathbf{x}))\|^2]$.
-- **Arquitetura:** Simétrica (geralmente).
-- **Aprendizado:** Backpropagation via gradiente descendente.
+- $400$ pontos num arco em $\mathbb{R}^2$; guardar $M=1$ número. Linha laranja: **todas** as reconstruções possíveis.
 
-## O Perigo do "Cópia e Cola"
-
-- Se o gargalo for largo demais $\to$ **Overfitting**.
-- A rede aprende a "memorizar" os dados em vez de "comprimir".
-- **Solução:** Forçar $M \ll D$ ou usar regularização (Denoising/Sparsity).
-
-## AE Linear vs Não Linear
-
-- **Linear:** $\mathbf{z} = \mathbf{W}\mathbf{x} + \mathbf{b}$.
-- **Não Linear:** $\mathbf{z} = \sigma(\mathbf{W}\mathbf{x} + \mathbf{b})$.
-- A não linearidade permite que o modelo "dobre" o espaço para melhor ajustar o manifold.
+::: {.fragment}
+- **PCA:** reta; erro `{python} brl(err_arc_pca, 4)`.
+- **AE raso** ($\tanh$ no gargalo, saída linear): erro `{python} brl(err_arc_raso, 4)`, **igual à PCA**; imagem do decoder é um segmento de reta.
+- **AE profundo** (camadas $\tanh$ dos dois lados): erro `{python} brl(err_arc_prof, 4)`; imagem do decoder **curva**.
 :::
 
-::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+::: {.fragment .callout-important}
+Os dois AEs têm não linearidade. A diferença é **onde**: só no profundo há camadas não lineares **entre $\mathbf{z}$ e $\hat{\mathbf{x}}$**.
+:::
+
+:::
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
 ```{python}
 #| echo: false
-# Comparação simples de erro de reconstrução: Linear vs Não Linear no Breast Cancer
-def build_ae(input_dim, latent_dim, non_linear=True):
-    class AE(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.enc = nn.Sequential(
-                nn.Linear(input_dim, latent_dim),
-                nn.ReLU() if non_linear else nn.Identity()
-            )
-            self.dec = nn.Sequential(
-                nn.Linear(latent_dim, input_dim),
-                nn.ReLU() if non_linear else nn.Identity()
-            )
-        def forward(self, x):
-            return self.dec(self.enc(x))
-    return AE()
-
-def train_ae(model, data, epochs=50):
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    criterion = nn.MSELoss()
-    data_t = torch.FloatTensor(data)
-    for _ in range(epochs):
-        optimizer.zero_grad()
-        loss = criterion(model(data_t), data_t)
-        loss.backward()
-        optimizer.step()
-    return model
-
-M = 2
-ae_lin = train_ae(build_ae(X_bc_scaled.shape[1], M, False), X_bc_scaled)
-ae_non = train_ae(build_ae(X_bc_scaled.shape[1], M, True), X_bc_scaled)
-
-with torch.no_grad():
-    err_lin = nn.MSELoss()(ae_lin(torch.FloatTensor(X_bc_scaled)), torch.FloatTensor(X_bc_scaled)).item()
-    err_non = nn.MSELoss()(ae_non(torch.FloatTensor(X_bc_scaled)), torch.FloatTensor(X_bc_scaled)).item()
-
-plt.figure(figsize=(5, 4))
-plt.bar(["Linear (PCA-like)", "Não Linear"], [err_lin, err_non], color=[COR_CINZA, COR_AZUL])
-plt.ylabel("Erro de Reconstrução (MSE)")
-plt.title(f"Impacto da Não Linearidade (M={M})")
+fig, axes = plt.subplots(1, 3, figsize=(12, 3.6), sharex=True, sharey=True)
+for ax, R, curva, nome, err in zip(
+        axes, [R_arc_pca, R_arc_raso, R_arc_prof], [curva_pca, curva_raso, curva_prof],
+        ["PCA (M=1)", "AE raso: tanh no gargalo", "AE profundo"],
+        [err_arc_pca, err_arc_raso, err_arc_prof]):
+    ax.scatter(X_arc[:, 0], X_arc[:, 1], s=8, color=COR_CINZA, alpha=0.5, label="dados")
+    for k in range(0, n_arc, 8):
+        ax.plot([X_arc[k, 0], R[k, 0]], [X_arc[k, 1], R[k, 1]], color=COR_AZUL, lw=0.6, alpha=0.6)
+    ax.plot(curva[:, 0], curva[:, 1], color=COR_LARANJA, lw=2.5, label="imagem do decoder")
+    ax.set_title(f"{nome}\nerro médio = {brl(err, 4)}")
+    ax.set_aspect("equal")
+axes[0].legend(loc="lower center", fontsize=8)
+plt.tight_layout()
 plt.show()
 ```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## A Arquitetura: Duas Funções em Sequência
+
+O DLFC (§19.1.2, p. 565, Figs. 19.2 e 19.3) descreve o autoencoder
+profundo como duas funções em sequência. A primeira, $F_1$ (o encoder),
+leva $\mathbf{x}\in\mathbb{R}^D$ ao código $\mathbf{z}\in\mathbb{R}^M$.
+A segunda, $F_2$ (o decoder), leva o código de volta a $\mathbb{R}^D$.
+Como $F_2$ pode ser não linear, a imagem de $F_2$ é uma superfície $M$-dimensional
+**curva** mergulhada em $\mathbb{R}^D$, a variedade aprendida. O encoder
+$F_1$ faz o papel de projeção: diz em que ponto dessa superfície cada
+dado deve ser representado. No arco, $F_2$ é a curva laranja e $F_1$
+escolhe o ponto da curva.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Arquitetura: $F_1$ e $F_2$
+
+- **Encoder** $F_1$: $\mathbb{R}^D\to\mathbb{R}^M$, diz **onde** cada dado cai na superfície.
+- **Decoder** $F_2$: $\mathbb{R}^M\to\mathbb{R}^D$, sua imagem **é** a superfície (curva, se $F_2$ for não linear).
+- DLFC §19.1.2, Figs. 19.2–19.3. No arco: $F_2$ é a curva laranja, $F_1$ escolhe o ponto.
+
+:::
+
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{27,54,93}
+\definecolor{laranja}{RGB}{217,83,30}
+\definecolor{cinza}{RGB}{127,140,141}
+\begin{tikzpicture}[
+  camada/.style={draw=azul, line width=1pt, rounded corners=2pt, minimum width=0.9cm, align=center, font=\small},
+  nl/.style={camada, fill=laranja!25, draw=laranja},
+  lin/.style={camada, fill=azul!8},
+  arr/.style={->, >=stealth, thick, draw=cinza}
+]
+\node[lin, minimum height=4.2cm] (x)  at (0,0)   {$\mathbf{x}$\\[2pt]\scriptsize $D$};
+\node[nl,  minimum height=3.2cm] (h1) at (2,0)   {\scriptsize não\\\scriptsize linear};
+\node[nl,  minimum height=2.2cm] (h2) at (4,0)   {\scriptsize não\\\scriptsize linear};
+\node[lin, minimum height=1.0cm, fill=azul!25] (z) at (6,0) {$\mathbf{z}$\\\scriptsize $M$};
+\node[nl,  minimum height=2.2cm] (h3) at (8,0)   {\scriptsize não\\\scriptsize linear};
+\node[nl,  minimum height=3.2cm] (h4) at (10,0)  {\scriptsize não\\\scriptsize linear};
+\node[lin, minimum height=4.2cm] (y)  at (12,0)  {$\hat{\mathbf{x}}$\\[2pt]\scriptsize $D$};
+\foreach \a/\b in {x/h1,h1/h2,h2/z,z/h3,h3/h4,h4/y} \draw[arr] (\a) -- (\b);
+\draw[thick, draw=azul] (0,-2.5) -- (6,-2.5) node[midway, below=2pt, font=\small, text=azul] {encoder $F_1$: $\mathbf{z}=\mathbf{f}(\mathbf{x},\boldsymbol\phi)$};
+\draw[thick, draw=laranja] (6,-3.4) -- (12,-3.4) node[midway, below=2pt, font=\small, text=laranja] {decoder $F_2$: $\hat{\mathbf{x}}=\mathbf{g}(\mathbf{z},\mathbf{w})$};
+\node[font=\scriptsize, text=laranja, align=center] at (9,2.0) {camadas não lineares\\entre $\mathbf{z}$ e $\hat{\mathbf{x}}$:\\curvam a superfície};
+\end{tikzpicture}
+```
+:::
+
+# Bloco 1: O *Deep Autoencoder*
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## Definição
+
+::: {.callout-note icon=false}
+## Definição (autoencoder profundo; DLFC §19.1.2)
+
+Um *autoencoder profundo* é a composição de duas redes neurais:
+
+- um **encoder** $\mathbf{f}(\cdot,\boldsymbol\phi):\mathbb{R}^D\to\mathbb{R}^M$, com $M<D$;
+- um **decoder** $\mathbf{g}(\cdot,\mathbf{w}):\mathbb{R}^M\to\mathbb{R}^D$,
+
+cada uma formada por camadas afins intercaladas com ativações não
+lineares, com pelo menos uma camada oculta não linear em cada rede. A
+reconstrução de $\mathbf{x}$ é
+$\hat{\mathbf{x}}=\mathbf{g}(\mathbf{f}(\mathbf{x},\boldsymbol\phi),\mathbf{w})$,
+e os parâmetros são ajustados minimizando o erro de soma de quadrados
+
+$$
+E(\boldsymbol\phi,\mathbf{w})=\frac12\sum_{n=1}^N\big\|\mathbf{g}(\mathbf{f}(\mathbf{x}_n,\boldsymbol\phi),\mathbf{w})-\mathbf{x}_n\big\|^2 .
+$$
+:::
+
+Em relação à Aula 6, só a parametrização mudou. O critério é o mesmo
+erro de reconstrução. Separamos os parâmetros em $\boldsymbol\phi$
+(encoder) e $\mathbf{w}$ (decoder), como no DLFC, porque no VAE os dois
+terão papéis diferentes.
+
+## Por Que a Profundidade Precisa Estar no Decoder
+
+A ressalva do DLFC (p. 565) diz que unidades ocultas não lineares na
+arquitetura rasa não tiram a solução do subespaço da PCA. O argumento
+abaixo mostra o mecanismo por trás disso. Ele é nosso, elementar, e dá a
+cota inferior. A prova original de Bourlard e Kamp (1988), citada pelo
+DLFC, trata do mínimo global.
+
+::: {.callout-note icon=false}
+## Proposição (decoder afim não sai do plano)
+
+Hipótese: o decoder é afim, $\mathbf{g}(\mathbf{z})=\mathbf{B}\mathbf{z}+\mathbf{c}$,
+com $\mathbf{B}\in\mathbb{R}^{D\times M}$ e $\mathbf{c}\in\mathbb{R}^D$; o
+encoder $\mathbf{f}$ é **qualquer** função $\mathbb{R}^D\to\mathbb{R}^M$.
+
+Tese: (i) todas as reconstruções pertencem ao subespaço afim
+$\mathcal{S}=\mathbf{c}+\mathcal{C}(\mathbf{B})$, de dimensão $\le M$;
+(ii) $E(\boldsymbol\phi,\mathbf{w})$ é maior ou igual ao erro de
+reconstrução da PCA com $M$ componentes.
+:::
+
+*Demonstração.* (i) Para todo $n$,
+$\hat{\mathbf{x}}_n=\mathbf{B}\,\mathbf{f}(\mathbf{x}_n)+\mathbf{c}$.
+Como $\mathbf{f}(\mathbf{x}_n)\in\mathbb{R}^M$, o vetor
+$\mathbf{B}\,\mathbf{f}(\mathbf{x}_n)$ é combinação linear das colunas
+de $\mathbf{B}$, logo pertence a $\mathcal{C}(\mathbf{B})$, e
+$\hat{\mathbf{x}}_n\in\mathbf{c}+\mathcal{C}(\mathbf{B})=\mathcal{S}$. A
+dimensão de $\mathcal{C}(\mathbf{B})$ é o posto de $\mathbf{B}$, que é
+$\le M$ porque $\mathbf{B}$ tem $M$ colunas.
+(ii) Seja $P_{\mathcal{S}}$ a projeção ortogonal sobre $\mathcal{S}$.
+Como $\hat{\mathbf{x}}_n\in\mathcal{S}$ e $P_{\mathcal{S}}(\mathbf{x}_n)$
+é o ponto de $\mathcal{S}$ mais próximo de $\mathbf{x}_n$,
+$\|\mathbf{x}_n-\hat{\mathbf{x}}_n\|^2\ge\|\mathbf{x}_n-P_{\mathcal{S}}(\mathbf{x}_n)\|^2$.
+Somando em $n$,
+
+$$
+E\;\ge\;\tfrac12\sum_n\|\mathbf{x}_n-P_{\mathcal{S}}(\mathbf{x}_n)\|^2
+\;\ge\;\min_{\mathcal{S}'\,:\,\dim\mathcal{S}'\le M}\;\tfrac12\sum_n\|\mathbf{x}_n-P_{\mathcal{S}'}(\mathbf{x}_n)\|^2 ,
+$$
+
+e o mínimo à direita, sobre subespaços afins de dimensão $\le M$, é
+atingido pelo subespaço principal passando pela média. É o Teorema de
+erro mínimo da Aula 6 (PRML §12.1.2), cuja forma
+$\tilde{\mathbf{x}}_n=\sum_{i\le M}z_{ni}\mathbf{u}_i+\sum_{i>M}b_i\mathbf{u}_i$
+já admite o deslocamento constante $b_i$ nas direções descartadas, ou
+seja, trata subespaços afins. $\blacksquare$
+
+A rede rasa $D$-$M$-$D$ com unidades ocultas não lineares e saída linear
+é exatamente esse caso: o "código" é a ativação $\mathbf{h}=\sigma(\mathbf{V}\mathbf{x}+\mathbf{a})$
+e o decoder é $\mathbf{W}\mathbf{h}+\mathbf{c}$, afim em $\mathbf{h}$.
+A não linearidade do encoder só decide **em que ponto do plano** cada
+dado cai; quem desenha o plano é o decoder. Uma ativação de saída
+aplicada coordenada a coordenada (como a sigmoide que usamos no MNIST,
+para manter os pixels em $[0,1]$) só deforma cada eixo por uma função
+fixa. A flexibilidade para curvar a variedade vem das camadas ocultas
+**do decoder**.
+
+## O Que Se Ganha e o Que Se Perde
+
+O DLFC (§19.1.2, p. 566, tradução livre) resume: a rede *"realiza uma
+forma não linear de PCA. Tem a vantagem de não se limitar a
+transformações lineares, embora contenha a PCA padrão como caso
+particular. Porém, o treino passa a envolver otimização não linear, pois
+a função de erro (19.1) deixa de ser quadrática nos parâmetros [...] e há
+o risco de encontrar um mínimo local subótimo. Além disso, a
+dimensionalidade do subespaço precisa ser especificada antes do
+treino"*. Em contraste, a PCA sai de uma decomposição espectral exata e
+entrega todos os $M$ de uma vez, ordenados por variância.
+
+Há uma terceira limitação que o trecho não menciona e que o dataset-fio
+mostra: **sobreajuste**. A figura compara, no Breast Cancer Wisconsin
+(30 atributos padronizados, $M=2$), PCA, AE raso e AE profundo
+($30$-$64$-$32$-$2$-$32$-$64$-$30$, `{python} milhar(n_par_bc)`
+parâmetros), ajustados em `{python} n_tr_bc` pacientes e avaliados em
+`{python} n_te_bc` pacientes separados.
+
+- O AE raso empata com a PCA no treino (`{python} brl(bc_raso_tr, 3)`
+  contra `{python} brl(bc_pca_tr, 3)`) e no teste
+  (`{python} brl(bc_raso_te, 3)` contra `{python} brl(bc_pca_te, 3)`),
+  como prevê a Proposição.
+- O AE profundo reduz o erro de **treino** a
+  `{python} brl(bc_prof_tr, 3)`, menos de um terço do da PCA, mas o
+  erro de **teste** sobe para `{python} brl(bc_prof_te, 3)`, pior que
+  a PCA. A rede usou sua flexibilidade para memorizar os pacientes de
+  treino. É o *double-dipping* da Aula 5: o erro medido nos pontos de
+  ajuste é otimista.
+- Como resumo para o diagnóstico (que nunca entrou no ajuste), uma
+  regressão logística sobre os dois números atinge acurácia de teste de
+  `{python} pct(acc_bc["pca"])`% com a PCA e
+  `{python} pct(acc_bc["prof"])`% com o AE profundo. A diferença
+  corresponde a `{python} dif_pac_bc` pacientes em `{python} n_te_bc`,
+  pouco para concluir algo com um conjunto de teste desse tamanho; o
+  critério que o modelo de fato otimiza, o erro de reconstrução, piorou.
+
+A conclusão não é que o AE profundo é "pior". Com $455$ pacientes e
+estrutura quase linear (lembre que o primeiro componente explicou
+$44{,}27\%$ da variância na Aula 6), não há curvatura que a amostra
+sustente. No MNIST, com $20\,000$ imagens e uma variedade sabidamente
+curva, a flexibilidade compensa. A capacidade do modelo precisa ser
+proporcional à quantidade de dados e à curvatura real.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Definição: Autoencoder Profundo
+
+::: {.callout-note icon=false}
+**Definição (DLFC §19.1.2):** 
+
+- encoder $\mathbf{f}(\cdot,\boldsymbol\phi):\mathbb{R}^D\to\mathbb{R}^M$ ($M<D$) e 
+- decoder $\mathbf{g}(\cdot,\mathbf{w}):\mathbb{R}^M\to\mathbb{R}^D$, 
+- camadas afins intercaladas com ativações não lineares,
+**pelo menos uma oculta não linear em cada rede**.
+$$
+E(\boldsymbol\phi,\mathbf{w})=\tfrac12\sum_{n}\big\|\mathbf{g}(\mathbf{f}(\mathbf{x}_n,\boldsymbol\phi),\mathbf{w})-\mathbf{x}_n\big\|^2 .
+$$
+:::
+
+::: {.fragment}
+- Mesmo critério da Aula 6; muda só a parametrização.
+- $\boldsymbol\phi$ (encoder) e $\mathbf{w}$ (decoder) separados: no VAE terão papéis diferentes.
+:::
+
+## Ganhos, Custos e o Breast Cancer
+
+::: {.fragment .callout-note}
+DLFC p. 566 (tradução livre): *"uma forma não linear de PCA [...] contém
+a PCA como caso particular. Porém, o treino envolve otimização não
+linear [...] risco de mínimo local subótimo. Além disso, a dimensão do
+subespaço precisa ser especificada antes do treino."*
+:::
+
+::: {.fragment}
+Breast Cancer, $M=2$, treino `{python} n_tr_bc` / teste `{python} n_te_bc`; AE profundo com `{python} milhar(n_par_bc)` parâmetros:
+
+| | PCA | AE raso | AE profundo |
+|---|---|---|---|
+| erro treino | `{python} brl(bc_pca_tr, 3)` | `{python} brl(bc_raso_tr, 3)` | `{python} brl(bc_prof_tr, 3)` |
+| erro teste | `{python} brl(bc_pca_te, 3)` | `{python} brl(bc_raso_te, 3)` | `{python} brl(bc_prof_te, 3)` |
+| acurácia (logística, teste) | `{python} pct(acc_bc["pca"])`% | — | `{python} pct(acc_bc["prof"])`% (diferença: `{python} dif_pac_bc` de `{python} n_te_bc` pacientes) |
+:::
+
+::: {.fragment .callout-important}
+Treino $\div3$, teste **pior**: memorização (*double-dipping*, Aula 5). Com $455$ pacientes e estrutura quase linear, não há curvatura que a amostra sustente. No MNIST ($20\,000$ imagens, variedade curva) a flexibilidade compensa.
+:::
+
+:::
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.8))
+ax = axes[0]
+pos = np.arange(3)
+ax.bar(pos - 0.18, [bc_pca_tr, bc_raso_tr, bc_prof_tr], 0.36, color=COR_AZUL, label="treino")
+ax.bar(pos + 0.18, [bc_pca_te, bc_raso_te, bc_prof_te], 0.36, color=COR_LARANJA, label="teste")
+ax.set_xticks(pos); ax.set_xticklabels(["PCA", "AE raso", "AE profundo"])
+ax.set_ylabel("erro quadrático médio")
+ax.set_title("Erro de reconstrução (M=2)")
+ax.set_ylim(0, 1.3 * max(bc_pca_tr, bc_prof_te, bc_raso_tr))
+ax.legend(loc="upper center", ncol=2)
+for ax, Z, nome in [(axes[1], Z_bc_pca, "PCA"), (axes[2], Z_bc_prof, "AE profundo")]:
+    for lab, cor, txt in [(0, COR_AZUL, "benigno"), (1, COR_VERM, "maligno")]:
+        ax.scatter(Z[y_bc == lab, 0], Z[y_bc == lab, 1], s=9, alpha=0.6, color=cor, label=txt)
+    ax.set_title(f"Código 2D: {nome}")
+    ax.set_xlabel("$z_1$"); ax.set_ylabel("$z_2$")
+axes[1].legend(fontsize=8)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## Outras Formas de Impedir a Cópia
+
+O gargalo $M<D$ é uma forma de impedir que a rede aprenda a identidade.
+O DLFC (§19.1.3–19.1.4, pp. 566–567) descreve outras duas:
+
+- **Autoencoder esparso:** gargalo largo, mas com penalidade $L_1$ sobre
+  as ativações de uma camada oculta,
+  $\widetilde{E}(\mathbf{w})=E(\mathbf{w})+\lambda\sum_k|z_k|$ (19.2).
+  A regularização incide sobre **ativações**, não sobre pesos, e faz
+  cada ponto usar poucas unidades.
+- **Autoencoder com remoção de ruído (*denoising*):** a entrada é uma
+  versão corrompida $\tilde{\mathbf{x}}_n$ (ruído Gaussiano ou pixels
+  zerados), e o alvo é o $\mathbf{x}_n$ limpo,
+  $E(\mathbf{w})=\sum_n\|\mathbf{y}(\tilde{\mathbf{x}}_n,\mathbf{w})-\mathbf{x}_n\|^2$
+  (19.3). Como entrada e alvo diferem, copiar não zera o erro. A rede
+  precisa aprender para onde fica a variedade dos dados limpos.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Outras Formas de Impedir a Cópia
+
+- O gargalo $M<D$ é **uma** forma de impedir a identidade. DLFC §19.1.3–19.1.4:
+
+::: {.fragment}
+- **Esparso:** gargalo largo + $L_1$ nas **ativações**:
+  $\widetilde{E}(\mathbf{w})=E(\mathbf{w})+\lambda\sum_k|z_k|$ (19.2). Cada ponto usa poucas unidades.
+:::
+
+::: {.fragment}
+- ***Denoising*:** entrada corrompida $\tilde{\mathbf{x}}_n$, alvo limpo:
+  - $E(\mathbf{w})=\sum_n\|\mathbf{y}(\tilde{\mathbf{x}}_n,\mathbf{w})-\mathbf{x}_n\|^2$ (19.3).
+  - Entrada $\ne$ alvo $\Rightarrow$ copiar não zera o erro; a rede aprende para onde fica a variedade.
+:::
+
+:::
+
+## Pausa — Quando a Flexibilidade Compensa
+
+::: {.callout-tip}
+## No Breast Cancer, o AE profundo reduz o erro de treino a um terço do da PCA e piora no teste. O que mudaria esse resultado: mais camadas, mais pacientes ou um $M$ maior?
+
+Separe o que aumenta a capacidade do modelo do que aumenta a informação
+disponível para ajustá-lo.
+:::
+
+::: {.callout-tip}
+## Julgue V ou F
+
+- □ Acrescentar camadas ocultas não lineares apenas ao encoder,
+  mantendo o decoder afim de $\mathbf{z}$ até $\hat{\mathbf{x}}$, permite
+  reconstruções sobre uma superfície curva.
+- □ Com $M=D$ e redes suficientemente expressivas, o erro de treino
+  mínimo de um autoencoder profundo é zero, sem que a rede aprenda
+  estrutura alguma dos dados.
+- □ Como o autoencoder profundo minimiza a mesma soma de quadrados da
+  PCA, o gradiente descendente encontra o mínimo global, assim como a
+  decomposição espectral.
+- □ Um autoencoder *denoising* pode ter camada oculta mais larga que a
+  entrada sem convergir para a identidade, porque a entrada corrompida é
+  diferente do alvo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa — Resposta
+
+::: {.callout-tip}
+## Julgue V ou F — Resposta
+
+- ✗ Com decoder afim, a imagem é um subespaço afim de dimensão $\le M$
+  (Proposição), por mais complicado que seja o encoder.
+- ✔ Com $M=D$ a identidade passa pelo gargalo: erro zero copiando,
+  sem resumir nada.
+- ✗ A soma de quadrados deixa de ser quadrática nos parâmetros: o
+  problema é não convexo, com risco de mínimos locais (DLFC p. 566).
+- ✔ Copiar $\tilde{\mathbf{x}}_n$ não reproduz $\mathbf{x}_n$; a rede
+  precisa desfazer a corrupção (DLFC §19.1.4).
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** mais camadas ou $M$ maior aumentam a
+**capacidade** e tendem a piorar o sobreajuste. O que ajuda é **mais
+pacientes** (mais informação para sustentar a curvatura) ou restringir a
+capacidade (rede menor, regularização, parada antecipada guiada por um
+conjunto de validação). E, antes disso, conferir se há curvatura real:
+com estrutura quase linear, a PCA já é o modelo adequado.
+:::
+
 :::
 
 # Bloco 2: O Gap Generativo
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Embora o AE seja excelente para compressão, ele falha miseravelmente como modelo generativo. Por que?
 
-O AE aprende a mapear cada $\mathbf{x}$ para um ponto $\mathbf{z}$ no espaço latente. No entanto, ele não impõe nenhuma restrição sobre a **distribuição** desses pontos. O resultado é um espaço latente "buracado": regiões onde o decoder nunca foi treinado. Se amostramosmos um $\mathbf{z}$ de uma região vazia, o decoder produzirá lixo.
+## O Espaço Latente do Autoencoder
 
-Para ser generativo, precisamos que o espaço latente seja **contínuo** (pontos próximos em $\mathbf{z}$ geram imagens semelhantes) e **completo** (qualquer ponto amostrado de uma distribuição conhecida, como $\mathcal{N}(\mathbf{0}, \mathbf{I})$, resulte em algo válido).
+No MNIST a compressão funciona. A pergunta seguinte é se o decoder pode
+**gerar** dígitos novos. A figura mostra, à esquerda, os códigos 2D das
+$20\,000$ imagens de treino, coloridos pelo dígito (o rótulo não entrou
+no treino). Três coisas chamam a atenção.
+
+1. **Escala e posição arbitrárias.** Os códigos ocupam aproximadamente
+   `{python} mm(rf"[{bm(ae_lo[0], 1)};\,{bm(ae_hi[0], 1)}]\times[{bm(ae_lo[1], 1)};\,{bm(ae_hi[1], 1)}]")`
+   (percentis 1 e 99). Nada no objetivo fixa a escala, o centro ou a
+   forma dessa nuvem.
+2. **Ilhas e buracos.** Os dígitos formam braços e aglomerados com
+   regiões vazias entre eles.
+3. **Densidade desconhecida.** Para gerar, é preciso **sortear**
+   $\mathbf{z}$ de alguma distribuição, e o AE não fornece nenhuma.
+
+A tentativa ingênua é ajustar **uma única** Gaussiana a todos os códigos
+(média e covariância da nuvem inteira, sem usar os rótulos) e sortear dela.
+O centro da figura mostra $16$ dessas amostras decodificadas. A maioria
+parece um dígito, porque a Gaussiana concentra as amostras onde os
+códigos são densos. Algumas saem borradas ou ambíguas, e o problema
+está nas amostras que caem fora das regiões cobertas. Para medir, contamos
+quantas amostras caem longe de qualquer código de treino, a mais de dez
+vezes a distância típica entre vizinhos:
+`{python} pct(longe_ae)`% das amostras da Gaussiana ajustada ao AE,
+contra `{python} pct(longe_vae, 2)`% das amostras da priori do VAE que
+treinaremos adiante. Nessas regiões o decoder nunca recebeu sinal de
+treino. A interpolação linear entre o código de um "1" e o de um "7"
+(embaixo) atravessa a região de outro dígito: no meio do caminho
+aparece algo parecido com um "9". A reta entre dois códigos não precisa
+passar por regiões que representem uma transição entre eles.
+
+## O Diagnóstico
+
+O motivo está no próprio objetivo. $E(\boldsymbol\phi,\mathbf{w})$ só
+avalia o decoder nos pontos $\mathbf{f}(\mathbf{x}_n,\boldsymbol\phi)$,
+os códigos de treino. Fora deles, nenhum termo da perda diz o que
+$\mathbf{g}$ deve produzir. Além disso, o objetivo é **invariante por
+reparametrização do espaço latente**. Se $\mathbf{h}:\mathbb{R}^M\to\mathbb{R}^M$
+é invertível e as redes conseguem representar $\mathbf{h}\circ\mathbf{f}$
+e $\mathbf{g}\circ\mathbf{h}^{-1}$, então
+
+$$
+\mathbf{g}\circ\mathbf{h}^{-1}\big(\mathbf{h}\circ\mathbf{f}(\mathbf{x})\big)=\mathbf{g}(\mathbf{f}(\mathbf{x}))
+\quad\text{para todo }\mathbf{x},
+$$
+
+e as duas soluções têm exatamente o mesmo erro. É a versão não linear da
+invariância por $\mathbf{G}$ da Aula 6. Lá, os dados fixavam o plano mas
+não os eixos. Aqui, os dados fixam a superfície $\mathbf{g}(\cdot)$ mas
+não a coordenatização do espaço latente. Escala, forma e densidade dos
+códigos são acidentes do treino.
+
+O DLFC (§19.1, p. 564, tradução livre) resume: *"autoencoders simples
+raramente são usados diretamente em *deep learning* moderno, pois não
+fornecem representações semanticamente significativas no espaço latente
+e não são capazes de gerar diretamente novos exemplos da distribuição
+dos dados"*.
+
+Falta ao AE o que a PPCA tinha: **uma distribuição $p(\mathbf{z})$ fixada
+de antemão e uma $p(\mathbf{x}\mid\mathbf{z})$**, isto é, um modelo
+gerador. O bloco seguinte constrói esse modelo.
+
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## O Problema do Espaço Latente
 
-- **AE Tradicional:** $\mathbf{x} \to \mathbf{z}$ (mapeamento pontual).
-- O espaço $\mathbf{z}$ é arbitrário e descontínuo.
-- **Amostragem:** Escolher um $\mathbf{z}$ aleatório $\to$ Resultado imprevisível.
+## O Espaço Latente do AE no MNIST
 
-## Compressão $\neq$ Geração
+- Códigos 2D das $20\,000$ imagens de treino, coloridos pelo dígito (rótulo fora do treino).
 
-- **Compressão:** Queremos que $\text{dec}(\text{enc}(\mathbf{x})) \approx \mathbf{x}$.
-- **Geração:** Queremos que $\text{dec}(\mathbf{z}) \approx \text{dado real}$ para qualquer $\mathbf{z} \sim p(\mathbf{z})$.
-- O AE não modela a densidade $p(\mathbf{z})$.
+::: {.fragment}
+1. **Escala arbitrária:** `{python} mm(rf"\approx[{bm(ae_lo[0], 1)};\,{bm(ae_hi[0], 1)}]\times[{bm(ae_lo[1], 1)};\,{bm(ae_hi[1], 1)}]")` (perc. 1–99).
+2. **Ilhas e buracos** entre os dígitos.
+3. **Densidade desconhecida:** para gerar, sortear $\mathbf{z}$ de onde?
 :::
 
-## Pausa Ativa
+::: {.fragment}
+- Tentativa ingênua: **uma** Gaussiana ajustada a todos os códigos (sem rótulos). Amostras **longe** de todo código de treino ($>10\times$ a distância típica entre vizinhos): `{python} pct(longe_ae)`% (AE) contra `{python} pct(longe_vae, 2)`% (priori do VAE, adiante).
+- Amostras: a maioria plausível (onde os códigos são densos), algumas borradas. Interpolação $1\to7$ atravessa a região de outro dígito.
+:::
+
+:::
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig = plt.figure(figsize=(12, 5.2))
+gs = fig.add_gridspec(2, 2, height_ratios=[4, 1], width_ratios=[1.2, 1])
+ax = fig.add_subplot(gs[0, 0])
+cmap = plt.get_cmap("tab10")
+sub = rng.choice(N_mn, 6000, replace=False)
+for d in range(10):
+    m = ym[sub] == d
+    ax.scatter(Z_ae[sub][m, 0], Z_ae[sub][m, 1], s=3, alpha=0.5, color=cmap(d), label=str(d))
+ax.set_xlim(ae_lo[0] - 1, ae_hi[0] + 1); ax.set_ylim(ae_lo[1] - 1, ae_hi[1] + 1)
+ax.legend(markerscale=4, fontsize=7, ncol=5, loc="upper left")
+ax.set_title("Códigos do AE (treino)"); ax.set_xlabel("$z_1$"); ax.set_ylabel("$z_2$")
+ax = fig.add_subplot(gs[0, 1])
+ax.imshow(mosaico(amostras_ae, 4), cmap="gray_r", vmin=0, vmax=1)
+ax.set_xticks([]); ax.set_yticks([]); ax.grid(False)
+ax.set_title("Decoder do AE em z ~ Gaussiana única ajustada")
+ax = fig.add_subplot(gs[1, :])
+ax.imshow(mosaico(interp_ae, 10), cmap="gray_r", vmin=0, vmax=1)
+ax.set_xticks([]); ax.set_yticks([]); ax.grid(False)
+ax.set_title("AE: interpolação linear no espaço latente, do '1' ao '7'")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Diagnóstico
+
+::: {.fragment}
+- $E(\boldsymbol\phi,\mathbf{w})$ só avalia $\mathbf{g}$ nos códigos de treino; **fora deles, nada** diz o que gerar.
+:::
+
+::: {.fragment}
+- **Invariância:** $\mathbf{h}$ invertível $\Rightarrow$ $\mathbf{g}\circ\mathbf{h}^{-1}\big(\mathbf{h}\circ\mathbf{f}(\mathbf{x})\big)=\mathbf{g}(\mathbf{f}(\mathbf{x}))$: mesmo erro.
+- Versão não linear da invariância por $\mathbf{G}$ (Aula 6): os dados fixam a **superfície**, não a coordenatização do latente.
+:::
+
+::: {.fragment .callout-note}
+DLFC p. 564 (tradução livre): *"autoencoders simples [...] não fornecem
+representações semanticamente significativas no espaço latente e não
+são capazes de gerar diretamente novos exemplos"*.
+:::
+
+::: {.fragment .callout-important}
+Falta o que a PPCA tinha: $p(\mathbf{z})$ fixada **e** $p(\mathbf{x}\mid\mathbf{z})$, isto é, um **modelo gerador**.
+:::
+
+:::
+
+## Pausa — Corrigir o Espaço Latente Depois
 
 ::: {.callout-tip}
-## O que aconteceria se forçássemos todos os $\mathbf{z}$ a estarem dentro de um círculo unitário?
+## Ajustar uma distribuição aos códigos do AE já treinado (uma Gaussiana, ou um GMM da Aula 4) e sortear dela resolveria o problema de gerar?
 
-Isso resolveria o problema dos "buracos" no espaço latente ou apenas mudaria a escala do problema?
+Pense no que essa distribuição ajustada consegue corrigir e no que fica
+igual: o decoder foi treinado olhando para quais pontos de $\mathbf{z}$?
 :::
 
 ::: {.callout-tip}
 ## Julgue V ou F
 
-- □ O Autoencoder tradicional aprende a densidade de probabilidade dos dados.
-- □ No AE, a função de custo penaliza a distância entre a entrada e a saída.
-- □ Um espaço latente contínuo é essencial para a interpolação de características.
-- □ O decoder de um AE funciona como um modelo generativo por definição.
+- □ Padronizar cada coordenada dos códigos do AE (média zero, variância
+  um) faz com que eles passem a seguir uma $\mathcal{N}(\mathbf{0},\mathbf{I})$.
+- □ Se um autoencoder reconstrói bem todas as imagens de treino, então
+  o decoder produz imagens plausíveis para qualquer $\mathbf{z}$ dentro
+  da caixa que contém os códigos de treino.
+- □ Um GMM ajustado aos códigos 2D de um AE, seguido do decoder, define
+  um modelo cuja verossimilhança $p(\mathbf{x})$ dos dados pode ser
+  calculada em forma fechada.
+- □ No autoencoder linear da Aula 6, a invariância por uma matriz
+  invertível $\mathbf{G}$ é um caso particular da invariância do
+  objetivo do AE por qualquer reparametrização invertível do espaço
+  latente.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## Pausa Ativa — Resposta
+## Pausa — Resposta
 
 ::: {.callout-tip}
 ## Julgue V ou F — Resposta
 
-- ✗ Falso — O AE aprende um mapeamento, não uma densidade.
-- ✔ Verdadeiro — Via MSE.
-- ✔ Verdadeiro — Permite transições suaves entre classes.
-- ✗ Falso — Ele reconstrói, mas não sabe como amostrar novos dados.
+- ✗ Padronizar acerta só média e variância; ilhas e buracos continuam.
+  Uma nuvem multimodal padronizada não é Gaussiana.
+- ✗ Reconstruir bem os pontos de treino não diz nada sobre $\mathbf{g}$
+  nos buracos entre os códigos; foi onde as amostras falharam.
+- ✗ O AE não tem $p(\mathbf{x}\mid\mathbf{z})$ (é determinístico); e
+  mesmo com ruído, $\int p(\mathbf{x}\mid\mathbf{z})p(\mathbf{z})\,\mathrm{d}\mathbf{z}$
+  com decoder não linear não tem forma fechada.
+- ✔ $\mathbf{h}(\mathbf{z})=\mathbf{G}\mathbf{z}$ é uma reparametrização
+  invertível linear; a do AE vale para qualquer $\mathbf{h}$ invertível
+  que as redes representem.
 :::
 
 ::: {.fragment}
-**Voltando à pergunta:** Apenas mudar a escala não resolve. O problema é a *topologia* do espaço. Podemos ter todos os pontos no círculo, mas com "ilhas" de dados separadas por vastos desertos de baixa probabilidade. Precisamos de uma força que "empurre" as representações para preencher o espaço de forma regular.
+**Voltando à pergunta:** ajuda em parte. A distribuição ajustada
+descreve onde os códigos estão e reduz amostras nos buracos, mas o
+decoder continua sem treino fora dos códigos, a forma da nuvem é
+acidente do treino e não há verossimilhança para comparar modelos. O
+VAE resolve na direção oposta: fixa $p(\mathbf{z})$ **antes** e treina
+encoder e decoder para respeitá-la.
 :::
 
 :::
 
-# Bloco 3: Variational Autoencoders (VAE)
+# Bloco 3: O VAE como PPCA Não Linear
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-O VAE resolve o gap generativo mudando a natureza do gargalo. Em vez de mapear $\mathbf{x}$ para um ponto $\mathbf{z}$, o encoder agora estima os **parâmetros de uma distribuição de probabilidade** $q_{\phi}(\mathbf{z}|\mathbf{x})$. 
 
-Geralmente, assumimos que essa distribuição é uma Gaussiana multivariada com diagonal:
-$$q_{\phi}(\mathbf{z}|\mathbf{x}) = \mathcal{N}(\mathbf{z} \mid \boldsymbol\mu_{\phi}(\mathbf{x}), \text{diag}(\boldsymbol\sigma_{\phi}^2(\mathbf{x})))$$
+## O Modelo Gerador
 
-O encoder produz dois vetores: $\boldsymbol\mu$ (a localização do dado no espaço latente) e $\boldsymbol\sigma$ (a incerteza ou "espalhamento" desse dado). O decoder então tenta reconstruir $\mathbf{x}$ a partir de amostras $\mathbf{z} \sim q_{\phi}(\mathbf{z}|\mathbf{x})$. Isso força o decoder a ser robusto a pequenas variações em $\mathbf{z}$, promovendo a continuidade do espaço.
+Voltamos ao modelo que a PPCA já tinha e trocamos uma única peça.
+
+::: {.callout-note icon=false}
+## Definição (modelo gerador não linear de variável latente contínua; DLFC §16.4.1, eq. 16.80, e §19.2, eq. 19.5)
+
+$$
+p(\mathbf{z})=\mathcal{N}(\mathbf{z}\mid\mathbf{0},\mathbf{I}_M),
+\qquad
+p(\mathbf{x}\mid\mathbf{z},\mathbf{w})=\mathcal{N}\big(\mathbf{x}\mid\mathbf{g}(\mathbf{z},\mathbf{w}),\,\sigma^2\mathbf{I}_D\big),
+$$
+
+em que $\mathbf{g}(\cdot,\mathbf{w}):\mathbb{R}^M\to\mathbb{R}^D$ é uma
+rede neural (o **decoder**). Para gerar um ponto: sorteia-se
+$\mathbf{z}\sim p(\mathbf{z})$, calcula-se $\mathbf{g}(\mathbf{z},\mathbf{w})$
+e soma-se ruído $\mathcal{N}(\mathbf{0},\sigma^2\mathbf{I})$.
+:::
+
+Com $\mathbf{g}(\mathbf{z},\mathbf{w})=\mathbf{W}\mathbf{z}+\boldsymbol\mu$,
+o modelo **é** a PPCA. O VAE é, portanto, a PPCA com a reta trocada por
+uma rede. O ruído $\sigma^2$ não é detalhe. O DLFC (§16.4.1, p. 523,
+tradução livre) explica que, sem ele, o modelo *"atribui densidade zero a
+todo vetor de dados que não esteja exatamente sobre a variedade"*. A
+verossimilhança seria zero em quase todo ponto real, e o gradiente não
+teria por onde guiar o treino.
+
+**Atenção à notação.** $\sigma^2$, sem índice, é a variância do ruído do
+decoder, como na PPCA. Mais adiante, o encoder terá desvios-padrão
+$\sigma_{nj}$, um por ponto $n$ e por coordenada latente $j$. São
+quantidades diferentes.
+
+## O Que Deixa de Ter Forma Fechada
+
+A verossimilhança marginal de um ponto é
+
+$$
+p(\mathbf{x}\mid\mathbf{w})=\int p(\mathbf{x}\mid\mathbf{z},\mathbf{w})\,p(\mathbf{z})\,\mathrm{d}\mathbf{z}
+\qquad\text{(DLFC 19.4).}
+$$
+
+Na PPCA, o integrando é Gaussiano em $(\mathbf{x},\mathbf{z})$
+conjuntamente (média linear em $\mathbf{z}$), e a integral dá
+$\mathcal{N}(\boldsymbol\mu,\mathbf{C})$. Com $\mathbf{g}$ não linear,
+$\mathbf{z}$ entra na média por uma rede, e a integral não tem forma
+fechada. Pelo mesmo motivo, a posterior
+
+$$
+p(\mathbf{z}\mid\mathbf{x},\mathbf{w})=\frac{p(\mathbf{x}\mid\mathbf{z},\mathbf{w})\,p(\mathbf{z})}{p(\mathbf{x}\mid\mathbf{w})}
+\qquad\text{(DLFC 19.12)}
+$$
+
+também não. O DLFC (§19.2, p. 571, tradução livre) aponta onde: *"o
+numerador é fácil de avaliar para o nosso modelo gerador profundo. Porém,
+o denominador é dada pela função de verossimilhança, que, como já
+notamos, é intratável"*. Além de não ter fórmula, essa posterior pode ter
+forma bem diferente de uma Gaussiana. O DLFC (Fig. 19.7) mostra um
+exemplo em que a priori é unimodal e a posterior de um ponto é bimodal.
+
+## Inferência Amortizada
+
+Sem a posterior exata, o passo E do EM precisa de uma aproximação. A
+decomposição da Aula 5 vale para **qualquer** $q$, então uma opção seria
+otimizar uma $q_n(\mathbf{z}_n)$ separada para cada ponto. Isso exige $N$
+otimizações, e todas teriam de ser refeitas a cada atualização de
+$\mathbf{w}$. O VAE usa outra estratégia, a **inferência amortizada**
+(DLFC §19.2.1, p. 572, tradução livre): *"em vez de tentar avaliar uma
+posterior separada $p(\mathbf{z}_n\mid\mathbf{x}_n,\mathbf{w})$ para cada
+ponto individualmente, treinamos uma única rede neural, chamada rede
+encoder, para aproximar todas essas distribuições"*.
+
+::: {.callout-note icon=false}
+## Definição (encoder Gaussiano diagonal; DLFC eq. 19.13)
+
+$$
+q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)=\prod_{j=1}^M\mathcal{N}\big(z_j\mid\mu_j(\mathbf{x},\boldsymbol\phi),\,\sigma_j^2(\mathbf{x},\boldsymbol\phi)\big),
+$$
+
+em que $\boldsymbol\mu(\cdot,\boldsymbol\phi)$ e $\boldsymbol\sigma^2(\cdot,\boldsymbol\phi)$
+são saídas de uma rede neural com entrada $\mathbf{x}$. As médias usam
+saída linear. As variâncias precisam ser positivas, então a rede produz
+$\ln\sigma_j^2$ com saída linear e toma a exponencial.
+:::
+
+**O que muda em relação ao AE.** O encoder do AE devolvia um ponto,
+$\mathbf{z}_n=\mathbf{f}(\mathbf{x}_n,\boldsymbol\phi)$. O encoder do VAE
+devolve os parâmetros de uma distribuição: para cada coordenada latente,
+uma média $\mu_j$ e uma log-variância $\ln\sigma_j^2$ (painel (a) da
+figura ao fim desta seção). Cada dado deixa de ser representado por um
+código e passa a ser representado por uma **nuvem de códigos compatíveis
+com ele**, centrada em $\boldsymbol\mu(\mathbf{x}_n,\boldsymbol\phi)$ e
+com largura $\boldsymbol\sigma(\mathbf{x}_n,\boldsymbol\phi)$. Passada
+pelo decoder, essa nuvem corresponde a uma família de dados parecidos com
+$\mathbf{x}_n$, e não a uma única reconstrução. No modelo probabilístico
+(painel (b)), $q$ é a seta tracejada de $\mathbf{x}_n$ para
+$\mathbf{z}_n$: a aproximação da posterior, no sentido inverso ao da
+geração.
+
+O "custo amortizado" é este: treina-se uma rede uma vez, e depois inferir
+$\mathbf{z}$ para um ponto novo custa uma passagem pelo encoder, sem
+otimização.
+
+::: {.callout-note icon=false}
+## Definição (*Variational Autoencoder*; DLFC §19.2)
+
+Um VAE é o par (modelo gerador da definição acima, encoder
+$q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)$) com os parâmetros
+$(\mathbf{w},\boldsymbol\phi)$ ajustados **conjuntamente** maximizando a
+soma dos ELBOs dos pontos de treino.
+:::
+
+O DLFC (§19.2, pp. 569–570, tradução livre) resume o VAE em três ideias:
+*"(i) usar o ELBO para aproximar a verossimilhança, o que leva a uma
+relação próxima com o algoritmo EM, (ii) inferência amortizada, em que um
+segundo modelo, a rede encoder, aproxima as posteriores das variáveis
+latentes no passo E, e (iii) tornar tratável o treino do encoder por meio
+do truque de reparametrização"*. A ideia (ii) está acima. A (i) é o
+Bloco 4, e a (iii) é o Bloco 5.
+
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Variational Autoencoders (VAE)
 
-- **Mudança de Paradigma:** $\mathbf{x} \to p(\mathbf{z}|\mathbf{x}) \to \mathbf{x}$.
-- O Encoder não é mais um compressor de pontos, mas um **estimador de densidade**.
-- **Saídas do Encoder:** $\boldsymbol\mu$ (média) e $\boldsymbol\sigma$ (desvio padrão).
+## O Modelo Gerador: PPCA com Rede
 
-## O Processo Generativo
+::: {.callout-note icon=false}
+**Definição (DLFC 16.80, 19.5):**
 
-1. **Encoder:** $\mathbf{x} \to (\boldsymbol\mu, \boldsymbol\sigma)$.
-2. **Amostragem:** $\mathbf{z} \sim \mathcal{N}(\boldsymbol\mu, \boldsymbol\sigma^2)$.
-3. **Decoder:** $\mathbf{z} \to \mathbf{\hat{x}}$.
-- Isso garante que regiões próximas no espaço latente gerem resultados semelhantes.
+- $p(\mathbf{z})=\mathcal{N}(\mathbf{0},\mathbf{I}_M)$
+- $\;p(\mathbf{x}\mid\mathbf{z},\mathbf{w})=\mathcal{N}\big(\mathbf{g}(\mathbf{z},\mathbf{w}),\sigma^2\mathbf{I}_D\big)$
+- $\mathbf{g}$ = rede (**decoder**). 
+- Gerar: $\mathbf{z}\sim p(\mathbf{z})$ $\to$ $\mathbf{g}(\mathbf{z},\mathbf{w})$ $\to$ $+$ ruído.
 :::
 
-# Bloco 4: O Objetivo do VAE (ELBO)
+::: {.fragment}
+- $\mathbf{g}(\mathbf{z})=\mathbf{W}\mathbf{z}+\boldsymbol\mu$ $\Rightarrow$ **é a PPCA**.
+- Por que o ruído $\sigma^2$? DLFC p. 523: sem ele o modelo *"atribui densidade zero a todo vetor que não esteja exatamente sobre a variedade"*: verossimilhança zero, sem gradiente.
+:::
 
-::: {.content-visible when-format="html" unless-format="revealjs"}
-Se deixássemos o VAE apenas com o erro de reconstrução, o modelo simplesmente definiria $\boldsymbol\sigma \to 0$ e voltaria a ser um AE tradicional (pontos isolados). Para evitar isso, introduzimos uma regularização: queremos que a distribuição latente $q_{\phi}(\mathbf{z}|\mathbf{x})$ seja próxima de uma priori simples, tipicamente $\mathcal{N}(\mathbf{0}, \mathbf{I})$.
+## O Que Perde a Forma Fechada
 
-Isso nos leva de volta ao **ELBO** (Aula 5). A função de custo do VAE é a minimização da perda:
-$$\text{Loss} = \underbrace{\mathbb{E}_{\mathbf{z} \sim q_{\phi}(\mathbf{z}|\mathbf{x})} [\|\mathbf{x} - g_{\theta}(\mathbf{z})\|^2]}_{\text{Fidelidade (Reconstrução)}} + \beta \cdot \underbrace{\mathrm{KL}(q_{\phi}(\mathbf{z}|\mathbf{x}) \| \mathcal{N}(\mathbf{0}, \mathbf{I}))}_{\text{Regularização (Prior)}}$$
+::: {.fragment}
+$$
+p(\mathbf{x}\mid\mathbf{w})=\int p(\mathbf{x}\mid\mathbf{z},\mathbf{w})\,p(\mathbf{z})\,\mathrm{d}\mathbf{z}\;\;(19.4),
+\qquad
+p(\mathbf{z}\mid\mathbf{x},\mathbf{w})=\frac{p(\mathbf{x}\mid\mathbf{z},\mathbf{w})\,p(\mathbf{z})}{p(\mathbf{x}\mid\mathbf{w})}\;\;(19.12).
+$$
 
-- **Fidelidade:** Força o modelo a reconstruir o dado com precisão.
-- **Regularização:** Força o espaço latente a ser compacto, centralizado e sem buracos.
-- **O Equilíbrio:** Se $\beta$ for muito alto, todos os dados colapsam no centro (borrado). Se for muito baixo, temos o problema do AE tradicional (overfitting).
+- PPCA: média linear em $\mathbf{z}$ $\Rightarrow$ tudo Gaussiano $\Rightarrow$ integral fechada.
+- VAE: $\mathbf{z}$ entra na média **por uma rede** $\Rightarrow$ sem forma fechada.
+:::
+
+::: {.fragment .callout-note}
+DLFC p. 571 (tradução livre): *"o numerador é fácil de avaliar [...]. Porém, o denominador é a verossimilhança, que é intratável"*. E a posterior pode ser até **bimodal** com priori unimodal (Fig. 19.7).
+:::
+
+## O Encoder Devolve uma Distribuição
+
+::: {.fragment}
+No AE, o encoder devolvia **um ponto** $\mathbf{z}_n=\mathbf{f}(\mathbf{x}_n,\boldsymbol\phi)$. No VAE, devolve **duas saídas** por coordenada: média $\mu_j$ e log-variância $\ln\sigma_j^2$ (o log garante $\sigma_j^2>0$).
+:::
+
+::: {.fragment .callout-note icon=false}
+**Definição (encoder Gaussiano diagonal; DLFC 19.13):**
+$q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)=\prod_{j=1}^M\mathcal{N}\big(z_j\mid\mu_j(\mathbf{x},\boldsymbol\phi),\sigma_j^2(\mathbf{x},\boldsymbol\phi)\big)$.
+:::
+
+::: {.fragment}
+**O que se modela:** cada $\mathbf{x}_n$ vira uma **nuvem de códigos compatíveis com ele** (a), não um código único; decodificada, a nuvem é uma família de dados parecidos com $\mathbf{x}_n$. Em (b), $q$ aproxima a posterior, no sentido inverso ao da geração.
+:::
+
+:::
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{27,54,93}
+\definecolor{laranja}{RGB}{217,83,30}
+\definecolor{cinza}{RGB}{127,140,141}
+\begin{tikzpicture}[
+  var/.style={circle, draw=azul, line width=1pt, minimum size=1.1cm, font=\normalsize},
+  obs/.style={var, fill=azul!20},
+  par/.style={font=\small},
+  arr/.style={->, >=stealth, thick, draw=azul},
+  enc/.style={->, >=stealth, thick, dashed, draw=laranja}
+]
+% ---------- (a) a rede encoder ----------
+\node[font=\small\bfseries, text=cinza] at (3.6,2.6) {(a) a rede encoder};
+\node[draw=azul, fill=azul!20, line width=1pt, minimum width=0.9cm, minimum height=1.6cm] (xin) at (0,0.8) {$\mathbf{x}_n$};
+\draw[draw=laranja, fill=laranja!12, line width=1pt] (1.0,-0.2) -- (2.8,0.3) -- (2.8,1.3) -- (1.0,1.8) -- cycle;
+\node[par, text=laranja] at (1.9,0.8) {rede $\boldsymbol\phi$};
+\draw[arr] (xin) -- (1.0,0.8);
+\node[par, text=laranja, anchor=west] (mu) at (3.3,1.45) {$\boldsymbol\mu(\mathbf{x}_n,\boldsymbol\phi)$};
+\node[par, text=laranja, anchor=west] (ls) at (3.3,0.15) {$\ln\boldsymbol\sigma^2(\mathbf{x}_n,\boldsymbol\phi)$};
+\draw[arr, draw=laranja] (2.8,1.1) -- (mu.west);
+\draw[arr, draw=laranja] (2.8,0.5) -- (ls.west);
+% nuvem q(z | x_n)
+\begin{scope}[shift={(7.2,0.8)}]
+  \fill[laranja!10] (0,0) ellipse (1.25 and 0.8);
+  \fill[laranja!22] (0,0) ellipse (0.85 and 0.55);
+  \fill[laranja!38] (0,0) ellipse (0.45 and 0.29);
+  \draw[laranja, line width=0.8pt] (0,0) ellipse (1.25 and 0.8);
+  \foreach \p in {(0.3,0.2),(-0.5,0.1),(0.7,-0.35),(-0.2,-0.4),(-0.85,0.4),(0.1,0.55),(0.95,0.15)}
+    \fill[azul] \p circle (1.3pt);
+  \fill[laranja!70!black] (0,0) circle (2pt);
+  \draw[cinza, <->, >=stealth] (0,-1.0) -- (1.25,-1.0) node[midway, below, font=\scriptsize, text=cinza] {largura $\boldsymbol\sigma$};
+\end{scope}
+\draw[arr, draw=laranja, dashed] (mu.east) to[bend left=15] (7.2,0.8);
+\draw[arr, draw=laranja, dashed] (ls.east) to[bend right=10] (6.4,0.25);
+\node[par, text=laranja] at (7.2,2.1) {$q(\mathbf{z}\mid\mathbf{x}_n,\boldsymbol\phi)$};
+\node[font=\scriptsize, text=azul, align=center] at (7.2,-1.0) {pontos: códigos\\compatíveis com $\mathbf{x}_n$};
+% separador
+\draw[cinza!60, dashed] (9.4,-1.4) -- (9.4,2.8);
+% ---------- (b) o modelo probabilístico ----------
+\begin{scope}[shift={(13.9,0)}]
+\node[font=\small\bfseries, text=cinza] at (0,2.6) {(b) o modelo probabilístico};
+\node[var] (z) at (0,1.5) {$\mathbf{z}_n$};
+\node[obs] (x) at (0,0) {$\mathbf{x}_n$};
+\draw[arr] (z) -- (x) node[midway, left=2pt, par, text=azul] {$p(\mathbf{x}\mid\mathbf{z},\mathbf{w})$};
+\draw[enc] (x) to[bend right=50] node[midway, right=2pt, par, text=laranja] {$q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)$} (z);
+\node[par, text=azul] (w) at (-2.6,0) {$\mathbf{w}$};
+\draw[arr] (w) -- (x);
+\node[par, text=azul, anchor=east] at (-1.7,1.5) {$p(\mathbf{z})=\mathcal{N}(\mathbf{0},\mathbf{I})$};
+\draw[rounded corners, draw=cinza] (-1.5,-0.75) rectangle (1.9,2.2);
+\node[font=\small, text=cinza] at (1.6,-0.5) {$N$};
+\end{scope}
+\end{tikzpicture}
+```
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## O Objetivo do VAE: ELBO
 
-A função de custo é um cabo de guerra entre dois termos:
+## Inferência Amortizada: Uma Rede para Todos os Pontos
 
-1. **Erro de Reconstrução (Fidelidade):**
-   - $\mathbb{E} [\|\mathbf{x} - \text{dec}(\mathbf{z})\|^2]$.
-   - "Quero que o dado seja reconstruído perfeitamente".
-   - $\to$ Tende a criar "ilhas" isoladas para cada dado.
-
-2. **Divergência KL (Regularização):**
-   - $\mathrm{KL}(q(\mathbf{z}|\mathbf{x}) \| \mathcal{N}(\mathbf{0}, \mathbf{I}))$.
-   - "Quero que o espaço latente seja uma Gaussiana padrão".
-   - $\to$ Tende a esmagar tudo no centro.
-
-**Resultado:** Um espaço latente suave, contínuo e centrado.
+::: {.fragment}
+- **O problema:** a posterior $p(\mathbf{z}_n\mid\mathbf{x}_n,\mathbf{w})$ não tem forma fechada, então o passo E precisa de uma aproximação $q$.
+- **Caminho direto:** uma $q_n$ por ponto, cada uma otimizada separadamente. São $N$ otimizações, refeitas a cada atualização de $\mathbf{w}$, e mais uma para cada ponto novo.
 :::
 
-# Bloco 5: O Reparameterization Trick
+::: {.fragment}
+- **Caminho do VAE (amortizado):** uma única rede $\boldsymbol\phi$ aprende a função $\mathbf{x}\mapsto(\boldsymbol\mu,\boldsymbol\sigma^2)$ para todos os pontos.
+- O esforço de inferência fica concentrado no treino. Para um ponto novo, basta uma passagem pelo encoder, sem otimização.
+:::
+
+::: {.fragment .callout-note icon=false}
+**Definição (VAE; DLFC §19.2):** o modelo gerador mais o encoder $q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)$, com $(\mathbf{w},\boldsymbol\phi)$ ajustados **conjuntamente** maximizando a soma dos ELBOs dos pontos de treino.
+:::
+
+::: {.fragment}
+DLFC pp. 569–570: o VAE combina três ideias. (i) **ELBO**, com relação próxima ao EM (Bloco 4). (ii) **Inferência amortizada** (este slide). (iii) **Reparametrização** (Bloco 5).
+:::
+
+:::
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Há um problema técnico fundamental: a operação de amostragem $\mathbf{z} \sim \mathcal{N}(\boldsymbol\mu, \boldsymbol\sigma^2)$ é estocástica e **não é diferenciável**. O gradiente do erro de reconstrução não consegue "atravessar" a amostragem para atualizar os pesos do encoder ($\boldsymbol\mu$ e $\boldsymbol\sigma$).
 
-A solução é o **Reparameterization Trick**. Em vez de amostrar diretamente da Gaussiana dependente de $\mathbf{x}$, expressamos $\mathbf{z}$ como uma transformação determinística de um ruído externo $\boldsymbol\epsilon \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$:
-$$\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon$$
+## PPCA e VAE Lado a Lado
 
-Agora, a estocasticidade está isolada em $\boldsymbol\epsilon$, que não depende dos parâmetros da rede. O gradiente pode fluir livremente através de $\boldsymbol\mu$ e $\boldsymbol\sigma$ via a soma e a multiplicação, permitindo o treinamento via backpropagation.
+| | PPCA (Aula 6) | VAE |
+|---|---|---|
+| priori | $\mathcal{N}(\mathbf{0},\mathbf{I})$ | $\mathcal{N}(\mathbf{0},\mathbf{I})$ |
+| $p(\mathbf{x}\mid\mathbf{z})$ | $\mathcal{N}(\mathbf{W}\mathbf{z}+\boldsymbol\mu,\sigma^2\mathbf{I})$ | $\mathcal{N}(\mathbf{g}(\mathbf{z},\mathbf{w}),\sigma^2\mathbf{I})$ |
+| $p(\mathbf{x})$ | $\mathcal{N}(\boldsymbol\mu,\mathbf{W}\mathbf{W}^T+\sigma^2\mathbf{I})$ | integral sem forma fechada |
+| "encoder" | posterior exata, média $\mathbf{B}^{-1}\mathbf{W}^T(\mathbf{x}-\boldsymbol\mu)$ | $q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)$, rede treinada |
+| incerteza de $\mathbf{z}$ | $\sigma^2\mathbf{B}^{-1}$, igual para todo $\mathbf{x}$ | $\sigma_j^2(\mathbf{x},\boldsymbol\phi)$, depende de $\mathbf{x}$ |
+| folga do ELBO | zero (passo E exato) | positiva em geral |
+| ajuste | forma fechada ou EM | gradiente estocástico no ELBO |
+
+A última linha distingue o VAE do EM. No EM, o passo E zera a folga
+$\mathrm{KL}(q\|p(\mathbf{z}\mid\mathbf{x}))$. No VAE, ela não zera. O
+DLFC (§19.2.1, p. 573, tradução livre) explica: *"otimizar os parâmetros
+$\boldsymbol\phi$ do encoder não reduz, em geral, a divergência de
+Kullback-Leibler a zero, porque a rede encoder não é um preditor perfeito
+da posterior das variáveis latentes"*. Ou a posterior verdadeira não é
+Gaussiana fatorada, ou a rede tem flexibilidade limitada, ou a otimização
+é aproximada. No Bloco 4 mediremos essa folga.
+
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## O Reparameterization Trick
 
-**O Problema:**
-$\text{Encoder} \to \text{Amostra } \mathbf{z} \to \text{Decoder}$.
-O gradiente $\nabla_{\phi}$ para no passo de amostragem (não é diferenciável).
+## PPCA e VAE Lado a Lado
 
-**A Solução:**
-Mover a aleatoriedade para fora da rede.
-$$\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon, \quad \text{onde } \boldsymbol\epsilon \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$$
+| | PPCA (Aula 6) | VAE |
+|---|---|---|
+| $p(\mathbf{x}\mid\mathbf{z})$ | $\mathcal{N}(\mathbf{W}\mathbf{z}+\boldsymbol\mu,\sigma^2\mathbf{I})$ | $\mathcal{N}(\mathbf{g}(\mathbf{z},\mathbf{w}),\sigma^2\mathbf{I})$ |
+| $p(\mathbf{x})$ | $\mathcal{N}(\boldsymbol\mu,\mathbf{W}\mathbf{W}^T+\sigma^2\mathbf{I})$ | sem forma fechada |
+| "encoder" | posterior exata (12.42), linear em $\mathbf{x}$ | $q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)$, rede |
+| incerteza de $\mathbf{z}$ | $\sigma^2\mathbf{B}^{-1}$, fixa | $\sigma_j^2(\mathbf{x},\boldsymbol\phi)$, varia |
+| folga do ELBO | zero | positiva em geral |
+| ajuste | forma fechada / EM | gradiente estocástico |
 
-- $\boldsymbol\mu$ e $\boldsymbol\sigma$ são determinísticos (saídas da rede).
-- $\boldsymbol\epsilon$ é um ruído fixo para aquele passo.
-- **Agora o gradiente flui!**
+::: {.fragment .callout-important}
+DLFC p. 573: otimizar $\boldsymbol\phi$ *"não reduz, em geral, a KL a zero, porque o encoder não é um preditor perfeito da posterior"*. O passo E **deixa de ser exato**.
 :::
 
-## Pausa Ativa
+:::
+
+## Pausa — Um Encoder para Todos
 
 ::: {.callout-tip}
-## O que acontece se removermos o termo KL do VAE?
+## Por que não otimizar uma $q_n(\mathbf{z}_n)$ separada para cada ponto, como faria um passo E aproximado ponto a ponto? O que se ganha e o que se perde ao usar um único encoder para todos os pontos?
 
-O modelo ainda consegue gerar imagens? Elas seriam semelhantes às do MNIST?
+Compare as duas opções em custo para um ponto novo e em quão perto cada
+uma consegue chegar da posterior de cada ponto.
 :::
 
 ::: {.callout-tip}
 ## Julgue V ou F
 
-- □ O Reparameterization Trick torna a amostragem diferenciável.
-- □ No VAE, o encoder prevê o valor exato de $\mathbf{z}$ para cada $\mathbf{x}$.
-- □ A divergência KL no VAE atua como um regularizador do espaço latente.
-- □ O decoder de um VAE é capaz de transformar qualquer $\mathbf{z} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$ em um dado plausível.
+- □ Se o decoder de um VAE fosse afim, $\mathbf{g}(\mathbf{z})=\mathbf{W}\mathbf{z}+\boldsymbol\mu$,
+  o modelo gerador seria a PPCA e a posterior exata de $\mathbf{z}$ seria
+  Gaussiana.
+- □ No caso afim acima, um encoder Gaussiano **diagonal** sempre
+  consegue representar a posterior exata, porque ela é Gaussiana.
+- □ Com inferência amortizada, obter a distribuição aproximada de
+  $\mathbf{z}$ para um ponto novo exige apenas uma passagem pelo
+  encoder, sem otimização.
+- □ Como o encoder é uma rede neural flexível, o ELBO maximizado de um
+  VAE coincide com $\ln p(\mathbf{x}\mid\mathbf{w})$.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## Pausa Ativa — Resposta
+## Pausa — Resposta
 
 ::: {.callout-tip}
 ## Julgue V ou F — Resposta
 
-- ✔ Verdadeiro — Permite o uso de backpropagation.
-- ✗ Falso — Ele prevê os parâmetros ($\boldsymbol\mu, \boldsymbol\sigma$) de uma distribuição.
-- ✔ Verdadeiro — Evita o colapso em pontos isolados.
-- ✔ Verdadeiro — Esse é o objetivo de ter um espaço latente regularizado.
+- ✔ Modelo linear-Gaussiano: é a PPCA, com posterior PRML eq. 12.42.
+- ✗ A covariância exata é $\sigma^2\mathbf{B}^{-1}$, com
+  $\mathbf{B}=\mathbf{W}^T\mathbf{W}+\sigma^2\mathbf{I}$; ela só é
+  diagonal se as colunas de $\mathbf{W}$ forem ortogonais entre si. Uma
+  rotação qualquer de $\mathbf{W}$ (invariância da Aula 6) a torna não
+  diagonal.
+- ✔ É o ganho da amortização: o custo de inferência foi pago no treino.
+- ✗ Sobra a folga $\mathrm{KL}(q\|p(\mathbf{z}\mid\mathbf{x}))>0$
+  (DLFC p. 573); no Bloco 4 ela é medida no MNIST.
 :::
 
 ::: {.fragment}
-**Voltando à pergunta:** Se removermos o KL, o VAE vira um AE tradicional com ruído. Ele ainda "gera" algo, mas o espaço latente terá buracos. Se você amostrar um $\mathbf{z}$ aleatório, as chances de cair num "buraco" são altas, resultando em imagens que não parecem nada com dígitos.
+**Voltando à pergunta:** com uma $q_n$ por ponto, cada aproximação pode
+chegar mais perto da sua posterior, mas são $N$ otimizações, refeitas a
+cada passo em $\mathbf{w}$, e um ponto novo exige mais uma. O encoder
+único torna a inferência uma passagem pela rede e compartilha
+informação entre pontos parecidos. Perde-se a precisão por ponto: a
+rede impõe uma função suave $\mathbf{x}\mapsto(\boldsymbol\mu,\boldsymbol\sigma)$,
+e a folga resultante soma-se à da família Gaussiana diagonal.
+:::
+
+:::
+
+# Bloco 4: O ELBO do VAE
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## Da Decomposição da Aula 5 à Perda do VAE
+
+Este é o resultado central da aula. Partimos da identidade da Aula 5 e
+chegamos, passo a passo, à função que se minimiza no treino. As
+premissas são as do Bloco 3: priori $p(\mathbf{z})=\mathcal{N}(\mathbf{0},\mathbf{I})$,
+decoder Gaussiano com variância $\sigma^2$ fixa, encoder Gaussiano
+diagonal, pontos independentes.
+
+**Passo 1 — decomposição da Aula 5**, com $\mathbf{H}=\mathbf{z}_n$,
+$\mathbf{X}=\mathbf{x}_n$ e $q=q(\mathbf{z}_n\mid\mathbf{x}_n,\boldsymbol\phi)$:
+
+$$
+\ln p(\mathbf{x}_n\mid\mathbf{w})=\mathcal{L}_n(\mathbf{w},\boldsymbol\phi)+\mathrm{KL}\big(q(\mathbf{z}_n\mid\mathbf{x}_n,\boldsymbol\phi)\,\|\,p(\mathbf{z}_n\mid\mathbf{x}_n,\mathbf{w})\big).
+$$
+
+**Passo 2 — definição do ELBO**, com
+$p(\mathbf{x}_n,\mathbf{z}_n\mid\mathbf{w})=p(\mathbf{x}_n\mid\mathbf{z}_n,\mathbf{w})\,p(\mathbf{z}_n)$:
+
+$$
+\mathcal{L}_n(\mathbf{w},\boldsymbol\phi)=\int q(\mathbf{z}_n\mid\mathbf{x}_n,\boldsymbol\phi)\,\ln\frac{p(\mathbf{x}_n\mid\mathbf{z}_n,\mathbf{w})\,p(\mathbf{z}_n)}{q(\mathbf{z}_n\mid\mathbf{x}_n,\boldsymbol\phi)}\,\mathrm{d}\mathbf{z}_n .
+$$
+
+**Passo 3 — logaritmo de produto é soma de logaritmos**, e linearidade
+da integral:
+
+$$
+\mathcal{L}_n=\int q(\mathbf{z}_n\mid\mathbf{x}_n,\boldsymbol\phi)\,\ln p(\mathbf{x}_n\mid\mathbf{z}_n,\mathbf{w})\,\mathrm{d}\mathbf{z}_n
++\int q(\mathbf{z}_n\mid\mathbf{x}_n,\boldsymbol\phi)\,\ln\frac{p(\mathbf{z}_n)}{q(\mathbf{z}_n\mid\mathbf{x}_n,\boldsymbol\phi)}\,\mathrm{d}\mathbf{z}_n .
+$$
+
+**Passo 4 — definição de KL da Aula 5**,
+$\mathrm{KL}(q\|p)=-\int q\ln\{p/q\}$, aplicada ao segundo termo:
+
+$$
+\boxed{\;\mathcal{L}_n(\mathbf{w},\boldsymbol\phi)=\mathbb{E}_{q(\mathbf{z}_n\mid\mathbf{x}_n,\boldsymbol\phi)}\big[\ln p(\mathbf{x}_n\mid\mathbf{z}_n,\mathbf{w})\big]-\mathrm{KL}\big(q(\mathbf{z}_n\mid\mathbf{x}_n,\boldsymbol\phi)\,\|\,p(\mathbf{z}_n)\big)\;}
+\qquad\text{(DLFC 19.14).}
+$$
+
+**Passo 5 — independência entre pontos:**
+$\ln p(\mathcal{D}\mid\mathbf{w})=\sum_n\ln p(\mathbf{x}_n\mid\mathbf{w})=\sum_n\mathcal{L}_n+\sum_n\mathrm{KL}(\cdot)\ge\sum_n\mathcal{L}_n$
+(DLFC 19.10), porque cada KL é $\ge0$.
+
+**Há duas divergências KL diferentes nesta derivação**, e confundi-las é
+o erro mais comum. A do Passo 1 compara $q$ com a **posterior**
+$p(\mathbf{z}_n\mid\mathbf{x}_n,\mathbf{w})$. Ela não é calculável
+(depende de $p(\mathbf{x}_n\mid\mathbf{w})$) e é a folga que gostaríamos
+de zerar. A do Passo 4 compara $q$ com a **priori** $p(\mathbf{z}_n)$.
+Ela é calculável e é um termo da função objetivo. Só esta segunda KL
+aparece em $\mathcal{L}_n$, mas a primeira também é controlada: com
+$\mathbf{w}$ fixo, $\ln p(\mathbf{x}_n\mid\mathbf{w})$ não depende de
+$\boldsymbol\phi$, e pelo Passo 1 maximizar $\mathcal{L}_n$ em
+$\boldsymbol\phi$ equivale a reduzir a folga, sem nunca calculá-la.
+
+**Leitura dos dois termos.** O primeiro é um erro de reconstrução
+esperado: codificar $\mathbf{x}_n$, sortear $\mathbf{z}_n$ de $q$,
+decodificar e medir a verossimilhança do dado original. O segundo puxa
+cada $q(\mathbf{z}\mid\mathbf{x}_n)$ para a priori. Esse termo regulariza
+o espaço latente e é exatamente o que faltava ao AE.
+
+## A Verossimilhança Gaussiana Vira Erro Quadrático
+
+**Passo 6 — log da Gaussiana isotrópica:**
+
+$$
+\ln\mathcal{N}\big(\mathbf{x}\mid\mathbf{g},\sigma^2\mathbf{I}_D\big)
+=-\frac D2\ln(2\pi\sigma^2)-\frac{1}{2\sigma^2}\|\mathbf{x}-\mathbf{g}\|^2 .
+$$
+
+**Passo 7 — substituindo no ELBO e trocando o sinal**, obtém-se a perda
+por ponto:
+
+$$
+-\mathcal{L}_n=\frac{1}{2\sigma^2}\,\mathbb{E}_{q}\big\|\mathbf{x}_n-\mathbf{g}(\mathbf{z}_n,\mathbf{w})\big\|^2
++\mathrm{KL}\big(q(\mathbf{z}_n\mid\mathbf{x}_n,\boldsymbol\phi)\,\|\,p(\mathbf{z}_n)\big)
++\frac D2\ln(2\pi\sigma^2).
+$$
+
+O último termo não depende de $(\mathbf{w},\boldsymbol\phi)$. Maximizar
+o ELBO equivale, portanto, a minimizar
+"erro quadrático$/(2\sigma^2)$ + KL até a priori". O erro quadrático do
+autoencoder reaparece como log-verossimilhança Gaussiana, e não como
+escolha arbitrária. Para dados binários, uma Bernoulli em
+$p(\mathbf{x}\mid\mathbf{z})$ trocaria o erro quadrático pela entropia
+cruzada e deixaria o termo KL intacto.
+
+## A KL Gaussiana em Forma Fechada
+
+::: {.callout-note icon=false}
+## Teorema (KL entre Gaussiana diagonal e $\mathcal{N}(\mathbf{0},\mathbf{I})$; DLFC eq. 19.15, Exercícios 2.27 e 19.4)
+
+Sejam $q(\mathbf{z})=\prod_{j=1}^M\mathcal{N}(z_j\mid\mu_j,\sigma_j^2)$,
+com $\sigma_j>0$, e $p(\mathbf{z})=\mathcal{N}(\mathbf{z}\mid\mathbf{0},\mathbf{I}_M)$.
+Então
+
+$$
+\mathrm{KL}(q\,\|\,p)=\frac12\sum_{j=1}^M\big(\mu_j^2+\sigma_j^2-1-\ln\sigma_j^2\big).
+$$
+:::
+
+*Demonstração.* **(a) Redução a uma dimensão.** As duas densidades
+fatoram por coordenada: $q=\prod_jq_j(z_j)$ e $p=\prod_jp_j(z_j)$ com
+$p_j=\mathcal{N}(0,1)$. Logo
+$\ln\{q(\mathbf{z})/p(\mathbf{z})\}=\sum_j\ln\{q_j(z_j)/p_j(z_j)\}$, e
+
+$$
+\mathrm{KL}(q\|p)=\mathbb{E}_q\Big[\sum_j\ln\frac{q_j(z_j)}{p_j(z_j)}\Big]=\sum_j\mathbb{E}_{q_j}\Big[\ln\frac{q_j(z_j)}{p_j(z_j)}\Big]=\sum_j\mathrm{KL}(q_j\|p_j),
+$$
+
+porque cada parcela depende só de $z_j$, cuja marginal sob $q$ é $q_j$.
+
+**(b) Caso escalar.** Com $q_j=\mathcal{N}(\mu,s^2)$ e $p_j=\mathcal{N}(0,1)$:
+
+$$
+\ln q_j(z)=-\tfrac12\ln(2\pi s^2)-\frac{(z-\mu)^2}{2s^2},
+\qquad
+\ln p_j(z)=-\tfrac12\ln(2\pi)-\frac{z^2}{2}.
+$$
+
+Sob $q_j$, $\mathbb{E}[(z-\mu)^2]=s^2$ e
+$\mathbb{E}[z^2]=\mathrm{Var}[z]+(\mathbb{E}[z])^2=s^2+\mu^2$. Então
+
+$$
+\mathbb{E}_{q_j}[\ln q_j]=-\tfrac12\ln(2\pi s^2)-\tfrac12,
+\qquad
+\mathbb{E}_{q_j}[\ln p_j]=-\tfrac12\ln(2\pi)-\tfrac12(s^2+\mu^2),
+$$
+
+$$
+\mathrm{KL}(q_j\|p_j)=\mathbb{E}_{q_j}[\ln q_j]-\mathbb{E}_{q_j}[\ln p_j]
+=-\tfrac12\ln s^2-\tfrac12+\tfrac12(s^2+\mu^2)
+=\tfrac12\big(\mu^2+s^2-1-\ln s^2\big).
+$$
+
+Somar em $j$ com $(\mu,s)=(\mu_j,\sigma_j)$ conclui. $\blacksquare$
+
+*Nota de leitura:* o DLFC escreve (19.15) com o sinal trocado,
+$\tfrac12\sum_j(1+\ln\sigma_j^2-\mu_j^2-\sigma_j^2)$, que é $-\mathrm{KL}$,
+a parcela que entra **somada** no ELBO.
+
+**O que cada parcela faz.** A figura mostra
+$k(\mu,\sigma)=\tfrac12(\mu^2+\sigma^2-1-\ln\sigma^2)$ para uma
+coordenada. O mínimo, zero, está em $(\mu,\sigma)=(0,1)$, isto é,
+$q_j=p_j$.
+
+- $\tfrac12\mu^2$ puxa a média de cada ponto para a origem. Isso centra
+  o espaço latente e fixa sua escala, coisa que o AE não tinha.
+- $\tfrac12(\sigma^2-1-\ln\sigma^2)\ge0$, com igualdade só em
+  $\sigma^2=1$ (porque $\ln t\le t-1$). Quando $\sigma\to0$, o termo
+  $-\ln\sigma^2\to+\infty$. A KL **proíbe** que $q$ degenere num ponto,
+  que é justamente o que o AE faz. Cada dado passa a ocupar uma pequena
+  nuvem, e o decoder é treinado na vizinhança de cada código, não só no
+  código.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Do ELBO da Aula 5 à Perda do VAE
+
+::: {.fragment}
+**Passo 1 — decomposição da Aula 5** ($\mathbf{H}=\mathbf{z}_n$, $q=q(\mathbf{z}_n\mid\mathbf{x}_n,\boldsymbol\phi)$):
+$$
+\ln p(\mathbf{x}_n\mid\mathbf{w})=\mathcal{L}_n(\mathbf{w},\boldsymbol\phi)+\mathrm{KL}\big(q\,\|\,p(\mathbf{z}_n\mid\mathbf{x}_n,\mathbf{w})\big).
+$$
+:::
+
+::: {.fragment}
+**Passo 2 — definição do ELBO**, $p(\mathbf{x}_n,\mathbf{z}_n)=p(\mathbf{x}_n\mid\mathbf{z}_n,\mathbf{w})p(\mathbf{z}_n)$:
+$$
+\mathcal{L}_n=\int q\,\ln\frac{p(\mathbf{x}_n\mid\mathbf{z}_n,\mathbf{w})\,p(\mathbf{z}_n)}{q}\,\mathrm{d}\mathbf{z}_n .
+$$
+:::
+
+::: {.fragment}
+**Passo 3 — $\ln$ de produto = soma de $\ln$:**
+$$
+\mathcal{L}_n=\int q\,\ln p(\mathbf{x}_n\mid\mathbf{z}_n,\mathbf{w})\,\mathrm{d}\mathbf{z}_n+\int q\,\ln\frac{p(\mathbf{z}_n)}{q}\,\mathrm{d}\mathbf{z}_n .
+$$
+:::
+
+::: {.fragment}
+**Passo 4 — definição de KL** ($\mathrm{KL}(q\|p)=-\int q\ln\{p/q\}$):
+$$
+\boxed{\;\mathcal{L}_n=\mathbb{E}_{q}\big[\ln p(\mathbf{x}_n\mid\mathbf{z}_n,\mathbf{w})\big]-\mathrm{KL}\big(q(\mathbf{z}_n\mid\mathbf{x}_n,\boldsymbol\phi)\,\|\,p(\mathbf{z}_n)\big)\;}\quad(19.14)
+$$
+:::
+
+## Duas KLs, Dois Papéis
+
+::: {.fragment}
+As duas equações do slide anterior, com as KLs nomeadas:
+$$
+\ln p(\mathbf{x}_n\mid\mathbf{w})=\mathcal{L}_n+\underbrace{\mathrm{KL}\big(q\,\|\,p(\mathbf{z}_n\mid\mathbf{x}_n,\mathbf{w})\big)}_{\text{KL até a posterior}},
+\qquad
+\mathcal{L}_n=\mathbb{E}_q\big[\ln p(\mathbf{x}_n\mid\mathbf{z}_n,\mathbf{w})\big]-\underbrace{\mathrm{KL}\big(q\,\|\,p(\mathbf{z}_n)\big)}_{\text{KL até a priori}}.
+$$
+:::
+
+::: {.fragment}
+| | KL até a **posterior** | KL até a **priori** |
+|---|---|---|
+| compara $q$ com | $p(\mathbf{z}_n\mid\mathbf{x}_n,\mathbf{w})$ | $p(\mathbf{z}_n)=\mathcal{N}(\mathbf{0},\mathbf{I})$ |
+| calculável? | não: depende de $p(\mathbf{x}_n\mid\mathbf{w})$ | sim: forma fechada (fórmula nas notas) |
+| papel | **folga** entre a cota e $\ln p(\mathbf{x}_n\mid\mathbf{w})$ | **termo** do objetivo (regularização) |
+:::
+
+::: {.fragment .callout-important}
+Só a KL até a priori aparece em $\mathcal{L}_n$. Com $\mathbf{w}$ fixo, $\ln p(\mathbf{x}_n\mid\mathbf{w})$ não depende de $\boldsymbol\phi$; então maximizar $\mathcal{L}_n$ em $\boldsymbol\phi$ **equivale a reduzir a folga**, sem nunca calculá-la.
+:::
+
+## Da Cota à Perda do VAE
+
+Onde paramos: $\mathcal{L}_n=\mathbb{E}_q\big[\ln p(\mathbf{x}_n\mid\mathbf{z}_n,\mathbf{w})\big]-\mathrm{KL}\big(q\,\|\,p(\mathbf{z}_n)\big)$.
+
+::: {.fragment}
+**Passo 5 — independência entre pontos e $\mathrm{KL}\ge0$ (Gibbs, Aula 5):**
+$$
+\ln p(\mathcal{D}\mid\mathbf{w})=\sum_n\ln p(\mathbf{x}_n\mid\mathbf{w})=\sum_n\mathcal{L}_n+\sum_n\mathrm{KL}\big(q\,\|\,p(\mathbf{z}_n\mid\mathbf{x}_n,\mathbf{w})\big)\ge\sum_n\mathcal{L}_n\quad(19.10).
+$$
+:::
+
+::: {.fragment}
+**Passo 6 — log da Gaussiana:** $\ln\mathcal{N}(\mathbf{x}\mid\mathbf{g},\sigma^2\mathbf{I})=-\tfrac D2\ln(2\pi\sigma^2)-\tfrac{1}{2\sigma^2}\|\mathbf{x}-\mathbf{g}\|^2$.
+:::
+
+::: {.fragment}
+**Passo 7 — perda por ponto:**
+$$
+-\mathcal{L}_n=\underbrace{\frac{1}{2\sigma^2}\,\mathbb{E}_{q}\big\|\mathbf{x}_n-\mathbf{g}(\mathbf{z}_n,\mathbf{w})\big\|^2}_{\text{reconstrução}}
++\underbrace{\mathrm{KL}\big(q\,\|\,p(\mathbf{z}_n)\big)}_{\text{regularização}}
++\underbrace{\tfrac D2\ln(2\pi\sigma^2)}_{\text{const.}}
+$$
+:::
+
+::: {.fragment .callout-important}
+O erro quadrático do AE reaparece como **log-verossimilhança Gaussiana**. Bernoulli em $p(\mathbf{x}\mid\mathbf{z})$ $\to$ entropia cruzada; o termo KL não muda.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+::: {.fig-resize style="width: 50%; margin: 0 auto;"}
+```{python}
+#| echo: false
+mu_g = np.linspace(-3, 3, 300)
+s_g = np.linspace(0.05, 2.5, 300)
+MU, SG = np.meshgrid(mu_g, s_g)
+K = 0.5 * (MU ** 2 + SG ** 2 - 1 - np.log(SG ** 2))
+fig, ax = plt.subplots(figsize=(6, 4.2))
+cs = ax.contourf(MU, SG, K, levels=np.linspace(0, 5, 21), cmap="Blues", extend="max")
+ax.contour(MU, SG, K, levels=[0.25, 1, 2, 4], colors=COR_AZUL, linewidths=0.8)
+ax.plot(0, 1, "o", color=COR_LARANJA, ms=9, label=r"mínimo: $q_j=p_j$")
+fig.colorbar(cs, ax=ax, label=r"$\frac{1}{2}(\mu^2+\sigma^2-1-\ln\sigma^2)$")
+ax.set_xlabel(r"média $\mu$ do encoder"); ax.set_ylabel(r"desvio-padrão $\sigma$ do encoder")
+ax.set_title("KL de uma coordenada até N(0,1)")
+ax.legend(loc="upper right")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## O Peso da Regularização: $\beta$ e $\sigma^2$
+
+O DLFC (§19.2.2, p. 577) apresenta o coeficiente $\beta$ (Higgins et al.,
+2017) multiplicando o termo KL. O objetivo passa a ser
+$\mathbb{E}_q[\ln p(\mathbf{x}_n\mid\mathbf{z}_n)]-\beta\,\mathrm{KL}(q\|p(\mathbf{z}_n))$,
+e $\beta=1$ recupera o ELBO. (O DLFC diz "o primeiro termo de (19.14)",
+mas o coeficiente multiplica o termo KL, que é o segundo.) O resultado
+abaixo, derivado por nós, mostra que $\beta$ e $\sigma^2$ não são dois
+botões independentes.
+
+::: {.callout-note icon=false}
+## Proposição ($\beta$ e $\sigma^2$ atuam juntos)
+
+Os minimizadores em $(\mathbf{w},\boldsymbol\phi)$ de
+$\frac{1}{2\sigma^2}\sum_n\mathbb{E}_q\|\mathbf{x}_n-\mathbf{g}(\mathbf{z}_n,\mathbf{w})\|^2+\beta\sum_n\mathrm{KL}(q\|p(\mathbf{z}_n))$
+dependem de $\sigma^2$ e $\beta$ apenas pelo produto $\beta\sigma^2$.
+:::
+
+*Demonstração.* Multiplicar uma função por uma constante positiva não
+altera seus minimizadores. Multiplicando por $2\sigma^2>0$, o objetivo
+fica
+$\sum_n\mathbb{E}_q\|\mathbf{x}_n-\mathbf{g}\|^2+2\beta\sigma^2\sum_n\mathrm{KL}(\cdot)$,
+que depende dos dois só por $\beta\sigma^2$. $\blacksquare$
+
+Fixar a variância do ruído do decoder é, portanto, escolher a força da
+regularização. Um $\sigma^2$ pequeno afirma que os dados ficam muito
+perto da variedade, então a reconstrução domina. Um $\sigma^2$ grande
+afirma o contrário, e a priori domina. No MNIST usamos `{python} mm(rf"\sigma^2={bm(SIG2, 1)}")`.
+
+**Experimento.** Treinamos o mesmo VAE ($784$-$512$-$256$-$2$ no encoder,
+espelhado no decoder, $M=2$) com $\beta\in\{0,1,20\}$. A tabela mede, nas
+imagens de teste, o erro de reconstrução por pixel decodificando
+$\boldsymbol\mu$, a KL média até a priori, o desvio-padrão médio
+$\sigma_{nj}$ do encoder e o espalhamento (desvio-padrão) das médias
+$\mu_{nj}$.
+
+| $\beta$ | erro por pixel | KL média | $\sigma_{nj}$ médio | desvio-padrão de $\mu_{nj}$ |
+|---|---|---|---|---|
+| $0$ | `{python} brl(vae_stats[0.0]["mse"], 4)` | `{python} brl(vae_stats[0.0]["kl"], 1)` | `{python} brl(vae_stats[0.0]["sig"], 4)` | `{python} brl(vae_stats[0.0]["mu_dp"], 2)` |
+| $1$ | `{python} brl(vae_stats[1.0]["mse"], 4)` | `{python} brl(vae_stats[1.0]["kl"], 1)` | `{python} brl(vae_stats[1.0]["sig"], 4)` | `{python} brl(vae_stats[1.0]["mu_dp"], 2)` |
+| $20$ | `{python} brl(vae_stats[20.0]["mse"], 4)` | `{python} brl(vae_stats[20.0]["kl"], 1)` | `{python} brl(vae_stats[20.0]["sig"], 4)` | `{python} brl(vae_stats[20.0]["mu_dp"], 2)` |
+
+- **$\beta=0$ (sem KL):** nada impede $\sigma\to0$, e é o que acontece
+  (`{python} mm(rf"\sigma_{{nj}}\approx{bm(vae_stats[0.0]['sig'], 3)}")`). O ruído
+  da amostragem só atrapalha a reconstrução, então o encoder o elimina, e
+  o modelo volta a ser um AE determinístico, com escala latente
+  arbitrária.
+- **$\beta=1$ (ELBO):** médias centradas, espalhamento perto de $1$,
+  reconstrução praticamente igual à do AE.
+- **$\beta=20$:** a KL cai, os $\sigma_{nj}$ crescem e a reconstrução
+  piora. Levado ao extremo, é o *posterior collapse* descrito pelo DLFC
+  (§19.2.2, pp. 576–577, tradução livre): *"a distribuição variacional
+  $q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)$ converge para a priori
+  $p(\mathbf{z})$ e, portanto, torna-se não informativa, porque deixa de
+  depender de $\mathbf{x}$. Na prática, o código latente é ignorado"*.
+  O decoder passa a receber ruído independente da entrada e só pode
+  produzir algo próximo de uma imagem média.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## $\beta$, $\sigma^2$ e o Experimento
+
+::: {.fragment}
+- DLFC p. 577 (Higgins et al., 2017): $\mathbb{E}_q[\ln p(\mathbf{x}_n\mid\mathbf{z}_n)]-\beta\,\mathrm{KL}(q\|p(\mathbf{z}_n))$; $\beta=1$ é o ELBO. (DLFC diz "primeiro termo"; é o KL, o segundo.)
+- **Proposição (nossa):** multiplicando por $2\sigma^2>0$,
+  $\sum_n\mathbb{E}_q\|\mathbf{x}_n-\mathbf{g}\|^2+2\beta\sigma^2\sum_n\mathrm{KL}$ $\Rightarrow$ minimizadores dependem só de **$\beta\sigma^2$**.
+- Escolher $\sigma^2$ é escolher a força da regularização. MNIST: `{python} mm(rf"\sigma^2={bm(SIG2, 1)}")`.
+:::
+
+::: {.fragment}
+| $\beta$ | erro/pixel | KL média | $\sigma_{nj}$ médio | dp de $\mu_{nj}$ |
+|---|---|---|---|---|
+| $0$ | `{python} brl(vae_stats[0.0]["mse"], 4)` | `{python} brl(vae_stats[0.0]["kl"], 1)` | `{python} brl(vae_stats[0.0]["sig"], 4)` | `{python} brl(vae_stats[0.0]["mu_dp"], 2)` |
+| $1$ | `{python} brl(vae_stats[1.0]["mse"], 4)` | `{python} brl(vae_stats[1.0]["kl"], 1)` | `{python} brl(vae_stats[1.0]["sig"], 4)` | `{python} brl(vae_stats[1.0]["mu_dp"], 2)` |
+| $20$ | `{python} brl(vae_stats[20.0]["mse"], 4)` | `{python} brl(vae_stats[20.0]["kl"], 1)` | `{python} brl(vae_stats[20.0]["sig"], 4)` | `{python} brl(vae_stats[20.0]["mu_dp"], 2)` |
+:::
+
+::: {.fragment}
+- $\beta=0$: $\sigma\to0$, volta ao **AE** (escala arbitrária). $\beta=1$: centrado, escala $\approx1$. $\beta=20$: rumo ao ***posterior collapse*** (DLFC pp. 576–577): *"$q$ converge para a priori [...] o código latente é ignorado"*.
+:::
+
+:::
+
+::: {.fig-resize style="width: 90%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, axes = plt.subplots(1, 3, figsize=(13, 4.3), sharex=True, sharey=True)
+lim = np.percentile(np.abs(Mu_b[0.0]), 99) * 1.05
+sub = rng.choice(N_mn, 6000, replace=False)
+tt = np.linspace(0, 2 * np.pi, 200)
+for ax, b in zip(axes, BETAS):
+    Z = Mu_b[b][sub]
+    for d in range(10):
+        m = ym[sub] == d
+        ax.scatter(Z[m, 0], Z[m, 1], s=3, alpha=0.5, color=cmap(d), label=str(d))
+    for r in (1, 2):
+        ax.plot(r * np.cos(tt), r * np.sin(tt), "--", color="black", lw=1)
+    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_aspect("equal")
+    ax.set_title(f"β = {b:g}: médias μ do encoder")
+    ax.set_xlabel("$z_1$")
+axes[0].set_ylabel("$z_2$")
+axes[0].legend(markerscale=4, fontsize=7, ncol=2, loc="upper left")
+fig.suptitle("Círculos tracejados: raios 1 e 2 da priori N(0, I)", fontsize=10)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## Quanto Falta Para a Verossimilhança
+
+A folga $\ln p(\mathbf{x})-\mathcal{L}=\mathrm{KL}(q\|p(\mathbf{z}\mid\mathbf{x}))$
+não é calculável diretamente, mas pode ser estimada. Para qualquer $q$
+positiva onde $p(\mathbf{x},\mathbf{z})$ é positiva,
+
+$$
+p(\mathbf{x})=\int p(\mathbf{x},\mathbf{z})\,\mathrm{d}\mathbf{z}
+=\int q(\mathbf{z}\mid\mathbf{x})\,\frac{p(\mathbf{x},\mathbf{z})}{q(\mathbf{z}\mid\mathbf{x})}\,\mathrm{d}\mathbf{z}
+=\mathbb{E}_{q}\!\left[\frac{p(\mathbf{x},\mathbf{z})}{q(\mathbf{z}\mid\mathbf{x})}\right],
+$$
+
+o que sugere estimar $\ln p(\mathbf{x})$ por
+$\ln\big(\tfrac1K\sum_k p(\mathbf{x},\mathbf{z}^{(k)})/q(\mathbf{z}^{(k)}\mid\mathbf{x})\big)$,
+com $\mathbf{z}^{(k)}\sim q$ (amostragem por importância). Pela
+desigualdade de Jensen ($\ln$ é côncava), a esperança desse estimador é
+$\le\ln p(\mathbf{x})$, de modo que a folga estimada é ela própria uma
+cota **inferior** da folga real.
+
+Com `{python} mm(f"K={milhar(K_is)}")` amostras, em
+`{python} n_is` imagens de teste, o ELBO médio é
+`{python} brl(elbo_te, 2)`, e a estimativa de $\ln p(\mathbf{x})$ é
+`{python} brl(lnp_is, 2)`. A folga média é de pelo menos
+`{python} brl(folga, 2)` nats por imagem. Os valores são positivos
+porque $p(\mathbf{x})$ é uma densidade em $784$ dimensões com
+`{python} mm(rf"\sigma^2={bm(SIG2, 1)}")`, e densidades podem passar de $1$. É
+a ilustração numérica do DLFC (Fig. 19.8): o ELBO fica sempre um pouco
+abaixo da log-verossimilhança, porque o encoder não reproduz a posterior
+exata.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Quanto Falta Para a Verossimilhança
+
+::: {.fragment}
+**Identidade (amostragem por importância):**
+
+- $p(\mathbf{x})=\int q\,\frac{p(\mathbf{x},\mathbf{z})}{q}\,\mathrm{d}\mathbf{z}=\mathbb{E}_q\!\left[\frac{p(\mathbf{x},\mathbf{z})}{q(\mathbf{z}\mid\mathbf{x})}\right]$
+- $\Rightarrow$ estimar $\ln p(\mathbf{x})$ por $\ln\tfrac1K\sum_k p(\mathbf{x},\mathbf{z}^{(k)})/q(\mathbf{z}^{(k)}\mid\mathbf{x})$.
+- Jensen: a esperança do estimador é $\le\ln p(\mathbf{x})$ $\Rightarrow$ folga estimada é cota **inferior** da real.
+:::
+
+::: {.fragment}
+- `{python} mm(f"K={milhar(K_is)}")`, `{python} n_is` imagens de teste: ELBO `{python} brl(elbo_te, 2)`; `{python} mm(rf"\ln p(\mathbf{{x}})\approx{bm(lnp_is)}")`.
+- Folga `{python} mm(rf"\mathrm{{KL}}(q\|p(\mathbf{{z}}\mid\mathbf{{x}}))\ge{bm(folga)}")` nats por imagem (valores positivos: densidade em $784$ dim.).
+:::
+
+::: {.fragment .callout-important}
+A folga do Bloco 3, medida: o ELBO fica **abaixo** de $\ln p(\mathbf{x})$ porque o encoder não reproduz a posterior (DLFC Fig. 19.8).
+:::
+
+:::
+
+## Pausa — O Termo Que Organiza o Espaço
+
+::: {.callout-tip}
+## Sem o termo KL ($\beta=0$), o encoder levou $\sigma_{nj}$ a quase zero. Por que o treino "quer" eliminar o ruído da amostragem, e o que exatamente o termo KL faz para impedir isso?
+
+Olhe para cada termo da perda separadamente: como o primeiro reage a
+$\sigma_{nj}$ grande, e como o segundo reage a $\sigma_{nj}\to0$?
+:::
+
+::: {.callout-tip}
+## Julgue V ou F
+
+- □ Num VAE com decoder Gaussiano, dobrar a variância $\sigma^2$ do
+  ruído do decoder leva aos mesmos parâmetros ótimos que dobrar o peso
+  $\beta$ do termo KL.
+- □ A parcela $\tfrac12(\mu_j^2+\sigma_j^2-1-\ln\sigma_j^2)$ é mínima em
+  $\sigma_j=0$, o que empurra o VAE de volta para um autoencoder
+  determinístico.
+- □ Se a KL média até a priori for praticamente zero para todos os
+  pontos, o decoder recebe códigos que não dependem da entrada e só pode
+  produzir algo próximo de uma imagem média.
+- □ Num VAE para o MNIST binarizado, trocar a Gaussiana por uma
+  Bernoulli em $p(\mathbf{x}\mid\mathbf{z})$ muda o termo KL do
+  objetivo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa — Resposta
+
+::: {.callout-tip}
+## Julgue V ou F — Resposta
+
+- ✔ Os minimizadores dependem só de $\beta\sigma^2$: dobrar qualquer um
+  dos dois dá o mesmo produto.
+- ✗ O mínimo é em $\sigma_j=1$ (e $\mu_j=0$); em $\sigma_j\to0$ a
+  parcela vai a $+\infty$. É o termo que **impede** a volta ao AE.
+- ✔ KL $\approx0$ significa $q(\mathbf{z}\mid\mathbf{x})\approx p(\mathbf{z})$
+  para todo $\mathbf{x}$: *posterior collapse* (DLFC p. 577).
+- ✗ A verossimilhança só aparece no termo de reconstrução (vira
+  entropia cruzada); o KL compara $q$ com a priori e não muda.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** o termo de reconstrução é avaliado em
+$\mathbf{z}=\boldsymbol\mu+\boldsymbol\sigma\odot\boldsymbol\epsilon$:
+quanto maior $\boldsymbol\sigma$, mais longe do ponto ideal o decoder
+recebe o código, e pior a reconstrução esperada. Sozinho, ele leva
+$\boldsymbol\sigma\to0$. A parcela $-\tfrac12\ln\sigma_j^2$ da KL cresce
+sem limite nesse caso, e o equilíbrio fica num $\sigma_{nj}>0$: cada
+dado ocupa uma nuvem, e o decoder aprende a responder bem a toda ela.
+:::
+
+:::
+
+# Bloco 5: O *Reparameterization Trick* e o VAE Treinado
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## O Problema: Derivar Uma Esperança
+
+O termo KL tem forma fechada e se deriva sem dificuldade. O de
+reconstrução,
+$\mathbb{E}_{q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)}[\ln p(\mathbf{x}\mid\mathbf{z},\mathbf{w})]$,
+é uma integral contra uma rede e precisa ser estimado por Monte Carlo
+(DLFC 19.16): sorteiam-se $\mathbf{z}^{(l)}\sim q$ e faz-se a média de
+$\ln p(\mathbf{x}\mid\mathbf{z}^{(l)},\mathbf{w})$. Derivar essa
+estimativa em $\mathbf{w}$ é fácil. Em $\boldsymbol\phi$, não. O DLFC
+(§19.2.2, p. 575, tradução livre) explica: *"o gradiente em relação a
+$\boldsymbol\phi$ é problemático, porque mudanças em $\boldsymbol\phi$
+mudam a distribuição $q(\mathbf{z}_n\mid\mathbf{x}_n,\boldsymbol\phi)$ da
+qual as amostras são tiradas, e no entanto essas amostras são valores
+fixos, de modo que não temos como obter suas derivadas em relação a
+$\boldsymbol\phi$"*.
+
+O problema geral é calcular $\nabla_{\boldsymbol\phi}\mathbb{E}_{q(\mathbf{z}\mid\boldsymbol\phi)}[f(\mathbf{z})]$
+quando $\boldsymbol\phi$ está **na distribuição** e não no integrando.
+Há dois estimadores.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Problema: Derivar Uma Esperança
+
+::: {.fragment}
+- KL: forma fechada, deriva sem dificuldade.
+- Reconstrução: $\mathbb{E}_{q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)}[\ln p(\mathbf{x}\mid\mathbf{z},\mathbf{w})]\approx\frac1L\sum_l\ln p(\mathbf{x}\mid\mathbf{z}^{(l)},\mathbf{w})$, $\mathbf{z}^{(l)}\sim q$ (19.16).
+- Em $\mathbf{w}$: fácil. Em $\boldsymbol\phi$: $\boldsymbol\phi$ está **na distribuição**, não no integrando.
+:::
+
+::: {.fragment .callout-note}
+DLFC p. 575 (tradução livre): *"mudanças em $\boldsymbol\phi$ mudam a
+distribuição da qual as amostras são tiradas, e no entanto essas
+amostras são valores fixos"*: a amostragem bloqueia o gradiente.
+:::
+
+::: {.fragment}
+**Problema geral:** $\nabla_{\boldsymbol\phi}\mathbb{E}_{q(\mathbf{z}\mid\boldsymbol\phi)}[f(\mathbf{z})]$. Dois estimadores.
+:::
+
+:::
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{27,54,93}
+\definecolor{laranja}{RGB}{217,83,30}
+\definecolor{verm}{RGB}{192,57,43}
+\definecolor{verde}{RGB}{39,174,96}
+\begin{tikzpicture}[
+  bloco/.style={draw=azul, line width=1pt, rounded corners=3pt, fill=azul!8, minimum height=0.8cm, minimum width=1.3cm, font=\small, align=center},
+  rand/.style={draw=laranja, line width=1pt, circle, fill=laranja!15, minimum size=0.9cm, font=\small},
+  fw/.style={->, >=stealth, thick, draw=azul},
+  bw/.style={->, >=stealth, thick, dashed, draw=verde},
+  bloq/.style={thick, dashed, draw=verm}
+]
+% ---- sem o truque
+\node[font=\small\bfseries, anchor=west] at (-0.6,1.3) {sem o truque};
+\node[bloco] (x1) at (0,0) {$\mathbf{x}$};
+\node[bloco] (e1) at (2.2,0) {encoder\\$\boldsymbol\phi$};
+\node[bloco] (ms1) at (4.6,0) {$\boldsymbol\mu,\boldsymbol\sigma$};
+\node[rand] (z1) at (7,0) {$\mathbf{z}$};
+\node[font=\scriptsize, text=laranja] at (7,-0.8) {$\mathbf{z}\sim q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)$};
+\node[bloco] (d1) at (9.4,0) {decoder\\$\mathbf{w}$};
+\node[bloco] (l1) at (11.8,0) {$\ln p(\mathbf{x}\mid\mathbf{z})$};
+\foreach \a/\b in {x1/e1,e1/ms1,ms1/z1,z1/d1,d1/l1} \draw[fw] (\a) -- (\b);
+\draw[bw] (l1.north) to[bend right=25] (d1.north);
+\draw[bw] (d1.north) to[bend right=25] (z1.north);
+\draw[bloq] (z1.north west) to[bend right=25] node[midway, above, font=\scriptsize, text=verm] {gradiente bloqueado} node[pos=0.5, text=verm, font=\large] {$\times$} (ms1.north);
+% ---- com o truque
+\node[font=\small\bfseries, anchor=west] at (-0.6,-2.2) {com o truque};
+\node[bloco] (x2) at (0,-3.5) {$\mathbf{x}$};
+\node[bloco] (e2) at (2.2,-3.5) {encoder\\$\boldsymbol\phi$};
+\node[bloco] (ms2) at (4.6,-3.5) {$\boldsymbol\mu,\boldsymbol\sigma$};
+\node[bloco, fill=white] (z2) at (7,-3.5) {$\mathbf{z}=\boldsymbol\mu+\boldsymbol\sigma\odot\boldsymbol\epsilon$};
+\node[rand] (eps) at (7,-5.1) {$\boldsymbol\epsilon$};
+\node[font=\scriptsize, text=laranja, anchor=west] at (7.55,-5.1) {$\boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\mathbf{I})$, fora da rede};
+\node[bloco] (d2) at (9.6,-3.5) {decoder\\$\mathbf{w}$};
+\node[bloco] (l2) at (12,-3.5) {$\ln p(\mathbf{x}\mid\mathbf{z})$};
+\foreach \a/\b in {x2/e2,e2/ms2,ms2/z2,z2/d2,d2/l2} \draw[fw] (\a) -- (\b);
+\draw[fw] (eps) -- (z2);
+\draw[bw] (l2.north) to[bend right=25] (d2.north);
+\draw[bw] (d2.north) to[bend right=25] (z2.north);
+\draw[bw] (z2.north) to[bend right=25] (ms2.north);
+\draw[bw] (ms2.north) to[bend right=25] node[midway, above, font=\scriptsize, text=verde] {gradiente chega ao encoder} (e2.north);
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## Estimador 1: *Score Function*
+
+::: {.callout-note icon=false}
+## Proposição (estimador *score function*; DLFC Exercício 19.1)
+
+Se $q(\mathbf{z}\mid\boldsymbol\phi)>0$ é diferenciável em
+$\boldsymbol\phi$ e derivada e integral podem ser trocadas,
+
+$$
+\nabla_{\boldsymbol\phi}\int q(\mathbf{z}\mid\boldsymbol\phi)\,f(\mathbf{z})\,\mathrm{d}\mathbf{z}
+=\mathbb{E}_{q(\mathbf{z}\mid\boldsymbol\phi)}\big[f(\mathbf{z})\,\nabla_{\boldsymbol\phi}\ln q(\mathbf{z}\mid\boldsymbol\phi)\big],
+$$
+
+e $\frac1L\sum_lf(\mathbf{z}^{(l)})\nabla_{\boldsymbol\phi}\ln q(\mathbf{z}^{(l)}\mid\boldsymbol\phi)$,
+com $\mathbf{z}^{(l)}\sim q$ independentes, é um estimador não enviesado.
+:::
+
+*Demonstração.* Trocando derivada e integral,
+$\nabla_{\boldsymbol\phi}\int qf\,\mathrm{d}\mathbf{z}=\int f\,\nabla_{\boldsymbol\phi}q\,\mathrm{d}\mathbf{z}$.
+Pela regra da cadeia, $\nabla_{\boldsymbol\phi}\ln q=\nabla_{\boldsymbol\phi}q/q$,
+logo $\nabla_{\boldsymbol\phi}q=q\,\nabla_{\boldsymbol\phi}\ln q$, e
+$\int f\,q\,\nabla_{\boldsymbol\phi}\ln q\,\mathrm{d}\mathbf{z}=\mathbb{E}_q[f\,\nabla_{\boldsymbol\phi}\ln q]$.
+A média de $L$ amostras independentes tem essa esperança. $\blacksquare$
+
+O estimador só usa **valores** de $f$, nunca a derivada de $f$, e serve
+até para $\mathbf{z}$ discreta. A limitação é a variância. $f$ entra
+multiplicando, então se $f$ é grande (como $\ln p(\mathbf{x}\mid\mathbf{z})$,
+uma soma sobre $784$ pixels), o estimador oscila muito. O DLFC (p. 575)
+atribui a técnica a Williams (1992) e observa que *"esses estimadores têm
+variância alta"*.
+
+## Estimador 2: Reparametrização (*Pathwise*)
+
+::: {.callout-note icon=false}
+## Lema (reparametrização Gaussiana; DLFC eq. 19.17, Exercício 19.2)
+
+Se $\epsilon\sim\mathcal{N}(0,1)$, $\mu\in\mathbb{R}$ e $\sigma>0$, então
+$z=\mu+\sigma\epsilon\sim\mathcal{N}(\mu,\sigma^2)$. Para vetores: se
+$\boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\mathbf{I}_M)$, então
+$\mathbf{z}=\boldsymbol\mu+\boldsymbol\sigma\odot\boldsymbol\epsilon\sim\prod_j\mathcal{N}(\mu_j,\sigma_j^2)$.
+:::
+
+*Demonstração.* Para todo $t$,
+$P(z\le t)=P(\mu+\sigma\epsilon\le t)=P\big(\epsilon\le\tfrac{t-\mu}{\sigma}\big)=\Phi\big(\tfrac{t-\mu}{\sigma}\big)$,
+usando $\sigma>0$ na segunda igualdade. Essa é a função de distribuição
+de $\mathcal{N}(\mu,\sigma^2)$. No caso vetorial, cada $z_j$ depende só
+de $\epsilon_j$, e os $\epsilon_j$ são independentes, logo os $z_j$
+também são, cada um com a marginal acima. $\blacksquare$
+
+**Consequência.** Como $\mathbf{z}$ e $\boldsymbol\mu+\boldsymbol\sigma\odot\boldsymbol\epsilon$
+têm a mesma distribuição, as esperanças coincidem:
+
+$$
+\mathbb{E}_{q(\mathbf{z}\mid\mathbf{x},\boldsymbol\phi)}[f(\mathbf{z})]
+=\mathbb{E}_{\boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\mathbf{I})}\big[f\big(\boldsymbol\mu(\mathbf{x},\boldsymbol\phi)+\boldsymbol\sigma(\mathbf{x},\boldsymbol\phi)\odot\boldsymbol\epsilon\big)\big].
+$$
+
+A distribuição de $\boldsymbol\epsilon$ não depende de $\boldsymbol\phi$.
+O parâmetro saiu da distribuição e foi para o integrando, então a
+derivada entra na esperança:
+
+$$
+\nabla_{\boldsymbol\phi}\mathbb{E}_q[f(\mathbf{z})]
+=\mathbb{E}_{\boldsymbol\epsilon}\big[\nabla_{\boldsymbol\phi}f(\boldsymbol\mu+\boldsymbol\sigma\odot\boldsymbol\epsilon)\big]
+=\mathbb{E}_{\boldsymbol\epsilon}\Big[\Big(\frac{\partial\mathbf{z}}{\partial\boldsymbol\phi}\Big)^T\nabla_{\mathbf{z}}f(\mathbf{z})\Big],
+$$
+
+e o termo dentro da esperança é calculado por *backpropagation* através
+do decoder ($\nabla_{\mathbf{z}}f$) e do encoder
+($\partial\mathbf{z}/\partial\boldsymbol\phi$, via $\boldsymbol\mu$ e
+$\boldsymbol\sigma$). Diferentemente do *score function*, esse estimador
+usa a **derivada** de $f$: sabe em que direção mudar $\mathbf{z}$ para
+melhorar a reconstrução.
+
+O DLFC (p. 575) registra o limite: o truque *"pode ser estendido a
+outras distribuições, mas é limitado a variáveis contínuas"*. Por isso
+ele não se aplica diretamente a uma latente categórica como a do GMM.
+
+*Nota de leitura:* a eq. (19.18) e o Algoritmo 19.1 do DLFC estão
+impressos como $z_{nj}=\mu_j\epsilon_{nj}+\sigma_j^2$. A forma correta é
+$z_{nj}=\mu_j+\sigma_j\epsilon_{nj}$, consistente com (19.17) e com o
+texto depois de (19.19).
+
+## A Variância, Medida
+
+Tomamos uma imagem de teste e o VAE treinado ($\beta=1$) e estimamos
+`{python} milhar(n_rep)` vezes, com uma única amostra
+($L=1$), a derivada de $\mathbb{E}_q[\ln p(\mathbf{x}\mid\mathbf{z})]$
+em relação à primeira coordenada de $\boldsymbol\mu$ pelos dois
+estimadores.
+
+- *Pathwise*: média `{python} brl(media_path, 1)` (erro-padrão
+  `{python} brl(ep_path, 1)`), desvio-padrão `{python} brl(dp_path, 1)`.
+- *Score function*: média `{python} brl(media_score, 1)` (erro-padrão
+  `{python} brl(ep_score, 1)`), desvio-padrão `{python} brl(dp_score, 1)`.
+
+As médias diferem em `{python} brl(z_medias, 2)` erros-padrão
+combinados, compatível com o fato de os dois estimadores serem não
+enviesados: o *score function* acerta na média, mas cada estimativa
+isolada oscila muito. O desvio-padrão do *score
+function* é cerca de `{python} brl(razao_dp, 0)` vezes maior, então
+para a mesma precisão ele precisaria de cerca de
+`{python} milhar(round(razao_dp**2))` vezes mais amostras.
+O DLFC (p. 575) conclui que a reparametrização *"pode ser vista também
+como uma técnica de redução de variância"*. Na prática, $L=1$ amostra por
+ponto basta (DLFC p. 576), porque o gradiente estocástico já é ruidoso
+pelo minilote.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Dois Estimadores do Mesmo Gradiente
+
+::: {.fragment}
+**1. *Score function* (DLFC Ex. 19.1):** $\nabla_{\boldsymbol\phi}q=q\,\nabla_{\boldsymbol\phi}\ln q$ $\Rightarrow$
+$$
+\nabla_{\boldsymbol\phi}\mathbb{E}_q[f]=\mathbb{E}_q\big[f(\mathbf{z})\,\nabla_{\boldsymbol\phi}\ln q(\mathbf{z}\mid\boldsymbol\phi)\big].
+$$
+- Só **valores** de $f$; serve para $\mathbf{z}$ discreta. Não enviesado, mas **variância alta** (Williams, 1992): $f$ entra multiplicando.
+:::
+
+::: {.fragment .callout-note icon=false}
+**Lema (DLFC 19.17, Ex. 19.2):** $\epsilon\sim\mathcal{N}(0,1)$, $\sigma>0$ $\Rightarrow$ $\mu+\sigma\epsilon\sim\mathcal{N}(\mu,\sigma^2)$.
+Prova: $P(\mu+\sigma\epsilon\le t)=\Phi\big(\tfrac{t-\mu}{\sigma}\big)$. Vetorial: componentes independentes.
+:::
+
+::: {.fragment}
+**2. Reparametrização (*pathwise*):** mesma distribuição $\Rightarrow$ mesma esperança, e $\boldsymbol\epsilon$ não depende de $\boldsymbol\phi$:
+$$
+\nabla_{\boldsymbol\phi}\mathbb{E}_q[f(\mathbf{z})]
+=\mathbb{E}_{\boldsymbol\epsilon}\big[\nabla_{\boldsymbol\phi}f(\boldsymbol\mu+\boldsymbol\sigma\odot\boldsymbol\epsilon)\big]
+=\mathbb{E}_{\boldsymbol\epsilon}\Big[\Big(\tfrac{\partial\mathbf{z}}{\partial\boldsymbol\phi}\Big)^T\nabla_{\mathbf{z}}f\Big].
+$$
+- Usa a **derivada** de $f$ (*backpropagation*). Limite: só variáveis **contínuas** (DLFC p. 575).
+- DLFC (19.18) e Alg. 19.1 imprimem $\mu_j\epsilon+\sigma_j^2$; o correto é $\mu_j+\sigma_j\epsilon$.
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## A Variância, Medida
+
+- Uma imagem de teste, VAE treinado, `{python} milhar(n_rep)` estimativas com $L=1$ da derivada em relação a $\mu_1$.
+
+::: {.fragment}
+| | média (erro-padrão) | desvio-padrão |
+|---|---|---|
+| *pathwise* | `{python} brl(media_path, 1)` (`{python} brl(ep_path, 1)`) | `{python} brl(dp_path, 1)` |
+| *score function* | `{python} brl(media_score, 1)` (`{python} brl(ep_score, 1)`) | `{python} brl(dp_score, 1)` |
+:::
+
+::: {.fragment}
+- Médias a `{python} brl(z_medias, 2)` erros-padrão uma da outra (ambos não enviesados); desvio-padrão $\approx`{python} brl(razao_dp, 0)`\times$ maior $\Rightarrow$ `{python} mm(rf"\approx{milhar(round(razao_dp**2))}\times")` mais amostras para a mesma precisão.
+:::
+
+::: {.fragment .callout-important}
+DLFC p. 575: a reparametrização é *"também uma técnica de redução de variância"*. Na prática, $L=1$ amostra por ponto (DLFC p. 576).
+:::
+
+:::
+
+::: {.fig-resize style="width: 60%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, ax = plt.subplots(figsize=(7, 3.6))
+lim_g = np.percentile(np.abs(g_score[:, 0]), 99)
+bins = np.linspace(-lim_g, lim_g, 120)
+ax.hist(g_score[:, 0], bins=bins, color=COR_LARANJA, alpha=0.7, density=True, label="score function")
+ax.hist(g_path[:, 0], bins=bins, color=COR_AZUL, alpha=0.9, density=True, label="pathwise (reparametrização)")
+ax.axvline(media_path, color="black", lw=1, ls="--")
+ax.set_xlabel(r"estimativa de $\partial\,\mathbb{E}_q[\ln p(\mathbf{x}\mid\mathbf{z})]/\partial\mu_1$ com L = 1")
+ax.set_ylabel("densidade")
+ax.set_title("Mesmo gradiente, dois estimadores")
+ax.legend()
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## O Algoritmo e o Que o VAE Aprendeu
+
+Juntando os Blocos 3 a 5, o treino do VAE (adaptado do Algoritmo 19.1
+do DLFC, com a reparametrização corrigida e em minilotes) é:
+
+1. Sortear um minilote $\{\mathbf{x}_n\}$.
+2. **Encoder:** calcular $\boldsymbol\mu_n=\boldsymbol\mu(\mathbf{x}_n,\boldsymbol\phi)$
+   e $\ln\boldsymbol\sigma_n^2$.
+3. **Reparametrização:** sortear $\boldsymbol\epsilon_n\sim\mathcal{N}(\mathbf{0},\mathbf{I})$
+   e fazer $\mathbf{z}_n=\boldsymbol\mu_n+\boldsymbol\sigma_n\odot\boldsymbol\epsilon_n$.
+4. **Perda:**
+   $\sum_n\Big[\frac{1}{2\sigma^2}\|\mathbf{x}_n-\mathbf{g}(\mathbf{z}_n,\mathbf{w})\|^2+\beta\cdot\tfrac12\sum_j\big(\mu_{nj}^2+\sigma_{nj}^2-1-\ln\sigma_{nj}^2\big)\Big]$.
+5. Gradientes em $(\mathbf{w},\boldsymbol\phi)$ por *backpropagation* e
+   um passo do otimizador (usamos Adam).
+
+Para **gerar**, descarta-se o encoder: sorteia-se $\mathbf{z}\sim\mathcal{N}(\mathbf{0},\mathbf{I})$
+e calcula-se $\mathbf{g}(\mathbf{z},\mathbf{w})$. A primeira figura
+abaixo mostra, à esquerda, o decoder avaliado numa grade de pontos
+espaçados pelos **quantis** da priori, de $5\%$ a $95\%$ em cada eixo.
+Cada célula ocupa a mesma massa de probabilidade. Os dígitos se
+transformam continuamente uns nos outros e não há regiões de lixo,
+porque o treino espalhou os códigos sobre a priori e ensinou o decoder a
+responder a toda a vizinhança de cada código. À direita estão $16$
+amostras de $p(\mathbf{z})$, a mesma operação que falhou no AE do
+Bloco 2. A segunda figura repete a interpolação do "1" ao "7": no VAE,
+as imagens intermediárias são formas plausíveis ao longo de todo o
+caminho.
+
+As amostras são **borradas**, porém. O decoder Gaussiano devolve a
+**média** de $p(\mathbf{x}\mid\mathbf{z})$. Quando um mesmo $\mathbf{z}$
+é compatível com várias formas (em $M=2$, isso é inevitável), a média
+das formas é um borrão. Com $M$ maior o borrão diminui, mas não
+desaparece. Melhorar isso é a motivação dos modelos que vêm depois do
+VAE.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## O Algoritmo e a Geração
+
+::: {.fragment}
+1. Minilote $\{\mathbf{x}_n\}$ $\to$ encoder: $\boldsymbol\mu_n$, $\ln\boldsymbol\sigma_n^2$.
+2. $\boldsymbol\epsilon_n\sim\mathcal{N}(\mathbf{0},\mathbf{I})$, $\;\mathbf{z}_n=\boldsymbol\mu_n+\boldsymbol\sigma_n\odot\boldsymbol\epsilon_n$.
+3. Perda: $\sum_n\big[\tfrac{1}{2\sigma^2}\|\mathbf{x}_n-\mathbf{g}(\mathbf{z}_n,\mathbf{w})\|^2+\beta\cdot\tfrac12\sum_j(\mu_{nj}^2+\sigma_{nj}^2-1-\ln\sigma_{nj}^2)\big]$.
+4. *Backpropagation* em $(\mathbf{w},\boldsymbol\phi)$ e passo do Adam.
+:::
+
+::: {.fragment}
+- **Gerar:** descartar o encoder; $\mathbf{z}\sim\mathcal{N}(\mathbf{0},\mathbf{I})$ $\to$ $\mathbf{g}(\mathbf{z},\mathbf{w})$.
+- Grade nos **quantis** da priori (5%–95%, mesma massa por célula): transição contínua, sem regiões de lixo.
+:::
+
+::: {.fragment .callout-important}
+Amostras **borradas**: o decoder devolve a **média** de $p(\mathbf{x}\mid\mathbf{z})$; um $\mathbf{z}$ compatível com várias formas dá a média delas.
+:::
+
+:::
+
+::: {.fig-resize style="width: 85%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, axes = plt.subplots(1, 2, figsize=(11, 5.2), gridspec_kw={"width_ratios": [1.5, 1]})
+axes[0].imshow(mosaico(grade_vae, 15, pad=0), cmap="gray_r", vmin=0, vmax=1)
+axes[0].set_title("Decoder do VAE na grade de quantis da priori")
+axes[1].imshow(mosaico(amostras_vae, 4), cmap="gray_r", vmin=0, vmax=1)
+axes[1].set_title("VAE: 16 amostras de z ~ N(0, I)")
+for ax in axes:
+    ax.set_xticks([]); ax.set_yticks([]); ax.grid(False)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.fig-resize style="width: 75%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, axes = plt.subplots(2, 1, figsize=(9, 2.6))
+for ax, imgs, nome in zip(axes, [interp_ae, interp_vae], ["AE", "VAE"]):
+    ax.imshow(mosaico(imgs, 10), cmap="gray_r", vmin=0, vmax=1)
+    ax.set_xticks([]); ax.set_yticks([]); ax.grid(False)
+    ax.set_ylabel(nome, rotation=0, ha="right", va="center")
+axes[0].set_title("Interpolação linear no espaço latente, do '1' ao '7'")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+## Pausa — Quando Não Há Caminho Contínuo
+
+::: {.callout-tip}
+## O truque exige $\mathbf{z}$ contínua. Num modelo com latente categórica (um GMM da Aula 4 com decoder neural, digamos), como se obteria o gradiente do termo de reconstrução em relação aos parâmetros do encoder?
+
+Releia o que cada estimador precisa saber sobre $f$ e sobre
+$q(\mathbf{z}\mid\boldsymbol\phi)$; e pense em quantos valores uma
+latente com $K$ categorias pode assumir.
+:::
+
+::: {.callout-tip}
+## Julgue V ou F
+
+- □ Como o estimador *score function* é não enviesado, com uma única
+  amostra ele é tão útil para o treino quanto o estimador da
+  reparametrização.
+- □ Se $\boldsymbol\epsilon\sim\mathcal{N}(\mathbf{0},\mathbf{I})$ e
+  $\mathbf{z}=\boldsymbol\mu+\boldsymbol\sigma\odot\boldsymbol\epsilon$
+  com $\sigma_j>0$, então $\mathbf{z}$ segue uma Gaussiana de média
+  $\boldsymbol\mu$ e covariância diagonal com entradas $\sigma_j^2$.
+- □ O truque da reparametrização elimina a aleatoriedade do treino: o
+  gradiente do ELBO passa a ser calculado de forma exata.
+- □ Fazer o encoder produzir $\ln\sigma_j^2$ em vez de $\sigma_j$ garante
+  a positividade da variância sem mudar a família de distribuições
+  representáveis por $q$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa — Resposta
+
+::: {.callout-tip}
+## Julgue V ou F — Resposta
+
+- ✗ Não enviesado não é o mesmo que preciso: com $L=1$, o desvio-padrão
+  medido foi $\approx`{python} brl(razao_dp, 0)`\times$ maior.
+- ✔ É o Lema: cada $z_j=\mu_j+\sigma_j\epsilon_j\sim\mathcal{N}(\mu_j,\sigma_j^2)$,
+  independentes.
+- ✗ Continua uma estimativa de Monte Carlo (sobre $\boldsymbol\epsilon$
+  e sobre o minilote); muda a **variância**, não a natureza estocástica.
+- ✔ $\sigma_j^2=\exp(\cdot)$ cobre exatamente $(0,\infty)$: mesma
+  família, sem restrição na saída da rede.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não há $\mathbf{z}=h(\boldsymbol\phi,\boldsymbol\epsilon)$
+diferenciável quando $\mathbf{z}$ só assume $K$ valores. Duas saídas: o
+estimador *score function*, que só usa valores de $f$ e funciona com
+$\mathbf{z}$ discreta, ao custo da variância alta; ou, com $K$ pequeno,
+**somar exatamente** sobre as categorias,
+$\mathbb{E}_q[f]=\sum_kq(k\mid\mathbf{x},\boldsymbol\phi)f(k)$, que é
+diferenciável em $\boldsymbol\phi$ sem amostragem, como as
+responsabilidades do passo E do GMM.
 :::
 
 :::
@@ -493,36 +2645,128 @@ O modelo ainda consegue gerar imagens? Elas seriam semelhantes às do MNIST?
 # Fechamento
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Retomando as perguntas do roteiro:
-- **O que é um AE?** Uma rede que aprende a comprimir e reconstruir dados via gargalo não linear.
-- **Por que o AE não é generativo?** Porque seu espaço latente é descontínuo e não modela a densidade dos dados.
-- **Como o VAE resolve isso?** Transformando o gargalo em uma distribuição e regularizando-a via KL para ser próxima de $\mathcal{N}(\mathbf{0}, \mathbf{I})$.
-- **O que é o Reparameterization Trick?** Uma técnica para permitir o fluxo de gradientes através de amostragem estocástica.
 
-**O Que Fica em Aberto:** Vimos que VAEs geram dados "borrados" (devido à natureza da Gaussiana e do MSE). Existem formas de gerar imagens mais nítidas? (Spoiler: GANs e Diffusion Models).
+## Retomando as Quatro Perguntas
 
-**Ponte para a Aula 8:** Até agora, focamos em reconstruir o dado. Mas e se quisermos apenas visualizar a estrutura de vizinhança em 2D, preservando a topologia local sem necessariamente reconstruir os pixels? Entraremos no mundo do MDS e t-SNE.
+1. **Onde a não linearidade precisa estar, e quando compensa?** No
+   caminho de $\mathbf{z}$ até $\hat{\mathbf{x}}$. Com decoder afim, as
+   reconstruções ficam num subespaço afim de dimensão $\le M$, por mais
+   complicado que seja o encoder. Por isso o AE raso empata com a PCA.
+   O AE profundo curva a superfície: no MNIST ($20\,000$ imagens,
+   variedade curva) reconstrói muito melhor; no Breast Cancer ($455$
+   pacientes, estrutura quase linear) sobreajusta.
+2. **Por que um bom compressor não é um bom gerador?** Porque o objetivo
+   do AE só avalia o decoder nos códigos de treino e é invariante a
+   reparametrizações do espaço latente. A escala, a forma e a densidade
+   dos códigos são acidentes do treino, e não há $p(\mathbf{z})$ de onde
+   sortear.
+3. **Como o VAE estende a PPCA?** Mesmo modelo gerador, com
+   $\mathbf{W}\mathbf{z}+\boldsymbol\mu$ trocado por uma rede. A
+   posterior perde a forma fechada. Um encoder aproxima todas as
+   posteriores de uma vez (inferência amortizada), e o ELBO da Aula 5
+   vira o objetivo: reconstrução esperada menos KL até a priori, com a
+   KL em forma fechada. O passo E deixa de ser exato, e sobra uma folga
+   mensurável.
+4. **Como derivar uma esperança sob uma distribuição que depende dos
+   parâmetros?** Pelo estimador *score function* (geral, variância
+   alta) ou pela reparametrização
+   $\mathbf{z}=\boldsymbol\mu+\boldsymbol\sigma\odot\boldsymbol\epsilon$,
+   que tira $\boldsymbol\phi$ da distribuição e o põe no integrando.
+   Ela exige $\mathbf{z}$ contínua e reduz a variância em ordens de
+   grandeza.
 
-[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+## O Que Fica em Aberto
+
+- **Borrão.** O decoder Gaussiano devolve médias condicionais, e a
+  média de várias formas é um borrão.
+- **Posterior agregada $\ne$ priori.** O termo KL age ponto a ponto. A
+  distribuição de todos os códigos juntos não é forçada a ser
+  exatamente $\mathcal{N}(\mathbf{0},\mathbf{I})$ (com $\beta=1$, o
+  desvio-padrão das médias foi `{python} brl(vae_stats[1.0]["mu_dp"], 2)`,
+  não $1$), e podem sobrar regiões da priori pouco visitadas.
+- **Escolha de $\beta$, $\sigma^2$ e $M$.** O equilíbrio entre
+  reconstrução e regularização é um hiperparâmetro. O *posterior
+  collapse* é o extremo de um lado, e o AE disfarçado é o extremo do
+  outro.
+- **Outros geradores.** O DLFC (Cap. 20, p. 582, tradução livre)
+  observa que *"modelos de difusão podem ser vistos como uma forma de
+  autoencoder variacional hierárquico em que a distribuição do encoder é
+  fixa, definida pelo processo de ruído, e só a distribuição geradora é
+  aprendida"*. A mesma ideia de ELBO, levada a muitas camadas de
+  latentes, está na base dos geradores de imagens atuais.
+
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Retomando as Perguntas
 
-- **AE:** Compressão via gargalo $\to$ Manifold Learning.
-- **Gap Generativo:** Espaço latente "buracado" $\to$ Amostragem falha.
-- **VAE:** Encoder $\to$ Distribuição $\to$ Regularização KL.
-- **Reparameterization:** $\mathbf{z} = \boldsymbol\mu + \boldsymbol\sigma \odot \boldsymbol\epsilon \to$ Gradientes fluem.
+## Retomando as Quatro Perguntas
 
-## O Que Fica em Aberto?
+::: {.fragment}
+**1.** Não linearidade **entre $\mathbf{z}$ e $\hat{\mathbf{x}}$**: decoder afim $\Rightarrow$ subespaço afim de dim. $\le M$ (AE raso = PCA). Profundo compensa no MNIST, sobreajusta no Breast Cancer.
+:::
 
-- Por que as imagens do VAE são borradas?
-- Como gerar imagens com alta fidelidade (estilo "fotorealista")?
+::: {.fragment}
+**2.** O objetivo do AE só vê os códigos de treino e é invariante a reparametrizações do latente: escala, forma e densidade são acidentes; sem $p(\mathbf{z})$ para sortear.
+:::
+
+::: {.fragment}
+**3.** VAE = PPCA com rede; posterior sem forma fechada $\to$ encoder amortizado; ELBO = reconstrução $-$ KL até a priori (fechada); folga mensurável.
+:::
+
+::: {.fragment}
+**4.** *Score function* (geral, variância alta) ou reparametrização $\mathbf{z}=\boldsymbol\mu+\boldsymbol\sigma\odot\boldsymbol\epsilon$ ($\boldsymbol\phi$ sai da distribuição; só contínuas).
+:::
+
+## O Que Fica em Aberto
+
+::: {.fragment}
+- **Borrão:** médias condicionais de várias formas.
+- **Posterior agregada $\ne$ priori:** a KL age ponto a ponto (dp das médias com $\beta=1$: `{python} brl(vae_stats[1.0]["mu_dp"], 2)`).
+- **$\beta$, $\sigma^2$, $M$:** entre o *posterior collapse* e o AE disfarçado.
+:::
+
+::: {.fragment .callout-note}
+DLFC p. 582 (tradução livre): *"modelos de difusão podem ser vistos como um autoencoder variacional hierárquico em que o encoder é fixo, definido pelo processo de ruído, e só a distribuição geradora é aprendida"*.
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+::: {.callout-tip}
+## Ponte para a Aula 8
+
+Os mapas 2D desta aula são **subprodutos** de um objetivo de
+reconstrução. No VAE, o termo KL ainda espreme todos os códigos num
+disco em torno da origem, e as classes do MNIST se encostam no centro.
+Se o objetivo for só **visualizar** a estrutura de vizinhança dos dados
+em duas dimensões, não há por que exigir um decoder: pode-se otimizar
+diretamente as posições dos pontos no plano para preservar distâncias
+(MDS) ou vizinhanças probabilísticas (t-SNE). A Aula 8 começa pelo
+obstáculo geométrico que aparece ao fazer isso, o *crowding problem*:
+não cabe no plano tudo o que é vizinho em alta dimensão.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
 
 ## Ponte para a Aula 8
 
-**Próximo passo:** Redução para Visualização.
-Sairemos da reconstrução para a preservação de topologia: **MDS e t-SNE**.
+::: {.callout-tip}
+## Ponte para a Aula 8
 
-[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+Os mapas 2D desta aula são **subprodutos** da reconstrução; no VAE, o KL
+ainda espreme as classes num disco. Para só **visualizar** vizinhanças,
+dispensa-se o decoder e otimizam-se as posições no plano diretamente:
+**MDS** (distâncias) e **t-SNE** (vizinhanças probabilísticas). O
+obstáculo de partida: o *crowding problem*.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+
 :::

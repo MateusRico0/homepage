@@ -93,6 +93,8 @@ Regras de slide (detalhes e exemplos em `_ref-conteudo.md#slides`):
 
 **Código:** um único chunk de setup global no topo (imports, paleta `COR_*` consistente com as aulas anteriores, dataset-fio, e todo cálculo cujo número aparece no texto). Todo número citado na prosa ou nos slides sai do código executado, com vírgula decimal (`$0{,}451$`). Chunks de figura: `#| echo: false`, envolvidos em `::: {.fig-resize style="width: XX%; margin: 0 auto;"}` (em chunks Python, `out-width`/`fig-width`/`fig-height` são ignorados; o tamanho vem do `figsize` e da largura do `.fig-resize`).
 
+**Render:** antes de rodar `quarto render`, verifique se o *watcher* está ligado (`pgrep -f "[p]review-watch.py"`). Se estiver, **não renderize**: ele já re-renderiza a aula a cada edição, e um segundo render em paralelo disputa CPU e `_site/` (já quebrou com `site_libs` sumindo). Só edite, espere o render dele terminar (`pgrep -f "[q]uarto.js render"` vazio; os colchetes evitam que o `pgrep` case com o próprio comando de espera) e confira o resultado em `_site/`. Sem *watcher*: `source .venv/bin/activate && quarto render <arquivo>`.
+
 **Diagramas:** proponha TikZ (```` ```{.tikz} ````) sem esperar pedido quando houver sequência, árvore de decisão, ramificação ou caminhos alternativos. Use as cores de `lesson-theme.scss` e envolva também em `.fig-resize` (`fig-align` não tem efeito sem `fig-cap`).
 
 **Dados:** o exemplo-fio vem de um dataset real (lista testada no Hugging Face Hub em `_ref-conteudo.md#datasets`), nunca Iris. Dados sintéticos só para isolar um ponto matemático (contraexemplo controlado, verificação numérica).

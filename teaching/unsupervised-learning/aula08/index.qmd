@@ -166,7 +166,7 @@ A cauda pesada permite empurrar aglomerados distantes para longe no plano, liber
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 Para construir essa teoria de forma rigorosa, estruturaremos a aula em torno de cinco questões fundamentais:
 
-1. **Por que métodos de projeção global falham ao mapear dados complexos em 2D?** Compreender a geometria de esferas em alta dimensão e a origem matemática do *crowding problem*.
+1. **Por que métodos de projeção global falham ao mapear dados complexos em 2D?** Compreender a impossibilidade geométrica de preservar distâncias globais e vizinhanças locais simultaneamente no plano.
 2. **Como o MDS formaliza a preservação de distâncias e qual é o viés da função *Stress*?** Analisar a perda quadrática do MDS e provar por que distâncias longas dominam a otimização em detrimento da estrutura fina local.
 3. **Por que modelar vizinhanças probabilisticamente via divergência KL?** Derivar a formulação do SNE (*Stochastic Neighbor Embedding*), a calibração da Perplexidade via entropia e o papel crucial da assimetria da perda de Kullback-Leibler.
 4. **De que maneira a distribuição $t$-Student de 1 grau de liberdade resolve o *crowding problem*?** Demonstrar como a lei de potência $1/(1+d^2)$ alivia a pressão de atração entre aglomerados distintos e balanceia as forças de atração e repulsão no gradiente.
@@ -174,7 +174,7 @@ Para construir essa teoria de forma rigorosa, estruturaremos a aula em torno de 
 :::
 
 ::: {.content-visible when-format="revealjs"}
-1. **O Dilema do Volume e o Crowding Problem:** A geometria de esferas em $\mathbb{R}^D$ versus $\mathbb{R}^2$.
+1. **O Dilema da Projeção 2D:** Por que métodos globais colapsam e misturam agrupamentos no plano.
 2. **MDS e a Perda Stress:** Tentativa de preservar distâncias métricas e o domínio das escalas longas.
 3. **Vizinhanças Probabilísticas (SNE):** Conversão de distâncias em probabilidades gaussianas e a assimetria da divergência KL.
 4. **A Solução t-SNE (Student-$t$):** A cauda pesada como alívio da pressão de confinamento e o balanço de forças.
@@ -202,6 +202,7 @@ Projetar $N=1.500$ dígitos em 2D sem supervisão por PCA, MDS e t-SNE.
 - **t-SNE:** Identifica e isola os 10 dígitos em aglomerados bem definidos.
 :::
 
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
 ```{python}
 #| echo: false
 #| fig-align: center
@@ -234,6 +235,7 @@ cbar.set_label("Rótulo do Dígito (usado apenas na cor para inspeção visual)"
 plt.tight_layout()
 plt.show()
 ```
+:::
 
 ## Pausa Ativa 1: O Dilema da Projeção 2D
 
@@ -241,8 +243,6 @@ plt.show()
 ## O Tetraedro no Plano
 
 Se tivermos 4 pontos mutuamente equidistantes em $\mathbb{R}^3$ (os vértices de um tetraedro regular tridimensional), é geometricamente possível posicioná-los em uma folha plana $\mathbb{R}^2$ de modo que as 6 distâncias entre pares permaneçam exatamente iguais?
-
-*Dica para discussão:* Quantos pontos mutuamente equidistantes cabem em um plano euclidiano? O que isso implica quando tentamos projetar 30 ou 784 dimensões em um gráfico 2D?
 :::
 
 ::: {.callout-tip}
@@ -272,128 +272,245 @@ Julgue V ou F — a questão só conta se acertar os 4 itens:
 :::
 :::
 
-# Intuição — O Dilema do Volume e o "Crowding Problem"
-
-## O Dilema do Volume e o Crowding Problem: $\mathbb{R}^D$ vs. $\mathbb{R}^2$
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-Para compreender por que os métodos lineares e métricos falham tão drasticamente em 2D, precisamos recorrer à geometria de espaços vetoriais de alta dimensão estudada na Aula 2 (*A Maldição da Dimensionalidade*).
-
-Considere uma esfera de raio $r$ em $\mathbb{R}^D$. O volume dessa esfera é dado por:
-$$V_D(r) = \frac{\pi^{D/2}}{\Gamma(D/2 + 1)} r^D \propto r^D$$
-
-Agora considere uma casca esférica de raio interno $r - \epsilon$ e raio externo $r$. A fração de volume contida nessa casca em relação ao volume total da esfera é:
-$$\frac{V_D(r) - V_D(r - \epsilon)}{V_D(r)} = 1 - \left(1 - \frac{\epsilon}{r}\right)^D$$
-
-Quando $D$ é grande (digamos, $D=50$ ou $D=784$), essa razão aproxima-se rapidamente de $1$ mesmo para $\epsilon/r$ relativamente pequeno. Isso significa que, em alta dimensão:
-1. **Quase todo o volume reside na casca superficial.**
-2. **Há uma quantidade monumental de "espaço angular"**: é possível colocar dezenas ou centenas de vetores que são quase mutuamente ortogonais e estão a distâncias semelhantes entre si.
-
-O que acontece quando tentamos mapear esses pontos para $d=2$? No plano, o volume de uma esfera de raio $R$ é apenas a área de um círculo: $V_2(R) = \pi R^2$. A área cresce apenas quadraticamente. Em torno de um ponto central $\mathbf{y}_i$, a quantidade de "vagas" para vizinhos a uma distância moderada $R$ é minúscula comparada ao espaço que existia em $\mathbb{R}^D$.
-
-Se tentarmos manter as distâncias proporcionais às originais, os centenas de pontos que estavam a distâncias moderadas em $\mathbb{R}^D$ passam a disputar o mesmo anel circular estreito em $\mathbb{R}^2$. Essa restrição força os pontos a se comprimirem uns contra os outros, colapsando em direção ao centro do mapa. Esse fenômeno é o que van der Maaten & Hinton (2008) denominaram **crowding problem** (o problema da superlotação).
-:::
-
-::: {.content-visible when-format="revealjs"}
-::: {.callout-note}
-## O Volume da Hiperesfera
-$$V_D(r) \propto r^D \quad \Longrightarrow \quad \text{Em 2D: } V_2(r) \propto r^2$$
-:::
-
-::: {.fragment}
-- **Em alta dimensão ($D=30, 784$):** O volume cresce exponencialmente. Cabem centenas de pontos a uma distância média $r$ sem que eles interfiram entre si.
-- **Em baixa dimensão ($d=2$):** A área cresce apenas com $r^2$. Faltam "vagas" geométricas para acomodar todos os vizinhos a distâncias moderadas.
-:::
-
-::: {.fragment .callout-important}
-## O "Crowding Problem"
-Se forçarmos as distâncias no mapa 2D a serem diretamente proporcionais às distâncias na alta dimensão, todos os pontos não mutuamente vizinhos competirão pela mesma área periférica limitada, gerando uma resultante de forças que **esmaga tudo no centro**.
-:::
-:::
-
-```{python}
-#| echo: false
-#| fig-align: center
-
-# Visualização didática do crescimento de volume por dimensão
-raios = np.linspace(0.1, 1.0, 100)
-fig, ax = plt.subplots(figsize=(6.2, 3.4))
-
-for D, cor, label in zip([2, 5, 10, 50], [COR_A, COR_B, COR_NEU, "#e7298a"], ["D=2 (Plano)", "D=5", "D=10", "D=50 (Hiperesfera)"]):
-    # Volume relativo normalizado para r=1
-    vol_rel = raios**D
-    ax.plot(raios, vol_rel, label=label, color=cor, lw=2)
-
-ax.set_title("Fração de Volume Acumulado $V_D(r)/V_D(1) = r^D$")
-ax.set_xlabel("Raio relativo $r$")
-ax.set_ylabel("Fração do Volume Total")
-ax.legend(loc="upper left")
-plt.tight_layout()
-plt.show()
-```
-
 # Bloco 1: Preservando Distâncias Métricas — MDS e a Perda Stress
 
-## A Formulação Clássica do MDS: Preservação Global de Distâncias
+## MDS: Reconstruindo Mapas a Partir de Distâncias
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-A primeira tentativa histórica e matematicamente natural de projetar dados preservando a geometria foi o **Multidimensional Scaling (MDS)** (Torgerson, 1952; Kruskal, 1964). 
+A primeira tentativa histórica e intuitiva de projetar dados preservando a geometria foi o **Multidimensional Scaling (MDS)** (Torgerson, 1952; Kruskal, 1964). 
 
-Suponha que dispomos de $N$ objetos e conhecemos as distâncias euclidianas (ou dissimilaridades) entre todos os pares no espaço original:
+Imagine a metáfora clássica da cartografia: suponha que você receba uma tabela contendo exclusivamente as distâncias rodoviárias em quilômetros entre todas as capitais brasileiras (São Paulo, Rio de Janeiro, Salvador, Brasília, Porto Alegre), sem qualquer coordenada de latitude ou longitude. É possível reconstruir a posição geográfica relativa de cada cidade em um mapa plano bidimensional?
+
+Essa é exatamente a proposta do MDS. Dado um conjunto de $N$ objetos cujas distâncias euclidianas (ou dissimilaridades arbitrárias) no espaço original são conhecidas:
 $$d_{ij}^{(X)} = \|\mathbf{x}_i - \mathbf{x}_j\|_2$$
+o MDS busca encontrar uma configuração de coordenadas de baixa dimensão $\mathbf{y}_1, \dots, \mathbf{y}_N \in \mathbb{R}^2$ tais que as distâncias euclidianas no mapa, $d_{ij}^{(Y)} = \|\mathbf{y}_i - \mathbf{y}_j\|_2$, reproduzam $d_{ij}^{(X)}$ da forma mais fiel possível.
 
-O MDS busca encontrar coordenadas bidimensionais $\mathbf{y}_1, \dots, \mathbf{y}_N \in \mathbb{R}^2$ tais que as distâncias euclidianas no mapa, $d_{ij}^{(Y)} = \|\mathbf{y}_i - \mathbf{y}_j\|_2$, sejam o mais próximas possível de $d_{ij}^{(X)}$.
-
-Para quantificar a discrepância global, Kruskal definiu a função de perda denominada **Stress** (em sua versão quadrática direta):
-$$\sigma_M(\mathbf{Y}) = \sum_{i < j} \left( d_{ij}^{(X)} - d_{ij}^{(Y)} \right)^2$$
-
-Ou na forma normalizada padronizada (*Normalized Stress*):
-$$\text{Stress}(\mathbf{Y}) = \sqrt{ \frac{\sum_{i < j} \left( d_{ij}^{(X)} - d_{ij}^{(Y)} \right)^2}{\sum_{i < j} (d_{ij}^{(X)})^2} }$$
+Na literatura matemática, essa formulação divide-se em duas abordagens:
+1. **MDS Clássico (*Principal Coordinate Analysis* — PCoA / Torgerson, 1952):**
+   Opera analiticamente sobre a matriz de distâncias quadradas $\mathbf{D}^{(2)} = [ (d_{ij}^{(X)})^2 ]$. Aplica a operação de centralização dupla via matriz de projeção ortogonal $\mathbf{H} = \mathbf{I} - \frac{1}{N}\mathbf{1}\mathbf{1}^\top$:
+   $$\mathbf{B} = -\frac{1}{2} \mathbf{H} \mathbf{D}^{(2)} \mathbf{H}$$
+   A matriz $\mathbf{B}$ representa os produtos internos centrados entre os pontos ($\mathbf{B} = \mathbf{X}\mathbf{X}^\top$). As coordenadas ótimas $\mathbf{Y}$ em 2D são obtidas analiticamente pela decomposição espectral dos dois maiores autovalores e autovetores: $\mathbf{B} = \mathbf{V}\boldsymbol\Lambda\mathbf{V}^\top \implies \mathbf{Y} = \mathbf{V}_2 \boldsymbol\Lambda_2^{1/2}$.
+   * **Teorema de Young-Householder (1938):** Se as distâncias $d_{ij}^{(X)}$ forem estritamente euclidianas, a solução do MDS clássico coincide **rigorosamente com a projeção PCA** sobre as duas componentes principais!
+2. **MDS Métrico com Otimização de Stress (Kruskal, 1964):**
+   Abandona a exigência de produtos internos e formula o problema como uma otimização não linear direta sobre as distâncias observadas.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ::: {.callout-note}
-## O Critério do Stress (Kruskal, 1964)
-$$\sigma_M(\mathbf{Y}) = \sum_{i < j} \left( \|\mathbf{x}_i - \mathbf{x}_j\| - \|\mathbf{y}_i - \mathbf{y}_j\| \right)^2$$
+## A Pergunta Fundamental do MDS
+Dada apenas uma tabela com as distâncias $d_{ij}^{(X)} = \|\mathbf{x}_i - \mathbf{x}_j\|$ entre todos os pares de cidades (sem GPS nem latitude), como posicionar os pontos em uma folha plana 2D?
 :::
 
 ::: {.fragment}
-- **Objetivo:** Encontrar coordenadas $\mathbf{y}_1, \dots, \mathbf{y}_N \in \mathbb{R}^2$ que minimizem o erro entre distâncias originais e distâncias no mapa.
-- **Teorema de Young-Householder:** Se $d_{ij}^{(X)}$ são distâncias euclidianas exatas e minimizamos a perda matricial via decomposição espectral da matriz duplamente centralizada $\mathbf{B} = -\frac{1}{2}\mathbf{H}\mathbf{D}^{(2)}\mathbf{H}$, a solução coincide **rigorosamente com a projeção PCA** nos maiores autovetores.
-:::
-:::
-
-## Por Que o Stress Falha: A Tirania das Distâncias Longas
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-A razão pela qual o MDS falha em separar agrupamentos reside na própria natureza **quadrática e uniforme** da função *Stress*:
-
-1. **A tirania das distâncias longas:** Suponha que dois pontos pertencentes ao mesmo cluster estejam separados por $d_{\text{local}} = 1{,}0$ no espaço original e sejam mapeados para $\|\mathbf{y}_i - \mathbf{y}_j\| = 2{,}0$ (um erro relativo de 100%, que funde ou destrói o agrupamento). A penalidade no Stress é:
-   $$(1{,}0 - 2{,}0)^2 = 1{,}0$$
-   Agora, suponha que dois pontos de clusters opostos estejam a uma distância $d_{\text{global}} = 50{,}0$, e o mapa 2D os posicione a uma distância $48{,}0$ (um erro insignificante de apenas 4%). A penalidade no Stress é:
-   $$(50{,}0 - 48{,}0)^2 = 4{,}0$$
-   Ou seja, o otimizador prefere errar grotescamente nas pequenas distâncias locais para economizar uma fração mínima de erro em uma única distância longa.
-
-2. **A abundância de pares distantes:** Em qualquer conjunto de dados com clusters, a imensa maioria dos pares $(i, j)$ é formada por pontos de clusters diferentes (distâncias longas). Há muito mais pares inter-cluster do que pares intra-cluster. Como a perda soma sobre **todos os pares sem ponderação**, as distâncias longas dominam a soma numérica por magnitude individual e por quantidade de termos.
-
-O resultado inescapável é que o MDS atua como um método de alinhamento macroscópico: ele preserva a forma geral da nuvem e a orientação dos eixos de maior variância, mas sacrifica completamente as microestruturas locais que revelam subpopulações.
-:::
-
-::: {.content-visible when-format="revealjs"}
-::: {.callout-note}
-## O Balanço Perverso de Erros
-- Erro local: $d_{\text{real}} = 1{,}0 \to d_{\text{mapa}} = 2{,}0 \implies \text{Erro}^2 = (1 - 2)^2 = \mathbf{1{,}0}$ (destrói o cluster!).
-- Erro global: $d_{\text{real}} = 50{,}0 \to d_{\text{mapa}} = 48{,}0 \implies \text{Erro}^2 = (50 - 48)^2 = \mathbf{4{,}0}$.
-:::
-
-::: {.fragment}
-- **O otimizador é míope:** Vale quatro vezes mais a pena ajustar a distância de dois pontos distantes em 4% do que preservar a coesão interna de um cluster em 100%.
-- **Além disso:** Há $O(N^2)$ pares no total, e a esmagadora maioria são pares distantes entre clusters distintos.
+- **O Objetivo:** Encontrar coordenadas $\mathbf{y}_1, \dots, \mathbf{y}_N \in \mathbb{R}^2$ tais que:
+  $$d_{ij}^{(Y)} = \|\mathbf{y}_i - \mathbf{y}_j\|_2 \approx d_{ij}^{(X)}$$
 :::
 
 ::: {.fragment .callout-important}
-## Conclusão Metodológica
-Métodos baseados em *Stress* métrico global são estruturalmente incapazes de resolver agrupamentos densos e curvados em duas dimensões.
+## Duas Filosofias de Resolução
+1. **MDS Clássico (PCoA / Torgerson, 1952):** Álgebra linear analítica (autovalores de produtos internos centrados). Coincide **exatamente com a PCA** se as distâncias forem euclidianas!
+2. **MDS Métrico (Kruskal, 1964):** Otimização numérica direta da perda de distâncias (*Stress*).
+:::
+:::
+
+## O Critério de Stress de Kruskal (1964)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+No MDS métrico moderno, a discrepância entre as distâncias originais e as distâncias projetadas no mapa é quantificada pela função de custo **Stress**:
+$$\sigma_M(\mathbf{Y}) = \sum_{i < j} \left( d_{ij}^{(X)} - d_{ij}^{(Y)} \right)^2$$
+
+Para tornar a métrica invariante à escala geral do mapa, define-se o **Stress Normalizado** (*Normalized Stress*):
+$$\text{Stress}(\mathbf{Y}) = \sqrt{ \frac{\sum_{i < j} \left( d_{ij}^{(X)} - d_{ij}^{(Y)} \right)^2}{\sum_{i < j} (d_{ij}^{(X)})^2} }$$
+
+Essa função de perda possui propriedades numéricas importantes:
+1. **Não possui solução analítica fechada:** A presença das normas euclidianas $\|\mathbf{y}_i - \mathbf{y}_j\|_2 = \sqrt{\sum_k (y_{ik} - y_{jk})^2}$ torna o gradiente não linear e acoplado.
+2. **Otimização via SMACOF:** Algoritmos clássicos (como `sklearn.manifold.MDS`) resolvem o Stress iterativamente pelo método **SMACOF** (*Scaling by Majorizing a Complicated Function* / De Leeuw, 1977), construindo majorantes quadráticos sucessivos que convergem monotonicamente para um mínimo local.
+
+À primeira vista, o critério de Stress parece perfeito: se $\text{Stress}(\mathbf{Y}) = 0$, todas as distâncias foram perfeitamente preservadas. Mas o que acontece quando é matematicamente impossível zerar o Stress (ao projetar de $D=784$ para $d=2$)? Como o algoritmo decide onde alocar o erro inevitável?
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## A Função de Custo Stress (Kruskal, 1964)
+$$\text{Stress}(\mathbf{Y}) = \sqrt{ \frac{\sum_{i < j} \left( d_{ij}^{(X)} - \|\mathbf{y}_i - \mathbf{y}_j\| \right)^2}{\sum_{i < j} (d_{ij}^{(X)})^2} }$$
+:::
+
+::: {.fragment}
+- **Otimização Numérica (SMACOF / De Leeuw, 1977):**
+  Como a distância envolve raízes quadradas não lineares, o Stress não tem inversa matricial; é resolvido por aproximações parabólicas iterativas sucessivas.
+:::
+
+::: {.fragment .callout-important}
+## O Dilema da Projeção $D \to 2$
+Em $D=784$ (MNIST) ou $D=30$, é geometricamente **impossível** que o Stress seja zero no plano. Onde o algoritmo decide concentrar o erro inevitável?
+:::
+:::
+
+## A Falha do Stress: A Tirania das Distâncias Longas
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A razão fundamental pela qual o MDS métrico falha em separar agrupamentos no plano 2D reside na própria estrutura **quadrática e desponderada** da função *Stress*:
+
+Considere um conjunto de dados com múltiplos aglomerados densos e compare o tratamento de dois pares de pontos:
+
+1. **Par Local (Vizinhos do mesmo cluster):**
+   Suponha que dois pontos próximos no espaço original tenham distância real $d_{\text{local}} = 1{,}0$. No mapa 2D, o algoritmo os afasta para $\|\mathbf{y}_i - \mathbf{y}_j\| = 2{,}0$.
+   - O erro relativo é de **$100\%$**, o que funde clusters vizinhos e destrói completamente a topologia local.
+   - A penalidade imposta no Stress é:
+     $$(1{,}0 - 2{,}0)^2 = \mathbf{1{,}0}$$
+
+2. **Par Global (Pontos de clusters opostos):**
+   Suponha agora que dois pontos pertencentes a clusters distintos estejam a uma distância macroscópica original $d_{\text{global}} = 50{,}0$. No mapa 2D, o algoritmo os posiciona a uma distância de $48{,}0$.
+   - O erro relativo é de míseros **$4\%$**, absolutamente imperceptível visualmente no gráfico macroscópico.
+   - A penalidade imposta no Stress é:
+     $$(50{,}0 - 48{,}0)^2 = \mathbf{4{,}0}$$
+
+**O Diagnóstico:**  
+A penalidade do par distante ($4{,}0$) é **quatro vezes maior** que a penalidade do par local ($1{,}0$)!
+O otimizador do MDS prefere tolerar um erro catastrófico de $100\%$ na vizinhança local para economizar um desvio insignificante de $4\%$ em um par de pontos distantes. As distâncias longas governam a perda com mãos de ferro.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Balanço Perverso de Penalidades Quadráticas
+Comparação entre dois erros em um mesmo mapa 2D:
+:::
+
+::: {.fragment}
+- **1. Erro Local (Vizinhos do mesmo grupo):**
+  $$d_{\text{real}} = 1{,}0 \quad \to \quad d_{\text{mapa}} = 2{,}0 \quad (\text{Erro Relativo: } \mathbf{100\%})$$
+  $$\text{Penalidade no Stress: } (1{,}0 - 2{,}0)^2 = \mathbf{1{,}0}$$
+  *(A vizinhança local é destruída e o cluster se desfaz!)*
+:::
+
+::: {.fragment}
+- **2. Erro Global (Pontos de grupos opostos):**
+  $$d_{\text{real}} = 50{,}0 \quad \to \quad d_{\text{mapa}} = 48{,}0 \quad (\text{Erro Relativo: } \mathbf{4\%})$$
+  $$\text{Penalidade no Stress: } (50{,}0 - 48{,}0)^2 = \mathbf{4{,}0}$$
+  *(O erro visual é imperceptível, mas custa 4× mais caro!)*
+:::
+
+::: {.fragment}
+O algoritmo prefere sacrificar a estrutura interna de um cluster em 100% para evitar um desvio de 4% entre pontos afastados!
+:::
+:::
+
+## O Efeito Combinatório
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O problema da tirania das distâncias longas torna-se exponencialmente pior quando consideramos a **contagem estatística de pares** em um conjunto de dados real:
+
+1. **Pares Locais (Intra-cluster):** Se os dados formam clusters de tamanho médio $k$, o número de pares que realmente representam vizinhos imediatos é da ordem de:
+   $$N_{\text{local}} \approx O(N \cdot k)$$
+2. **Pares Globais (Inter-cluster):** O número total de pares em um dataset de $N$ amostras é $\frac{N(N-1)}{2} \approx \frac{N^2}{2}$. Logo, o número de pares entre aglomerados distintos é da ordem de:
+   $$N_{\text{global}} \approx \mathbf{O(N^2)}$$
+
+**Exemplo com o MNIST ($N = 1.500$ amostras):**
+- O número total de pares é $\frac{1.500 \times 1.499}{2} = \mathbf{1.124.250\text{ pares}}$!
+- Se cada dígito tiver $\approx 150$ amostras, os pares dentro do mesmo dígito somam apenas $\approx 110.000$ pares ($< 10\%$ do total).
+- Mais de **$90\%$ de todos os termos da função Stress** medem distâncias longas entre dígitos completamente distintos!
+
+**O Resultado Inevitável:**  
+O gradiente do MDS é completamente sequestrado pelos pares distantes. O algoritmo atua como uma ferramenta macroscópica de rotação e escala global, preservando a forma externa da nuvem mas compactando todas as classes em uma massa disforme sobreposta no centro.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## A Assimetria Combinatória dos Dados
+Em qualquer dataset com múltiplos clusters, há muito mais pares distantes do que vizinhos locais:
+:::
+
+::: {.fragment}
+- **Pares locais (intra-cluster):** Apenas $O(N \cdot k)$ termos.
+- **Pares distantes (inter-cluster):** Crescem com $\mathbf{O(N^2)}$ termos!
+:::
+
+::: {.fragment}
+- **No Experimento do MNIST ($N=1.500$):**
+  $$\text{Total de pares: } \frac{1500 \times 1499}{2} \approx \mathbf{1{,}12\text{ milhão de distâncias}}$$
+  - Pares do mesmo dígito: $\approx 10\%$.
+  - Pares entre dígitos diferentes: **mais de $90\%$!**
+:::
+
+::: {.fragment .callout-warning}
+## O Sequestro do Gradiente
+Mais de $90\%$ do gradiente do Stress gasta sua força ajustando distâncias entre classes opostas. Os clusters individuais são esmagados no centro.
+:::
+:::
+
+## Tentativas Correção: Sammon e MDS Não-Métrico
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Estatísticos e psicometristas perceberam essa limitação cedo e desenvolveram duas correções clássicas para o MDS nos softwares estatísticos:
+
+### 1. Mapeamento de Sammon (*Sammon Mapping* / Sammon, 1969)
+Para contrabalançar o peso desproporcional dos termos grandes, John W. Sammon propôs ponderar cada resíduo quadrático pelo **inverso da distância original**:
+$$E_{\text{Sammon}}(\mathbf{Y}) = \frac{1}{\sum_{i < j} d_{ij}^{(X)}} \sum_{i < j} \frac{\left( d_{ij}^{(X)} - d_{ij}^{(Y)} \right)^2}{\mathbf{d_{ij}^{(X)}}}$$
+
+Observe o impacto do peso $1/d_{ij}^{(X)}$:
+- Para um par de vizinhos próximos com $d_{ij}^{(X)} = 1{,}0$, o peso é $1 / 1{,}0 = \mathbf{1{,}0}$.
+- Para um par de pontos distantes com $d_{ij}^{(X)} = 50{,}0$, o peso despenca para $1 / 50{,}0 = \mathbf{0{,}02}$ (reduzido em 50 vezes!).
+O Sammon Mapping (disponível no pacote `MASS::sammon` do R) foi um marco pioneiro na tentativa de proteger a estrutura local.
+
+### 2. MDS Não-Métrico (*Non-Metric / Ordinal MDS* — Kruskal, 1964)
+Em muitas ciências sociais e cognitivas, os valores absolutos das distâncias são irrelevantes; apenas a ordem importa (saber quem é mais próximo de quem). O MDS Não-Métrico relaxa as distâncias exatas e exige apenas a **preservação da ordem monótona dos postos**:
+$$\text{Se } d_{ij}^{(X)} < d_{kl}^{(X)} \implies d_{ij}^{(Y)} \le d_{kl}^{(Y)}$$
+Isso é implementado substituindo $d_{ij}^{(X)}$ por disparidades ajustadas $\hat{d}_{ij}$ via **regressão isotônica**, visualizada no clássico *Diagrama de Shepard*.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## As Correções Clássicas nos Softwares Estatísticos
+Como a literatura tentou combater a tirania das distâncias longas?
+:::
+
+::: {.fragment}
+- **1. Mapeamento de Sammon (Sammon, 1969):**
+  Ponderação inversa pela distância original:
+  $$E_{\text{Sammon}} = \frac{1}{\sum d_{ij}^{(X)}} \sum_{i < j} \frac{(d_{ij}^{(X)} - d_{ij}^{(Y)})^2}{\mathbf{d_{ij}^{(X)}}}$$
+  - Distância $d=1 \implies$ peso **$1{,}0$**.
+  - Distância $d=50 \implies$ peso **$0{,}02$** (reduzido em 50×!).
+:::
+
+::: {.fragment}
+- **2. MDS Não-Métrico (Kruskal, 1964):**
+  Preserva apenas a **ordem dos postos** via regressão isotônica:
+  $$\text{Se } d_{ij}^{(X)} < d_{kl}^{(X)} \implies d_{ij}^{(Y)} \le d_{kl}^{(Y)} \quad (\text{Diagrama de Shepard})$$
+:::
+:::
+
+## Por Que Abordagens Métricas Falham em 2D
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Apesar do progresso trazido pelo Mapeamento de Sammon e pelo MDS Não-Métrico, ambos ainda falham ao tentar visualizar variedades complexas em 2D. Os motivos revelam os limites intrínsecos de qualquer abordagem métrica:
+
+1. **Incapacidade de adaptar-se à densidade local:**
+   O peso de Sammon ($1/d_{ij}$) é puramente geométrico e universal. Mas em distribuições reais, a densidade varia ponto a ponto: uma distância $d=2{,}0$ pode representar um ponto isolado em um cluster denso, mas um vizinho íntimo em uma região esparsa. Não existe no MDS um mecanismo capaz de calibrar o "tamanho da lupa" individualmente para cada amostra.
+2. **O aprisionamento no gargalo volumétrico ($r^D \leftrightarrow r^2$):**
+   Mesmo com pesos invertidos ou regressão ordinal, Sammon e MDS continuam tentando acomodar distâncias métricas no plano $\mathbb{R}^2$. Como vimos na seção de intuição, em alta dimensão centenas de vizinhos vivem na casca hiperdimensional ($r^D$); ao projetar para a área limitada $r^2$, o plano não possui área física suficiente, gerando um conflito mecânico que esmaga os pontos no centro.
+
+**A Ruptura Metodológica Necessária:**  
+Para resolver de fato o problema da visualização em duas dimensões, Hinton & Roweis (2002) perceberam que era preciso uma mudança radical de paradigma:
+$$\textbf{Abandonar distâncias métricas rígidas} \quad \longrightarrow \quad \textbf{Modelar probabilidades de vizinhança estocástica}$$
+Essa é a fundação do **SNE** e do **t-SNE**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Por Que as Correções Métricas Falham em 2D?
+Duas limitações intrínsecas e incontornáveis:
+:::
+
+::: {.fragment}
+- **1. Falta de Escala Local Adaptativa:**
+  O peso $1/d$ trata distâncias absolutas igualmente, ignorando se o ponto está num núcleo ultra-denso ou numa periferia esparsa.
+- **2. O Gargalo Físico do Plano ($r^D \leftrightarrow r^2$):**
+  Ainda tentam acomodar distâncias na área de um círculo 2D, que não tem "vagas" para a casca hiperdimensional.
+:::
+
+::: {.fragment .callout-important}
+## A Ruptura Necessária: O Salto Probabilístico
+Em vez de tentar preservar distâncias euclidianas numéricas rígidas, devemos **modelar a probabilidade estocástica de vizinhança local** com variâncias adaptativas (o SNE e o t-SNE!).
 :::
 :::
 
@@ -405,8 +522,6 @@ Métodos baseados em *Stress* métrico global são estruturalmente incapazes de 
 Se um algoritmo de redução de dimensionalidade minimiza $\sum_{i<j} (d_{ij}^{(X)} - d_{ij}^{(Y)})^2$, qual dos seguintes desvios gera maior aumento na função de custo?
 - (A) Uma distância entre vizinhos imediatos que era $0{,}5$ e virou $2{,}5$.
 - (B) Uma distância entre pontos de clusters distintos que era $40{,}0$ e virou $37{,}0$.
-
-*Dica para discussão:* Calcule as duas contribuições quadráticas e reflita sobre o impacto visual de cada uma no mapa 2D.
 :::
 
 ::: {.callout-tip}
@@ -461,69 +576,103 @@ $$p_{j|i} = \frac{\exp(-\|\mathbf{x}_i - \mathbf{x}_j\|^2 / 2\sigma_i^2)}{\sum_{
 
 ::: {.fragment}
 - **Propriedade fundamental:** A função exponencial decai tão rapidamente que pontos moderadamente distantes têm $p_{j|i} \approx 0$.
-- **Consequência:** O modelo ignora olimpicamente distâncias absolutas entre pontos afastados; apenas os vizinhos próximos competem por probabilidade.
+- **Consequência:** O modelo ignora distâncias absolutas entre pontos afastados; apenas os vizinhos próximos competem por probabilidade.
 :::
 :::
 
 ## Calibração Local: O Hiperparâmetro Perplexidade
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Em um conjunto de dados real, a densidade local varia consideravelmente: há regiões densamente povoadas e regiões esparsas. Usar um $\sigma$ global constante faria com que pontos em áreas densas tivessem centenas de vizinhos e pontos em áreas esparsas não tivessem nenhum.
+A formulação probabilística $p_{j|i} \propto \exp(-\|\mathbf{x}_i - \mathbf{x}_j\|^2 / 2\sigma_i^2)$ introduz um problema prático imediato: **como determinar a variância $\sigma_i^2$ do kernel gaussiano?**
 
-Para resolver isso, o SNE calibra um $\sigma_i$ específico para cada ponto $\mathbf{x}_i$ por meio do conceito de **Perplexidade** da distribuição condicional $P_i$:
-$$\text{Perp}(P_i) = 2^{H(P_i)}$$
+1. **Por que achar $\sigma$ diretamente é uma tarefa inglória:**
+   - Em dados reais de alta dimensão, a densidade varia drasticamente ao longo do espaço. Em regiões centrais de clusters densos, os vizinhos estão a distâncias microscópicas (ex.: $d=0{,}1$); já em regiões periféricas ou esparsas, o vizinho mais próximo pode estar a distâncias muito maiores (ex.: $d=5{,}0$).
+   - Um $\sigma$ universal único falha miseravelmente: se for pequeno demais, os pontos esparsos ficam isolados ($p_{j|i} \approx 0$ para todos os $j$); se for grande demais, os clusters densos ficam saturados (todos os pontos viram vizinhos com probabilidade quase uniforme, apagando as nuances locais).
+   - Porém, estipular manualmente um $\sigma_i$ numérico diferente para cada um dos $N$ pontos é impossível: o usuário teria que adivinhar $N$ parâmetros contínuos sem nenhuma intuição geométrica da escala em 784 dimensões!
 
-Onde $H(P_i)$ é a entropia de Shannon (em bits) da distribuição de vizinhança de $\mathbf{x}_i$:
-$$H(P_i) = -\sum_{j \ne i} p_{j|i} \log_2 p_{j|i}$$
+2. **A inversão do problema: fixar a "quantidade de vizinhos" desejada:**
+   A sacada fundamental de Hinton & Roweis foi inverter a lógica: em vez de pedir ao usuário um desvio padrão numérico abstrato $\sigma_i$, **o algoritmo pede um número inteiro intuitivo de vizinhos que cada ponto deve manter**. Essa grandeza é formalizada pela **Perplexidade**:
+   $$\text{Perp}(P_i) = 2^{H(P_i)}$$
+   onde $H(P_i)$ é a entropia de Shannon (em bits) da distribuição de vizinhança de $\mathbf{x}_i$:
+   $$H(P_i) = -\sum_{j \ne i} p_{j|i} \log_2 p_{j|i}$$
 
-A perplexidade possui uma interpretação operacional elegante: **ela representa o número efetivo de vizinhos que o usuário deseja que cada ponto possua**. O algoritmo realiza uma busca binária unidimensional em $\sigma_i$ até que a entropia de $P_i$ satisfaça a perplexidade escolhida:
-- Em **regiões densas**, $\sigma_i$ torna-se automaticamente pequeno.
-- Em **regiões esparsas**, $\sigma_i$ expande-se automaticamente para englobar vizinhos mais distantes.
+3. **Por que a Perplexidade é o número efetivo de vizinhos:**
+   Imagine que a probabilidade condicional $P_i$ fosse perfeitamente uniforme sobre exatamente $K$ vizinhos próximos (e zero para todos os outros). A entropia seria $H(P_i) = -\sum_{k=1}^K \frac{1}{K} \log_2 \frac{1}{K} = \log_2 K$. Nesse caso, a perplexidade seria:
+   $$\text{Perp}(P_i) = 2^{\log_2 K} = K$$
+   Ou seja, a perplexidade é literalmente o **número efetivo de vizinhos**!
+
+4. **Calibração automática por busca binária:**
+   Como a entropia $H(P_i)$ é uma função contínua e estritamente monótona crescente em relação a $\sigma_i$ (quando $\sigma_i \to 0$, $H \to 0$; quando $\sigma_i \to \infty$, $H \to \log_2(N-1)$), para qualquer valor de perplexidade escolhido pelo usuário (tipicamente entre $5$ e $50$), existe um **único valor de $\sigma_i$** que satisfaz a equação. O algoritmo encontra esse $\sigma_i$ para cada ponto de forma rápida e exata via busca binária unidimensional (bisseção).
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ::: {.callout-note}
-## Definição Formal
+## O Dilema do $\sigma$: Densidade Heterogênea
+- **O impasse:** Um $\sigma$ global único satura regiões densas e isola pontos esparsos.
+- **A inviabilidade:** Escolher $N$ sigmas manuais ($\sigma_1, \dots, \sigma_N$) no escuro é impossível.
+:::
+
+::: {.fragment .callout-tip}
+## A Solução: Inverter a Lógica
+Em vez de chutar desvios padrões $\sigma_i$, **o usuário estipula o número desejado de vizinhos**:
 $$\text{Perp}(P_i) = 2^{H(P_i)}, \quad H(P_i) = -\sum_{j \ne i} p_{j|i} \log_2 p_{j|i}$$
 :::
 
 ::: {.fragment}
-- **Interpretação:** A perplexidade é o número efetivo de vizinhos próximos atribuído a cada ponto.
-- **Adaptação automática à densidade local:**
-  - Ponto em aglomerado denso $\to$ muitos vizinhos colados $\to$ $\sigma_i$ encolhe.
-  - Ponto isolado/esparso $\to$ vizinhos distantes $\to$ $\sigma_i$ cresce para alcançá-los.
-- Tipicamente calibrado entre $5$ e $50$.
+- **Para uma distribuição uniforme sobre $K$ vizinhos:** $\text{Perp}(P_i) = 2^{\log_2 K} = \mathbf{K}$.
+- **Interpretação:** A Perplexidade é literalmente o **número efetivo de vizinhos** que cada ponto tenta manter.
+- **Busca binária automática:** Como $\sigma_i \mapsto \text{Perp}(P_i)$ é estritamente crescente, o algoritmo calibra o $\sigma_i$ ideal de cada ponto automaticamente.
 :::
 :::
 
 ## Simetrização e a Função de Custo: Divergência KL
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-No mapa bidimensional $\mathbf{Y}$, podemos definir analogamente a probabilidade condicional $q_{j|i}$. No entanto, van der Maaten & Hinton (2008) simplificaram a formulação e melhoraram a convergência do gradiente definindo **probabilidades conjuntas simétricas**:
+Após calibrar as probabilidades locais na alta dimensão, precisamos definir com precisão **qual é o objetivo matemático do aprendizado**:
+
+Temos em mãos duas matrizes de probabilidade sobre os mesmos $N$ objetos:
+1. **$P = [p_{ij}]$ (A Verdade de Alta Dimensão):** Mede a afinidade de vizinhança real entre cada par de amostras no espaço $\mathbb{R}^D$.
+2. **$Q(\mathbf{Y}) = [q_{ij}]$ (O Mapa 2D Candidato):** Mede as probabilidades de vizinhança induzidas pelas coordenadas bidimensionais $\mathbf{Y} = [\mathbf{y}_1, \dots, \mathbf{y}_N]^\top \in \mathbb{R}^{N \times 2}$.
+
+**O Objetivo Fundamental:** Encontrar as coordenadas $\mathbf{y}_1, \dots, \mathbf{y}_N$ no plano que façam a distribuição de vizinhanças $Q(\mathbf{Y})$ espelhar a distribuição original $P$ da forma mais fiel possível.
+
+### Por Que a Divergência de Kullback-Leibler (KL)?
+Como $P$ e $Q$ são distribuições de probabilidade conjuntas (com $\sum_{i,j} p_{ij} = 1$ e $\sum_{i,j} q_{ij} = 1$), a ferramenta matemática canônica da teoria da informação para quantificar a discrepância (ou perda de informação ao aproximar $P$ por $Q$) é a **Divergência KL**:
+$$C(\mathbf{Y}) = \mathrm{KL}(P \parallel Q) = \sum_{i \ne j} p_{ij} \ln \frac{p_{ij}}{q_{ij}(\mathbf{Y})}$$
+
+Diferentemente do erro quadrático $\sum (p_{ij} - q_{ij})^2$, a divergência KL possui fundamentação probabilística rigorosa e, como veremos a seguir, introduz uma assimetria geométrica essencial para proteger agrupamentos locais.
+
+### Por Que Simetrizar as Probabilidades ($p_{ij}$ Conjunto)?
+No SNE original de 2002, as probabilidades eram condicionais $p_{j|i}$ e a perda somava $\sum_i \mathrm{KL}(P_i \parallel Q_i)$. van der Maaten & Hinton (2008) propuseram a **probabilidade conjunta simétrica**:
 $$p_{ij} = \frac{p_{j|i} + p_{i|j}}{2N}, \quad p_{ii} = 0$$
 
-Isso garante que $\sum_{i, j} p_{ij} = 1$ e que mesmo um ponto atípico $\mathbf{x}_i$ com todos os $p_{j|i}$ difusos tenha uma probabilidade conjunta mínima garantida se outro ponto o reconhecer como vizinho.
-
-No mapa 2D, as probabilidades conjuntas no SNE simétrico original eram dadas por:
-$$q_{ij} = \frac{\exp(-\|\mathbf{y}_i - \mathbf{y}_j\|^2)}{\sum_{k} \sum_{l \ne k} \exp(-\|\mathbf{y}_k - \mathbf{y}_l\|^2)}, \quad q_{ii} = 0$$
-
-O objetivo do aprendizado é ajustar as posições $\mathbf{y}_1, \dots, \mathbf{y}_N$ para que a distribuição conjunta $Q$ no mapa seja o mais fiel possível à distribuição $P$ da alta dimensão. A medida canônica da teoria da informação para discrepância entre distribuições é a **Divergência de Kullback-Leibler (KL)**:
-$$C = \mathrm{KL}(P \parallel Q) = \sum_{i \ne j} p_{ij} \ln \frac{p_{ij}}{q_{ij}} = \sum_{i \ne j} p_{ij} \ln p_{ij} - \sum_{i \ne j} p_{ij} \ln q_{ij}$$
+Essa simetrização cumpre três papéis vitais:
+1. **Tratamento robusto de outliers:** Se $\mathbf{x}_i$ for um ponto anômalo afastado de todos, todos os seus $p_{j|i}$ originais seriam minúsculos. No SNE condicional, o softmax forçava esses termos a somarem 1, atribuindo peso excessivo ao ruído de um ponto isolado. Com a probabilidade conjunta, $p_{ij}$ só é expressivo se $\mathbf{x}_i$ escolher $\mathbf{x}_j$ OU se $\mathbf{x}_j$ escolher $\mathbf{x}_i$. Se ninguém o escolhe, o ponto atípico tem $p_{ij} \approx 0$ e não desestabiliza o mapa.
+2. **Simplificação e aceleração do gradiente:** A simetrização elimina derivadas cruzadas assimétricas, gerando uma expressão elegante e eficiente para o gradiente descendente.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ::: {.callout-note}
-## Probabilidades Conjuntas e Divergência KL
-$$p_{ij} = \frac{p_{j|i} + p_{i|j}}{2N}, \quad C = \mathrm{KL}(P \parallel Q) = \sum_{i \ne j} p_{ij} \ln \frac{p_{ij}}{q_{ij}}$$
+## O Objetivo Fundamental da Otimização
+Temos duas distribuições sobre as relações entre os dados:
+
+- **$P$ (Espaço Original):** As afinidades reais entre vizinhos em $\mathbb{R}^D$.
+- **$Q(\mathbf{Y})$ (Mapa 2D):** As afinidades propostas pelas coordenadas $\mathbf{y}_1, \dots, \mathbf{y}_N$.
+- **Meta:** Mover $\mathbf{Y}$ até que a distribuição $Q$ se ajuste perfeitamente à distribuição $P$.
+:::
+
+::: {.fragment .callout-tip}
+## Por Que Divergência KL e Simetrização?
+$$p_{ij} = \frac{p_{j|i} + p_{i|j}}{2N}, \quad C(\mathbf{Y}) = \mathrm{KL}(P \parallel Q) = \sum_{i \ne j} p_{ij} \ln \frac{p_{ij}}{q_{ij}(\mathbf{Y})}$$
 :::
 
 ::: {.fragment}
-- Note a direção da divergência: é $\mathrm{KL}(P \parallel Q)$, e **não** $\mathrm{KL}(Q \parallel P)$.
-- Por ser não simétrica, a ordem dos termos define exatamente quais tipos de erro geométrico o modelo penaliza ou tolera.
+- **Divergência KL:** Mede a ineficiência estatística de representar $P$ através de $Q$.
+- **Simetrização:** Garante $\sum p_{ij} = 1$, neutraliza outliers desestabilizadores e gera um gradiente computacionalmente limpo.
 :::
 :::
 
-## A Assimetria da KL: Falso Afastamento vs. Falsa Aproximação
+## KL: Falso Afastamento vs. Falsa Aproximação
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 A escolha de minimizar $\mathrm{KL}(P \parallel Q)$ é o elemento matemático que muda completamente o comportamento em relação ao MDS. Vamos analisar a penalidade termo a termo:
@@ -562,7 +711,7 @@ O SNE foca 100% de sua energia em **não separar vizinhos**. Ele não se importa
 :::
 :::
 
-## Pausa Ativa 3: Vizinhanças Probabilísticas e a Assimetria da KL
+## Pausa Ativa 3: Vizinhanças Probabilísticas e KL
 
 ::: {.callout-tip}
 ## O Comportamento da Divergência KL
@@ -601,72 +750,194 @@ Julgue V ou F — a questão só conta se acertar os 4 itens:
 
 # Bloco 3: A Solução da Cauda Pesada — t-SNE
 
-## Por Que o SNE Original Ainda Sofria de Crowding em 2D
+## Como a Gaussiana Chega ao SNE: O Modelo de Difusão e Vizinhança
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Apesar do avanço conceitual da divergência KL, o SNE simétrico original (com kernel gaussiano no mapa 2D) ainda sofria do *crowding problem*: na prática, ao projetar conjuntos com muitos agrupamentos, o mapa 2D resultava em uma grande massa indiferenciada no centro.
+Por que Hinton & Roweis (2002) adotaram distribuições gaussianas para quantificar afinidades de vizinhança? A escolha da gaussiana tanto no espaço de alta dimensão quanto no mapa 2D decorre de princípios probabilísticos e físicos bem fundamentados:
 
-A razão matemática é sutil:
-- No espaço de alta dimensão, $p_{ij}$ decai com $\exp(-\|\mathbf{x}_i - \mathbf{x}_j\|^2 / 2\sigma^2)$. Como o volume da esfera escala com $r^D$, há uma enorme quantidade de pares a distâncias intermediárias. Cada par individual tem uma probabilidade $p_{ij}$ pequena, mas a soma de milhares desses termos pequenos representa uma massa de probabilidade total substancial.
-- No mapa 2D, se $q_{ij}$ também decai com uma gaussiana $\exp(-\|\mathbf{y}_i - \mathbf{y}_j\|^2)$, a única forma de gerar um $q_{ij}$ pequeno é afastando os pontos no plano.
-- Mas o plano 2D não tem área suficiente para acomodar tantos pares moderadamente afastados ao mesmo tempo. Para evitar que os $q_{ij}$ fiquem excessivamente pequenos (o que explodiria a perda KL), o otimizador é forçado a manter todos os pontos moderadamente próximos entre si, comprimindo os diferentes agrupamentos no centro do mapa.
+### 1. No Espaço Original ($\mathbb{R}^D$): Princípio da Máxima Entropia e Perturbação Isotrópica
+Ao modelar a incerteza em torno de uma amostra $\mathbf{x}_i \in \mathbb{R}^D$, suponha que fixemos apenas a média (o próprio ponto $\mathbf{x}_i$) e a dispersão quadrática esperada (variância isotrópica $\sigma_i^2$). 
+
+De acordo com o **Princípio da Máxima Entropia de Jaynes**, entre todas as distribuições de probabilidade contínuas com primeiro e segundo momentos especificados, a **distribuição normal multivariada** $\mathcal{N}(\mathbf{x}_i, \sigma_i^2 \mathbf{I})$ é a que possui a máxima entropia diferencial de Shannon. Isso significa que a gaussiana é a escolha estatisticamente mais conservadora e honesta: ela maximiza a incerteza e não introduz nenhum viés ou pressuposição geométrica espúria além da variância estipulada.
+
+Sob uma lente física, imagine um processo de **difusão browniana**: se o ponto $\mathbf{x}_i$ emitir uma perturbação isotrópica com dispersão térmica $\sigma_i^2$, a probabilidade infinitesimal de essa perturbação alcançar uma amostra vizinha $\mathbf{x}_j$ é proporcional à densidade de transição:
+$$p(\mathbf{x}_j \mid \mathbf{x}_i) \propto \exp\left(-\frac{\|\mathbf{x}_i - \mathbf{x}_j\|^2}{2\sigma_i^2}\right)$$
+
+Ao normalizar essa densidade sobre o conjunto discreto de todas as outras amostras candidatas ($k \ne i$), obtemos a função de escolha *softmax*:
+$$p_{j|i} = \frac{\exp\left(-\frac{\|\mathbf{x}_i - \mathbf{x}_j\|^2}{2\sigma_i^2}\right)}{\sum_{k \ne i} \exp\left(-\frac{\|\mathbf{x}_i - \mathbf{x}_k\|^2}{2\sigma_i^2}\right)}, \quad p_{i|i} = 0$$
+E a probabilidade conjunta simétrica:
+$$p_{ij} = \frac{p_{j|i} + p_{i|j}}{2N}$$
+
+### 2. No Mapa Projetado ($\mathbb{R}^2$): A Hipótese Gaussiana e Invariância de Escala ($2\sigma^2 = 1$)
+No SNE original, a hipótese natural de partida foi adotar **o mesmo modelo gaussiano** para as afinidades no mapa bidimensional:
+$$q_{ij} \propto \exp\left(-\frac{\|\mathbf{y}_i - \mathbf{y}_j\|^2}{2\sigma_{\text{mapa}}^2}\right)$$
+
+**Por que podemos fixar $2\sigma_{\text{mapa}}^2 = 1$ (isto é, $\sigma_{\text{mapa}} = 1/\sqrt{2}$) sem perda de generalidade?**
+
+No plano 2D, as posições $\mathbf{y}_1, \dots, \mathbf{y}_N$ são variáveis livres que o algoritmo otimiza diretamente por descida de gradiente. Se multiplicássemos $\sigma_{\text{mapa}}$ por uma constante arbitrária $c > 0$, o algoritmo de otimização simplesmente reescalaria todas as coordenadas projetadas pelo mesmo fator:
+$$\mathbf{y}_k \leftarrow c \mathbf{y}_k \implies \|\mathbf{y}_i - \mathbf{y}_j\|^2 \leftarrow c^2 \|\mathbf{y}_i - \mathbf{y}_j\|^2$$
+O quociente $\frac{\|\mathbf{y}_i - \mathbf{y}_j\|^2}{2(c\sigma)^2} = \frac{\|\mathbf{y}_i - \mathbf{y}_j\|^2}{2\sigma^2}$ permaneceria rigorosamente invariante! Como a escala global do mapa 2D é livre, fixar $2\sigma^2 = 1$ elimina um grau de liberdade redundante, resultando na afinidade não normalizada simplificada $\exp(-\|\mathbf{y}_i - \mathbf{y}_j\|^2)$ e na probabilidade conjunta:
+$$q_{ij} = \frac{\exp\left(-\|\mathbf{y}_i - \mathbf{y}_j\|^2\right)}{\sum_{k \ne l} \exp\left(-\|\mathbf{y}_k - \mathbf{y}_l\|^2\right)}, \quad q_{ii} = 0$$
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ::: {.callout-note}
-## O Conflito Gaussiana-Gaussiana
-- Na alta dimensão, há milhares de pares a distâncias intermediárias cuja soma de probabilidades $\sum p_{ij}$ é expressiva.
-- No plano 2D, a gaussiana $\exp(-\|\mathbf{y}_i - \mathbf{y}_j\|^2)$ decai extremamente rápido.
+## Por Que a Gaussiana no Espaço de Alta Dimensão ($\mathbb{R}^D$)?
+- **Máxima Entropia (Jaynes):** Fixadas média $\mathbf{x}_i$ e variância $\sigma_i^2 \mathbf{I}$, a normal multivariada é a distribuição única que **maximiza a entropia**, minimizando pressuposições sobre a geometria.
+- **Difusão Isotrópica:** Probabilidade de transição browniana atingir $\mathbf{x}_j$ a partir de $\mathbf{x}_i$:
+$$p_{j|i} = \frac{\exp(-\|\mathbf{x}_i - \mathbf{x}_j\|^2 / 2\sigma_i^2)}{\sum_{k \ne i} \exp(-\|\mathbf{x}_i - \mathbf{x}_k\|^2 / 2\sigma_i^2)}, \quad p_{ij} = \frac{p_{j|i} + p_{i|j}}{2N}$$
 :::
 
-::: {.fragment}
-- Para que a probabilidade $q_{ij}$ no mapa corresponda à probabilidade $p_{ij}$ de alta dimensão, a distância euclidiana $\|\mathbf{y}_i - \mathbf{y}_j\|$ precisaria ser moderada.
-- Mas em 2D **não há espaço circular suficiente** para acomodar centenas de pontos a distâncias moderadas sem que eles colidam.
+::: {.fragment .callout-tip}
+## Por Que $2\sigma^2 = 1$ no Mapa 2D ($\mathbb{R}^2$)?
+No SNE original, adotou-se o mesmo modelo gaussiano no mapa:
+$$q_{ij} \propto \exp(-\|\mathbf{y}_i - \mathbf{y}_j\|^2 / 2\sigma^2)$$
+- As coordenadas $\mathbf{y}_i$ são variáveis livres da otimização.
+- Mudar $\sigma$ equivale meramente a reescalar globalmente o mapa 2D (invariância de escala).
+- Fixar **$2\sigma^2 = 1$** simplifica a fórmula sem qualquer perda de generalidade.
+:::
+:::
+
+## O Gargalo do SNE Gaussiano: A Cauda Leve e o Colapso Central
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Apesar da elegância teórica de usar gaussianas em ambos os espaços, o SNE simétrico original falhava sistematicamente em dados complexos: na prática, o mapa 2D colapsava em uma **única massa indiferenciada no centro** (*crowding problem*).
+
+A causa matemática reside no **decaimento superexponencial da cauda gaussiana**:
+
+### 1. A Velocidade de Decaimento da Afinidade Gaussiana
+Observe como a afinidade não normalizada $\exp(-d^2)$ desaba com a distância euclidiana $d = \|\mathbf{y}_i - \mathbf{y}_j\|$ no plano:
+
+| Distância no Mapa ($d$) | Afinidade $\exp(-d^2)$ | Razão em Relação à Origem |
+| :--- | :--- | :--- |
+| $d = 0$ | $\exp(0) = 1{,}000$ | $100\%$ |
+| $d = 1$ | $\exp(-1) \approx 0{,}368$ | $36{,}8\%$ |
+| $d = 2$ | $\exp(-4) \approx 0{,}0183$ | $1{,}83\%$ |
+| $d = 3$ | $\exp(-9) \approx 1{,}23 \times 10^{-4}$ | $0{,}012\%$ |
+| $d = 4$ | $\exp(-16) \approx 1{,}13 \times 10^{-7}$ | $0{,}00001\%$ |
+| $d = 5$ | $\exp(-25) \approx 1{,}39 \times 10^{-11}$ | $0{,}000000001\%$ |
+
+A afinidade cai quase **cem mil vezes** ao passar de $d=1$ para $d=4$! Trata-se de uma cauda excessivamente leve (*light-tailed*).
+
+### 2. A Armadilha da Penalidade KL: $p_{ij} \ln(p_{ij} / q_{ij})$
+Na alta dimensão, entre amostras de clusters adjacentes ou em regiões intermediárias, a probabilidade conjunta $p_{ij}$ não é exatamente zero — ela é pequena, digamos $p_{ij} \approx 0{,}01$ ou $0{,}001$.
+
+Se no mapa 2D o algoritmo afastasse esses agrupamentos para uma distância moderada, como $d = 4$:
+- A probabilidade $q_{ij}$ afundaria para a ordem de $10^{-7}$.
+- O termo correspondente na perda explodiria:
+  $$p_{ij} \ln \frac{p_{ij}}{q_{ij}} = 0{,}01 \times \ln\left(\frac{0{,}01}{10^{-7}}\right) = 0{,}01 \times \ln(10^5) \approx 0{,}01 \times 11{,}51 = \mathbf{+0{,}115}$$
+Multiplicado por milhares de pares intermediários, essa perda gera uma força atrativa colossal sobre todos os pontos.
+
+### 3. O Colapso Gravitacional no Centro do Mapa
+Para que a perda KL não exploda, o otimizador é forçado a confinar **quase todos os pontos** a distâncias mútuas minúsculas ($d \le 2$).
+
+Porém, a área de um disco de raio $2$ em $\mathbb{R}^2$ é de apenas:
+$$A = \pi (2)^2 \approx 12{,}57$$
+Não há espaço geométrico bidimensional suficiente nesse pequeno disco para acomodar dezenas de agrupamentos distintos sem que eles colidam e se sobreponham. O resultado prático do SNE original era um colapso gravitacional generalizado: todos os clusters eram esmagados em um "emaranhado amorfo" no centro do plano.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Decaimento Superexponencial da Gaussiana $\exp(-d^2)$
+| Distância $d$ | Afinidade $\exp(-d^2)$ | Comportamento |
+| :---: | :---: | :---: |
+| $d = 1$ | $\approx 0{,}368$ | Vizinho próximo |
+| $d = 2$ | $\approx 0{,}018$ | Decréscimo acentuado |
+| $d = 3$ | $\approx 1{,}2 \times 10^{-4}$ | Quase desprezível |
+| $d = 4$ | $\approx 1{,}1 \times 10^{-7}$ | Praticamente zero absoluto |
 :::
 
 ::: {.fragment .callout-important}
-## O Resultado
-Os aglomerados continuavam aglutinados no centro do mapa, incapazes de se desprenderem uns dos outros.
+## A Armadilha na Perda KL
+- Se pares intermediários ($p_{ij} \approx 0{,}01$) ficarem a $d=4$, $q_{ij} \approx 10^{-7}$, explodindo o custo:
+$$p_{ij} \ln\frac{p_{ij}}{q_{ij}} = 0{,}01 \times \ln(10^5) \approx \mathbf{+0{,}115 \text{ por par!}}$$
+- Para evitar a penalidade, o otimizador força todos os pontos para $d \le 2$.
+:::
+
+::: {.fragment .callout-tip}
+## O Colapso em 2D
+O disco de raio 2 tem área $\pi(2)^2 \approx 12{,}6$. Não há espaço para acomodar dezenas de clusters: **todos colapsam em uma massa central única**.
 :::
 :::
 
-## A Solução t-SNE: A Distribuição Student-$t$
+## t-SNE: Da Distribuição Student-$t$ ao Kernel de Cauchy
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-A solução brilhante introduzida por Laurens van der Maaten e Geoffrey Hinton em 2008 foi **quebrar a simetria de famílias de distribuição**:
-- Manter o kernel **gaussiano** na alta dimensão ($P$).
-- Adotar a **distribuição $t$-Student com 1 grau de liberdade (equivalente à distribuição de Cauchy)** no mapa de baixa dimensão ($Q$).
+A solução revolucionária introduzida por Laurens van der Maaten e Geoffrey Hinton em 2008 consistiu em **quebrar a simetria de distribuições entre os dois espaços**:
+- No espaço de alta dimensão ($P$), mantém-se o kernel **gaussiano**.
+- No mapa de baixa dimensão ($Q$), adota-se a **distribuição $t$-Student com 1 grau de liberdade**, que coincide com a **distribuição de Cauchy**.
 
-A probabilidade conjunta $q_{ij}$ no mapa 2D passa a ser definida como:
+Vamos construir essa formulação passo a passo a partir da definição probabilística fundamental:
+
+### 1. A Função Densidade da Distribuição Student-$t$
+A densidade de probabilidade de uma distribuição Student-$t$ padrão com $\nu$ graus de liberdade é dada por:
+$$f(t; \nu) = \frac{\Gamma\left(\frac{\nu+1}{2}\right)}{\sqrt{\pi \nu} \, \Gamma\left(\frac{\nu}{2}\right)} \left(1 + \frac{t^2}{\nu}\right)^{-\frac{\nu+1}{2}}$$
+
+### 2. Especialização para $\nu = 1$ (Distribuição de Cauchy)
+Quando fixamos $\nu = 1$ grau de liberdade, temos $\Gamma(1) = 1$ e $\Gamma(1/2) = \sqrt{\pi}$, de modo que a constante multiplicativa simplifica-se para:
+$$\frac{\Gamma(1)}{\sqrt{\pi} \, \Gamma(1/2)} = \frac{1}{\sqrt{\pi} \cdot \sqrt{\pi}} = \frac{1}{\pi}$$
+Resultando na densidade univariada da distribuição de Cauchy padrão:
+$$f(t; 1) = \frac{1}{\pi \left(1 + t^2\right)} \propto \frac{1}{1 + t^2} = \left(1 + t^2\right)^{-1}$$
+
+### 3. De Densidade Contínua para Similaridade no Mapa 2D
+No mapa bidimensional $\mathbb{R}^2$, a distância entre dois pontos projetados $\mathbf{y}_i$ e $\mathbf{y}_j$ é a norma euclidiana $d_{ij} = \|\mathbf{y}_i - \mathbf{y}_j\|$. Substituindo essa distância no lugar de $t$, a afinidade ou similaridade não normalizada entre $\mathbf{y}_i$ e $\mathbf{y}_j$ torna-se:
+$$k(\mathbf{y}_i, \mathbf{y}_j) = \frac{1}{1 + \|\mathbf{y}_i - \mathbf{y}_j\|^2} = \left( 1 + \|\mathbf{y}_i - \mathbf{y}_j\|^2 \right)^{-1}$$
+
+### 4. Construção da Probabilidade Conjunta Normalizada $q_{ij}$
+Para transformar essa afinidade em uma distribuição de probabilidade conjunta sobre todos os pares de pontos com $q_{ii} = 0$ e $\sum_{i, j} q_{ij} = 1$, normalizamos pela soma de todas as afinidades do conjunto:
 $$q_{ij} = \frac{\left(1 + \|\mathbf{y}_i - \mathbf{y}_j\|^2\right)^{-1}}{\sum_{k} \sum_{l \ne k} \left(1 + \|\mathbf{y}_k - \mathbf{y}_l\|^2\right)^{-1}}, \quad q_{ii} = 0$$
-
-Por que a Student-$t$ com $\nu=1$ resolve o problema? Observe o decaimento assintótico:
-- **Kernel Gaussiano:** decaimento exponencial超-rápido: $e^{-d^2}$.
-- **Kernel Student-$t$ ($\nu=1$):** decaimento em lei de potência com cauda pesada:
-  $$\frac{1}{1 + d^2} \approx \frac{1}{d^2} \quad (\text{para } d \gg 1)$$
-
-Essa cauda pesada opera uma mágica geométrica: **ela permite que pontos moderadamente distantes no espaço original sejam posicionados muito mais longe uns dos outros no mapa 2D sem sofrer penalidade**. Como a cauda da Student-$t$ é muito mais alta que a da Gaussiana para distâncias médias e longas, uma probabilidade $q_{ij}$ pequena pode ser satisfeita com uma distância euclidiana $\|\mathbf{y}_i - \mathbf{y}_j\|$ substancialmente maior.
-
-Isso dissipa completamente a pressão de confinamento: os aglomerados que não são vizinhos são "empurrados" para a periferia do mapa, abrindo uma vasta área interna livre para que cada agrupamento individual se organize sem interferência externa.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ::: {.callout-note}
-## O Kernel Student-$t$ de 1 Grau de Liberdade (Cauchy)
-$$q_{ij} = \frac{(1 + \|\mathbf{y}_i - \mathbf{y}_j\|^2)^{-1}}{\sum_{k \ne l} (1 + \|\mathbf{y}_k - \mathbf{y}_l\|^2)^{-1}}$$
+## 1. A Densidade Student-$t$ com $\nu=1$ (Cauchy)
+$$f(t; \nu=1) = \frac{\Gamma(1)}{\sqrt{\pi}\,\Gamma(1/2)} \left(1 + t^2\right)^{-1} = \frac{1}{\pi(1 + t^2)} \propto \mathbf{\frac{1}{1 + t^2}}$$
+:::
+
+::: {.fragment .callout-note}
+## 2. Similaridade entre Pontos 2D
+Substituindo $t$ pela distância euclidiana $\|\mathbf{y}_i - \mathbf{y}_j\|$:
+$$k(\mathbf{y}_i, \mathbf{y}_j) = \frac{1}{1 + \|\mathbf{y}_i - \mathbf{y}_j\|^2} = (1 + \|\mathbf{y}_i - \mathbf{y}_j\|^2)^{-1}$$
+:::
+
+::: {.fragment .callout-tip}
+## 3. Probabilidade Conjunta Normalizada $q_{ij}$
+$$q_{ij} = \frac{(1 + \|\mathbf{y}_i - \mathbf{y}_j\|^2)^{-1}}{\sum_{k \ne l} (1 + \|\mathbf{y}_k - \mathbf{y}_l\|^2)^{-1}}, \quad q_{ii} = 0$$
+:::
+:::
+
+## O Mecanismo da Cauda Pesada: Aliviando o Crowding
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Por que a Student-$t$ com $\nu=1$ resolve de forma tão espetacular o *crowding problem*? A resposta está no contraste entre o decaimento exponencial e o decaimento por lei de potência:
+
+- **Kernel Gaussiano (usado no SNE original):** decai como $\exp(-d^2)$. Trata-se de uma cauda ultra-leve: quando $d$ cresce moderadamente (ex.: $d=3$), $\exp(-9) \approx 0{,}00012$, a probabilidade praticamente desaparece.
+- **Kernel Student-$t$ (usado no t-SNE):** decai como lei de potência $(1 + d^2)^{-1} \approx d^{-2}$ para distâncias grandes. A cauda é pesada: para $d=3$, $(1+9)^{-1} = 0{,}10$, uma probabilidade **quase mil vezes maior** que a da Gaussiana!
+
+**A consequência geométrica:**  
+Para produzir a mesma probabilidade pequena $q_{ij} = p_{ij}$ exigida por pares moderadamente distantes, a distância euclidiana $\|\mathbf{y}_i - \mathbf{y}_j\|$ no plano sob a Student-$t$ pode ser **muito maior**. A cauda pesada permite que aglomerados distintos sejam empurrados para a periferia do mapa sem que a função de custo penalize esse afastamento. Isso abre um amplo espaço livre no interior do plano para que a microestrutura interna de cada cluster se desdobre com máxima fidelidade.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Gaussiana vs. Student-$t$: O Contraste das Caudas
+- **Gaussiana:** decai com $\exp(-d^2)$ $\longrightarrow$ cauda ultra-rápida (sufoca distâncias médias).
+- **Student-$t$ ($\nu=1$):** decai com $1/d^2$ $\longrightarrow$ **cauda pesada** (lei de potência).
 :::
 
 ::: {.fragment}
-- **Gaussiana:** decai como $\exp(-d^2)$ (cauda ultra-leve).
-- **Student-$t$:** decai como $1/d^2$ (cauda pesada / lei de potência).
+- Para gerar uma probabilidade pequena $q_{ij} = 0{,}01$:
+  - Na Gaussiana, $d$ precisa ser pequeno ($d \approx 2{,}1$).
+  - Na Student-$t$, $d$ pode ser muito maior ($d \approx 10{,}0$).
 :::
 
 ::: {.fragment .callout-important}
-## Como a Cauda Pesada Alivia a Pressão
-Para produzir a mesma probabilidade baixa $q_{ij} = p_{ij}$, a distância $\|\mathbf{y}_i - \mathbf{y}_j\|$ pode ser **muito maior**. Os clusters não relacionados são empurrados para longe no plano, liberando espaço para que a microestrutura de cada cluster se desdobre livremente.
+## O Efeito no Mapa 2D
+Clusters não correlacionados são empurrados para a periferia sem penalidade, liberando o interior do mapa para acomodar os detalhes locais.
 :::
 :::
 
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
 ```{python}
 #| echo: false
 #| fig-align: center
@@ -693,20 +964,59 @@ ax.legend()
 plt.tight_layout()
 plt.show()
 ```
+:::
+
+## A Função Objetivo Global do t-SNE
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Com as probabilidades $P$ e $Q$ rigorosamente estabelecidas, podemos agora formular de maneira completa o **problema de otimização do t-SNE**:
+
+Buscamos a matriz de coordenadas bidimensionais $\mathbf{Y} = [\mathbf{y}_1, \dots, \mathbf{y}_N]^\top \in \mathbb{R}^{N \times 2}$ que minimiza a divergência de Kullback-Leibler entre a distribuição conjunta de alta dimensão $P$ e a distribuição Student-$t$ de baixa dimensão $Q(\mathbf{Y})$:
+$$\min_{\mathbf{Y} \in \mathbb{R}^{N \times 2}} C(\mathbf{Y}) = \mathrm{KL}(P \parallel Q) = \sum_{i \ne j} p_{ij} \ln \left( \frac{p_{ij}}{q_{ij}(\mathbf{Y})} \right)$$
+
+Onde:
+- $p_{ij} = \frac{p_{j|i} + p_{i|j}}{2N}$ são valores escalares **constantes e fixos**, pré-calculados a partir das distâncias originais $\|\mathbf{x}_i - \mathbf{x}_j\|$ e da perplexidade escolhida.
+- $q_{ij}(\mathbf{Y}) = \frac{(1 + \|\mathbf{y}_i - \mathbf{y}_j\|^2)^{-1}}{\sum_{k \ne l} (1 + \|\mathbf{y}_k - \mathbf{y}_l\|^2)^{-1}}$ são as probabilidades dependentes das coordenadas do mapa.
+
+### Decomposição Analítica da Função de Custo
+Expandindo o logaritmo da razão:
+$$C(\mathbf{Y}) = \sum_{i \ne j} p_{ij} \ln p_{ij} - \sum_{i \ne j} p_{ij} \ln q_{ij}(\mathbf{Y})$$
+
+Note que o primeiro termo $\sum_{i \ne j} p_{ij} \ln p_{ij} = -H(P)$ é a entropia negativa da distribuição original $P$. Esse termo é **estritamente constante** em relação a $\mathbf{Y}$. Portanto:
+$$C(\mathbf{Y}) = \text{Constante} - \sum_{i \ne j} p_{ij} \ln q_{ij}(\mathbf{Y})$$
+
+Isso demonstra que minimizar a divergência KL no t-SNE equivale a **maximizar a entropia cruzada** $\sum_{i \ne j} p_{ij} \ln q_{ij}(\mathbf{Y})$. Para encontrar o mínimo dessa função não convexa, emprega-se o método do gradiente descendente com momento.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Problema de Otimização Contínua
+$$\min_{\mathbf{Y} \in \mathbb{R}^{N \times 2}} C(\mathbf{Y}) = \mathrm{KL}(P \parallel Q) = \sum_{i \ne j} p_{ij} \ln \left( \frac{p_{ij}}{q_{ij}(\mathbf{Y})} \right)$$
+:::
+
+::: {.fragment}
+- **$p_{ij}$ (Constantes fixas):** Dependem apenas dos dados originais e da perplexidade.
+- **$q_{ij}(\mathbf{Y})$ (Variáveis de decisão):** Dependem das posições projetadas $\mathbf{y}_1, \dots, \mathbf{y}_N$.
+:::
+
+::: {.fragment .callout-important}
+## Decomposição em Entropia Cruzada
+$$C(\mathbf{Y}) = \underbrace{\sum_{i \ne j} p_{ij} \ln p_{ij}}_{-H(P) \text{ (constante)}} - \sum_{i \ne j} p_{ij} \ln q_{ij}(\mathbf{Y})$$
+Minimizar $C(\mathbf{Y})$ é exatamente maximizar a probabilidade de vizinhança $\sum p_{ij} \ln q_{ij}(\mathbf{Y})$.
+:::
+:::
 
 ## O Gradiente da Perda: Atração por Mola e Repulsão Global
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Além da elegância conceitual, a combinação de $P$ (gaussiano) com $Q$ (Student-$t$) produz uma derivada extraordinariamente simples e computacionalmente tratável para otimização via gradiente descendente.
-
-Diferenciando $C = \sum_{j \ne k} p_{jk} \ln(p_{jk}/q_{jk})$ em relação às coordenadas do ponto $\mathbf{y}_i$, obtém-se:
+Diferenciando a função objetivo $C(\mathbf{Y})$ em relação às coordenadas vetoriais do ponto $\mathbf{y}_i \in \mathbb{R}^2$, a combinação da distribuição conjunta simétrica com o kernel de Cauchy produz uma derivada extraordinariamente elegante:
 $$\frac{\partial C}{\partial \mathbf{y}_i} = 4 \sum_{j \ne i} \left( p_{ij} - q_{ij} \right) \left( 1 + \|\mathbf{y}_i - \mathbf{y}_j\|^2 \right)^{-1} \left( \mathbf{y}_i - \mathbf{y}_j \right)$$
 
-Essa expressão admite uma interpretação física clássica de **sistema de partículas**:
-1. **Termo de Atração ($p_{ij} > q_{ij}$):** Quando dois pontos são vizinhos na alta dimensão ($p_{ij}$ significativo) mas estão afastados no mapa ($q_{ij} < p_{ij}$), o termo $(p_{ij} - q_{ij})$ é positivo. A força atua no sentido de puxar $\mathbf{y}_i$ em direção a $\mathbf{y}_j$, comportando-se exatamente como uma mola elástica esticada que une pontos que devem ficar juntos.
-2. **Termo de Repulsão ($q_{ij} > p_{ij}$):** Quando dois pontos não são vizinhos na alta dimensão ($p_{ij} \approx 0$) mas acabam se aproximando no mapa, o termo $(p_{ij} - q_{ij})$ torna-se negativo (aproximadamente $-q_{ij}$). Como $q_{ij} \propto (1 + \|\mathbf{y}_i - \mathbf{y}_j\|^2)^{-1}$, a força multiplica $(1 + \|\mathbf{y}_i - \mathbf{y}_j\|^2)^{-2} (\mathbf{y}_i - \mathbf{y}_j)$, gerando uma força de repulsão que empurra todos os pontos para longe uns dos outros, como partículas de mesma carga elétrica.
+Essa expressão admite uma interpretação física clássica e intuitiva de **sistema mecânico de partículas**:
+1. **Termo de Atração ($p_{ij} > q_{ij}$):** Quando dois pontos são vizinhos na alta dimensão ($p_{ij}$ apreciável) mas estão afastados no mapa ($q_{ij} < p_{ij}$), a diferença $(p_{ij} - q_{ij})$ é positiva. A força atua no sentido de puxar $\mathbf{y}_i$ em direção a $\mathbf{y}_j$, comportando-se exatamente como uma mola elástica esticada que une pontos que devem ficar próximos.
+2. **Termo de Repulsão ($q_{ij} > p_{ij}$):** Quando dois pontos não são vizinhos na alta dimensão ($p_{ij} \approx 0$) mas acabam se aproximando no mapa 2D, a diferença $(p_{ij} - q_{ij})$ torna-se negativa (aproximadamente $-q_{ij}$). Como $q_{ij} \propto (1 + \|\mathbf{y}_i - \mathbf{y}_j\|^2)^{-1}$, a força resultante empurra $\mathbf{y}_i$ para longe de $\mathbf{y}_j$, como duas partículas com cargas elétricas do mesmo sinal.
 
-A configuração final de equilíbrio do t-SNE é o estado de energia mínima onde a atração entre verdadeiros vizinhos equilibra perfeitamente a repulsão global exercida por todos os outros pontos do conjunto.
+A configuração final do mapa 2D corresponde ao estado de energia mínima em que a atração exercida pelas molas dos verdadeiros vizinhos equilibra com precisão a repulsão global de todos os outros pontos.
 :::
 
 ::: {.content-visible when-format="revealjs"}
@@ -726,7 +1036,7 @@ O mapa final estabiliza quando a atração local dos verdadeiros vizinhos cancel
 :::
 :::
 
-## Pausa Ativa 4: O "Crowding Problem" e a Cauda Pesada de Student-$t$
+## Pausa Ativa 4: O "Crowding Problem" e Student-$t$
 
 ::: {.callout-tip}
 ## Por Que a Student-$t$ Alivia o Confinamento?
@@ -785,6 +1095,7 @@ Vejamos o comportamento extremo no conjunto do *Breast Cancer Wisconsin* ($D=30$
 :::
 :::
 
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
 ```{python}
 #| echo: false
 #| fig-align: center
@@ -806,6 +1117,7 @@ plt.suptitle("Efeito da Perplexidade no Breast Cancer Wisconsin ($N=569, D=30$)"
 plt.tight_layout()
 plt.show()
 ```
+:::
 
 ## As 4 Falácias Clássicas de Interpretação do t-SNE
 
@@ -860,8 +1172,6 @@ Não existe função $\mathbf{y} = f(\mathbf{x})$. Não é possível projetar um
 ## Diagnóstico de Interpretação
 
 Um bioinformata executa o t-SNE sobre dados de expressão gênica e observa que o "Cluster A" tem um diâmetro visual de $5\text{ cm}$ e o "Cluster B" tem um diâmetro de apenas $1\text{ cm}$. Além disso, a distância entre os centros dos dois clusters no gráfico é de $15\text{ cm}$.
-
-Ele escreve em seu relatório: *"O Cluster A apresenta variância genética cinco vezes maior que o Cluster B, e a grande separação espacial comprova que essas duas populações celulares são filogeneticamente muito distantes"*. O que está metodologicamente incorreto nessa afirmação?
 :::
 
 ::: {.callout-tip}
@@ -899,7 +1209,7 @@ Julgue V ou F — a questão só conta se acertar os 4 itens:
 Ao final desta jornada pela redução de dimensionalidade para visualização, podemos responder de forma conclusiva às cinco questões do nosso roteiro:
 
 1. **Por que métodos de projeção global falham ao mapear dados complexos em 2D?**
-   Devido ao *crowding problem*: em $\mathbb{R}^D$ o volume da esfera escala com $r^D$, permitindo que inúmeros vizinhos coexistam a distâncias moderadas. Em $\mathbb{R}^2$, a área cresce apenas com $r^2$, gerando um gargalo geométrico insolúvel se exigirmos proporcionalidade métrica.
+   Porque no plano $\mathbb{R}^2$ não é geometricamente possível manter distâncias métricas globais sem esmagar as vizinhanças locais (como provado no caso do tetraedro regular). A tentativa de acomodar todas as distâncias inter-pares em 2D força o colapso dos agrupamentos sobrepostos no centro.
 2. **Como o MDS formaliza a preservação de distâncias e qual é o viés da função *Stress*?**
    O MDS busca minimizar $\sum_{i<j} (d_{ij}^{(X)} - d_{ij}^{(Y)})^2$. A natureza quadrática da perda faz com que as distâncias longas (inter-cluster), que são a imensa maioria dos pares, dominem completamente o custo, sacrificando as microestruturas locais.
 3. **Por que modelar vizinhanças probabilisticamente via divergência KL?**
@@ -911,7 +1221,7 @@ Ao final desta jornada pela redução de dimensionalidade para visualização, p
 :::
 
 ::: {.content-visible when-format="revealjs"}
-1. **Crowding Problem:** Gargalo de volume entre $r^D$ e $r^2$.
+1. **Dilema da Projeção 2D:** Impossibilidade geométrica de preservar distâncias globais e locais no plano.
 2. **Viés do Stress (MDS):** Distâncias longas dominam a soma quadrática e esmagam vizinhanças locais.
 3. **SNE e Divergência KL:** Modelagem probabilística onde afastar vizinhos custa caro e aproximar distantes custa quase zero.
 4. **Student-$t$ no t-SNE:** Cauda pesada empurra aglomerados distantes para a periferia e abre espaço para a microestrutura.
@@ -941,13 +1251,20 @@ O t-SNE consolidou-se como o padrão de ouro para visualização exploratória n
 ## Ponte para a Parte 3: Aula 9
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-tip}
 Com esta aula, encerramos a **Parte 2 do curso**, dedicada à redução de dimensionalidade e representação latente (do mundo linear de PCA e PPCA, passando pela não linearidade dos Autoencoders e VAEs, até a projeção topológica para visualização com t-SNE).
 
 Na próxima aula, iniciaremos a **Parte 3: Descoberta de Informação e Estruturas em Grande Escala**. Investigaremos como descobrir dependências complexas e regras de associação em dados categóricos massivos e esparsos utilizando **Modelos Gráficos Probabilísticos (PGMs) e Redes Bayesianas**, permitindo distinguir correlações espúrias de dependências estruturais verdadeiras.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
 :::
 
 ::: {.content-visible when-format="revealjs"}
-::: {.callout-note}
+## Ponte para a Parte 3: Aula 9
+
+::: {.callout-tip}
 ## O Que Vem a Seguir
 - **Encerramento da Parte 2:** Exploramos PCA, PPCA, Autoencoders, VAEs e t-SNE.
 - **Início da Parte 3:** Descoberta de estruturas e padrões em larga escala sem supervisão.
@@ -957,7 +1274,9 @@ Na próxima aula, iniciaremos a **Parte 3: Descoberta de Informação e Estrutur
 - **Aula 9:** *Modelos Gráficos Probabilísticos (PGMs) e Mineração de Itens Frequentes*.
 - Como transformar regras de associação empíricas em grafos probabilísticos direcionados e isolar variáveis de confusão latentes.
 :::
-:::
 
+::: {.fragment}
 [Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
 [Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+:::

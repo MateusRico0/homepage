@@ -42,9 +42,11 @@ qualidade (a folga de KL) precisa ser levada a sério.
 
 - ✔ O ELBO resolve calculabilidade, não a ausência de penalidade — essa
   já está na integral da evidência, antes de qualquer aproximação.
-- ✗ Se a evidência já fosse calculável exatamente, não haveria motivo
-  para aproximá-la — a Navalha de Occam já estaria lá, sem precisar
-  de $q$.
+- ✗ Com priori uniforme, $p(\mathcal{M}_m)$ continua na posterior
+  aproximada $q(\mathcal{M}_m)\propto p(\mathcal{M}_m)\exp\{\mathcal{L}_m\}$
+  como o mesmo fator para todos os candidatos: some ao normalizar e não
+  altera o ranking, mas não "deixa de fazer parte". Com outra priori
+  (por exemplo, $\propto e^{-m}$), o mesmo fator mudaria o resultado.
 - ✔ Quanto mais apertada a KL residual, mais o ranqueamento por
   $\mathcal{L}_m$ se aproxima do ranqueamento pela evidência verdadeira.
 - ✗ Mesma família $q$ não garante gaps iguais entre modelos diferentes

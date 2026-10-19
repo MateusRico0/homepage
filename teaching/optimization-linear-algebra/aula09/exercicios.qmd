@@ -1,0 +1,133 @@
+---
+title: "Exercícios — Aula 9: Séries de Taylor e a Regra da Cadeia Multivariada"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado das questões de Verdadeiro/Falso está em
+[`soluções.qmd`](soluções.qmd). Encontrou um erro numa questão? Corrija
+diretamente neste arquivo e abra um *pull request*.
+:::
+
+## Contexto e notação
+
+Nesta lista, consideramos funções multivariadas suaves $f: \mathbb{R}^d \to \mathbb{R}$ e campos vetoriais $\mathbf{f}: \mathbb{R}^n \to \mathbb{R}^m$.
+
+- **Vetor Gradiente:** $\nabla f(\mathbf{x}) \in \mathbb{R}^{d \times 1}$ é um vetor-coluna cujas componentes são $\big(\frac{\partial f}{\partial x_1}, \dots, \frac{\partial f}{\partial x_d}\big)^T$.
+- **Matriz Hessiana:** $\nabla^2 f(\mathbf{x}) \in \mathbb{R}^{d \times d}$ é a matriz simétrica de segundas derivadas parciais $H_{ij} = \frac{\partial^2 f}{\partial x_i \partial x_j}$.
+- **Aproximações de Taylor:** Em torno de $\mathbf{x}_0 \in \mathbb{R}^d$ com deslocamento $\mathbf{h} = \mathbf{x} - \mathbf{x}_0$:
+  - Ordem 1: $T_1(\mathbf{x}_0 + \mathbf{h}) = f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h}$, com resto $|R_1(\mathbf{h})| \le \frac{L}{2}\|\mathbf{h}\|_2^2$ sob gradiente $L$-Lipschitziano.
+  - Ordem 2: $T_2(\mathbf{x}_0 + \mathbf{h}) = f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h} + \frac{1}{2}\mathbf{h}^T \nabla^2 f(\mathbf{x}_0)\mathbf{h}$, com resto $|R_2(\mathbf{h})| \le \frac{M}{6}\|\mathbf{h}\|_2^3$ sob Hessiana $M$-Lipschitziana.
+- **Matriz Jacobiana (*Denominator Layout*):** Para $\mathbf{f}: \mathbb{R}^n \to \mathbb{R}^m$, $J_{\mathbf{f}}(\mathbf{x}) \in \mathbb{R}^{n \times m}$ possui as derivadas nas colunas ($[J_{\mathbf{f}}]_{ij} = \frac{\partial f_j}{\partial x_i}$). O gradiente da composição escalar $g(\mathbf{f}(\mathbf{x}))$ é $\nabla_{\mathbf{x}}(g \circ \mathbf{f}) = J_{\mathbf{f}}(\mathbf{x})\, \nabla_{\mathbf{u}} g \in \mathbb{R}^{n \times 1}$.
+- **Rede Neural MLP:** Camada $l$: pré-ativação $\mathbf{z}^{(l)} = W^{(l)}\mathbf{a}^{(l-1)} + \mathbf{b}^{(l)}$ e ativação $\mathbf{a}^{(l)} = \sigma(\mathbf{z}^{(l)})$. Vetor de sensibilidade: $\boldsymbol{\delta}^{(l)} = \nabla_{\mathbf{z}^{(l)}}\mathcal{L}$. Retropropagação: $\boldsymbol{\delta}^{(l)} = \big((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}\big) \odot \sigma'(\mathbf{z}^{(l)})$. Gradientes: $\nabla_{W^{(l)}}\mathcal{L} = \boldsymbol{\delta}^{(l)}(\mathbf{a}^{(l-1)})^T$ e $\nabla_{\mathbf{b}^{(l)}}\mathcal{L} = \boldsymbol{\delta}^{(l)}$.
+
+---
+
+## Questões discursivas
+
+1. **Equivalência entre Gradient Descent e Otimização de Taylor com Região de Confiança.**
+   Considere o problema de otimização local em torno do ponto de operação $\mathbf{w}_k \in \mathbb{R}^d$:
+   $$\mathbf{h}^\star = \arg\min_{\mathbf{h} \in \mathbb{R}^d} \left\{ f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \mathbf{h} + \frac{1}{2\alpha} \|\mathbf{h}\|_2^2 \right\}$$
+   onde $\alpha > 0$ é um parâmetro escalar.
+   (a) Mostre formalmente que esse problema de otimização em relação a $\mathbf{h}$ é estritamente convexo e deduza sua solução analítica única $\mathbf{h}^\star$, demonstrando que $\mathbf{w}_{k+1} = \mathbf{w}_k + \mathbf{h}^\star$ recupera exatamente a iteração da Descida do Gradiente.
+   (b) Se substituíssemos o modelo de 1ª ordem pelo modelo quadrático de Taylor de 2ª ordem $T_2(\mathbf{w}_k + \mathbf{h})$ sem penalidade proximal, assumindo $\nabla^2 f(\mathbf{w}_k) \succ 0$, deduza a nova direção de passo ótima e identifique a qual método clássico de otimização ela corresponde.
+
+2. **Dedução da Regra da Cadeia Matricial e Sensibilidade em MLPs.**
+   Seja uma camada densa com $\mathbf{z} = W \mathbf{x} + \mathbf{b}$, onde $W \in \mathbb{R}^{m \times n}$, $\mathbf{x} \in \mathbb{R}^n$, $\mathbf{b} \in \mathbb{R}^m$, e uma perda escalar $\mathcal{L}(\mathbf{z})$. Suponha conhecido o vetor de sensibilidade $\boldsymbol{\delta} = \nabla_{\mathbf{z}} \mathcal{L} \in \mathbb{R}^m$.
+   (a) Utilizando a definição de diferencial $d\mathcal{L} = \boldsymbol{\delta}^T d\mathbf{z}$ e sabendo que $d\mathbf{z} = (dW)\mathbf{x} + W(d\mathbf{x}) + d\mathbf{b}$, deduza a expressão do gradiente matricial $\nabla_W \mathcal{L}$ sob a métrica do produto interno de Frobenius $\langle A, B \rangle = \operatorname{tr}(A^T B)$.
+   (b) Mostre que a matriz resultante coincide exatamente com o produto diádico $\boldsymbol{\delta} \mathbf{x}^T$, verificando rigorosamente as dimensões envolvidas.
+
+3. **Análise de Resto de Lagrange e Decaimento de Erro.**
+   Considere a função escalar bidimensional $f(x_1, x_2) = x_1^3 + x_1 x_2^2$ expandida em torno da origem $\mathbf{x}_0 = (0, 0)^T$.
+   (a) Calcule os polinômios de Taylor de 1ª e 2ª ordens, $T_1(\mathbf{h})$ e $T_2(\mathbf{h})$, para $\mathbf{h} = (h_1, h_2)^T$.
+   (b) Obtenha a expressão exata do erro $R_2(\mathbf{h}) = f(\mathbf{h}) - T_2(\mathbf{h})$ e determine a cota superior de $|R_2(\mathbf{h})|$ em função da norma euclidiana $\|\mathbf{h}\|_2$.
+
+---
+
+## Questões de Verdadeiro/Falso
+
+::: {.callout-note icon=false}
+## Teste 1 — Polinômios e Séries de Taylor Multivariadas
+
+- □ O polinômio de Taylor de grau 1 de uma função escalar suave $f: \mathbb{R}^d \to \mathbb{R}$ em torno de $\mathbf{x}_0$ define o hiperplano tangente ao gráfico de $f$ no ponto $(\mathbf{x}_0, f(\mathbf{x}_0))$.
+- □ Para qualquer função duas vezes continuamente diferenciável, o polinômio de Taylor de segunda ordem $T_2(\mathbf{x}_0 + \mathbf{h})$ é uma função estritamente convexa em relação a $\mathbf{h} \in \mathbb{R}^d$.
+- □ Se uma função $f: \mathbb{R}^d \to \mathbb{R}$ for um polinômio de grau 2, então o polinômio de Taylor de segunda ordem $T_2(\mathbf{x}_0 + \mathbf{h})$ é identicamente igual a $f(\mathbf{x}_0 + \mathbf{h})$ para todo $\mathbf{x}_0, \mathbf{h} \in \mathbb{R}^d$.
+- □ A aproximação de Taylor de primeira ordem de uma transformação afim $f(\mathbf{x}) = A\mathbf{x} + \mathbf{b}$ difere da função original por um termo proporcional a $\|\mathbf{h}\|_2^2$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — Restos de Lagrange e Ordens de Erro
+
+- □ Pelo Teorema do Valor Médio multivariado, o resto de primeira ordem $R_1(\mathbf{h}) = f(\mathbf{x}_0 + \mathbf{h}) - T_1(\mathbf{x}_0 + \mathbf{h})$ pode ser expresso exatamente como $\frac{1}{2}\mathbf{h}^T \nabla^2 f(\boldsymbol{\xi})\mathbf{h}$ para algum ponto $\boldsymbol{\xi}$ pertencente ao segmento de reta entre $\mathbf{x}_0$ e $\mathbf{x}_0 + \mathbf{h}$.
+- □ Se a matriz Hessiana de uma função satisfizer $\|\nabla^2 f(\mathbf{x})\|_2 \le L$ para todo $\mathbf{x}$, o erro absoluto da aproximação linear de Taylor é limitado superiormente por $\frac{L}{2}\|\mathbf{h}\|_2^2$.
+- □ A notação assintótica $R_1(\mathbf{h}) = \mathcal{O}(\|\mathbf{h}\|^2)$ significa que o erro relativo $\frac{|R_1(\mathbf{h})|}{\|\mathbf{h}\|_2}$ diverge quando $\|\mathbf{h}\| \to 0$.
+- □ Em um gráfico log-log do erro absoluto de aproximação contra a norma do passo $\|\mathbf{h}\|_2$, a aproximação quadrática de Taylor exibe inclinação assintótica igual a 3.
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — Otimização Proximal e a Conexão com Gradient Descent
+
+- □ O passo da Descida do Gradiente $\mathbf{h} = -\alpha \nabla f(\mathbf{x}_0)$ minimiza a aproximação linear de Taylor sem necessidade de restrições ou termos de penalidade sobre $\mathbf{h}$.
+- □ Na formulação de minimização proximal $\min_{\mathbf{h}} [f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T \mathbf{h} + \frac{1}{2\alpha}\|\mathbf{h}\|_2^2]$, o parâmetro $\alpha$ atua como o inverso do peso da penalidade de afastamento.
+- □ Minimizar a aproximação de Taylor de segunda ordem $T_2(\mathbf{x}_0 + \mathbf{h})$ quando a Hessiana $\nabla^2 f(\mathbf{x}_0)$ possui autovalores estritamente negativos produz uma direção de passo que garante a redução de $f$.
+- □ A constante de Lipschitz $L$ do gradiente fornece uma escolha teórica ótima de penalidade proximal $\alpha = 1/L$, garantindo a maior redução no limitante quadrático superior do Lema da Descida.
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — Regra da Cadeia e Convenções de Disposição (Layouts)
+
+- □ Na convenção *denominator layout*, o Jacobiano de uma função vetorial $\mathbf{f}: \mathbb{R}^n \to \mathbb{R}^m$ é uma matriz de dimensão $n \times m$.
+- □ Para a composição $y = g(\mathbf{f}(\mathbf{x}))$ com $g: \mathbb{R}^m \to \mathbb{R}$ e $\mathbf{f}: \mathbb{R}^n \to \mathbb{R}^m$, a regra da cadeia sob *denominator layout* é expressa por $\nabla_{\mathbf{x}} y = J_{\mathbf{f}}(\mathbf{x})\, \nabla_{\mathbf{u}} g$.
+- □ Na convenção *numerator layout*, o gradiente de uma função escalar em relação a um vetor $n \times 1$ é definido como um vetor-coluna $n \times 1$.
+- □ A regra da cadeia multivariada pode ser compreendida algebricamente como a multiplicação de matrizes de transformações lineares que aproximam localmente as funções compostas.
+:::
+
+::: {.callout-note icon=false}
+## Teste 5 — Jacobiano de Funções Vetoriais e Transformações Lineares
+
+- □ O Jacobiano de uma transformação puramente linear $\mathbf{f}(\mathbf{x}) = A \mathbf{x}$ (onde $A \in \mathbb{R}^{m \times n}$) na convenção *denominator layout* é a matriz transposta $A^T \in \mathbb{R}^{n \times m}$.
+- □ Para duas funções vetoriais compostas $\mathbf{x} \in \mathbb{R}^n \xrightarrow{\mathbf{f}} \mathbf{u} \in \mathbb{R}^m \xrightarrow{\mathbf{g}} \mathbf{y} \in \mathbb{R}^p$, o Jacobiano resultante em *denominator layout* é $J_{\mathbf{g} \circ \mathbf{f}}(\mathbf{x}) = J_{\mathbf{f}}(\mathbf{x})\, J_{\mathbf{g}}(\mathbf{f}(\mathbf{x}))$.
+- □ Se $\mathbf{f}: \mathbb{R}^n \to \mathbb{R}^n$ for diferenciável e inversível com inversa diferenciável $\mathbf{f}^{-1}$, o Jacobiano da função inversa satisfaz $J_{\mathbf{f}^{-1}}(\mathbf{f}(\mathbf{x})) = [J_{\mathbf{f}}(\mathbf{x})]^{-1}$.
+- □ O determinante da matriz Jacobiana de uma transformação não-linear entre espaços de mesma dimensão $\mathbb{R}^n \to \mathbb{R}^n$ mede o fator local de dilatação ou contração de volume induzido pela função.
+:::
+
+::: {.callout-note icon=false}
+## Teste 6 — Propagação de Sensibilidades ($\boldsymbol{\delta}^{(l)}$) em Redes Neurais
+
+- □ O vetor de sensibilidade $\boldsymbol{\delta}^{(l)}$ é formalmente definido como o gradiente da função de perda em relação às ativações pré-sinápticas lineares $\mathbf{z}^{(l)}$.
+- □ Na passagem retrógrada de uma rede densa, o erro propaga-se de $l+1$ para $l$ através da equação $\boldsymbol{\delta}^{(l)} = \big((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}\big) \odot \sigma'(\mathbf{z}^{(l)})$.
+- □ A multiplicação elemento a elemento por $\sigma'(\mathbf{z}^{(l)})$ atua como uma comporta de passagem que amplifica o sinal do erro quando as ativações estão muito distantes de zero na função logística.
+- □ A propagação do vetor de sensibilidade através de $L$ camadas envolve sucessivas multiplicações matriz-vetor, evitando a formação explícita de matrizes Jacobianas completas entre as camadas.
+:::
+
+::: {.callout-note icon=false}
+## Teste 7 — Gradientes Matriciais de Pesos e Vieses em MLPs
+
+- □ Para uma única amostra de treinamento, a matriz de gradiente $\nabla_{W^{(l)}}\mathcal{L} \in \mathbb{R}^{d_l \times d_{l-1}}$ é obtida pelo produto diádico $\boldsymbol{\delta}^{(l)}(\mathbf{a}^{(l-1)})^T$.
+- □ O posto da matriz de gradiente $\nabla_{W^{(l)}}\mathcal{L}$ calculada sobre um mini-batch de tamanho $B$ é limitado superiormente por $\min(B, d_l, d_{l-1})$.
+- □ O gradiente da perda em relação ao vetor de viés $\mathbf{b}^{(l)}$ é exatamente igual ao vetor de sensibilidade $\boldsymbol{\delta}^{(l)}$.
+- □ Se os neurônios da camada oculta anterior estiverem inativos ($\mathbf{a}^{(l-1)} = \mathbf{0}$), os pesos $W^{(l)}$ continuam recebendo atualizações proporcionais ao erro $\boldsymbol{\delta}^{(l)}$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 8 — Não-Linearidades, Saturação e o Desvanecimento do Gradiente
+
+- □ O valor máximo da derivada da função sigmoide logística $\sigma'(z) = \sigma(z)(1 - \sigma(z))$ é igual a $0{,}25$, ocorrendo quando $z = 0$.
+- □ Em uma rede neural profunda com 20 camadas e pesos inicializados com norma menor que 1, o produto repetido de derivadas $\sigma'(z) \le 0{,}25$ faz com que a norma de $\boldsymbol{\delta}^{(1)}$ decresça exponencialmente para zero.
+- □ A função de ativação ReLU evita o desvanecimento do gradiente porque sua derivada é identicamente 1 para qualquer entrada real $z \in \mathbb{R}$.
+- □ A perda de modelos neurais profundos é não-convexa em relação aos parâmetros, o que impede a garantia de convergência para o mínimo global a partir de qualquer ponto inicial.
+:::
+

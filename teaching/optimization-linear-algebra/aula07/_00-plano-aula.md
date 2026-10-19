@@ -3,7 +3,7 @@
 A Aula 6 terminou com a ressalva de que $\nabla L=\mathbf{0}$ identifica um ponto crítico, não necessariamente um mínimo. Esta aula passa à segunda ordem: define formalmente conjunto, conjunto convexo, função, função convexa e epígrafe, prova que $f$ é convexa se e somente se $\mathrm{epi}\,f$ é convexo, prova a condição de primeira ordem, introduz a Hessiana como matriz simétrica de curvatura e prova a condição de segunda ordem ($f$ convexa $\iff\nabla^2f\succeq0$). Aplica tudo à perda do problema-fio: $\nabla^2L=2X^TX$ e curvatura $2\|X\mathbf{v}\|^2$, com unicidade do minimizador se e somente se o posto coluna é completo. Fecha com a Ridge, que desloca os autovalores em $\lambda$ e garante existência e unicidade.
 
 **Objetivos:** reconhecer quando um ponto crítico é mínimo global; ler convexidade nos autovalores da Hessiana; provar a convexidade da perda quadrática e da Ridge.
-**Pré-requisitos:** gradiente-linha, regra da cadeia e $J_{\mathbf r}=X$ (Aula 6); $A\succeq0$, teorema espectral, Rayleigh (Aula 4); posto e núcleo (Aula 2); equações normais (Aula 3); $\text{cond}(X^TX)\approx23\,460{,}5$ (Aula 5).
+**Pré-requisitos:** gradiente-coluna, regra da cadeia e $J_{\mathbf r}=X^T$ (Aula 6, *denominator layout*); $A\succeq0$, teorema espectral, Rayleigh (Aula 4); posto e núcleo (Aula 2); equações normais (Aula 3); $\text{cond}(X^TX)\approx23\,460{,}5$ (Aula 5).
 **Dataset-fio:** California Housing, o mesmo $X$ de 4 colunas da Aula 6. Acrescenta-se a coluna derivada `AveOtherRooms = AveRooms − AveBedrms` para produzir um vale plano real: posto 4, núcleo gerado por $(0,0,-1,1,1)$.
 
 **Estratégia Pedagógica:** B (Inside-Out com Problema-Fio) — aula de fundamentação matemática (convexidade, Hessiana) guiada pela pergunta que a Aula 6 deixou aberta.
@@ -95,5 +95,13 @@ Deslocamentos página impressa → PDF: `copt.pdf` +14; `mathml.pdf` +6 (conferi
 
 **Trecho:**
 > "Definition 7.2. A set C is a convex set if for any x, y ∈ C and for any scalar θ with 0 ⩽ θ ⩽ 1, we have θx + (1 − θ)y ∈ C . [...] If we further know that a function f (x) is twice differentiable, that is, the Hessian (5.147) exists for all values in the domain of x, then the function f (x) is convex if and only if ∇2x f (x) is positive semidefinite (Boyd and Vandenberghe, 2004)."
+
+### Fonte 8: Wright & Recht, *Optimization for Data Analysis*, §2.1–2.2, p. 16
+**Uso pretendido:** Taylor com resto de Lagrange (forma de valor intermediário), definido antes da condição de 2ª ordem; caso $n=1$ e versão multivariada.
+
+**Trechos:**
+> "To do so, we introduce a powerful tool from calculus: Taylor's theorem. Taylor's theorem is the most important theorem in all of continuous optimization, and we review it next."
+
+> "Theorem 2.1 Given a continuously differentiable function f : Rn → R, and given x, p ∈ Rn [...] If f is twice continuously differentiable, we have [...] f (x + p) = f (x) + ∇f (x)T p + 1/2 pT ∇2 f (x + γp)p, some γ ∈ (0,1). (2.5)"
 
 **Contribuições nossas (sinalizadas no texto):** definição de conjunto (noção usual, não axiomática); prova de "$f$ convexa ⟺ $\mathrm{epi}\,f$ convexo" (o Boyd só enuncia); exemplos $x^2$, $x^3$, anel e união; prova da condição de 2ª ordem; proposição sobre o conjunto de minimizadores $\boldsymbol\beta^\star+\mathcal{N}(X)$; lema de unicidade e existência da solução Ridge; o exemplo `AveOtherRooms`. O teste da segunda derivada para $f$ não quadrática é citado sem prova.

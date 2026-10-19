@@ -1,0 +1,972 @@
+---
+title: "Aula 9: Redes Bayesianas e Modelos Gráficos Probabilísticos (PGMs) para Mineração de Itens Frequentes"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-10-13"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: homepage
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar, load_dataset
+disable_progress_bar()
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings("ignore")
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({
+    "figure.dpi": 130,
+    "font.size": 11,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "legend.frameon": True,
+    "legend.framealpha": 0.9,
+})
+
+COR_A = "#2b5c8f"    # Azul institucional
+COR_B = "#d95f02"    # Laranja quente
+COR_NEU = "#7570b3"  # Roxo
+COR_CINZA = "#7f7f7f"
+COR_VERDE = "#1b9e77"
+
+# Funções auxiliares para formatação de números
+def brl(val, dec=3):
+    return f"{val:.{dec}f}".replace(".", ",")
+
+# Simulação controlada de Market Basket com Causa Comum (Confounding)
+# Variável C (Contexto: 1 = Manhã/Alta Renda, 0 = Noite/Baixa Renda)
+np.random.seed(42)
+N_sim = 10000
+P_C = 0.20
+C = (np.random.rand(N_sim) < P_C).astype(int)
+
+# Itens A (Café Gourmet) e B (Torradeira de Alta Potência)
+# Condicionados em C, A e B são independentes!
+P_A_given_C1, P_A_given_C0 = 0.80, 0.10
+P_B_given_C1, P_B_given_C0 = 0.70, 0.05
+
+prob_A = np.where(C == 1, P_A_given_C1, P_A_given_C0)
+prob_B = np.where(C == 1, P_B_given_C1, P_B_given_C0)
+
+A = (np.random.rand(N_sim) < prob_A).astype(int)
+B = (np.random.rand(N_sim) < prob_B).astype(int)
+
+# Métricas empíricas agregadas
+p_A_emp = np.mean(A)
+p_B_emp = np.mean(B)
+p_AB_emp = np.mean(A * B)
+lift_emp = p_AB_emp / (p_A_emp * p_B_emp)
+
+# Métricas estratificadas por C
+lift_C1 = np.mean(A[C == 1] * B[C == 1]) / (np.mean(A[C == 1]) * np.mean(B[C == 1]))
+lift_C0 = np.mean(A[C == 0] * B[C == 0]) / (np.mean(A[C == 0]) * np.mean(B[C == 0]))
+```
+
+# Revisão e Introdução
+
+## Revisão Cuidadosa: O Que a Parte 2 Deixou Pronto
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Nas três aulas anteriores, exploramos a **Parte 2 do curso**, dedicada à redução de dimensionalidade e ao aprendizado de representações em espaços vetoriais contínuos:
+
+1. **Aula 6 (O Mundo Linear):** Estudamos a PCA como a projeção que maximiza a variância retida ou minimiza o erro quadrático de reconstrução, e formulamos a Probabilistic PCA (PPCA) como um modelo generativo gaussiano de posto reduzido $\mathbf{x} = \mathbf{W}\mathbf{z} + \boldsymbol\mu + \boldsymbol\epsilon$.
+2. **Aula 7 (O Mundo Não Linear):** Estendemos a PPCA para variedades curvas com Autoencoders Profundos e Variational Autoencoders (VAEs), utilizando a inferência amortizada e a otimização estocástica do ELBO via truque de reparametrização.
+3. **Aula 8 (Visualização e Vizinhanças):** Descobrimos que, para visualização humana estrita em 2D, a métrica global de reconstrução colapsa devido ao *crowding problem* (gargalo de volume $r^D$ vs. $r^2$). Analisamos o t-SNE, que troca distâncias geométricas por probabilidades de vizinhança calibradas pela Perplexidade e substitui a Gaussiana pela cauda pesada de Student-$t$ no plano.
+
+Em todas essas abordagens, lidamos com **variáveis contínuas** em espaços euclidianos $\mathbb{R}^D$, onde distâncias, normas e produtos internos faziam sentido geométrico.
+
+Agora, inauguramos a **Parte 3: Descoberta de Informação e Estruturas em Grande Escala**. Em inúmeros cenários reais — como logs de comércio eletrônico, registros hospitalares, redes de co-ocorrência de termos e dados genômicos discretos —, os dados chegam como **vetores binários esparsos** $\mathbf{x} \in \{0, 1\}^D$ ou variáveis categóricas puras. Nesses domínios, calcular distâncias euclidianas perde o sentido físico. O que realmente desejamos descobrir são **estruturas de dependência**: quais eventos condicionam outros e como distinguir dependências causais verdadeiras de correlações espúrias.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Que Construímos na Parte 2
+- **Espaços Latentes Contínuos:** PCA e PPCA (Aula 6), Autoencoders e VAEs (Aula 7).
+- **Preservação de Vizinhança:** t-SNE e o alívio da pressão de volume via cauda pesada (Aula 8).
+- **Métrica base:** Álgebra linear, distâncias euclidianas e densidades contínuas em $\mathbb{R}^D$.
+:::
+
+::: {.fragment}
+- **A Nova Fronteira (Parte 3):** Descoberta de estruturas em **dados categóricos e transações binárias esparsas** $\mathbf{x} \in \{0, 1\}^D$.
+- **O Desafio Central:** Distâncias geométricas perdem o sentido. O objetivo passa a ser **modelar dependências condicionais e descobrir a topologia das interações**.
+:::
+
+::: {.fragment .callout-important}
+## A Pergunta Fundamental da Aula 9
+Contar co-ocorrências e extrair regras empíricas de "se comprou $A$, compra $B$" é suficiente para modelar a realidade, ou métricas tradicionais como o *Lift* são cegas a variáveis de confusão latentes?
+:::
+:::
+
+## Ideia Central: Da Co-ocorrência à Topologia de Dependência
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A ideia central desta aula estrutura-se sobre uma distinção epistemológica fundamental: **co-ocorrência frequente não implica associação direta, e associação simétrica não implica direcionalidade**.
+
+Na prática de mineração de dados (*data mining*), o ponto de partida habitual é a análise de cestas de compras (*market basket analysis*), formulada por Agrawal et al. (1993) e sistematizada no ESL (Cap. 14). Utilizam-se métricas empíricas como **Suporte** ($P(A \cap B)$), **Confiança** ($P(B \mid A)$) e **Lift** ($\frac{P(A \cap B)}{P(A)P(B)}$) para identificar itens frequentemente comprados juntos. O algoritmo **Apriori** explora a propriedade de antimonotonicidade do suporte para podar o espaço combinatorial de $2^D$ possíveis subconjuntos.
+
+Entretanto, abordagens puramente baseadas em regras de associação possuem duas deficiências teóricas graves:
+1. **Simetria Ingênua:** O *Lift* é estritamente comutativo ($\text{Lift}(A \Rightarrow B) = \text{Lift}(B \Rightarrow A)$). Ele mede afastamento da independência marginal, mas é incapaz de indicar direcionalidade.
+2. **Cegueira a Confundidores Latentes:** Duas variáveis $A$ e $B$ podem apresentar um *Lift* expressivamente maior que $1$ puramente devido a uma causa comum não observada $C$ ($A \leftarrow C \to B$). Ao estratificarmos por $C$, a dependência dissipa-se completamente ($A \perp\!\!\!\perp B \mid C$), revelando que a associação empírica era espúria (Paradoxo de Simpson).
+
+Para superar essas deficiências de forma estatisticamente rigorosa, recorremos aos **Modelos Gráficos Probabilísticos Direcionados (Redes Bayesianas)** (Bishop, 2006, Cap. 8; Pearl, 1988). Em uma Rede Bayesiana, a topologia de um Grafo Acíclico Direcionado (DAG) codifica diretamente a fatoração da probabilidade conjunta:
+$$p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid \text{pa}_k)$$
+Através do critério de **$d$-separação**, podemos inspecionar graficamente se dois conjuntos de nós são condicionalmente independentes dado um terceiro, desvendando as três estruturas canônicas do fluxo de informação: **cadeias**, **bifurcações** e **colisores** (*explaining away*).
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Paradigma Heurístico vs. O Paradigma Gráfico
+- **Regras de Associação (ESL §14.2):** Mineração gulosa de co-ocorrências frequentes baseada em Suporte, Confiança e *Lift*.
+- **A Fragilidade:** O *Lift* é simétrico e confunde correlação espúria por causa comum latente com relação direta.
+:::
+
+::: {.fragment}
+- **Redes Bayesianas (PRML §8.1):** Grafos Acíclicos Direcionados (DAGs) que fatoram distribuições conjuntas multivariadas:
+  $$p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid \text{pa}_k)$$
+:::
+
+::: {.fragment .callout-important}
+## O Poder da $d$-Separação (Pearl, 1988)
+A geometria do grafo dita exatamente como a informação flui. Condicionar em uma causa comum dissipa correlações espúrias; condicionar em um colisor induz dependência (*explaining away*).
+:::
+:::
+
+## Roteiro da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para construir essa teoria do empírico ao formal, estruturaremos a aula em cinco blocos conceituais:
+
+1. **Como formalizar matematicamente a mineração de regras de associação e a poda do Apriori?** Definir suporte, confiança e *lift*, provando a propriedade de antimonotonicidade em conjuntos de dados transacionais.
+2. **Por que o Lift falha como métrica de descoberta estrutural?** Demonstrar analiticamente a simetria do *Lift* e o surgimento de correlações espúrias devido a causas comuns latentes (Paradoxo de Simpson em cestas de compras).
+3. **Como as Redes Bayesianas fatoram a distribuição conjunta e geram economia paramétrica exponencial?** Traduzir a regra da cadeia da probabilidade em grafos acíclicos direcionados (DAGs) condicionados aos nós pais.
+4. **Quais são as três geometrias canônicas de dependência condicional?** Analisar formalmente a cadeia (*head-to-tail*), a bifurcação (*tail-to-tail*) e o colisor (*head-to-head*), derivando analiticamente o fenômeno de *explaining away*.
+5. **Como funciona o critério geral de $d$-separação e quais são os limites da inferência observacional?** Aplicar o bloqueio de caminhos para distribuições gerais e provar o conceito de classes de equivalência de Markov (I-equivalência).
+:::
+
+::: {.content-visible when-format="revealjs"}
+1. **Mineração de Itens Frequentes:** Suporte, Confiança, *Lift* e antimonotonicidade do Apriori.
+2. **Falhas do Lift e Variáveis de Confusão:** A simetria comutativa e a indução de correlações espúrias por causas comuns.
+3. **Redes Bayesianas e Fatoração:** Economia paramétrica de $2^K - 1$ para dependências locais em DAGs.
+4. **As Três Estruturas Canônicas:** Cadeia ($A \to B \to C$), Causa Comum ($A \leftarrow B \to C$) e Colisor ($A \to C \leftarrow B$).
+5. **$d$-Separação e Equivalência de Markov:** Bloqueio formal de caminhos e os limites do aprendizado não supervisionado puramente observacional.
+:::
+
+## Problema Motivador: A Regra Ilusória do Café e da Torradeira
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Considere uma base transacional de varejo com $N=10.000$ compras. Analisando as vendas de dois produtos específicos — **Café Gourmet ($A$)** e **Torradeira Elétrica ($B$)** —, um cientista de dados calcula as seguintes métricas empíricas:
+- Suporte marginal do café: $P(A=1) \approx 0{,}24$;
+- Suporte marginal da torradeira: $P(B=1) \approx 0{,}18$;
+- Suporte conjunto: $P(A=1, B=1) \approx 0{,}116$.
+
+Ao calcular o *Lift* da regra $\{Caf\acute{e}\} \Rightarrow \{Torradeira\}$, ele encontra:
+$$\text{Lift} = \frac{P(A=1, B=1)}{P(A=1)P(B=1)} \approx \frac{0{,}116}{(0{,}24)(0{,}18)} \approx 2{,}69$$
+
+Um *Lift* de $2{,}69$ sugere aos tomadores de decisão que comprar café gourmet quase triplica a propensão de comprar uma torradeira. A equipe de marketing sugere colocar torradeiras na prateleira ao lado dos grãos de café.
+
+Porém, ao inspecionarmos uma terceira variável de contexto — **Perfil do Cliente ($C$)**, onde $C=1$ indica clientes de alta renda que compram eletrodomésticos premium e grãos especiais, e $C=0$ representa o público geral —, revelamos a seguinte realidade:
+- Dentro do grupo $C=1$: $\text{Lift}(A \Rightarrow B \mid C=1) \approx 1{,}00$;
+- Dentro do grupo $C=0$: $\text{Lift}(A \Rightarrow B \mid C=0) \approx 1{,}00$.
+
+Condicionalmente à renda do cliente, a compra de café e a compra de torradeira são **rigorosamente independentes**! A suposta atração de $2{,}69$ é uma correlação inteiramente espúria causada pela variável de confusão $C$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Caso Empírico das $10.000$ Transações
+Avaliando a associação entre Café Gourmet ($A$) e Torradeira ($B$):
+- $P(A) \approx 0{,}24$, $P(B) \approx 0{,}18$, $P(A \cap B) \approx 0{,}116$.
+- $\text{Lift}(A \Rightarrow B) \approx \frac{0{,}116}{0{,}24 \times 0{,}18} \approx \mathbf{2{,}69}$.
+:::
+
+::: {.fragment}
+- **A Decisão Ingênua:** O *Lift* de $2{,}69$ sugere forte complementaridade comercial.
+- **A Revelação Condicional:** Estratificando por Perfil de Renda ($C \in \{0, 1\}$):
+  $$\text{Lift}(A \Rightarrow B \mid C=1) = \mathbf{1{,}00} \quad \text{e} \quad \text{Lift}(A \Rightarrow B \mid C=0) = \mathbf{1{,}00}$$
+:::
+
+::: {.fragment .callout-important}
+## O Paradoxo de Simpson em Regras de Associação
+A associação de $2{,}69$ é puramente espúria. Café e torradeira nunca interagiram: ambos são efeitos independentes da causa comum $C$.
+:::
+:::
+
+::: {.fig-resize style="width: 85%; margin: 0 auto;"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 2, figsize=(10, 3.8))
+
+# Gráfico 1: População Agregada (Associação Espúria)
+bars1 = axes[0].bar(["P(B)", "P(B | A)"], [p_B_emp, p_AB_emp / p_A_emp], color=[COR_CINZA, COR_B], width=0.5)
+axes[0].set_ylim(0, 0.6)
+axes[0].set_title(f"População Agregada: Lift = {brl(lift_emp, 2)}")
+axes[0].set_ylabel("Probabilidade")
+for bar in bars1:
+    yval = bar.get_height()
+    axes[0].text(bar.get_x() + bar.get_width()/2.0, yval + 0.02, brl(yval, 3), ha='center', va='bottom', weight='bold')
+
+# Gráfico 2: Estratificado por Renda C (Independência Revelada)
+p_B_C1 = np.mean(B[C == 1])
+p_B_given_A_C1 = np.mean(B[(C == 1) & (A == 1)])
+p_B_C0 = np.mean(B[C == 0])
+p_B_given_A_C0 = np.mean(B[(C == 0) & (A == 1)])
+
+x = np.arange(2)
+width = 0.35
+axes[1].bar(x - width/2, [p_B_C0, p_B_C1], width, label="P(B | C)", color=COR_CINZA)
+axes[1].bar(x + width/2, [p_B_given_A_C0, p_B_given_A_C1], width, label="P(B | A, C)", color=COR_A)
+axes[1].set_xticks(x)
+axes[1].set_xticklabels(["C=0 (Baixa Renda)", "C=1 (Alta Renda)"])
+axes[1].set_ylim(0, 0.85)
+axes[1].set_title("Estratificado por C: Lift Condicional = 1,00")
+axes[1].legend()
+
+plt.tight_layout()
+plt.show()
+```
+:::
+
+## Pausa Ativa 1: Regras de Associação e Antimonotonicidade
+
+::: {.callout-tip}
+## O Superconjunto e o Suporte
+Se um conjunto de 3 produtos $\{Caf\acute{e}, Leite, P\tilde{a}o\}$ possui suporte medido de $15\%$ em uma base de 1 milhão de transações, o que podemos deduzir com certeza matemática absoluta sobre o suporte do par $\{Caf\acute{e}, P\tilde{a}o\}$ e do quarteto $\{Caf\acute{e}, Leite, P\tilde{a}o, Manteiga\}$?
+
+*Dica para conduzir:* Pense na probabilidade da interseção de conjuntos de eventos aleatórios. O que acontece com a probabilidade quando acrescentamos restrições adicionais?
+:::
+
+::: {.callout-tip}
+## V ou F: Métricas de Regras de Associação
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Se o itemset $\{A, B\}$ tem suporte de $0{,}05$, é matematicamente impossível que o item isolado $\{A\}$ tenha suporte inferior a $0{,}05$.
+- □ Uma regra com confiança de $100\%$ ($c(A \Rightarrow B) = 1{,}0$) comprova que a compra de $A$ causou a compra de $B$.
+- □ O espaço de todos os possíveis subconjuntos de itens em um catálogo de $D$ produtos escala linearmente com $D$.
+- □ A métrica de suporte expressa a probabilidade conjunta empírica $P(A \cap B)$, enquanto a confiança expressa a probabilidade condicional $P(B \mid A)$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 1: Resposta
+
+::: {.callout-tip}
+## V ou F: Resposta
+- ✔ **V:** Pela antimonotonicidade do suporte, $\{A\} \subset \{A, B\} \implies s(\{A\}) \ge s(\{A, B\}) = 0{,}05$.
+- ✗ **F:** Confiança mede apenas a condicional $P(B \mid A)$; se todos na loja compram $B$ ($P(B)=1$), a confiança é $100\%$ mesmo sem nenhuma relação causal.
+- ✗ **F:** O espaço de subconjuntos é $2^D - 1$, escalando exponencialmente.
+- ✔ **V:** Suporte é $P(A \cap B)$ e Confiança é $P(A \cap B)/P(A) = P(B \mid A)$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** O suporte de $\{Caf\acute{e}, P\tilde{a}o\}$ deve ser **pelo menos $15\%$** ($s \ge 0{,}15$), e o do quarteto $\{Caf\acute{e}, Leite, P\tilde{a}o, Manteiga\}$ pode ser **no máximo $15\%$** ($s \le 0{,}15$). Adicionar itens restringe a probabilidade da interseção. Essa antimonotonicidade é a chave da poda do Apriori.
+:::
+:::
+
+# Bloco 1: Mineração de Itens Frequentes — Suporte, Confiança e Lift
+
+## Formalização de Itens e Transações
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Seguindo a formulação de Agrawal et al. (1993) e ESL (§14.2), consideramos um universo de $D$ itens discretos $\mathcal{I} = \{i_1, i_2, \dots, i_D\}$.
+Uma transação de compras $t$ é um subconjunto de itens $t \subseteq \mathcal{I}$, convenientemente representada como um vetor binário:
+$$\mathbf{x} = (x_1, \dots, x_D)^T \in \{0, 1\}^D, \quad \text{onde } x_j = \mathbb{I}(i_j \in t)$$
+
+Dispomos de uma base não supervisionada com $N$ transações observadas:
+$$\mathcal{D} = \{\mathbf{x}_1, \mathbf{x}_2, \dots, \mathbf{x}_N\}$$
+
+::: {.callout-note icon=false}
+## Definição 1 (Itemset e Suporte; ESL §14.2.1)
+Um **itemset** $I \subseteq \mathcal{I}$ é qualquer subconjunto de itens. O **Suporte** de $I$, denotado por $s(I)$, é a frequência relativa de transações na base $\mathcal{D}$ que contêm todos os itens de $I$:
+$$s(I) = \frac{1}{N}\sum_{n=1}^N \prod_{j \in I} x_{nj} = P\left(\bigwedge_{j \in I} (x_j = 1)\right)$$
+Um itemset é dito **frequente** se seu suporte satisfaz $s(I) \ge s_{\min}$, onde $s_{\min} \in (0, 1]$ é um limiar de suporte fixado pelo analista.
+:::
+
+O cálculo exato de suporte para todos os possíveis itemsets candidatos envolveria testar $2^D - 1$ combinações. Para $D=50$ itens, $2^{50} \approx 1{,}12 \times 10^{15}$, tornando impossível a busca exaustiva. A viabilidade computacional decorre de uma propriedade teórica fundamental.
+
+::: {.callout-note icon=false}
+## Teorema 1 (Propriedade de Antimonotonicidade do Suporte; Agrawal et al., 1993)
+Sejam $A$ e $B$ dois itemsets. Se $A \subseteq B$, então:
+$$s(B) \le s(A)$$
+*Demonstração:* Seja $\mathcal{T}_I = \{n \in \{1, \dots, N\} \mid \forall j \in I, x_{nj} = 1\}$. Se $A \subseteq B$, então qualquer transação que satisfaça todos os itens de $B$ satisfaz trivialmente todos os itens de $A$, logo $\mathcal{T}_B \subseteq \mathcal{T}_A$. Pela monotonicidade da cardinalidade de conjuntos finitos, $|\mathcal{T}_B| \le |\mathcal{T}_A|$, de onde segue que $\frac{|\mathcal{T}_B|}{N} \le \frac{|\mathcal{T}_A|}{N}$, ou seja, $s(B) \le s(A)$. $\blacksquare$
+:::
+
+A contrapositiva do Teorema 1 estabelece a regra de poda do algoritmo **Apriori**:
+$$\text{Se } s(A) < s_{\min}, \quad \text{então } \forall B \supseteq A, \quad s(B) < s_{\min}$$
+Se qualquer subconjunto for infrequente, nenhum superconjunto precisa ser sequer gerado ou computado.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Definição: Transações e Suporte (ESL §14.2)
+- Vetor binário de itens: $\mathbf{x} = (x_1, \dots, x_D)^T \in \{0, 1\}^D$.
+- **Suporte de um itemset $I$:** Proporção de transações que contêm todos os itens de $I$:
+  $$s(I) = P\left(\bigwedge_{j \in I} x_j = 1\right) = \frac{1}{N}\sum_{n=1}^N \prod_{j \in I} x_{nj}$$
+:::
+
+::: {.fragment .callout-note icon=false}
+## Teorema: Antimonotonicidade do Suporte
+Para quaisquer itemsets $A$ e $B$:
+$$A \subseteq B \implies s(B) \le s(A)$$
+- **Regra de Poda do Apriori:** Se $s(A) < s_{\min}$, **nenhum** superconjunto $B \supseteq A$ pode ser frequente.
+:::
+
+::: {.fragment}
+- **O Gargalo:** Em $D$ variáveis, há $2^D - 1$ combinações. A antimonotonicidade transforma uma busca de ordem exponencial em podas sistemáticas por camadas de tamanho $k$.
+:::
+:::
+
+## Regras de Associação: Confiança e Lift
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A partir de um itemset frequente $I$, constroem-se **regras de associação** da forma:
+$$A \Rightarrow B, \quad \text{onde } A, B \subset I, \quad A \cap B = \emptyset, \quad A \cup B = I$$
+Onde $A$ é denominado *antecedente* e $B$ é o *consequente*.
+
+::: {.callout-note icon=false}
+## Definição 2 (Confiança e Lift; ESL §14.2.2)
+1. A **Confiança** de uma regra $A \Rightarrow B$ mede a probabilidade condicional empírica de observar $B$ dado que $A$ foi observado:
+   $$c(A \Rightarrow B) = \frac{s(A \cup B)}{s(A)} = \frac{P(A \cap B)}{P(A)} = P(B \mid A)$$
+2. O **Lift** mede a razão entre a probabilidade conjunta observada e a probabilidade esperada caso $A$ e $B$ fossem estatisticamente independentes:
+   $$\text{Lift}(A \Rightarrow B) = \frac{P(A \cap B)}{P(A)P(B)} = \frac{P(B \mid A)}{P(B)}$$
+:::
+
+Interpretando o *Lift*:
+- $\text{Lift}(A \Rightarrow B) = 1$: $A$ e $B$ são estatisticamente independentes ($P(B \mid A) = P(B)$);
+- $\text{Lift}(A \Rightarrow B) > 1$: $A$ e $B$ co-ocorrem com frequência superior à independência (associação positiva aparente);
+- $\text{Lift}(A \Rightarrow B) < 1$: $A$ e $B$ co-ocorrem menos do que o esperado (associação negativa ou substituição).
+
+Contudo, repare na seguinte propriedade matemática imediata:
+$$\text{Lift}(A \Rightarrow B) = \frac{P(A \cap B)}{P(A)P(B)} = \frac{P(B \cap A)}{P(B)P(A)} = \text{Lift}(B \Rightarrow A)$$
+O *Lift* é **estritamente comutativo**. Ele trata $A \Rightarrow B$ e $B \Rightarrow A$ com o mesmíssimo número. Não há nenhum mecanismo dentro do cálculo do *Lift* capaz de dizer se $A$ atrai $B$, se $B$ atrai $A$, ou se ambos decorrem de uma causa oculta.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Métricas da Regra $A \Rightarrow B$
+- **Confiança:** Probabilidade condicional de observar o consequente dado o antecedente:
+  $$c(A \Rightarrow B) = \frac{P(A \cap B)}{P(A)} = P(B \mid A)$$
+- **Lift:** Desvio relativo em relação à independência estocástica:
+  $$\text{Lift}(A \Rightarrow B) = \frac{P(A \cap B)}{P(A)P(B)} = \frac{P(B \mid A)}{P(B)}$$
+:::
+
+::: {.fragment}
+- $\text{Lift} = 1 \iff$ Independência estocástica ($P(A \cap B) = P(A)P(B)$).
+- $\text{Lift} > 1 \iff$ Co-ocorrência superior à independência.
+- $\text{Lift} < 1 \iff$ Efeito de substituição / inibição mútua.
+:::
+
+::: {.fragment .callout-important}
+## A Falácia da Simetria do Lift
+$$\text{Lift}(A \Rightarrow B) \equiv \text{Lift}(B \Rightarrow A)$$
+O Lift é incapaz de codificar direcionalidade. Uma regra $A \Rightarrow B$ com Lift elevado pode ter confiança assimétrica dramática ($90\%$ em um sentido e $5\%$ no outro), e é cega a confundidores latentes.
+:::
+:::
+
+## Pausa Ativa 2: A Simetria do Lift e o Confounding
+
+::: {.callout-tip}
+## O Paradoxo da Regra Simétrica
+Uma drogaria descobre que a regra $\{Fraldas\} \Rightarrow \{Cerveja\}$ possui $\text{Lift} = 2{,}5$, e a regra inversa $\{Cerveja\} \Rightarrow \{Fraldas\}$ possui exatamente o mesmo $\text{Lift} = 2{,}5$. O que a igualdade estrita desses valores revela sobre a capacidade do *Lift* de indicar direcionalidade causal? Se a variável oculta $\{Sexta\text{-}feira\ \grave{a}\ tarde\}$ duplicar as vendas de ambos os itens de forma independente, o que acontece com a dependência real entre eles?
+:::
+
+::: {.callout-tip}
+## V ou F: Propriedades do Lift e Confounding
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Um valor de $\text{Lift}(A \Rightarrow B) = 1{,}0$ indica que a ocorrência de $A$ e a ocorrência de $B$ são estatisticamente independentes na base de dados.
+- □ Se $\text{Lift}(A \Rightarrow B) = 3{,}0$, então necessariamente a confiança da regra $c(A \Rightarrow B)$ é o triplo da confiança inversa $c(B \Rightarrow A)$.
+- □ O paradoxo de Simpson ocorre quando uma associação observada em uma população agregada se inverte ou desaparece ao estratificarmos por uma variável confundidora.
+- □ Uma regra de associação com alto Lift e alta Confiança é imune a variáveis de confusão latentes.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 2: Resposta
+
+::: {.callout-tip}
+## V ou F: Resposta
+- ✔ **V:** $\text{Lift} = 1 \iff P(A \cap B) = P(A)P(B)$, indicando independência.
+- ✗ **F:** O Lift é idêntico nas duas direções; as confianças dependem das marginais $P(A)$ e $P(B)$, podendo ser muito diferentes ou iguais.
+- ✔ **V:** É a definição formal do paradoxo de Simpson.
+- ✗ **F:** Frequências agregadas são altamente sensíveis a causas comuns latentes que inflam o Lift sem haver ligação direta.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** A igualdade $\text{Lift}(A \Rightarrow B) = \text{Lift}(B \Rightarrow A)$ reflete a comutatividade da interseção, provando que o *Lift* não carrega direcionalidade. Se a causa comum $\{Sexta\text{-}feira\}$ inflar ambos os itens de forma não correlacionada internamente, o Lift na base agregada será artificialmente elevado ($> 1$), mas a dependência real condicional será nula ($\text{Lift} = 1$).
+:::
+:::
+
+# Bloco 2: Redes Bayesianas e a Fatoração da Distribuição Conjunta
+
+## Grafos Acíclicos Direcionados (DAGs) como Modelos Probabilísticos
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para ir além de tabelas empíricas de regras de associação e modelar a estrutura geradora dos dados, adotamos o paradigma dos **Modelos Gráficos Probabilísticos (PGMs)** (Bishop, 2006, Cap. 8).
+
+Considere um vetor com $K$ variáveis aleatórias discretas $\mathbf{x} = (x_1, x_2, \dots, x_K)$. Pela **regra do produto** da teoria da probabilidade, qualquer distribuição conjunta pode ser expandida sem perda de generalidade como:
+$$p(x_1, \dots, x_K) = p(x_K \mid x_1, \dots, x_{K-1}) \cdots p(x_2 \mid x_1) p(x_1) = \prod_{k=1}^K p(x_k \mid x_1, \dots, x_{k-1})$$
+Essa fatoração é sempre válida, mas é maximalmente complexa: para $K$ variáveis binárias, especificar essa distribuição sem simplificações exige $2^K - 1$ números reais livres. Para $K=30$, são mais de 1 bilhão de parâmetros.
+
+A intuição de uma **Rede Bayesiana** (ou grafo acíclico direcionado) é que, para cada variável $x_k$, o condicionamento a todo o passado histórico $x_1, \dots, x_{k-1}$ pode ser reduzido a um subconjunto restrito denominado **conjunto de pais** de $x_k$, denotado por $\text{pa}_k$:
+
+::: {.callout-note icon=false}
+## Definição 3 (Rede Bayesiana e Fatoração Conjunta; PRML §8.1.1)
+Dado um Grafo Acíclico Direcionado (DAG) $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ cujos vértices $\mathcal{V} = \{1, \dots, K\}$ correspondem às variáveis aleatórias, a distribuição conjunta $p(\mathbf{x})$ fatora de acordo com o grafo se:
+$$p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid \text{pa}_k)$$
+onde $\text{pa}_k = \{j \in \mathcal{V} \mid (j \to k) \in \mathcal{E}\}$ representa o conjunto de nós que possuem arestas direcionadas apontando diretamente para o nó $k$.
+:::
+
+A economia paramétrica é drástica: se cada nó possui no máximo $m \ll K$ pais binários, a tabela de probabilidades condicionais (CPT) de cada nó exige no máximo $2^m$ parâmetros. O total de parâmetros do modelo passa a ser de ordem $O(K \cdot 2^m)$, que escala **linearmente com o número de variáveis $K$**, em vez de exponencialmente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Da Regra da Cadeia à Fatoração em Grafos
+- Pela regra do produto (válida para qualquer distribuição):
+  $$p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid x_1, \dots, x_{k-1})$$
+- Custo tabular irrestrito para $K$ variáveis binárias: $2^K - 1$ parâmetros.
+:::
+
+::: {.fragment .callout-note icon=false}
+## Fatoração de uma Rede Bayesiana (PRML §8.1.1)
+Sob um Grafo Acíclico Direcionado (DAG), cada variável depende apenas dos seus **pais imediatos** $\text{pa}_k$:
+$$p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid \text{pa}_k)$$
+:::
+
+::: {.fragment}
+- **Economia Paramétrica Exponencial:**
+  - Se cada nó tem no máximo $m$ pais, precisamos de $O(K \cdot 2^m)$ parâmetros em vez de $2^K$.
+  - Para $K=30$ e $m=2$: de $10^9$ parâmetros para apenas $\approx 120$ parâmetros!
+:::
+:::
+
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{43,92,143}
+\definecolor{laranja}{RGB}{217,95,2}
+\definecolor{cinza}{RGB}{127,127,127}
+\begin{tikzpicture}[>=latex, font=\small, thick]
+  \node[draw=azul, fill=azul!10, circle, inner sep=3pt, minimum size=1cm] (C) at (2,2) {$C$};
+  \node[draw=laranja, fill=laranja!10, circle, inner sep=3pt, minimum size=1cm] (A) at (0,0) {$A$};
+  \node[draw=laranja, fill=laranja!10, circle, inner sep=3pt, minimum size=1cm] (B) at (4,0) {$B$};
+  \draw[->, very thick, azul] (C) -- (A) node[midway, left=2pt] {$p(A|C)$};
+  \draw[->, very thick, azul] (C) -- (B) node[midway, right=2pt] {$p(B|C)$};
+  \node[below=8pt of A] {Café Gourmet};
+  \node[below=8pt of B] {Torradeira};
+  \node[above=8pt of C] {Perfil de Renda (Causa Comum)};
+\end{tikzpicture}
+```
+:::
+
+## Pausa Ativa 3: Redes Bayesianas e Fatoração
+
+::: {.callout-tip}
+## O Custo do Catálogo Completo
+Considere um conjunto de $K=10$ produtos binários em um supermercado. Quantos números livres seriam necessários para especificar a distribuição conjunta completa $p(x_1, \dots, x_{10})$ sem nenhuma hipótese de independência? Se organizarmos esses itens em uma Rede Bayesiana onde cada produto tem no máximo 2 pais, quantos parâmetros tornam-se suficientes?
+:::
+
+::: {.callout-tip}
+## V ou F: Redes Bayesianas e Grafos
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Pela regra da cadeia da probabilidade, qualquer distribuição conjunta fatora como $p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid x_1, \dots, x_{k-1})$.
+- □ A ausência de uma aresta direcionada entre dois nós em uma Rede Bayesiana é apenas uma escolha visual e não expressa nenhuma restrição estatística.
+- □ Um Grafo Acíclico Direcionado (DAG) pode conter ciclos fechados desde que a probabilidade condicional seja normalizada.
+- □ Para um nó binário com $m$ pais binários, o número de parâmetros independentes em sua tabela condicional (CPT) é $2^m$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 3: Resposta
+
+::: {.callout-tip}
+## V ou F: Resposta
+- ✔ **V:** É a regra da cadeia fundamental de probabilidades.
+- ✗ **F:** A ausência de arestas é exatamente o que codifica hipóteses de independência condicional.
+- ✗ **F:** DAGs proíbem estritamente ciclos direcionados para manter a consistência da ordenação topológica.
+- ✔ **V:** Há $2^m$ configurações de pais; fixar $P(X=1 \mid \text{pais})$ determina $P(X=0 \mid \text{pais})$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Sem simplificações, precisamos de $2^{10} - 1 = 1023$ parâmetros livres. Na Rede Bayesiana com no máximo 2 pais por nó, cada nó exige no máximo $2^2 = 4$ parâmetros livres, totalizando no máximo $10 \times 4 = 40$ parâmetros (redução de mais de $96\%$).
+:::
+:::
+
+# Bloco 3: Independência Condicional e as Três Estruturas Canônicas
+
+## As Três Geometrias Fundamentais do Fluxo de Informação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A propriedade mais profunda dos Modelos Gráficos Probabilísticos é a capacidade de ler **independências condicionais** diretamente a partir do desenho do grafo (PRML §8.2).
+
+Dizemos que $A$ é condicionalmente independente de $B$ dado $C$, denotado por $A \perp\!\!\!\perp B \mid C$, se:
+$$p(A, B \mid C) = p(A \mid C) p(B \mid C) \quad \iff \quad p(A \mid B, C) = p(A \mid C)$$
+
+Em grafos direcionados com 3 variáveis, existem exatamente **três estruturas elementares**, que governam todo o fluxo de informação probabilística:
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Conceito de Independência Condicional (PRML §8.2)
+$$A \perp\!\!\!\perp B \mid C \iff p(A, B \mid C) = p(A \mid C)p(B \mid C) \iff p(A \mid B, C) = p(A \mid C)$$
+- Saber o valor de $B$ não altera em nada o conhecimento sobre $A$, uma vez que $C$ já é conhecido.
+:::
+
+::: {.fragment}
+- Existem apenas **três geometrias canônicas** de 3 nós que formam os blocos construtores de qualquer grafo complexo:
+  1. **Cadeia** (*Head-to-tail*): $A \to B \to C$
+  2. **Bifurcação / Causa Comum** (*Tail-to-tail*): $A \leftarrow B \to C$
+  3. **Colisor / Efeito Comum** (*Head-to-head*): $A \to C \leftarrow B$
+:::
+:::
+
+## 1. A Cadeia (Head-to-Tail) e a Causalidade Indireta
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Considere o grafo $A \to B \to C$. Pela fatoração de DAGs:
+$$p(A, B, C) = p(A) p(B \mid A) p(C \mid B)$$
+
+Marginalmente, $A$ e $C$ são dependentes:
+$$p(A, C) = \sum_B p(A, B, C) = p(A) \sum_B p(B \mid A) p(C \mid B) \neq p(A) p(C)$$
+
+Contudo, ao condicionarmos no nó intermediário $B$:
+$$p(A, C \mid B) = \frac{p(A, B, C)}{p(B)} = \frac{p(A) p(B \mid A) p(C \mid B)}{p(B)} = \frac{p(A, B) p(C \mid B)}{p(B)} = p(A \mid B) p(C \mid B)$$
+Portanto:
+$$A \perp\!\!\!\perp C \mid B$$
+O nó intermediário $B$ **bloqueia** o fluxo de informação quando é condicionado.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Estrutura 1: Cadeia (Head-to-tail) — $A \to B \to C$
+- Fatoração: $p(A, B, C) = p(A) p(B \mid A) p(C \mid B)$.
+- Sem condicionar: $A$ e $C$ são **marginalmente dependentes** ($A \not\perp\!\!\!\perp C$).
+:::
+
+::: {.fragment}
+- **Ao condicionar no intermediário $B$:**
+  $$p(A, C \mid B) = \frac{p(A) p(B \mid A) p(C \mid B)}{p(B)} = p(A \mid B) p(C \mid B) \implies \mathbf{A \perp\!\!\!\perp C \mid B}$$
+- O nó $B$ **bloqueia** o caminho *head-to-tail*.
+:::
+:::
+
+## 2. A Bifurcação (Tail-to-Tail) e a Causa Comum
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Considere o grafo $A \leftarrow B \to C$. Pela fatoração:
+$$p(A, B, C) = p(B) p(A \mid B) p(C \mid B)$$
+
+Marginalmente, $A$ e $C$ são dependentes pela causa comum $B$:
+$$p(A, C) = \sum_B p(B) p(A \mid B) p(C \mid B) \neq p(A) p(C)$$
+Esta é exatamente a estrutura do nosso Problema Motivador: Café ($A$) e Torradeira ($C$) compartilham a causa comum Renda ($B$), gerando o *Lift* espúrio de $2{,}69$.
+
+Ao condicionarmos em $B$:
+$$p(A, C \mid B) = \frac{p(A, B, C)}{p(B)} = \frac{p(B) p(A \mid B) p(C \mid B)}{p(B)} = p(A \mid B) p(C \mid B)$$
+Portanto:
+$$A \perp\!\!\!\perp C \mid B$$
+O nó de causa comum $B$ **bloqueia** o caminho *tail-to-tail* quando é condicionado.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Estrutura 2: Causa Comum (Tail-to-tail) — $A \leftarrow B \to C$
+- Fatoração: $p(A, B, C) = p(B) p(A \mid B) p(C \mid B)$.
+- Sem condicionar: $A$ e $C$ são **dependentes** via causa comum $B$ (fonte do Paradoxo de Simpson).
+:::
+
+::: {.fragment}
+- **Ao condicionar na causa comum $B$:**
+  $$p(A, C \mid B) = \frac{p(B) p(A \mid B) p(C \mid B)}{p(B)} = p(A \mid B) p(C \mid B) \implies \mathbf{A \perp\!\!\!\perp C \mid B}$$
+- O nó $B$ **bloqueia** o caminho *tail-to-tail*, dissipando a correlação espúria.
+:::
+:::
+
+## 3. O Colisor (Head-to-Head) e o Fenômeno de Explaining Away
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Considere agora o grafo $A \to C \leftarrow B$, onde as setas colidem no nó central $C$. Pela fatoração:
+$$p(A, B, C) = p(A) p(B) p(C \mid A, B)$$
+
+Integrando sobre $C$:
+$$p(A, B) = \sum_C p(A) p(B) p(C \mid A, B) = p(A) p(B) \sum_C p(C \mid A, B) = p(A) p(B)$$
+As variáveis $A$ e $B$ são **marginalmente independentes** ($A \perp\!\!\!\perp B$).
+
+Contudo, ao condicionarmos no efeito comum $C$:
+$$p(A, B \mid C) = \frac{p(A, B, C)}{p(C)} = \frac{p(A) p(B) p(C \mid A, B)}{p(C)} \neq p(A \mid C) p(B \mid C)$$
+Quando condicionamos no colisor $C$, **o caminho abre-se e $A$ e $B$ tornam-se dependentes**!
+
+Esse comportamento contra-intuitivo é o fenômeno de **explaining away** (Pearl, 1988): quando duas causas independentes disputam a explicação de um efeito comum observado, saber que uma delas ocorreu reduz a necessidade probabilística da outra.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Estrutura 3: Colisor (Head-to-head) — $A \to C \leftarrow B$
+- Fatoração: $p(A, B, C) = p(A) p(B) p(C \mid A, B)$.
+- **Marginalmente:** $p(A, B) = \sum_C p(A)p(B)p(C \mid A, B) = p(A)p(B) \implies \mathbf{A \perp\!\!\!\perp B}$.
+  As duas causas são naturalmente independentes!
+:::
+
+::: {.fragment .callout-important}
+## A Inversão do Colisor: Explaining Away
+- Ao condicionar no efeito comum $C$:
+  $$p(A, B \mid C) = \frac{p(A) p(B) p(C \mid A, B)}{p(C)} \neq p(A \mid C) p(B \mid C) \implies \mathbf{A \not\perp\!\!\!\perp B \mid C}$$
+- Condicionar no colisor (ou em seus descendentes) **abre o caminho** e induz dependência negativa mútua.
+:::
+:::
+
+::: {.fig-resize style="width: 85%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{43,92,143}
+\definecolor{laranja}{RGB}{217,95,2}
+\definecolor{cinza}{RGB}{127,127,127}
+\begin{tikzpicture}[>=latex, font=\small, thick]
+  % Cadeia
+  \node[draw=azul, fill=azul!10, circle, inner sep=2pt] (A1) at (0,2) {$A$};
+  \node[draw=laranja, fill=laranja!30, circle, inner sep=2pt] (B1) at (1.5,2) {$B$};
+  \node[draw=azul, fill=azul!10, circle, inner sep=2pt] (C1) at (3,2) {$C$};
+  \draw[->, thick] (A1) -- (B1);
+  \draw[->, thick] (B1) -- (C1);
+  \node[below=4pt of B1] {\textbf{Cadeia:} Bloqueado por $B$};
+
+  % Causa Comum
+  \node[draw=laranja, fill=laranja!30, circle, inner sep=2pt] (B2) at (5.5,2.7) {$B$};
+  \node[draw=azul, fill=azul!10, circle, inner sep=2pt] (A2) at (4.5,1.3) {$A$};
+  \node[draw=azul, fill=azul!10, circle, inner sep=2pt] (C2) at (6.5,1.3) {$C$};
+  \draw[->, thick] (B2) -- (A2);
+  \draw[->, thick] (B2) -- (C2);
+  \node[below=4pt of B2, yshift=-1.1cm] {\textbf{Causa Comum:} Bloqueado por $B$};
+
+  % Colisor
+  \node[draw=azul, fill=azul!10, circle, inner sep=2pt] (A3) at (8,2.7) {$A$};
+  \node[draw=azul, fill=azul!10, circle, inner sep=2pt] (B3) at (10,2.7) {$B$};
+  \node[draw=laranja, fill=laranja!30, circle, inner sep=2pt] (C3) at (9,1.3) {$C$};
+  \draw[->, thick] (A3) -- (C3);
+  \draw[->, thick] (B3) -- (C3);
+  \node[below=4pt of C3] {\textbf{Colisor:} Aberto por $C$};
+\end{tikzpicture}
+```
+:::
+
+## Pausa Ativa 4: As Três Estruturas Canônicas e o Colisor
+
+::: {.callout-tip}
+## O Regador e a Chuva
+Considere as variáveis $A$ (Choveu), $B$ (Regador automático ligou) e $C$ (Grama está molhada). A física dita que $A$ e $B$ ocorrem de forma independente ($A \perp\!\!\!\perp B$). Se você olhar pela janela e vir a grama molhada ($C=1$), e logo depois souber que o regador ligou com certeza ($B=1$), o que acontece com a probabilidade de que tenha chovido ($A=1$)?
+:::
+
+::: {.callout-tip}
+## V ou F: As Geometrias Canônicas
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Na cadeia $A \to B \to C$, as variáveis $A$ e $C$ tornam-se condicionalmente independentes dado $B$ ($A \perp\!\!\!\perp C \mid B$).
+- □ Na bifurcação $A \leftarrow B \to C$, condicionar em $B$ induz dependência espúria entre $A$ e $C$.
+- □ No colisor $A \to C \leftarrow B$, $A$ e $B$ são marginalmente independentes sem condicionamento ($A \perp\!\!\!\perp B$).
+- □ Se $C$ é um colisor no caminho entre $A$ e $B$, condicionar em um descendente de $C$ mantém o caminho bloqueado.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 4: Resposta
+
+::: {.callout-tip}
+## V ou F: Resposta
+- ✔ **V:** Condicionar no nó intermediário bloqueia o caminho *head-to-tail*.
+- ✗ **F:** Condicionar na causa comum dissipa a dependência espúria e restaura a independência.
+- ✔ **V:** Sem condicionamento, o colisor está naturalmente bloqueado ($A \perp\!\!\!\perp B$).
+- ✗ **F:** Condicionar no colisor **ou em seus descendentes** abre o canal e induz dependência.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** A certeza de que o regador ligou ($B=1$) "explica e afasta" (*explains away*) a evidência de que a grama está molhada, reduzindo a probabilidade a posteriori de chuva ($P(A=1 \mid C=1, B=1) < P(A=1 \mid C=1)$). É a assinatura matemática do colisor.
+:::
+:::
+
+# Bloco 4: d-Separação Geral, Cobertura de Markov e Equivalência
+
+## O Critério Geral de d-Separação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para analisar grafos com dezenas de nós, generalizamos as regras canônicas através do **critério de $d$-separação** (*directed separation*), formulado por Judea Pearl (1988) e detalhado em PRML (§8.2.2).
+
+::: {.callout-note icon=false}
+## Teorema 2 (Critério de $d$-Separação; Pearl, 1988; PRML §8.2.2)
+Considere um grafo acíclico direcionado $\mathcal{G}$ e três conjuntos disjuntos de nós $A$, $B$ e $C$.
+Dizemos que um caminho não direcionado $p$ entre um nó de $A$ e um nó de $B$ está **bloqueado** pelo conjunto condicionado $C$ se:
+1. O caminho contém um nó $m$ que é *head-to-tail* ($\to m \to$ ou $\leftarrow m \leftarrow$) ou *tail-to-tail* ($\leftarrow m \to$), e $m \in C$; OU
+2. O caminho contém um nó $m$ que é *head-to-head* ($\to m \leftarrow$, colisor), e nem $m$ nem qualquer descendente de $m$ pertence a $C$.
+
+Se **todos** os caminhos possíveis entre os nós de $A$ e os nós de $B$ estiverem bloqueados por $C$, dizemos que **$A$ é $d$-separado de $B$ por $C$** no grafo $\mathcal{G}$, o que implica rigorosamente:
+$$A \perp\!\!\!\perp B \mid C$$
+para qualquer distribuição de probabilidade que fature de acordo com $\mathcal{G}$.
+:::
+
+Um conceito correlato essencial em inferência e amostragem é a **Cobertura de Markov** (*Markov Blanket*):
+
+::: {.callout-note icon=false}
+## Definição 4 (Cobertura de Markov; PRML §8.3.2)
+A Cobertura de Markov de um nó $X_i$, denotada por $\text{MB}(X_i)$, é o menor conjunto de nós que torna $X_i$ condicionalmente independente de todas as outras variáveis do grafo:
+$$X_i \perp\!\!\!\perp (\mathcal{V} \setminus \{X_i \cup \text{MB}(X_i)\}) \mid \text{MB}(X_i)$$
+Em uma Rede Bayesiana, $\text{MB}(X_i)$ é formada por:
+$$\text{MB}(X_i) = \text{pa}(X_i) \cup \text{ch}(X_i) \cup \text{co-pais}(X_i)$$
+onde $\text{co-pais}(X_i)$ são os outros pais dos filhos de $X_i$. A inclusão dos co-pais é estritamente obrigatória para bloquear os colisores induzidos pelos nós filhos!
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Critério de $d$-Separação (Pearl, 1988; PRML §8.2.2)
+Um caminho entre $A$ e $B$ está **bloqueado** por $C$ se contiver:
+1. Um nó não colisor ($\to m \to$ ou $\leftarrow m \to$) que **está em $C$**; OU
+2. Um colisor ($\to m \leftarrow$) tal que **nem $m$ nem seus descendentes estão em $C$**.
+:::
+
+::: {.fragment}
+- Se **todos** os caminhos entre $A$ e $B$ estiverem bloqueados por $C$, então:
+  $$\mathbf{A \perp\!\!\!\perp B \mid C}$$
+:::
+
+::: {.fragment .callout-note icon=false}
+## Cobertura de Markov (Markov Blanket)
+Menor conjunto que isola completamente um nó $X_i$ do restante do grafo:
+$$\text{MB}(X_i) = \text{pais}(X_i) \cup \text{filhos}(X_i) \cup \text{co-pais}(X_i)$$
+*Os co-pais são obrigatórios para bloquear os colisores abertos pelos nós filhos.*
+:::
+:::
+
+::: {.fig-resize style="width: 65%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{43,92,143}
+\definecolor{laranja}{RGB}{217,95,2}
+\definecolor{verde}{RGB}{27,158,119}
+\begin{tikzpicture}[>=latex, font=\small, thick]
+  \node[draw=azul, fill=azul!20, circle, inner sep=3pt, minimum size=1.1cm] (X) at (2,2) {$X_i$};
+  \node[draw=laranja, fill=laranja!10, circle, inner sep=2pt] (P1) at (0.8,3.5) {Pai 1};
+  \node[draw=laranja, fill=laranja!10, circle, inner sep=2pt] (P2) at (3.2,3.5) {Pai 2};
+  \node[draw=laranja, fill=laranja!10, circle, inner sep=2pt] (F1) at (1.2,0.5) {Filho 1};
+  \node[draw=laranja, fill=laranja!10, circle, inner sep=2pt] (F2) at (2.8,0.5) {Filho 2};
+  \node[draw=verde, fill=verde!10, circle, inner sep=2pt] (CP) at (4.2,1.8) {Co-pai};
+
+  \draw[->, very thick] (P1) -- (X);
+  \draw[->, very thick] (P2) -- (X);
+  \draw[->, very thick] (X) -- (F1);
+  \draw[->, very thick] (X) -- (F2);
+  \draw[->, very thick, verde] (CP) -- (F2);
+
+  \draw[dashed, red, rounded corners=12pt] (-0.2, -0.2) rectangle (5.2, 4.2);
+  \node[red, above=2pt] at (2.5, 4.2) {Markov Blanket $\text{MB}(X_i)$};
+\end{tikzpicture}
+```
+:::
+
+## Classes de Equivalência de Markov (I-Equivalência)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Chegamos à questão metodológica decisiva do aprendizado não supervisionado de estruturas: **podemos aprender a direção causal exata de todas as arestas apenas a partir de dados observacionais passivos?**
+
+A resposta analítica é **não**. Considere os três grafos:
+1. $A \to B \to C$
+2. $A \leftarrow B \leftarrow C$
+3. $A \leftarrow B \to C$
+
+Todos os três codificam rigorosamente a mesma única declaração de independência condicional: $A \perp\!\!\!\perp C \mid B$. Nenhuma matriz de dados observacionais, por maior que seja o número de transações $N$, consegue diferenciar esses três modelos.
+
+::: {.callout-note icon=false}
+## Teorema 3 (I-Equivalência de Markov; Verma & Pearl, 1990)
+Dois Grafos Acíclicos Direcionados $\mathcal{G}_1$ e $\mathcal{G}_2$ induzem exatamente as mesmas declarações de independência condicional ($I(\mathcal{G}_1) = I(\mathcal{G}_2)$) se e somente se:
+1. Possuem o mesmo **esqueleto** (as mesmas arestas quando desconsideradas as direções); E
+2. Possuem as mesmas **v-structures não blindadas** (os mesmos colisores $A \to C \leftarrow B$ sem aresta direta entre $A$ e $B$).
+:::
+
+O colisor $A \to B \leftarrow C$ é observacionalmente único: ele codifica $A \perp\!\!\!\perp C$ (marginalmente) e $A \not\perp\!\!\!\perp C \mid B$, sendo distinguível dos outros três.
+Por isso, algoritmos não supervisionados de aprendizado de estrutura (*structure learning*, como o algoritmo PC) retornam um **Grafo Essencial (CPDAG)**: as arestas que formam v-structures recebem direções fixas, enquanto arestas pertencentes a cadeias/bifurcações permanecem não orientadas ($A - B - C$), exigindo ou ordem temporal a priori ou experimentos de intervenção ativa ($do$-calculus de Pearl) para determinar o fluxo causal.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Limite Epistemológico dos Dados Observacionais
+- Três estruturas distintas:
+  $$A \to B \to C \quad \Longleftrightarrow \quad A \leftarrow B \leftarrow C \quad \Longleftrightarrow \quad A \leftarrow B \to C$$
+- Todas as três dizem exatamente a mesma coisa: **$A \perp\!\!\!\perp C \mid B$**.
+- Nenhum algoritmo não supervisionado sobre dados passivos consegue separá-las!
+:::
+
+::: {.fragment .callout-note icon=false}
+## Teorema de I-Equivalência (Verma & Pearl, 1990)
+Dois DAGs pertencem à mesma classe de equivalência de Markov se e somente se:
+1. Compartilham o mesmo **esqueleto não direcionado**; E
+2. Compartilham as mesmas **v-structures** (colisores $A \to C \leftarrow B$).
+:::
+
+::: {.fragment .callout-important}
+## O CPDAG (Grafo Essencial)
+Algoritmos puramente observacionais orientam apenas as v-structures. Cadeias e bifurcações ficam como arestas não orientadas ($A - B - C$), exigindo suposições prévias de temporalidade ou intervenções causais ativas.
+:::
+:::
+
+## Pausa Ativa 5: d-Separação e Equivalência de Markov
+
+::: {.callout-tip}
+## O Limite da Observação Passiva
+Suponha que, analisando 500 mil transações de varejo com os itens $A$, $B$ e $C$, seus testes estatísticos comprovem que $A \perp\!\!\!\perp C \mid B$, e nenhuma outra independência exista. É viável determinar apenas com os dados e sem fazer intervenções de preços se o modelo correto é $A \to B \to C$ ou $A \leftarrow B \to C$? O que isso nos ensina sobre mineração de dados não supervisionada?
+:::
+
+::: {.callout-tip}
+## V ou F: d-Separação e Equivalência
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O critério de $d$-separação assegura que, se todos os caminhos entre $A$ e $B$ estiverem bloqueados por $C$, então $A \perp\!\!\!\perp B \mid C$ em qualquer distribuição compatível com o DAG.
+- □ A Cobertura de Markov de um nó $X$ é formada unicamente por seus pais e seus filhos imediatos.
+- □ Dois DAGs com o mesmo esqueleto e as mesmas v-structures geram o mesmo conjunto de independências condicionais.
+- □ O grafo de colisor $A \to B \leftarrow C$ pertence à mesma classe de equivalência de Markov que $A \to B \to C$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 5: Resposta
+
+::: {.callout-tip}
+## V ou F: Resposta
+- ✔ **V:** É o teorema fundamental de Pearl (1988).
+- ✗ **F:** A Cobertura de Markov inclui obrigatoriamente os co-pais para bloquear os colisores abertos pelos filhos.
+- ✔ **V:** Critério formal de Verma & Pearl (1990) para I-equivalência.
+- ✗ **F:** O colisor introduz uma v-structure exclusiva que torna $A$ e $C$ marginalmente independentes, sendo distinguível.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** É impossível distinguir $A \to B \to C$ de $A \leftarrow B \to C$ apenas com dados observacionais, pois ambos pertencem à mesma classe de equivalência de Markov. Para desvendar a seta, é indispensável informação a priori (como ordem temporal de checkout) ou uma intervenção causal ativa.
+:::
+:::
+
+# Fechamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+## Retomando as Cinco Perguntas
+
+1. **Como formalizar matematicamente a mineração de regras de associação e a poda do Apriori?**
+   O suporte é a probabilidade conjunta empírica $s(I) = P(\bigwedge_{j \in I} x_j = 1)$. A propriedade de antimonotonicidade ($A \subseteq B \implies s(B) \le s(A)$) garante que qualquer superconjunto de um itemset infrequente é obrigatoriamente infrequente, permitindo podar exponencialmente a busca em $2^D - 1$ combinações.
+2. **Por que o Lift falha como métrica de descoberta estrutural?**
+   O *Lift* é estritamente simétrico ($\text{Lift}(A \Rightarrow B) \equiv \text{Lift}(B \Rightarrow A)$) e mede apenas o desvio da independência marginal agregada. Ele é cego a causas comuns latentes: duas variáveis independentes podem apresentar um *Lift* muito superior a $1$ devido a um confundidor comum (Paradoxo de Simpson).
+3. **Como as Redes Bayesianas fatoram a distribuição conjunta e geram economia paramétrica exponencial?**
+   Sob um DAG, a regra da cadeia fatora localmente: $p(x_1, \dots, x_K) = \prod_k p(x_k \mid \text{pa}_k)$. Isso reduz o espaço de parâmetros de $2^K - 1$ para $O(K \cdot 2^m)$, viabilizando inferência e estimação com amostras finitas.
+4. **Quais são as três geometrias canônicas de dependência condicional?**
+   Cadeia ($A \to B \to C$, bloqueada por $B$), Causa Comum ($A \leftarrow B \to C$, bloqueada por $B$), e Colisor ($A \to C \leftarrow B$, aberto por $C$). No colisor, duas causas marginalmente independentes tornam-se dependentes ao condicionarmos no efeito comum (*explaining away*).
+5. **Como funciona o critério geral de $d$-separação e quais são os limites da inferência observacional?**
+   Um caminho é bloqueado se contiver um não colisor condicionado ou um colisor não condicionado (nem em seus descendentes). Dois DAGs com o mesmo esqueleto e as mesmas v-structures pertencem à mesma classe de equivalência de Markov, impondo um limite formal: dados observacionais passivos não orientam arestas fora de v-structures.
+
+## O Que Fica em Aberto e Limitações
+
+- **Complexidade do Aprendizado de Estrutura:** Encontrar o DAG ótimo que maximiza o escore BIC/BDeu a partir de dados é NP-difícil; algoritmos práticos utilizam heurísticas gulosas ou restrições de independência (algoritmo PC).
+- **Variáveis Ocultas não Observadas:** Quando confundidores latentes não são medidos, as classes de equivalência tornam-se Grafos Acíclicos Ancestrais (MAGs/PAGs), exigindo o cálculo de causalidade formal ($do$-calculus de Pearl).
+- **Dados Esparsos Massivos:** Em matrizes transacionais de catálogo gigante com milhões de produtos e poucos cliques por usuário, Redes Bayesianas tornam-se densas demais; métodos de fatoração contínua de matrizes oferecem uma saída algébrica complementar.
+
+::: {.callout-tip}
+## Ponte para a Aula 10
+
+Nesta aula, modelamos a dependência entre variáveis discretas através de grafos direcionados e probabilidades condicionais.
+
+Na próxima aula (**Aula 10: Sistemas de Recomendação — Fatoração de Matrizes: SVD e NMF**), enfrentaremos o problema da esparsidade extrema sob uma ótica algébrica e geométrica. Investigaremos como decompor matrizes gigantescas de preferências incompletas utilizando **Truncated SVD** e **Fatoração de Matrizes Não Negativas (NMF)**, demonstrando como a imposição de restrições de não negatividade altera radicalmente a interpretabilidade dos fatores latentes em partes aditivas reais.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Retomando as Cinco Perguntas
+
+::: {.fragment}
+**1.** Suporte é probabilidade conjunta empírica; antimonotonicidade ($A \subseteq B \implies s(B) \le s(A)$) permite a poda exponencial do Apriori.
+:::
+
+::: {.fragment}
+**2.** O Lift é simétrico ($\text{Lift}(A \Rightarrow B) \equiv \text{Lift}(B \Rightarrow A)$) e vulnerável ao Paradoxo de Simpson por causas comuns latentes.
+:::
+
+::: {.fragment}
+**3.** Redes Bayesianas fatoram a conjunta como $p(\mathbf{x}) = \prod_k p(x_k \mid \text{pa}_k)$, reduzindo os parâmetros de $2^K$ para $O(K \cdot 2^m)$.
+:::
+
+::: {.fragment}
+**4.** Cadeia e Causa Comum são bloqueadas pelo nó intermediário; Colisores são abertos pelo condicionamento no efeito comum (*explaining away*).
+:::
+
+::: {.fragment}
+**5.** $d$-Separação formaliza o bloqueio de caminhos gerais. Classes de equivalência de Markov (mesmo esqueleto e v-structures) limitam a descoberta causal em dados observacionais.
+:::
+
+## O Que Fica em Aberto
+
+::: {.fragment}
+- **Aprendizado de Estrutura:** Achar o melhor DAG é NP-difícil (algoritmos gulosos e algoritmo PC).
+- **Variáveis Latentes:** Exigem extensões causais e o $do$-calculus de Pearl.
+- **Esparsidade Massiva em Varejo:** Para milhões de itens, modelos tabulares tornam-se intratáveis.
+:::
+
+::: {.fragment .callout-tip}
+## Ponte para a Aula 10
+- **Aula 10:** *Sistemas de Recomendação — Fatoração de Matrizes (SVD e NMF)*.
+- Como fatorar matrizes massivas com valores faltantes e por que restrições de positividade no NMF produzem representações baseadas em partes interpretáveis.
+:::
+
+::: {.fragment}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+
+:::
+

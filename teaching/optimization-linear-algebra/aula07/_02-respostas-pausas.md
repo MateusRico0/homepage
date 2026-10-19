@@ -40,7 +40,7 @@ Para a quadrática, $f(\mathbf{x}^\star+\varepsilon\mathbf{u}_i)=f(\mathbf{x}^\s
 ### Resolução dos itens
 - ✗ **Item 1 (Falso):** a condição de segunda ordem exige $\nabla^2f(\mathbf{x})\succeq0$ em **todo** ponto do domínio. Num único ponto, no máximo se conclui algo local. Por exemplo, $f(x)=x^4-2{,}5x^2$ tem $f''>0$ perto de $x=\pm1{,}1$ e não é convexa.
 - ✔ **Item 2 (Verdadeiro):** é o contraexemplo do Boyd (§3.1.4, p. 71). Hessiana definida positiva em todo ponto é suficiente para convexidade estrita, mas não é necessária.
-- ✔ **Item 3 (Verdadeiro):** $\nabla f(\mathbf{x})=\mathbf{x}^TP+\mathbf{q}^T$ (gradiente-linha, com $P$ simétrica), e derivar de novo dá $P$, sem dependência de $\mathbf{x}$.
+- ✔ **Item 3 (Verdadeiro):** $\nabla f(\mathbf{x})=P\mathbf{x}+\mathbf{q}$ (gradiente-coluna, com $P$ simétrica), e derivar de novo dá $P$, sem dependência de $\mathbf{x}$.
 - ✗ **Item 4 (Falso):** com derivadas segundas contínuas, vale a simetria $\partial^2f/\partial x_i\partial x_j=\partial^2f/\partial x_j\partial x_i$ (Schwarz; MathML, eq. 5.146). A Hessiana não depende da ordem.
 
 ---

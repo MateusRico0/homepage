@@ -109,6 +109,28 @@ N_2d, d_2d = X_2d.shape
 
 Ks = list(range(1, 11))
 
+# --- Bloco 1: tamanho da soma sobre Z na evidência (K^N, com K=2) --------
+log10_KN = N_2d * np.log10(2)
+
+# --- Bloco 1: assimetria da KL — p bimodal, duas candidatas Gaussianas ----
+from scipy.stats import norm as _norm
+z_kl = np.linspace(-8, 8, 8001)
+dz_kl = z_kl[1] - z_kl[0]
+p_kl = 0.5 * _norm.pdf(z_kl, -2, 0.6) + 0.5 * _norm.pdf(z_kl, 2, 0.6)
+sd_larga = np.sqrt(0.6 ** 2 + 2 ** 2)          # mesma média e variância de p
+q_moda = _norm.pdf(z_kl, 2, 0.6)                 # cobre um único modo
+q_larga = _norm.pdf(z_kl, 0, sd_larga)           # cobre os dois modos
+
+
+def kl_num(a, b):
+    """KL(a||b) por soma de Riemann numa grade fina."""
+    m = a > 1e-300
+    return float(np.sum(a[m] * np.log(a[m] / np.maximum(b[m], 1e-300))) * dz_kl)
+
+
+kl_qp_moda, kl_pq_moda = kl_num(q_moda, p_kl), kl_num(p_kl, q_moda)
+kl_qp_larga, kl_pq_larga = kl_num(q_larga, p_kl), kl_num(p_kl, q_larga)
+
 # --- Abertura: GMM clássico para K=1..10 em TODOS os dados —
 # a log-verossimilhança de treino nunca cai (mesmo teste da Aula 4/5).
 loglik_total = []
@@ -578,108 +600,103 @@ sério, de forma Bayesiana.
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
 **O princípio formal.** Na inferência Bayesiana, não só os parâmetros
-de um modelo são incertos — a própria **estrutura** do modelo é. Trate
-cada estrutura candidata (ex.: "GMM com $K=1$", "GMM com $K=2$", ...)
-como um evento $\mathcal{M}_m$, com uma priori $p(\mathcal{M}_m)$ sobre
-qual estrutura é a certa. Pela regra de Bayes,
+de um modelo são incertos: a própria **estrutura** do modelo também é.
+Trate cada estrutura candidata ("GMM com $K=1$", "GMM com $K=2$", ...)
+como um evento $\mathcal{M}_m$, com uma priori $p(\mathcal{M}_m)$ que
+expressa, antes de ver os dados, quanto acreditamos em cada estrutura.
+Pela regra de Bayes,
 $$
-p(\mathcal{M}_m\mid\mathbf{X}) = \frac{p(\mathbf{X}\mid\mathcal{M}_m)\,p(\mathcal{M}_m)}{p(\mathbf{X})} \;\propto\; p(\mathcal{M}_m)\,p(\mathbf{X}\mid\mathcal{M}_m),
+p(\mathcal{M}_m\mid\mathbf{X}) = \frac{p(\mathbf{X}\mid\mathcal{M}_m)\,p(\mathcal{M}_m)}{p(\mathbf{X})},
+\qquad p(\mathbf{X})=\sum_{m'} p(\mathbf{X}\mid\mathcal{M}_{m'})\,p(\mathcal{M}_{m'}) .
 $$
-já que $p(\mathbf{X})=\sum_m p(\mathbf{X}\mid\mathcal{M}_m)p(\mathcal{M}_m)$
-não depende de qual $m$ se está avaliando — é a mesma constante para
-todos os candidatos, então pode ser ignorada ao **comparar** estruturas
-(só importa para normalizar a posterior de verdade). Sem motivo para
-favorecer uma estrutura a priori, tome $p(\mathcal{M}_m)$ uniforme
-sobre os candidatos — e a comparação vira inteiramente sobre o termo
-$p(\mathbf{X}\mid\mathcal{M}_m)$.
+O objetivo é encontrar a estrutura de maior posterior. Como o logaritmo
+é crescente, isso é o mesmo que maximizar
+$$
+\ln p(\mathcal{M}_m\mid\mathbf{X})
+= \underbrace{\ln p(\mathbf{X}\mid\mathcal{M}_m)}_{\text{evidência}}
++ \underbrace{\ln p(\mathcal{M}_m)}_{\text{priori}}
+- \underbrace{\ln p(\mathbf{X})}_{\text{normalizador}} .
+$$
+Cada termo tem um papel diferente, e vale mantê-los à vista até o fim do
+bloco.
 
-**A evidência.** Esse termo, $p(\mathbf{X}\mid\mathcal{M}_m)$, chama-se
-**evidência** (ou verossimilhança marginal) do modelo $\mathcal{M}_m$.
-Para qualquer variável não observada $\mathbf{H}$ daquele modelo
-(latentes, parâmetros, ou os dois — a mesma generalidade de $\mathbf{H}$
-de antes), a regra da soma dá
+- **Evidência**, $\ln p(\mathbf{X}\mid\mathcal{M}_m)$: depende de $m$ e
+  mede quão bem a estrutura explica os dados. É ela que vai dar trabalho.
+- **Priori**, $\ln p(\mathcal{M}_m)$: depende de $m$ e é escolha nossa.
+  Sem motivo para favorecer uma estrutura, ela é uniforme,
+  $p(\mathcal{M}_m)=1/(\text{número de candidatos})$. Nesse caso ela
+  continua na expressão, mas vale o mesmo para todos os $m$ e, portanto,
+  não muda **qual** estrutura vence.
+- **Normalizador**, $\ln p(\mathbf{X})$: é uma soma sobre todos os
+  candidatos e não depende de $m$. Não precisamos calculá-lo para
+  **comparar** estruturas, só para obter a posterior normalizada.
+
+Comparar estruturas é, então, comparar
+$\ln p(\mathbf{X}\mid\mathcal{M}_m)+\ln p(\mathcal{M}_m)$.
+
+**A evidência e a Navalha de Occam.** Para qualquer variável não
+observada $\mathbf{H}$ do modelo (latentes, parâmetros ou os dois), a
+regra da soma dá
 $$
 p(\mathbf{X}\mid\mathcal{M}_m) = \int p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)\,\mathrm{d}\mathbf{H} .
 $$
 Diferente da log-verossimilhança de treino do Problema Motivador, essa
-integral **já embute uma Navalha de Occam orgânica**, sem precisar de
-nenhum termo de penalidade adicionado à mão (Bishop, PRML, §3.4). A
-intuição: pense em $p(\mathbf{X}\mid\mathbf{H},\mathcal{M}_m)$, para
-$\mathbf{H}$ fixo, como uma distribuição sobre o espaço de todos os
-datasets possíveis daquele tamanho — ela precisa somar/integrar a $1$
-sobre esse espaço. Um modelo **complexo** (muitos parâmetros livres)
-tem um espaço de $\mathbf{H}$ muito maior para "explorar", e sua massa
-de probabilidade $p(\mathbf{X}\mid\mathbf{H},\mathcal{M}_m)$ se espalha
-por muito mais combinações de dataset possíveis — inclusive muitas que
-não se parecem em nada com dados reais. Um modelo **simples** (poucos
-parâmetros) tem menos onde "espalhar" e por isso concentra mais massa
-em qualquer combinação específica de $\mathbf{H}$. Quando se integra
-sobre $\mathbf{H}$, o modelo complexo só ganha se os dados realmente
-precisarem daquela flexibilidade extra — caso contrário, sua massa
-diluída perde para a massa concentrada do modelo simples, mesmo que o
-modelo complexo consiga, para algum $\mathbf{H}$ específico, ajustar os
-dados tão bem ou melhor que o simples (exatamente o problema que o
-Problema Motivador expôs para a log-verossimilhança de treino sozinha).
+integral **já embute uma Navalha de Occam**, sem nenhum termo de
+penalidade adicionado à mão (Bishop, PRML, §3.4). A intuição: para cada
+$\mathbf{H}$ fixo, $p(\mathbf{X}\mid\mathbf{H},\mathcal{M}_m)$ é uma
+distribuição sobre todos os datasets possíveis daquele tamanho e precisa
+integrar a $1$ sobre eles. Um modelo **complexo** tem um espaço de
+$\mathbf{H}$ maior e espalha sua massa por muito mais datasets possíveis,
+inclusive muitos que não se parecem com dados reais. Um modelo
+**simples** concentra mais massa nos datasets que consegue gerar. Ao
+integrar sobre $\mathbf{H}$, o modelo complexo só vence se os dados
+realmente precisarem da flexibilidade extra. Caso contrário, sua massa
+diluída perde para a massa concentrada do simples, mesmo que, para algum
+$\mathbf{H}$ específico, o complexo ajuste os dados tão bem ou melhor (o
+problema que o Problema Motivador expôs).
 
-:::
-
-::: {.content-visible when-format="revealjs"}
-
-## O Princípio Formal: Estrutura Também É Variável
-
-::: {.fragment}
-Trate cada estrutura candidata $\mathcal{M}_m$ (ex.: "GMM com $K=m$")
-como evento, com priori $p(\mathcal{M}_m)$. Bayes:
+**Por que a evidência não se calcula.** No GMM Bayesiano (Bloco 2),
+$\mathbf{H}=(\mathbf{Z},\pi,\mu,\Sigma)$, e a evidência é
 $$
-p(\mathcal{M}_m\mid\mathbf{X}) = \frac{p(\mathbf{X}\mid\mathcal{M}_m)\,p(\mathcal{M}_m)}{p(\mathbf{X})} \;\propto\; p(\mathcal{M}_m)\,p(\mathbf{X}\mid\mathcal{M}_m) .
+p(\mathbf{X}\mid\mathcal{M}_m)=\sum_{\mathbf{Z}}\int\!\!\int\!\!\int p(\mathbf{X},\mathbf{Z},\pi,\mu,\Sigma\mid\mathcal{M}_m)\,\mathrm{d}\pi\,\mathrm{d}\mu\,\mathrm{d}\Sigma .
 $$
-:::
+A soma sobre $\mathbf{Z}$ percorre todas as atribuições de pontos a
+componentes. Cada um dos $N$ pontos escolhe um de $K$ componentes, o que
+dá $K^N$ termos. No dataset-fio, com $N=`{python} N_2d`$ e só $K=2$,
+são $2^{`{python} N_2d`}\approx10^{`{python} f"{log10_KN:.0f}"`}$
+termos. No EM da Aula 4 isso não era problema: com $\theta$ fixo, os
+pontos são independentes dado $\theta$, e o passo E calculava uma
+responsabilidade por ponto ($N\times K$ números). Aqui $\theta=(\pi,\mu,\Sigma)$
+é integrado, e a integral **acopla** todos os pontos: a soma deixa de
+fatorar ponto a ponto.
 
-::: {.fragment}
-$p(\mathbf{X})=\sum_m p(\mathbf{X}\mid\mathcal{M}_m)p(\mathcal{M}_m)$
-não depende de $m$ — irrelevante para **comparar** estruturas. Sem
-favoritismo a priori, $p(\mathcal{M}_m)$ uniforme $\Rightarrow$
-comparação vira só sobre $p(\mathbf{X}\mid\mathcal{M}_m)$, a
-**evidência**.
-:::
+::: {.callout-important}
+## A estratégia deste bloco
 
-## A Evidência Já Embute Occam
-
-::: {.fragment}
+Queremos comparar estruturas por
+$\ln p(\mathbf{X}\mid\mathcal{M}_m)+\ln p(\mathcal{M}_m)$. A priori é
+escolha nossa; a evidência não se calcula. Vamos então construir uma
+quantidade **calculável** $\mathcal{L}_m(q)$, que depende de uma
+distribuição auxiliar $q(\mathbf{H})$ escolhida por nós e satisfaz
 $$
-p(\mathbf{X}\mid\mathcal{M}_m) = \int p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)\,\mathrm{d}\mathbf{H}
+\mathcal{L}_m(q)\le\ln p(\mathbf{X}\mid\mathcal{M}_m)\quad\text{para toda }q .
 $$
-(Bishop, PRML, §3.4) — sem nenhuma penalidade adicionada à mão.
+Essa quantidade é o **ELBO** (*Evidence Lower Bound*). Somando a log-priori
+dos dois lados,
+$$
+\mathcal{L}_m(q)+\ln p(\mathcal{M}_m)\;\le\;\ln p(\mathbf{X}\mid\mathcal{M}_m)+\ln p(\mathcal{M}_m)=\ln p(\mathcal{M}_m\mid\mathbf{X})+\ln p(\mathbf{X}),
+$$
+e é o lado esquerdo que usaremos para comparar estruturas. Para
+construir $\mathcal{L}_m(q)$ precisamos de uma ferramenta que meça quão
+longe uma distribuição está de outra: a divergência de Kullback-Leibler.
 :::
 
-::: {.fragment}
-Intuição: $p(\mathbf{X}\mid\mathbf{H},\mathcal{M}_m)$ integra a $1$
-sobre o espaço de todos os datasets possíveis. Modelo **complexo**:
-espaço de $\mathbf{H}$ maior, massa se espalha por mais combinações —
-inclusive muitas que não parecem dados reais.
-:::
+## Digressão: a Divergência de Kullback-Leibler
 
-::: {.fragment .callout-important}
-Modelo **simples**: menos onde espalhar, mais massa concentrada em
-qualquer $\mathbf{H}$ específico. Ao integrar, o complexo só ganha se
-os dados **realmente precisarem** da flexibilidade extra — mesmo que,
-para algum $\mathbf{H}$ pontual, ele ajuste tão bem ou melhor (o
-problema do Motivador, agora superado pela integração).
-:::
-
-:::
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-
-## O Surgimento do ELBO
-
-Para GMMs (e quase todo modelo latente de interesse prático), a
-integral da evidência é **intratável**: não existe forma fechada para
-$\int p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)\,\mathrm{d}\mathbf{H}$
-quando $\mathbf{H}$ mistura variáveis discretas ($\mathbf{Z}$) e
-contínuas de dimensão alta ($\pi,\mu,\Sigma$). Precisamos de um
-substituto tratável — e para construí-lo, precisamos de uma peça nova:
-a **divergência de Kullback-Leibler**.
+Vamos aproximar uma distribuição que não sabemos calcular (a posterior
+$p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)$) por uma distribuição $q$
+que nós escolhemos. Precisamos de uma medida de quanto essa aproximação
+erra.
 
 ::: {.callout-note icon=false}
 ## Definição (divergência de Kullback-Leibler)
@@ -693,172 +710,388 @@ $$
 
 Para qualquer função $f(\mathbf{H})$, a integral $\int q(\mathbf{H})
 f(\mathbf{H})\,\mathrm{d}\mathbf{H}$ é, por definição, a **esperança de
-$f$ sob $q$**, $\mathbb{E}_q[f(\mathbf{H})]$. A definição acima é
-exatamente uma integral desse tipo, com
-$f(\mathbf{H})=\ln\{q(\mathbf{H})/p(\mathbf{H})\}$:
+$f$ sob $q$**, $\mathbb{E}_q[f(\mathbf{H})]$. A definição acima é uma
+integral desse tipo, com $f(\mathbf{H})=\ln\{q(\mathbf{H})/p(\mathbf{H})\}$:
 $$
 \mathrm{KL}(q\|p) = \mathbb{E}_q\!\left[\ln\frac{q(\mathbf{H})}{p(\mathbf{H})}\right].
 $$
-Essa forma — esperança, não integral solta — é a que os passos abaixo
-reaproveitam diretamente.
+A esperança é tomada sob $q$, a primeira distribuição. É isso que faz a
+ordem importar.
 
-::: {.callout-note icon=false}
-## Teorema (não-negatividade da KL — desigualdade de Gibbs; PRML §1.6.1)
+**A KL não é simétrica.** O PRML (§1.6.1, p. 55, tradução livre) observa
+que ela *"não é uma quantidade simétrica"*: em geral,
+$\mathrm{KL}(q\|p)\ne\mathrm{KL}(p\|q)$. A figura mostra por que isso
+importa. A distribuição $p$ (preta) tem dois modos, como a posterior de
+um modelo de mistura costuma ter. Comparamos duas candidatas Gaussianas:
+uma sobre um único modo (azul) e uma larga, com a mesma média e
+variância de $p$ (laranja).
 
-Para quaisquer $p(\mathbf{H})$, $q(\mathbf{H})$,
-$\mathrm{KL}(q\|p)\ge0$, com igualdade se, e somente se,
-$q(\mathbf{H})=p(\mathbf{H})$.
-:::
+| candidata $q$ | $\mathrm{KL}(q\|p)$ | $\mathrm{KL}(p\|q)$ |
+|---|---|---|
+| um único modo | `{python} brl(kl_qp_moda)` | `{python} brl(kl_pq_moda)` |
+| larga | `{python} brl(kl_qp_larga)` | `{python} brl(kl_pq_larga)` |
 
-*Demonstração* (via Jensen). $-\ln(\cdot)$ é convexa, então para
-$X=p(\mathbf{H})/q(\mathbf{H})$ sob $q$,
-$-\ln\mathbb{E}_q[X]\le\mathbb{E}_q[-\ln X]$. Logo
-$$
-\mathrm{KL}(q\|p) = \mathbb{E}_q\!\left[-\ln\frac{p(\mathbf{H})}{q(\mathbf{H})}\right]
-\ge -\ln\mathbb{E}_q\!\left[\frac{p(\mathbf{H})}{q(\mathbf{H})}\right]
-= -\ln\int p(\mathbf{H})\,\mathrm{d}\mathbf{H} = -\ln1 = 0 .
-$$
-A igualdade em Jensen ocorre quando $p(\mathbf{H})/q(\mathbf{H})$ é
-constante sob $q$, o que, como ambas integram a $1$, força
-$p(\mathbf{H})=q(\mathbf{H})$. $\blacksquare$
-
-**A decomposição, já condicionada em $\mathcal{M}_m$.** Para qualquer
-$q(\mathbf{H})$ normalizada, defina
-$$
-\mathcal{L}_m(q) := \int q(\mathbf{H})\ln\left\{\frac{p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)}{q(\mathbf{H})}\right\}\mathrm{d}\mathbf{H} .
-$$
-
-**Passo 1 — regra do produto.**
-$p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)=p(\mathbf{H}\mid\mathbf{X},
-\mathcal{M}_m)\,p(\mathbf{X}\mid\mathcal{M}_m)$. Substituindo,
-$$
-\mathcal{L}_m(q) = \int q(\mathbf{H})\ln\left\{\frac{p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)\,p(\mathbf{X}\mid\mathcal{M}_m)}{q(\mathbf{H})}\right\}\mathrm{d}\mathbf{H} .
-$$
-
-**Passo 2 — separar o logaritmo em soma.**
-$$
-\ln\left\{\frac{p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)\,p(\mathbf{X}\mid\mathcal{M}_m)}{q(\mathbf{H})}\right\}
-= \ln p(\mathbf{X}\mid\mathcal{M}_m) - \ln\frac{q(\mathbf{H})}{p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)} .
-$$
-
-**Passo 3 — voltar à integral, separar em dois termos.**
-$$
-\mathcal{L}_m(q) = \int q(\mathbf{H})\ln p(\mathbf{X}\mid\mathcal{M}_m)\,\mathrm{d}\mathbf{H}
-\;-\; \int q(\mathbf{H})\ln\frac{q(\mathbf{H})}{p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)}\,\mathrm{d}\mathbf{H} .
-$$
-
-**Passo 4 — simplificar o primeiro termo.** $\ln
-p(\mathbf{X}\mid\mathcal{M}_m)$ não depende de $\mathbf{H}$, e $\int
-q(\mathbf{H})\,\mathrm{d}\mathbf{H}=1$:
-$$
-\int q(\mathbf{H})\ln p(\mathbf{X}\mid\mathcal{M}_m)\,\mathrm{d}\mathbf{H} = \ln p(\mathbf{X}\mid\mathcal{M}_m) .
-$$
-
-**Passo 5 — reconhecer o segundo termo como KL.** Pela mesma forma de
-esperança de antes,
-$$
-\int q(\mathbf{H})\ln\frac{q(\mathbf{H})}{p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)}\,\mathrm{d}\mathbf{H} = \mathrm{KL}\big(q(\mathbf{H})\,\|\,p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)\big) .
-$$
-
-Juntando os Passos 4 e 5, e rearranjando:
-
-::: {.callout-note icon=false}
-## Teorema (decomposição da evidência, por estrutura)
-
-Para qualquer $q(\mathbf{H})$ normalizada,
-$$
-\ln p(\mathbf{X}\mid\mathcal{M}_m) = \mathcal{L}_m(q) + \mathrm{KL}\big(q\,\|\,p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)\big) \;\Rightarrow\; \mathcal{L}_m(q)\le\ln p(\mathbf{X}\mid\mathcal{M}_m) .
-$$
-:::
-
-$\mathcal{L}_m(q)$ é o **ELBO** (*Evidence Lower Bound*) da estrutura
-$\mathcal{M}_m$: uma cota inferior **tratável** (basta escolher
-$q$ numa família conveniente — ver Bloco 2) para a evidência
-intratável. A igualdade ocorre exatamente quando $q(\mathbf{H})=
-p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)$, a posterior verdadeira —
-inatingível na prática, mas o alvo que a otimização de $q$ persegue.
-**Usamos $\mathcal{L}_m$ como *proxy* matemático para ranquear
-estruturas**: comparar $\mathcal{L}_1,\mathcal{L}_2,\dots$ no lugar de
-comparar $\ln p(\mathbf{X}\mid\mathcal{M}_1),\ln p(\mathbf{X}\mid
-\mathcal{M}_2),\dots$ diretamente — uma aproximação cuja qualidade
-depende de quão apertada é a cota, algo que o Bloco 4 questiona com
-cuidado.
+As duas direções escolhem candidatas **opostas**. Em
+$\mathrm{KL}(q\|p)$ a esperança é sob $q$: o que pesa é $q$ pôr massa
+onde $p$ é quase zero (o vale entre os modos), e a candidata larga é
+punida. Em $\mathrm{KL}(p\|q)$ a esperança é sob $p$: o que pesa é $q$
+**deixar de cobrir** massa de $p$, e a candidata de um modo é punida
+pelo modo que ignora. O PRML (§10.1.2, p. 468, tradução livre) resume:
+minimizar $\mathrm{KL}(q\|p)$ *"leva a distribuições $q$ que evitam
+regiões em que $p$ é pequena"*, enquanto $\mathrm{KL}(p\|q)$ *"é
+minimizada por distribuições $q$ que são não nulas nas regiões em que
+$p$ é não nula"*. O ELBO usará a primeira forma, $\mathrm{KL}(q\|\cdot)$.
+Guarde a consequência: aproximações variacionais tendem a se concentrar
+num modo e a subestimar a dispersão da posterior.
 
 :::
 
 ::: {.content-visible when-format="revealjs"}
 
-## KL: Definição e Não-Negatividade
+## Estrutura Também É Variável
 
 ::: {.fragment}
-**Definição:** $\mathrm{KL}(q\|p)=-\int q(\mathbf{H})\ln\{p(\mathbf{H})
-/q(\mathbf{H})\}\,\mathrm{d}\mathbf{H} = \mathbb{E}_q[\ln\{q(\mathbf{H})
-/p(\mathbf{H})\}]$ — não simétrica.
-:::
-
-::: {.callout-note .fragment icon=false}
-**Teorema (Gibbs):** $\mathrm{KL}(q\|p)\ge0$, igualdade sse $q=p$.
-:::
-
-::: {.fragment}
-*Prova.* $-\ln(\cdot)$ convexa $\Rightarrow$ Jensen:
-$-\ln\mathbb{E}_q[X]\le\mathbb{E}_q[-\ln X]$, com
-$X=p(\mathbf{H})/q(\mathbf{H})$:
-$\mathrm{KL}(q\|p)\ge-\ln\int p(\mathbf{H})\,\mathrm{d}\mathbf{H}=0$.
-:::
-
-## Decomposição da Evidência: Passo a Passo
-
-::: {.fragment}
-$\mathcal{L}_m(q):=\int q(\mathbf{H})\ln\{p(\mathbf{X},\mathbf{H}\mid
-\mathcal{M}_m)/q(\mathbf{H})\}\,\mathrm{d}\mathbf{H}$. **Passo 1:**
-regra do produto, $p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)=
-p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)\,p(\mathbf{X}\mid
-\mathcal{M}_m)$.
-:::
-
-::: {.fragment}
-**Passo 2:** separa o log em soma —
-$\ln\{\dots\} = \ln p(\mathbf{X}\mid\mathcal{M}_m) - \ln\{q(\mathbf{H})
-/p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)\}$.
-:::
-
-::: {.fragment}
-**Passo 3:** volta à integral, separa em dois termos:
+Cada estrutura candidata $\mathcal{M}_m$ ("GMM com $K=m$") é um evento, com priori $p(\mathcal{M}_m)$. Bayes, em log:
 $$
-\mathcal{L}_m(q) = \int q(\mathbf{H})\ln p(\mathbf{X}\mid\mathcal{M}_m)\,\mathrm{d}\mathbf{H} - \int q(\mathbf{H})\ln\frac{q(\mathbf{H})}{p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)}\,\mathrm{d}\mathbf{H}.
+\ln p(\mathcal{M}_m\mid\mathbf{X})
+= \underbrace{\ln p(\mathbf{X}\mid\mathcal{M}_m)}_{\text{evidência}}
++ \underbrace{\ln p(\mathcal{M}_m)}_{\text{priori}}
+- \underbrace{\ln p(\mathbf{X})}_{\text{normalizador}} .
 $$
 :::
 
 ::: {.fragment}
-**Passo 4:** $\ln p(\mathbf{X}\mid\mathcal{M}_m)$ não depende de
-$\mathbf{H}$, $\int q(\mathbf{H})\,\mathrm{d}\mathbf{H}=1$ $\Rightarrow$
-primeiro termo = $\ln p(\mathbf{X}\mid\mathcal{M}_m)$.
-:::
-
-::: {.fragment}
-**Passo 5:** segundo termo = $\mathrm{KL}(q\|p(\mathbf{H}\mid
-\mathbf{X},\mathcal{M}_m))$. Logo:
-:::
-
-::: {.callout-note .fragment icon=false}
-$$
-\ln p(\mathbf{X}\mid\mathcal{M}_m) = \mathcal{L}_m(q) + \mathrm{KL}\big(q\,\|\,p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)\big) \;\Rightarrow\; \mathcal{L}_m(q)\le\ln p(\mathbf{X}\mid\mathcal{M}_m) .
-$$
-:::
-
-## O ELBO Como *Proxy* de Ranqueamento
-
-::: {.fragment}
-$\mathcal{L}_m(q)$: cota inferior **tratável** para a evidência
-intratável. Igualdade sse $q=p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)$
-(posterior verdadeira, inatingível).
+- **Evidência:** depende de $m$; mede quão bem a estrutura explica os dados. É a parte difícil.
+- **Priori:** depende de $m$; escolha nossa. Uniforme $\Rightarrow$ mesmo valor para todo $m$: **continua lá**, mas não muda quem vence.
+- **Normalizador:** $p(\mathbf{X})=\sum_{m'}p(\mathbf{X}\mid\mathcal{M}_{m'})p(\mathcal{M}_{m'})$, não depende de $m$; desnecessário para **comparar**.
 :::
 
 ::: {.fragment .callout-important}
-Usamos $\mathcal{L}_m$ para **ranquear** estruturas, no lugar da
-evidência direta — aproximação cuja qualidade depende de quão apertada
-é a cota (Bloco 4 questiona isso com cuidado).
+Comparar estruturas $=$ comparar $\ln p(\mathbf{X}\mid\mathcal{M}_m)+\ln p(\mathcal{M}_m)$.
+:::
+
+## A Evidência Já Embute Occam
+
+::: {.fragment}
+$$
+p(\mathbf{X}\mid\mathcal{M}_m) = \int p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)\,\mathrm{d}\mathbf{H}
+$$
+(Bishop, PRML, §3.4): sem nenhuma penalidade adicionada à mão.
+:::
+
+::: {.fragment}
+Intuição: $p(\mathbf{X}\mid\mathbf{H},\mathcal{M}_m)$ integra a $1$
+sobre o espaço de todos os datasets possíveis. Modelo **complexo**:
+espaço de $\mathbf{H}$ maior, massa espalhada por mais datasets,
+inclusive muitos que não parecem dados reais.
+:::
+
+::: {.fragment .callout-important}
+Modelo **simples**: massa concentrada nos datasets que consegue gerar.
+Ao integrar, o complexo só vence se os dados **precisarem** da
+flexibilidade extra, mesmo que, para algum $\mathbf{H}$ pontual, ele
+ajuste tão bem ou melhor.
+:::
+
+## Por Que a Evidência Não Se Calcula
+
+::: {.fragment}
+GMM Bayesiano, $\mathbf{H}=(\mathbf{Z},\pi,\mu,\Sigma)$:
+$$
+p(\mathbf{X}\mid\mathcal{M}_m)=\sum_{\mathbf{Z}}\int\!\!\int\!\!\int p(\mathbf{X},\mathbf{Z},\pi,\mu,\Sigma\mid\mathcal{M}_m)\,\mathrm{d}\pi\,\mathrm{d}\mu\,\mathrm{d}\Sigma .
+$$
+- Soma sobre $\mathbf{Z}$: $K^N$ atribuições. Dataset-fio, $K=2$: $2^{`{python} N_2d`}\approx10^{`{python} f"{log10_KN:.0f}"`}$ termos.
+- No EM (Aula 4), $\theta$ fixo $\Rightarrow$ pontos independentes $\Rightarrow$ $N\times K$ responsabilidades. Integrar $\theta$ **acopla** os pontos.
+:::
+
+::: {.fragment .callout-important}
+**Estratégia:** construir $\mathcal{L}_m(q)$ **calculável**, com
+$\mathcal{L}_m(q)\le\ln p(\mathbf{X}\mid\mathcal{M}_m)$ para toda $q$ (o **ELBO**), e comparar
+$$
+\mathcal{L}_m(q)+\ln p(\mathcal{M}_m)\le\ln p(\mathcal{M}_m\mid\mathbf{X})+\ln p(\mathbf{X}).
+$$
+Ferramenta necessária: medir quão longe uma distribuição está de outra (KL).
+:::
+
+## Digressão: Divergência KL
+
+::: {.fragment .callout-note icon=false}
+**Definição:** $\mathrm{KL}(q\|p)=-\int q(\mathbf{H})\ln\{p(\mathbf{H})/q(\mathbf{H})\}\,\mathrm{d}\mathbf{H}=\mathbb{E}_q\big[\ln\{q(\mathbf{H})/p(\mathbf{H})\}\big]$, esperança **sob $q$**.
+:::
+
+::: {.fragment}
+**Não é simétrica** (PRML §1.6.1, p. 55). $p$ bimodal (preta), duas candidatas:
+
+| candidata $q$ | $\mathrm{KL}(q\|p)$ | $\mathrm{KL}(p\|q)$ |
+|---|---|---|
+| um único modo | `{python} brl(kl_qp_moda)` | `{python} brl(kl_pq_moda)` |
+| larga | `{python} brl(kl_qp_larga)` | `{python} brl(kl_pq_larga)` |
+:::
+
+::: {.fragment}
+- $\mathrm{KL}(q\|p)$ pune $q$ com massa onde $p\approx0$; $\mathrm{KL}(p\|q)$ pune $q$ que **não cobre** massa de $p$ (PRML §10.1.2, p. 468).
+- O ELBO usa $\mathrm{KL}(q\|\cdot)$: aproximações variacionais tendem a ficar num modo e **subestimar a dispersão**.
+:::
+
+:::
+
+::: {.fig-resize style="width: 60%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, ax = plt.subplots(figsize=(7, 3.4))
+ax.fill_between(z_kl, p_kl, color=COR_NEU, alpha=0.15)
+ax.plot(z_kl, p_kl, color="black", lw=2, label="$p$ (bimodal)")
+ax.plot(z_kl, q_moda, color=COR_A, lw=2,
+        label=f"$q$ num modo: KL(q‖p)={brl(kl_qp_moda)}, KL(p‖q)={brl(kl_pq_moda)}")
+ax.plot(z_kl, q_larga, color=COR_B, lw=2, ls="--",
+        label=f"$q$ larga: KL(q‖p)={brl(kl_qp_larga)}, KL(p‖q)={brl(kl_pq_larga)}")
+ax.set_xlim(-5, 5)
+ax.set_ylim(0, 0.75)
+ax.set_xlabel("$\\mathbf{H}$ (unidimensional, ilustrativo)")
+ax.set_ylabel("densidade")
+ax.set_title("A ordem dos argumentos da KL importa")
+ax.legend(fontsize=8, loc="upper left")
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+
+**A KL nunca é negativa.** É essa propriedade que transformará uma
+igualdade numa cota.
+
+::: {.callout-note icon=false}
+## Teorema (não negatividade da KL — desigualdade de Gibbs; PRML §1.6.1)
+
+Para quaisquer distribuições $p(\mathbf{H})$ e $q(\mathbf{H})$,
+$\mathrm{KL}(q\|p)\ge0$, com igualdade se, e somente se,
+$q(\mathbf{H})=p(\mathbf{H})$.
+:::
+
+*Demonstração* (via Jensen). A função $-\ln(\cdot)$ é convexa, então,
+para a variável aleatória $Y=p(\mathbf{H})/q(\mathbf{H})$ com
+$\mathbf{H}\sim q$, vale $-\ln\mathbb{E}_q[Y]\le\mathbb{E}_q[-\ln Y]$.
+Logo
+$$
+\mathrm{KL}(q\|p) = \mathbb{E}_q\!\left[-\ln\frac{p(\mathbf{H})}{q(\mathbf{H})}\right]
+\ge -\ln\mathbb{E}_q\!\left[\frac{p(\mathbf{H})}{q(\mathbf{H})}\right]
+= -\ln\int_{q>0} p(\mathbf{H})\,\mathrm{d}\mathbf{H} \;\ge\; -\ln1 = 0 .
+$$
+A última desigualdade usa $\int_{q>0}p\le\int p=1$ e o fato de
+$-\ln$ ser decrescente. A igualdade exige igualdade nas duas
+desigualdades: em Jensen, $p/q$ constante sob $q$; na segunda, $p$ sem
+massa fora do suporte de $q$. Como ambas integram a $1$, a constante é
+$1$ e $p=q$. $\blacksquare$
+
+## O ELBO: Uma Cota Inferior Calculável
+
+Agora construímos $\mathcal{L}_m(q)$. Em vez de defini-lo e verificar
+depois, partimos da quantidade que queremos, $\ln p(\mathbf{X}\mid
+\mathcal{M}_m)$, e o ELBO aparece sozinho. Seja $q(\mathbf{H})$
+**qualquer** distribuição normalizada, positiva onde a posterior é
+positiva.
+
+**Passo 1 — $q$ integra a $1$.** $\ln p(\mathbf{X}\mid\mathcal{M}_m)$
+não depende de $\mathbf{H}$, então
+$$
+\ln p(\mathbf{X}\mid\mathcal{M}_m) = \int q(\mathbf{H})\,\ln p(\mathbf{X}\mid\mathcal{M}_m)\,\mathrm{d}\mathbf{H} .
+$$
+
+**Passo 2 — regra do produto.**
+$p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)=p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)\,p(\mathbf{X}\mid\mathcal{M}_m)$,
+logo $p(\mathbf{X}\mid\mathcal{M}_m)=p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)/p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)$:
+$$
+\ln p(\mathbf{X}\mid\mathcal{M}_m) = \int q(\mathbf{H})\,\ln\frac{p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)}{p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)}\,\mathrm{d}\mathbf{H} .
+$$
+
+**Passo 3 — multiplicar e dividir por $q(\mathbf{H})$** dentro do
+logaritmo:
+$$
+\ln p(\mathbf{X}\mid\mathcal{M}_m) = \int q(\mathbf{H})\,\ln\left\{\frac{p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)}{q(\mathbf{H})}\cdot\frac{q(\mathbf{H})}{p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)}\right\}\mathrm{d}\mathbf{H} .
+$$
+
+**Passo 4 — log de produto é soma de logs**, e linearidade da integral:
+$$
+\ln p(\mathbf{X}\mid\mathcal{M}_m) = \int q(\mathbf{H})\ln\frac{p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)}{q(\mathbf{H})}\,\mathrm{d}\mathbf{H}
+\;+\; \int q(\mathbf{H})\ln\frac{q(\mathbf{H})}{p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)}\,\mathrm{d}\mathbf{H} .
+$$
+
+**Passo 5 — reconhecer a KL.** Pela forma de esperança da digressão, o
+segundo termo é $\mathrm{KL}\big(q(\mathbf{H})\,\|\,p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)\big)$.
+
+**Passo 6 — dar nome ao primeiro termo.** O primeiro termo é o ELBO:
+$$
+\mathcal{L}_m(q) := \int q(\mathbf{H})\ln\frac{p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)}{q(\mathbf{H})}\,\mathrm{d}\mathbf{H} .
+$$
+
+::: {.callout-note icon=false}
+## Teorema (decomposição da evidência; PRML §10.1, eqs. 10.2–10.4)
+
+Para qualquer $q(\mathbf{H})$ normalizada,
+$$
+\ln p(\mathbf{X}\mid\mathcal{M}_m) = \mathcal{L}_m(q) + \mathrm{KL}\big(q\,\|\,p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)\big) .
+$$
+**Corolário (a cota).** Pelo teorema de Gibbs,
+$\mathcal{L}_m(q)\le\ln p(\mathbf{X}\mid\mathcal{M}_m)$, com igualdade
+se, e somente se, $q(\mathbf{H})=p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)$.
+:::
+
+**Por que $\mathcal{L}_m(q)$ é calculável e a evidência não.** O ELBO só
+usa a **conjunta** $p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)=p(\mathbf{X}\mid\mathbf{H},\mathcal{M}_m)\,p(\mathbf{H}\mid\mathcal{M}_m)$,
+que é verossimilhança vezes priori dos parâmetros (as duas escritas na
+própria definição do modelo), e a $q$ que nós escolhemos. A integral
+difícil, sobre $p(\mathbf{X},\mathbf{H})$ sem nada que a simplifique,
+foi trocada por uma esperança sob $q$, e $q$ pode ser escolhida numa
+família em que essas esperanças têm forma fechada (Bloco 2).
+
+**A priori sobre estruturas, de volta.** Substituindo a decomposição no
+Bayes em log do início do bloco,
+$$
+\ln p(\mathcal{M}_m\mid\mathbf{X})
+= \mathcal{L}_m(q)+\mathrm{KL}\big(q\,\|\,p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)\big)+\ln p(\mathcal{M}_m)-\ln p(\mathbf{X})
+\;\ge\;\mathcal{L}_m(q)+\ln p(\mathcal{M}_m)-\ln p(\mathbf{X}) .
+$$
+O normalizador é comum a todos os $m$, e o critério de comparação é
+$\mathcal{L}_m(q)+\ln p(\mathcal{M}_m)$. Com priori uniforme,
+$\ln p(\mathcal{M}_m)=-\ln(\text{número de candidatos})$ é a mesma
+constante para todos, e o ranking é decidido por $\mathcal{L}_m$. Com
+uma priori que prefira estruturas simples, por exemplo
+$p(\mathcal{M}_m)\propto e^{-m}$, cada componente a mais custa uma
+unidade no critério, e uma estrutura com $\mathcal{L}_m$ um pouco maior
+pode perder. O PRML (§10.1.4, eq. 10.36, pp. 473–474) vai um passo além
+e obtém uma **posterior aproximada sobre as estruturas**,
+$$
+q(\mathcal{M}_m)\;\propto\;p(\mathcal{M}_m)\,\exp\{\mathcal{L}_m\},
+$$
+normalizada sobre os candidatos. A priori entra multiplicando, e o ELBO
+faz o papel da log-evidência.
+
+**O que significa "otimizar o ELBO".** $\mathcal{L}_m(q)$ depende de
+$q$; $\ln p(\mathbf{X}\mid\mathcal{M}_m)$ não. Pela decomposição, todo
+aumento de $\mathcal{L}_m$ é uma redução da KL até a posterior, na mesma
+quantidade. O PRML (§10.1, p. 463, tradução livre): *"podemos maximizar
+a cota inferior $\mathcal{L}(q)$ otimizando em relação à distribuição
+$q(\mathbf{Z})$, o que é equivalente a minimizar a divergência KL"*.
+Uma única otimização entrega duas coisas:
+
+1. **$q^\star$, uma aproximação da posterior**
+   $p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)$: é o uso para inferência
+   (o GMM Bayesiano do Bloco 2, o VAE da Aula 7);
+2. **$\max_q\mathcal{L}_m(q)$, a melhor cota disponível** para a
+   log-evidência: é o uso para comparar estruturas (este bloco e o
+   Bloco 3).
+
+**Duas KLs, dois papéis.** Abrindo a conjunta com a regra do produto,
+$p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)=p(\mathbf{X}\mid\mathbf{H},\mathcal{M}_m)\,p(\mathbf{H}\mid\mathcal{M}_m)$,
+e separando o log em soma dentro de $\mathcal{L}_m$,
+$$
+\mathcal{L}_m(q)=\mathbb{E}_q\big[\ln p(\mathbf{X}\mid\mathbf{H},\mathcal{M}_m)\big]-\mathrm{KL}\big(q\,\|\,p(\mathbf{H}\mid\mathcal{M}_m)\big).
+$$
+Aparece uma segunda KL, agora até a **priori** dos parâmetros. Ela é
+calculável e é um **termo do objetivo**: penaliza $q$ por se afastar do
+que se acreditava antes dos dados. A KL até a **posterior**, do teorema,
+não é calculável e é a **folga** da cota. O Bloco 3 especializa a
+primeira forma ao GMM.
+
+**Uma ressalva.** Usar $\mathcal{L}_m$ no lugar de $\ln p(\mathbf{X}\mid
+\mathcal{M}_m)$ é ranquear **cotas inferiores**. Se a folga for
+diferente entre as estruturas, o ranking pelo ELBO pode não coincidir
+com o ranking pela evidência. O Bloco 4 volta a esse ponto.
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## KL ≥ 0 (Gibbs)
+
+::: {.callout-note .fragment icon=false}
+**Teorema (Gibbs; PRML §1.6.1):** $\mathrm{KL}(q\|p)\ge0$, igualdade sse $q=p$.
+:::
+
+::: {.fragment}
+*Prova.* $-\ln$ convexa $\Rightarrow$ Jensen com $Y=p/q$, $\mathbf{H}\sim q$:
+$$
+\mathrm{KL}(q\|p)=\mathbb{E}_q[-\ln Y]\ge-\ln\mathbb{E}_q[Y]=-\ln\int_{q>0}p(\mathbf{H})\,\mathrm{d}\mathbf{H}\ge-\ln1=0 .
+$$
+Igualdade: $p/q$ constante e $p$ sem massa fora do suporte de $q$ $\Rightarrow$ $p=q$. $\blacksquare$
+:::
+
+::: {.fragment .callout-important}
+É esta propriedade que vai transformar uma **igualdade** numa **cota**.
+:::
+
+## Derivando o ELBO
+
+::: {.fragment}
+**Passo 1 — $q$ integra a 1:** $\ln p(\mathbf{X}\mid\mathcal{M}_m)=\int q(\mathbf{H})\ln p(\mathbf{X}\mid\mathcal{M}_m)\,\mathrm{d}\mathbf{H}$.
+:::
+
+::: {.fragment}
+**Passo 2 — regra do produto:**
+$$
+\ln p(\mathbf{X}\mid\mathcal{M}_m)=\int q(\mathbf{H})\ln\frac{p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)}{p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)}\,\mathrm{d}\mathbf{H}.
+$$
+:::
+
+::: {.fragment}
+**Passo 3 — multiplicar e dividir por $q$:**
+$$
+\ln p(\mathbf{X}\mid\mathcal{M}_m)=\int q(\mathbf{H})\ln\left\{\frac{p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)}{q(\mathbf{H})}\cdot\frac{q(\mathbf{H})}{p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)}\right\}\mathrm{d}\mathbf{H}.
+$$
+:::
+
+::: {.fragment}
+**Passo 4 — log de produto = soma de logs:**
+$$
+\ln p(\mathbf{X}\mid\mathcal{M}_m)=\underbrace{\int q\ln\frac{p(\mathbf{X},\mathbf{H}\mid\mathcal{M}_m)}{q}\,\mathrm{d}\mathbf{H}}_{\text{Passo 6: }\mathcal{L}_m(q)\text{, o ELBO}}+\underbrace{\int q\ln\frac{q}{p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m)}\,\mathrm{d}\mathbf{H}}_{\text{Passo 5: }\mathrm{KL}(q\|p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m))}
+$$
+:::
+
+::: {.callout-note .fragment icon=false}
+**Teorema (PRML §10.1):** $\ln p(\mathbf{X}\mid\mathcal{M}_m)=\mathcal{L}_m(q)+\mathrm{KL}(q\|p(\mathbf{H}\mid\mathbf{X},\mathcal{M}_m))$.
+**Corolário (Gibbs):** $\mathcal{L}_m(q)\le\ln p(\mathbf{X}\mid\mathcal{M}_m)$, igualdade sse $q=$ posterior.
+:::
+
+## A Cota e a Priori de Volta
+
+::: {.fragment}
+- $\mathcal{L}_m$ só usa a **conjunta** $p(\mathbf{X}\mid\mathbf{H},\mathcal{M}_m)\,p(\mathbf{H}\mid\mathcal{M}_m)$ (definição do modelo) e a $q$ escolhida: **calculável**.
+:::
+
+::: {.fragment}
+Substituindo no Bayes em log:
+$$
+\ln p(\mathcal{M}_m\mid\mathbf{X})=\mathcal{L}_m(q)+\mathrm{KL}(\cdot)+\ln p(\mathcal{M}_m)-\ln p(\mathbf{X})\;\ge\;\mathcal{L}_m(q)+\ln p(\mathcal{M}_m)-\ln p(\mathbf{X}).
+$$
+- Critério: $\mathcal{L}_m(q)+\ln p(\mathcal{M}_m)$. Uniforme: constante comum, decide $\mathcal{L}_m$. Priori $\propto e^{-m}$: cada componente a mais custa $1$.
+:::
+
+::: {.fragment .callout-note}
+PRML §10.1.4, eq. 10.36: posterior aproximada sobre estruturas,
+$q(\mathcal{M}_m)\propto p(\mathcal{M}_m)\exp\{\mathcal{L}_m\}$. A priori entra multiplicando; o ELBO faz o papel da log-evidência.
+:::
+
+## Otimizar em $q$: Dois Produtos, Duas KLs
+
+::: {.fragment}
+$\ln p(\mathbf{X}\mid\mathcal{M}_m)$ não depende de $q$ $\Rightarrow$ $\max_q\mathcal{L}_m\iff\min_q\mathrm{KL}(q\|\text{posterior})$ (PRML §10.1, p. 463).
+
+1. $q^\star\approx$ posterior: **inferência** (Bloco 2, VAE da Aula 7).
+2. $\max_q\mathcal{L}_m\approx$ log-evidência: **comparação** de estruturas.
+:::
+
+::: {.fragment}
+Abrindo a conjunta, $p(\mathbf{X},\mathbf{H})=p(\mathbf{X}\mid\mathbf{H})\,p(\mathbf{H})$:
+$$
+\mathcal{L}_m(q)=\mathbb{E}_q\big[\ln p(\mathbf{X}\mid\mathbf{H},\mathcal{M}_m)\big]-\mathrm{KL}\big(q\,\|\,p(\mathbf{H}\mid\mathcal{M}_m)\big).
+$$
+- KL até a **priori**: calculável, **termo do objetivo** (Bloco 3).
+- KL até a **posterior**: incalculável, **folga** da cota.
+:::
+
+::: {.fragment .callout-important}
+Ranquear por $\mathcal{L}_m$ é ranquear **cotas inferiores**: folgas diferentes entre estruturas podem trocar o ranking (Bloco 4).
 :::
 
 :::
@@ -876,10 +1109,9 @@ problema matemático (calculabilidade) ou um problema conceitual
 - □ O ELBO não adiciona nenhuma penalidade de complexidade que a
   evidência já não tivesse — sua função é tornar uma quantidade
   intratável em algo calculável, aproximando-a por baixo.
-- □ Se, por algum motivo, a evidência de um modelo específico fosse
-  calculável em forma fechada (sem precisar de $q$ nenhum), o ELBO
-  ainda assim seria estritamente necessário para obter a penalidade de
-  Occam.
+- □ Com priori uniforme sobre as estruturas candidatas, a priori deixa
+  de fazer parte da posterior aproximada $q(\mathcal{M}_m)\propto
+  p(\mathcal{M}_m)\exp\{\mathcal{L}_m\}$.
 - □ Quanto mais apertada a cota $\mathrm{KL}(q\|p(\mathbf{H}\mid
   \mathbf{X},\mathcal{M}_m))$ (ou seja, quanto mais $q$ se aproxima da
   posterior verdadeira), mais o ranqueamento por $\mathcal{L}_m$ se
@@ -900,9 +1132,10 @@ problema matemático (calculabilidade) ou um problema conceitual
 - ✔ O ELBO resolve **calculabilidade**, não a ausência de penalidade —
   essa penalidade (a Navalha de Occam) já está na integral da
   evidência, antes de qualquer aproximação.
-- ✗ Falso — se a evidência já fosse calculável exatamente, não haveria
-  motivo nenhum para aproximá-la; a Navalha de Occam já estaria
-  presente nela, sem precisar de $q$.
+- ✗ Falso — ela continua na expressão, como o mesmo fator
+  $p(\mathcal{M}_m)$ para todos os candidatos; por isso some ao
+  normalizar e não altera o ranking, mas não "deixa de fazer parte".
+  Com outra priori, o mesmo fator mudaria o resultado.
 - ✔ Sim — é exatamente a relação da decomposição: $\mathrm{KL}$ pequena
   $\Rightarrow$ $\mathcal{L}_m$ próximo de $\ln p(\mathbf{X}\mid
   \mathcal{M}_m)$.
@@ -1178,7 +1411,8 @@ $$
 p(\mathbf{X},\mathbf{Z},\pi,\mu,\Sigma\mid\mathcal{M}_m) = p(\mathbf{X}\mid\mathbf{Z},\mu,\Sigma,\mathcal{M}_m)\,p(\mathbf{Z},\pi,\mu,\Sigma\mid\mathcal{M}_m) .
 $$
 Substituindo essa igualdade dentro de $\mathcal{L}_m(q)$, separando o
-log em soma e voltando à integral (mesmos Passos 2-3 do Bloco 1), o
+log em soma e separando a integral em dois termos (a mesma manobra
+dos Passos 3–4 do Bloco 1), o
 primeiro termo fica
 $$
 \iiiint q(\mathbf{Z})q(\pi)q(\mu,\Sigma)\ln p(\mathbf{X}\mid\mathbf{Z},\mu,\Sigma,\mathcal{M}_m)\,\mathrm{d}\mathbf{Z}\,\mathrm{d}\pi\,\mathrm{d}\mu\,\mathrm{d}\Sigma .
@@ -1188,10 +1422,13 @@ q(\pi)\,\mathrm{d}\pi=1$ elimina essa variável, sobrando
 $\mathbb{E}_{q(\mathbf{Z})q(\mu,\Sigma)}[\ln p(\mathbf{X}\mid
 \mathbf{Z},\mu,\Sigma,\mathcal{M}_m)]$ — uma esperança só sobre
 $(\mathbf{Z},\mu,\Sigma)$, sem precisar de esperança sobre $\pi$
-também. O segundo termo, pela mesma definição de esperança de KL usada
-desde o Bloco 1, é $\mathrm{KL}(q(\mathbf{Z},\pi,\mu,\Sigma)\,\|\,
-p(\mathbf{Z},\pi,\mu,\Sigma\mid\mathbf{X},\mathcal{M}_m))$ — a KL
-**inteira**, sobre todo $\mathbf{H}$, não uma parte dela. Juntando:
+também. O segundo termo é $\int q\ln\{p(\mathbf{Z},\pi,\mu,\Sigma\mid
+\mathcal{M}_m)/q\}$, que, pela definição de KL do Bloco 1, vale
+$-\mathrm{KL}(q(\mathbf{Z},\pi,\mu,\Sigma)\,\|\,p(\mathbf{Z},\pi,\mu,
+\Sigma\mid\mathcal{M}_m))$: a KL até a **priori** de todo
+$\mathbf{H}$, não até a posterior. É a primeira das "duas KLs" do
+Bloco 1, a que é termo do objetivo; a KL até a posterior continua sendo
+a folga, fora de $\mathcal{L}_m$. Juntando:
 
 ::: {.callout-note icon=false}
 ## A decomposição do ELBO variacional completo
@@ -1199,7 +1436,7 @@ p(\mathbf{Z},\pi,\mu,\Sigma\mid\mathbf{X},\mathcal{M}_m))$ — a KL
 $$
 \mathcal{L}_m(q) = \underbrace{\mathbb{E}_{q(\mathbf{Z})q(\mu,\Sigma)}\big[\ln p(\mathbf{X}\mid\mathbf{Z},\mu,\Sigma,\mathcal{M}_m)\big]}_{\text{Termo de Ajuste}}
 \;-\;
-\underbrace{\mathrm{KL}\big(q(\mathbf{Z},\pi,\mu,\Sigma)\,\|\,p(\mathbf{Z},\pi,\mu,\Sigma\mid\mathbf{X},\mathcal{M}_m)\big)}_{\text{Navalha de Occam (custo estrutural)}}
+\underbrace{\mathrm{KL}\big(q(\mathbf{Z},\pi,\mu,\Sigma)\,\|\,p(\mathbf{Z},\pi,\mu,\Sigma\mid\mathcal{M}_m)\big)}_{\text{Navalha de Occam (custo estrutural)}}
 $$
 :::
 
@@ -1243,7 +1480,7 @@ $$
 :::
 
 ::: {.fragment}
-Mesmos Passos 2-3 do Bloco 1 (log em soma, integral em dois termos);
+Mesma manobra dos Passos 3–4 do Bloco 1 (log em soma, integral em dois termos);
 primeiro termo não depende de $\pi$ $\Rightarrow\int q(\pi)\,
 \mathrm{d}\pi=1$ elimina $\pi$, sobrando esperança só sobre
 $(\mathbf{Z},\mu,\Sigma)$.
@@ -1253,7 +1490,7 @@ $(\mathbf{Z},\mu,\Sigma)$.
 $$
 \mathcal{L}_m(q) = \underbrace{\mathbb{E}_{q(\mathbf{Z})q(\mu,\Sigma)}\big[\ln p(\mathbf{X}\mid\mathbf{Z},\mu,\Sigma,\mathcal{M}_m)\big]}_{\text{Ajuste}}
 \;-\;
-\underbrace{\mathrm{KL}\big(q(\mathbf{Z},\pi,\mu,\Sigma)\,\|\,p(\cdot\mid\mathbf{X},\mathcal{M}_m)\big)}_{\text{Navalha de Occam}}
+\underbrace{\mathrm{KL}\big(q(\mathbf{Z},\pi,\mu,\Sigma)\,\|\,p(\mathbf{Z},\pi,\mu,\Sigma\mid\mathcal{M}_m)\big)}_{\text{Navalha de Occam: KL até a priori}}
 $$
 :::
 

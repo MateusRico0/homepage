@@ -1,0 +1,113 @@
+---
+title: "Exercícios — Aula 9: Redes Bayesianas e Modelos Gráficos Probabilísticos (PGMs) para Mineração de Itens Frequentes"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "today"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+## Contexto e Notação
+
+Nesta lista, consideramos dados transacionais e variáveis categóricas binárias no contexto de mineração não supervisionada e modelos gráficos probabilísticos direcionados (Redes Bayesianas):
+
+- $\mathcal{D} = \{\mathbf{x}_1, \dots, \mathbf{x}_N\}$ é a base com $N$ transações observadas, onde cada transação é um vetor binário $\mathbf{x} = (x_1, \dots, x_D) \in \{0, 1\}^D$;
+- Um itemset $I \subseteq \{1, \dots, D\}$ representa a co-ocorrência dos itens associados: $\bigwedge_{j \in I} (x_j = 1)$;
+- O **Suporte** de um itemset $I$ é a probabilidade empírica conjunta $s(I) = P\left(\bigwedge_{j \in I} x_j = 1\right) = \frac{1}{N}\sum_{i=1}^N \prod_{j \in I} x_{ij}$;
+- Para uma regra de associação $A \Rightarrow B$ (com $A \cap B = \emptyset$):
+  - Suporte: $s(A \Rightarrow B) = s(A \cup B) = P(A \cap B)$;
+  - Confiança: $c(A \Rightarrow B) = \frac{s(A \cup B)}{s(A)} = P(B \mid A)$;
+  - *Lift*: $\text{Lift}(A \Rightarrow B) = \frac{P(A \cap B)}{P(A)P(B)} = \frac{P(B \mid A)}{P(B)}$;
+- Um Grafo Acíclico Direcionado (DAG) $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ modela a distribuição conjunta através de seus pais:
+  $$p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid \text{pa}_k)$$
+- A declaração $A \perp\!\!\!\perp B \mid C$ indica que os nós (ou conjuntos de nós) $A$ e $B$ são condicionalmente independentes dado o conjunto $C$;
+- Um caminho em um DAG está **bloqueado** por um conjunto de nós condicionados $C$ se:
+  1. Contém um nó em cadeia ($i \to m \to j$) ou bifurcação ($i \leftarrow m \to j$) tal que $m \in C$; ou
+  2. Contém um nó colisor ($i \to m \leftarrow j$) tal que nem $m$ nem qualquer descendente de $m$ pertence a $C$.
+:::
+
+## Questões Discursivas
+
+1. **A Antimonotonicidade do Suporte e a Poda do Apriori:**
+   Considere um catálogo comercial com $D$ itens binários distintos.
+   (a) Mostre matematicamente que para quaisquer dois itemsets $A$ e $B$ tais que $A \subseteq B$, o suporte satisfaz necessariamente $s(B) \le s(A)$.
+   (b) Explique como essa propriedade permite ao algoritmo Apriori podar o espaço combinatorial de busca de $2^D - 1$ possíveis itemsets, ilustrando por que o conhecimento de que um conjunto $\{X_1, X_2\}$ é infrequente elimina a necessidade de avaliar $\{X_1, X_2, X_3\}$ em um banco de $10^7$ transações.
+
+2. **A Falácia da Simetria do Lift e a Descoberta de Estrutura:**
+   (a) Demonstre analiticamente que $\text{Lift}(A \Rightarrow B) = \text{Lift}(B \Rightarrow A)$ para quaisquer eventos probabilísticos $A$ e $B$ com probabilidade não nula.
+   (b) Suponha que $A$ seja a causa direta e unidirecional de $B$ ($A \to B$), de modo que $P(B \mid A) = 0{,}90$ enquanto $P(B \mid \neg A) = 0{,}05$, com $P(A) = 0{,}01$. Calcule o valor exato de $\text{Lift}(A \Rightarrow B)$ e discuta por que essa métrica falha completamente em indicar que a causalidade flui de $A$ para $B$ e não de $B$ para $A$.
+
+3. **Paradoxo de Simpson e a Causa Comum (Tail-to-tail):**
+   Considere três variáveis binárias: $A$ (compra de café gourmet), $B$ (compra de torradeira de alta potência) e $C$ (cliente de alta renda, com $C=1$ para renda alta e $C=0$ para renda baixa).
+   Suponha as probabilidades condicionais:
+   - $P(C=1) = 0{,}20$;
+   - Condicionado a $C=1$: $P(A=1 \mid C=1) = 0{,}80$ e $P(B=1 \mid C=1) = 0{,}70$, sendo $A$ e $B$ independentes dado $C=1$;
+   - Condicionado a $C=0$: $P(A=1 \mid C=0) = 0{,}10$ e $P(B=1 \mid C=0) = 0{,}05$, sendo $A$ e $B$ independentes dado $C=0$.
+   (a) Calcule as probabilidades marginais $P(A=1)$, $P(B=1)$ e a probabilidade conjunta marginal $P(A=1, B=1)$.
+   (b) Calcule o $\text{Lift}(A \Rightarrow B)$ na população agregada e mostre que ele é estritamente maior que $1$.
+   (c) Compare o resultado com a estrutura gráfica $A \leftarrow C \to B$ e interprete a discrepância entre a correlação marginal observada e a independência condicional real.
+
+4. **Derivação Analítica do Fenômeno de Explaining Away no Colisor:**
+   Considere um colisor com duas causas binárias independentes e um efeito comum: $A \to C \leftarrow B$.
+   Sejam as probabilidades marginais $P(A=1) = 0{,}20$ e $P(B=1) = 0{,}30$, com $A \perp\!\!\!\perp B$.
+   A variável $C$ atua como uma porta "OU ruidosa" (*noisy OR*):
+   - $P(C=1 \mid A=0, B=0) = 0{,}0$;
+   - $P(C=1 \mid A=1, B=0) = 0{,}90$;
+   - $P(C=1 \mid A=0, B=1) = 0{,}90$;
+   - $P(C=1 \mid A=1, B=1) = 0{,}99$.
+   (a) Mostre que $P(A=1 \mid B=1) = P(A=1)$ (independência marginal).
+   (b) Dado que o efeito comum ocorreu ($C=1$), calcule a probabilidade a posteriori $P(A=1 \mid C=1)$.
+   (c) Calcule agora a probabilidade a posteriori $P(A=1 \mid C=1, B=1)$ sabendo adicionalmente que a outra causa $B$ ocorreu. Mostre analiticamente que $P(A=1 \mid C=1, B=1) < P(A=1 \mid C=1)$, demonstrando o fenômeno de *explaining away*.
+
+---
+
+## Testes Conceituais (Verdadeiro ou Falso)
+
+Julgue os itens a seguir como Verdadeiro (**V**) ou Falso (**F**).
+
+### Teste 1: Mineração de Regras e Propriedades de Suporte
+- □ (a) Se o conjunto de itens $\{A, B, C\}$ é frequente com suporte $s \ge s_{\min}$, então todo e qualquer subconjunto de itens formado a partir de $\{A, B, C\}$ é obrigatoriamente frequente.
+- □ (b) A confiança de uma regra de associação $A \Rightarrow B$ é sempre idêntica à confiança da regra inversa $B \Rightarrow A$.
+- □ (c) Um catálogo com 20 itens distintos gera exatamente $10^6$ possíveis conjuntos de itens candidatos para avaliação de suporte.
+- □ (d) Em uma base transacional onde o item $B$ está presente em 95% de todas as transações, qualquer regra $A \Rightarrow B$ terá confiança de pelo menos 95% mesmo se $A$ for estatisticamente independente de $B$.
+
+### Teste 2: Métricas de Associação e Falácias do Lift
+- □ (a) A métrica *Lift* mede a razão entre a probabilidade observada de co-ocorrência de dois conjuntos de itens e a probabilidade esperada sob hipótese de independência estatística.
+- □ (b) Se $\text{Lift}(A \Rightarrow B) > 1$, isso constitui prova matemática de que a ocorrência de $A$ aumenta a probabilidade causal de ocorrência de $B$.
+- □ (c) A propriedade $\text{Lift}(A \Rightarrow B) = \text{Lift}(B \Rightarrow A)$ decorre diretamente da comutatividade da interseção de eventos na probabilidade conjunta.
+- □ (d) Um valor de $\text{Lift}(A \Rightarrow B) < 1$ indica que a ocorrência conjunta dos itens é menos frequente do que o esperado pelo produto de suas frequências individuais (associação negativa/substituição).
+
+### Teste 3: Grafos Acíclicos Direcionados e Fatoração Conjunta
+- □ (a) Em uma Rede Bayesiana com $K$ variáveis, a fatoração $p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid \text{pa}_k)$ é válida se e somente se o grafo não contém ciclos direcionados.
+- □ (b) Para um conjunto de 15 variáveis binárias, a representação tabular irrestrita da distribuição conjunta exige $32.767$ parâmetros independentes, enquanto uma árvore direcionada (onde cada nó tem no máximo 1 pai) exige no máximo 29 parâmetros.
+- □ (c) Se um grafo acíclico direcionado for completamente conectado (possuir uma aresta direcionada entre todo par de nós), ele não impõe nenhuma restrição de independência condicional sobre a distribuição conjunta.
+- □ (d) A ausência de uma aresta entre os nós $X$ e $Y$ em um DAG implica que $X$ e $Y$ são marginalmente independentes na distribuição conjunta.
+
+### Teste 4: As Três Geometrias Canônicas de 3 Nós
+- □ (a) Na cadeia direcionada $A \to B \to C$, a variável $A$ é marginalmente dependente de $C$, mas torna-se condicionalmente independente de $C$ ao condicionarmos na variável intermediária $B$.
+- □ (b) Na bifurcação (causa comum) $A \leftarrow B \to C$, as variáveis $A$ e $C$ são marginalmente independentes, tornando-se dependentes ao condicionarmos na causa $B$.
+- □ (c) No colisor (efeito comum) $A \to C \leftarrow B$, as variáveis $A$ e $B$ são marginalmente independentes, mas tornam-se dependentes ao condicionarmos em $C$.
+- □ (d) Em uma cadeia $A \to B \to C$, condicionar em $A$ bloqueia o fluxo de dependência probabilística entre $B$ e $C$.
+
+### Teste 5: O Critério de d-Separação
+- □ (a) Em um grafo direcionado, um caminho entre nós $A$ e $B$ é bloqueado por um conjunto $C$ se o caminho contiver um colisor cujo nó central não pertença a $C$ e nenhum de seus descendentes pertença a $C$.
+- □ (b) Se dois conjuntos de nós $A$ e $B$ são $d$-separados por $C$ no grafo $\mathcal{G}$, então toda distribuição de probabilidade que fatora segundo $\mathcal{G}$ satisfaz $A \perp\!\!\!\perp B \mid C$.
+- □ (c) A presença de múltiplos caminhos distintos conectando $A$ e $B$ exige que apenas um desses caminhos esteja bloqueado por $C$ para garantir que $A \perp\!\!\!\perp B \mid C$.
+- □ (d) Se $C$ é descendente de um nó colisor $M$ no caminho entre $A$ e $B$, condicionar em $C$ abre o caminho e permite o fluxo de informação entre $A$ e $B$.
+
+### Teste 6: Cobertura de Markov e Equivalência Observacional
+- □ (a) A Cobertura de Markov de um nó $X$ em uma Rede Bayesiana é composta exclusivamente por seus nós pais e seus nós filhos.
+- □ (b) Condicionada em sua Cobertura de Markov, uma variável $X$ é condicionalmente independente de todas as demais variáveis presentes no grafo.
+- □ (c) Os grafos $A \to B \to C$, $A \leftarrow B \leftarrow C$ e $A \leftarrow B \to C$ pertencem à mesma classe de equivalência de Markov (I-equivalência), sendo indistinguíveis por testes de independência condicional sobre dados observacionais passivos.
+- □ (d) O grafo de colisor $A \to B \leftarrow C$ pertence à mesma classe de equivalência de Markov que o grafo $A \to B \to C$.
+

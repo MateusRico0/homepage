@@ -31,10 +31,24 @@ depois volta à prática (validação empírica, PPC).
 1. **Revisão e Introdução** (~12 min) — EM clássico não penaliza
    complexidade; log-verossimilhança de treino nunca cai em $K$;
    pergunta central de seleção de modelos.
-2. **Bloco 1 — Seleção Bayesiana de Modelos** (~20 min) — $p(\mathcal
-   M_m\mid\mathbf X)\propto p(\mathcal M_m)p(\mathbf X\mid\mathcal
-   M_m)$; a evidência como integral intratável que já embute Occam;
-   KL, decomposição geral, ELBO como *proxy* tratável.
+2. **Bloco 1 — Seleção Bayesiana de Modelos** (~20 min). Reformado em
+   2026-10-07, para não atropelar o ELBO:
+   - *Abertura:* Bayes sobre estruturas em log, com os três termos
+     visíveis (evidência, priori, normalizador); a priori nunca some
+     (uniforme = constante comum). A evidência embute Occam. A
+     intratabilidade fica concreta: $K^N$ termos, $2^{569}\approx10^{171}$,
+     com $\theta$ integrado acoplando os pontos. Callout de estratégia:
+     construir $\mathcal L_m(q)\le\ln p(\mathbf X\mid\mathcal M_m)$ e
+     comparar $\mathcal L_m(q)+\ln p(\mathcal M_m)$.
+   - *Digressão: KL.* Definição, forma de esperança, não simetria com
+     figura (p bimodal, q num modo vs. q larga; PRML Fig. 10.3) e Gibbs
+     com prova.
+   - *O ELBO.* $\mathcal L_m$ **derivado** a partir de
+     $\ln p(\mathbf X\mid\mathcal M_m)$ (seis passos), teorema e
+     corolário, por que é calculável, a priori de volta
+     ($q(\mathcal M_m)\propto p(\mathcal M_m)e^{\mathcal L_m}$, PRML
+     10.36), otimizar em $q$ (dois produtos), as duas KLs (priori =
+     termo do objetivo; posterior = folga) e a ressalva do *proxy*.
 3. **Bloco 2 — GMM Bayesiano: a Mecânica das Prioris** (~20 min) —
    $\mathbf H=(\mathbf Z,\pi,\mu,\Sigma)$ inteiro dentro do tratamento
    variacional; Normal-Wishart barra o colapso de $\Sigma_k$; Dirichlet
@@ -56,6 +70,32 @@ depois volta à prática (validação empírica, PPC).
    Aula 6 (o ELBO reaparece na PPCA/VAE).
 
 ## Fontes usadas — Aula 5
+
+### Trechos literais do PRML (`_fontes/prml.pdf`), usados no Bloco 1 reformado
+
+- **§1.6.1, p. 55** (não simetria da KL): "Note that it is not a
+  symmetrical quantity, that is to say KL(p‖q) ≢ KL(q‖p)."
+- **§10.1, p. 463** (decomposição e otimização em $q$): "As before, we
+  can maximize the lower bound L(q) by optimization with respect to the
+  distribution q(Z), which is equivalent to minimizing the KL
+  divergence. If we allow any possible choice for q(Z), then the maximum
+  of the lower bound occurs when the KL divergence vanishes, which
+  occurs when q(Z) equals the posterior distribution p(Z|X)."
+- **§10.1.2, p. 468** (assimetria, Fig. 10.3): "Thus minimizing this
+  form of KL divergence leads to distributions q(Z) that avoid regions
+  in which p(Z) is small. Conversely, the Kullback-Leibler divergence
+  KL(p‖q) is minimized by distributions q(Z) that are nonzero in regions
+  where p(Z) is nonzero."
+- **§10.1.4, pp. 473–474** (priori sobre modelos): "we may also wish to
+  compare a set of candidate models, labelled by the index m, and having
+  prior probabilities p(m). Our goal is then to approximate the
+  posterior probabilities p(m|X)" […] "We can maximize Lm with respect
+  to the distribution q(m) using a Lagrange multiplier, with the result
+  q(m) ∝ p(m) exp{Lm}. (10.36)"
+
+Nota: o parágrafo abaixo, que diz não haver PDF disponível, foi escrito
+antes de o `prml.pdf` estar em `_fontes/`; as citações do Bloco 1 agora
+são literais.
 
 Disciplina sem `_fontes/` PDF específico para este conteúdo (não há um
 capítulo único do PRML fisicamente disponível localmente cobrindo

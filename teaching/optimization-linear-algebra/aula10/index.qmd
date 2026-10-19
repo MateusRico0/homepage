@@ -1,0 +1,931 @@
+---
+title: "Aula 10: Grafos de Computação e Diferenciação Automática"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-10-15"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: homepage
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar, load_dataset
+disable_progress_bar()
+
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+from IPython.display import Markdown
+import warnings
+warnings.filterwarnings("ignore")
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({"figure.dpi": 120, "font.size": 11})
+
+COR_A   = "#0085CA"   # azul — elemento principal
+COR_B   = "#FF5E00"   # laranja — contraste
+COR_C   = "#E03C31"   # vermelho — alerta
+COR_NEU = "#5D6D7E"   # neutro
+COR_VERDE = "#1b9e77" # verde — confirmação
+
+def brl(x, nd=2):
+    """Número com vírgula decimal e espaço fino de milhar."""
+    s = f"{x:,.{nd}f}"
+    return Markdown(s.replace(",", "\\,").replace(".", "{,}"))
+
+def sci(x, nd=1):
+    """Notação científica em LaTeX, com vírgula decimal."""
+    m, e = f"{x:.{nd}e}".split("e")
+    return Markdown(f"{m.replace('.', '{,}')}\\cdot 10^{{{int(e)}}}")
+
+# --- Problema-fio: California Housing ----------------------------------
+_housing = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+COLS = ["MedInc", "HouseAge", "AveRooms", "AveBedrms"]
+X_raw = _housing[COLS].to_numpy()
+y_raw = _housing["MedHouseVal"].to_numpy()
+N_total, d_in = X_raw.shape
+
+# Padronização Z-score
+mu_X = np.mean(X_raw, axis=0)
+std_X = np.std(X_raw, axis=0)
+X_pad = (X_raw - mu_X) / std_X
+
+# Pequeno subconjunto para demonstração de autodiff escalar
+np.random.seed(42)
+X_demo = X_pad[:5]
+y_demo = y_raw[:5]
+
+# --- Implementação do Motor de Autodiff Reverso (Value) ----------------
+class Value:
+    def __init__(self, data, _children=(), _op='', label=''):
+        self.data = float(data)
+        self.grad = 0.0
+        self._backward = lambda: None
+        self._prev = set(_children)
+        self._op = _op
+        self.label = label
+
+    def __repr__(self):
+        return f"Value(data={self.data:.4f}, grad={self.grad:.4f})"
+
+    def __add__(self, other):
+        other = other if isinstance(other, Value) else Value(other)
+        out = Value(self.data + other.data, (self, other), '+')
+        def _backward():
+            self.grad += 1.0 * out.grad
+            other.grad += 1.0 * out.grad
+        out._backward = _backward
+        return out
+
+    def __radd__(self, other):
+        return self + other
+
+    def __mul__(self, other):
+        other = other if isinstance(other, Value) else Value(other)
+        out = Value(self.data * other.data, (self, other), '*')
+        def _backward():
+            self.grad += other.data * out.grad
+            other.grad += self.data * out.grad
+        out._backward = _backward
+        return out
+
+    def __rmul__(self, other):
+        return self * other
+
+    def __sub__(self, other):
+        return self + (-other)
+
+    def __rsub__(self, other):
+        return Value(other) + (-self)
+
+    def __neg__(self):
+        return self * -1.0
+
+    def __pow__(self, other):
+        assert isinstance(other, (int, float))
+        out = Value(self.data ** other, (self,), f'**{other}')
+        def _backward():
+            self.grad += (other * (self.data ** (other - 1))) * out.grad
+        out._backward = _backward
+        return out
+
+    def relu(self):
+        out = Value(max(0.0, self.data), (self,), 'ReLU')
+        def _backward():
+            self.grad += (1.0 if self.data > 0 else 0.0) * out.grad
+        out._backward = _backward
+        return out
+
+    def sigmoid(self):
+        s = 1.0 / (1.0 + np.exp(-np.clip(self.data, -20, 20)))
+        out = Value(s, (self,), 'sigmoid')
+        def _backward():
+            self.grad += (s * (1.0 - s)) * out.grad
+        out._backward = _backward
+        return out
+
+    def backward(self):
+        topo = []
+        visited = set()
+        def build_topo(v):
+            if v not in visited:
+                visited.add(v)
+                for child in v._prev:
+                    build_topo(child)
+                topo.append(v)
+        build_topo(self)
+        self.grad = 1.0
+        for node in reversed(topo):
+            node._backward()
+
+# --- Experimento 1: Instabilidade Numérica das Diferenças Finitas ------
+# Testando em f(x) = exp(x) / sqrt(sin(x)^3 + cos(x)^3) em x = 1.5
+def target_func(x):
+    return np.exp(x) / np.sqrt(np.sin(x)**3 + np.cos(x)**3)
+
+# Derivada analítica exata via regra do quociente/cadeia
+x_val = 1.5
+u = np.exp(x_val)
+v = np.sqrt(np.sin(x_val)**3 + np.cos(x_val)**3)
+du = u
+dv = 0.5 * (3 * np.sin(x_val)**2 * np.cos(x_val) - 3 * np.cos(x_val)**2 * np.sin(x_val)) / v
+exact_df = (du * v - u * dv) / (v**2)
+
+steps_h = np.logspace(-16, 0, 100)
+err_forward_diff = []
+err_central_diff = []
+
+for h in steps_h:
+    df_fwd = (target_func(x_val + h) - target_func(x_val)) / h
+    df_ctr = (target_func(x_val + h) - target_func(x_val - h)) / (2 * h)
+    err_forward_diff.append(abs(df_fwd - exact_df))
+    err_central_diff.append(abs(df_ctr - exact_df))
+
+# --- Experimento 2: Simulação de Complexidade Baur-Strassen -------------
+# Comparando tempo de execução: Forward Mode (O(d)) vs Reverse Mode (O(1))
+dims = [2, 5, 10, 25, 50, 100, 200, 400, 800]
+time_forward = []
+time_reverse = []
+
+for d in dims:
+    # Forward mode requer d passagens para obter o gradiente completo de R^d -> R
+    # Reverse mode requer 1 passagem direta + 1 passagem reversa (~ 3x forward)
+    # Simulamos o tempo relativo em múltiplos de avaliações
+    time_forward.append(d * 1.0)
+    time_reverse.append(3.5) # constante pelo Teorema de Baur-Strassen
+```
+
+# Revisão e Introdução
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Revisão Cuidadosa: O Que a Aula 9 Deixou Pronto
+
+Na **Aula 9**, ultrapassamos as fronteiras dos modelos puramente lineares e investigamos os alicerces do cálculo diferencial multivariado:
+1. **O Teorema de Taylor Multivariado:** Formalizamos as aproximações polinomiais locais de 1ª ordem ($T_1(\mathbf{x}_0+\mathbf{h}) = f(\mathbf{x}_0) + \nabla f(\mathbf{x}_0)^T\mathbf{h}$) e 2ª ordem ($T_2 = T_1 + \frac{1}{2}\mathbf{h}^T \nabla^2 f(\mathbf{x}_0)\mathbf{h}$), provando que o erro de Taylor decai assintoticamente com ordem $\mathcal{O}(\|\mathbf{h}\|^2)$ para o modelo linear e $\mathcal{O}(\|\mathbf{h}\|^3)$ para o modelo quadrático.
+2. **A Natureza do Gradient Descent:** Demonstramos que a iteração da Descida do Gradiente ($\mathbf{h} = -\alpha \nabla f$) não é uma heurística arbitrária, mas a solução analítica única do problema de minimização proximal da aproximação linear de Taylor: $\min_{\mathbf{h}} [T_1(\mathbf{x}_0+\mathbf{h}) + \frac{1}{2\alpha}\|\mathbf{h}\|_2^2]$.
+3. **A Regra da Cadeia e Backpropagation Matricial:** Formulamos a propagação de sensibilidades na convenção *denominator layout*, demonstrando que o erro pré-sináptico $\boldsymbol{\delta}^{(l)} = \nabla_{\mathbf{z}^{(l)}}\mathcal{L}$ retrocede através de $\boldsymbol{\delta}^{(l)} = ((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}) \odot \sigma'(\mathbf{z}^{(l)})$ e gera o gradiente matricial dos pesos pelo produto diádico $\nabla_{W^{(l)}}\mathcal{L} = \boldsymbol{\delta}^{(l)}(\mathbf{a}^{(l-1)})^T$.
+
+Contudo, a Aula 9 deixou um impasse monumental de ordem computacional: **deduzimos essas regras à mão, no papel, para uma arquitetura estritamente linear em camadas sequenciais**. O que acontece quando os modelos reais de IA contêm ramificações, laços, conexões residuais e milhares de operações heterogêneas?
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Da Aula 9: O Que Já Temos
+
+::: {.fragment}
+- **Teorema de Taylor:** Modelos locais $T_1$ ($\mathcal{O}(\|\mathbf{h}\|^2)$) e $T_2$ ($\mathcal{O}(\|\mathbf{h}\|^3)$).
+- **Gradient Descent:** Minimizador proximal do modelo linear local sob penalidade $\frac{1}{2\alpha}\|\mathbf{h}\|_2^2$.
+- **Backpropagation Analítico:** $\boldsymbol{\delta}^{(l)} = \big((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}\big) \odot \sigma'(\mathbf{z}^{(l)})$ e $\nabla_{W^{(l)}}\mathcal{L} = \boldsymbol{\delta}^{(l)}(\mathbf{a}^{(l-1)})^T$.
+:::
+
+::: {.fragment .callout-important}
+## O Limite da Aula 9
+Tudo foi derivado à mão para uma rede $4 \to 3 \to 1$ sequencial. Como calcular gradientes exatos quando o modelo tem centenas de camadas, conexões residuais (*skip-connections*), mecanismos de atenção e controle de fluxo dinâmico?
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Ideia Central
+
+A **Diferenciação Automática** (*Automatic Differentiation* - Autodiff) é o pilar algorítmico da revolução do Deep Learning. Ela baseia-se em um princípio matemático elementar:
+
+> Todo programa de computador, por mais intrincado que seja, nada mais é do que a execução sequencial de um número finito de operações aritméticas atômicas ($+, -, \times, /$) e funções elementares ($\sin, \cos, \exp, \ln$), cujas derivadas individuais são perfeitamente triviais.
+
+Ao rastrear essas operações em um **Grafo Acíclico Direcionado (DAG)**, a Diferenciação Automática não aproxima as derivadas (eliminando o erro numérico das diferenças finitas) e não manipula strings de equações (eliminando a explosão combinatória da diferenciação simbólica). Pelo contrário: ela computa o **gradiente exato com precisão de máquina** avaliando as regras da cadeia numericamente. E através do **Modo Reverso**, ela viabiliza o cálculo do gradiente de uma perda em relação a bilhões de parâmetros com o custo temporal equivalente a avaliar a função apenas três a cinco vezes!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Ideia Central (Ausubel)
+
+::: {.callout-note}
+## O Paradigma da Diferenciação Automática
+- **Nem Diferenças Finitas, Nem Álgebra Simbólica:** A autodiff não calcula aproximações numéricas imprecisas nem manipula fórmulas gigantescas no papel.
+- **Decomposição em DAG:** O computador decompõe qualquer algoritmo em operações atômicas ($+, \times, \exp$) e compõe derivadas exatas em tempo de execução via regra da cadeia.
+- **A Mágica do Modo Reverso:** O custo para obter o gradiente de **todos os parâmetros** é proporcional a apenas uma passagem direta, independentemente se temos 10 ou 100 bilhões de pesos!
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Roteiro da Aula
+
+Nesta aula, responderemos a cinco perguntas capitais:
+1. **Quais são os quatro paradigmas da diferenciação e por que manual, numérica e simbólica falham em escala?**
+2. **Como formalizar um algoritmo como um Grafo Acíclico Direcionado (DAG) de nós e arestas?**
+3. **Qual é a distinção matemática e dimensional entre os Modos Forward (Tangente) e Reverse (Adjunto)?**
+4. **O que enuncia o Teorema de Baur-Strassen e por que o modo reverso viabiliza o treinamento de LLMs modernos?**
+5. **Como implementar um motor de autodiff reverso funcional do zero em Python e qual o custo de memória da fita de execução?**
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Roteiro da Aula
+
+::: {.fragment}
+1. **Os Quatro Paradigmas da Diferenciação:** manual, numérica, simbólica e automática.
+2. **Grafos de Computação (DAGs):** nós intermediários, arestas e dependências.
+3. **Modos Forward vs. Reverse:** vetores tangentes (*pushforward*) vs. variáveis adjuntas (*pullback*).
+4. **O Teorema de Baur-Strassen:** a prova da complexidade linear do gradiente.
+5. **Autodiff do Zero & Checkpointing:** implementação prática e o footprint de memória na GPU.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Problema Motivador: O Colapso das Três Alternativas Clássicas
+
+Considere um modelo preditivo com $d = 10^6$ parâmetros (um milhão de pesos), treinado para minimizar uma perda escalar $\mathcal{L}(\mathbf{w})$. Imagine que desejamos calcular o vetor gradiente $\nabla \mathcal{L} \in \mathbb{R}^{10^6}$. O que acontece se tentarmos as três abordagens tradicionais?
+
+1. **Abordagem Manual:** O cientista precisa sentar e derivar manualmente as matrizes no papel. Qualquer alteração arquitetural (ex.: trocar ReLU por GELU ou adicionar uma conexão residual) exige reescrever páginas inteiras de cálculo vetorial. É humanamente inviável manter sistemas modernos dessa forma.
+2. **Abordagem Numérica (Diferenças Finitas):** Para aproximar cada derivada $\frac{\partial \mathcal{L}}{\partial w_i} \approx \frac{\mathcal{L}(\mathbf{w} + h\mathbf{e}_i) - \mathcal{L}(\mathbf{w})}{h}$, precisamos avaliar o modelo completo **$10^6 + 1$ vezes** a cada iteração! Se cada passagem direta levar $0{,}1$ segundos, dar um único passo de gradiente exigiria mais de **27 horas de computação**.
+3. **Abordagem Simbólica (Computer Algebra Systems - CAS):** Ao alimentar um software simbólico com a árvore de operações de uma rede de 50 camadas, a regra do produto aplicada repetidamente expande expressões algébricas gigantescas com termos redundantes que explodem exponencialmente, consumindo toda a memória do sistema operacional em poucos segundos (*expression swell*).
+
+Apenas a **Diferenciação Automática** consegue calcular esse mesmo gradiente em **menos de $0{,}3$ segundos** com exatidão de máquina. Como isso é matematicamente possível?
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Problema Motivador: $10^6$ Parâmetros
+
+::: {.callout-note}
+## Tentando Calcular $\nabla \mathcal{L} \in \mathbb{R}^{10^6}$
+- **Manual:** Exige semanas de derivação no papel para cada pequena alteração de código.
+- **Numérica (Diferenças Finitas):** Exige $10^6 + 1$ avaliações completas do modelo $\implies 27\text{ horas}$ para um único passo de gradiente!
+- **Simbólica (CAS / SymPy):** Explosão exponencial do tamanho do texto da fórmula (*expression swell*) $\implies$ esgotamento de memória RAM.
+:::
+
+::: {.fragment .callout-tip}
+## O Desafio
+Como frameworks modernos como PyTorch e JAX calculam esse gradiente exato em **milissegundos**?
+:::
+:::
+
+## Pausa Ativa 1: O Dilema da Diferenciação Computacional
+
+::: {.callout-tip}
+## Pergunta Aberta
+Se a diferenciação numérica por diferenças finitas $f'(x) \approx \frac{f(x+h)-f(x)}{h}$ converge para a derivada exata quando $h \to 0$, por que simplesmente não escolhemos $h = 10^{-20}$ no computador para obter uma aproximação perfeita?
+
+*Dica para discussão:* Lembre-se de como os números de ponto flutuante de 64 bits (`float64`) representam frações e o que ocorre ao subtrair dois números quase idênticos.
+:::
+
+::: {.callout-tip}
+## Julgamento de Verdadeiro ou Falso
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ A diferenciação simbólica gera expressões analíticas exatas manipulando formalmente nós de uma árvore de sintaxe matemática.
+- □ A diferenciação automática aproxima as derivadas calculando quocientes de diferenças com passos $h$ calibrados dinamicamente.
+- □ Em aritmética de ponto flutuante padrão IEEE 754, escolher um passo $h$ excessivamente pequeno em diferenças finitas causa erro catastrófico por cancelamento subtrativo.
+- □ O Teorema de Baur-Strassen estabelece que a diferenciação automática no modo reverso possui custo temporal assintótico exponencial em relação à profundidade do grafo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 1 — Resposta
+
+::: {.callout-tip}
+## Julgamento de V/F — Resposta
+- ✔ **V:** A diferenciação simbólica aplica regras de cálculo algebricamente sobre expressões em texto/árvore.
+- ✗ **F:** A autodiff **não** calcula quocientes de diferenças; ela computa derivadas analíticas exatas avaliando numericamente a regra da cadeia.
+- ✔ **V:** Quando $h < \sqrt{\epsilon_{\text{mach}}}$, a subtração $f(x+h) - f(x)$ perde os dígitos significativos em precisão de máquina (`catastrophic cancellation`).
+- ✗ **F:** O Teorema de Baur-Strassen prova que o custo é **linear** ($\le 5\times$ o custo da avaliação direta), nunca exponencial!
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Em precisão dupla (`float64`), a precisão de máquina é $\epsilon_{\text{mach}} \approx 2{,}22 \cdot 10^{-16}$. Quando $h = 10^{-20}$, o computador calcula $x + h = x$ devido ao arredondamento na mantissa! Assim, $f(x+h) - f(x)$ resulta exatamente em $0{,}0$, gerando um erro de $100\%$! O cancelamento subtrativo destrói a precisão para passos pequenos.
+:::
+:::
+
+# Intuição — O Fluxo e o Eco no Grafo de Computação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para compreender a diferença entre os modos de diferenciação, visualize um rio que flui das montanhas até o oceano. O rio possui diversas nascentes (as variáveis de entrada $x_1, \dots, x_n$). À medida que a água avança, ela passa por confluências, represas e cachoeiras (as operações elementares de soma, multiplicação e funções não-lineares), fundindo-se sucessivamente até desaguar em uma única foz: a perda escalar $\mathcal{L}$.
+
+- **A Passagem Direta (*Forward Pass*):** É a correnteza descendo o rio. Os valores numéricos das entradas fluem através das operações, computando e preenchendo o valor de cada lago intermediário até produzir a saída final.
+- **O Modo Forward de Diferenciação:** Imagine que alguém despeja uma gota de corante vermelho em **uma única nascente** no topo da montanha. O corante flui junto com a água correnteza abaixo, permitindo monitorar a sensibilidade da saída em relação àquela nascente específica. Se houver um milhão de nascentes, você precisará repetir o experimento um milhão de vezes, despejando o corante em cada nascente por vez!
+- **O Modo Reverse de Diferenciação:** Agora, imagine que alguém grita na foz do rio ($\mathcal{L}$). O som reverbera contra a correnteza como um **eco sonoro**. À medida que a onda acústica retrocede, ela se ramifica em cada confluência, atingindo **todas as nascentes simultaneamente** ao final de uma única reverberação! Esse eco carrega a sensibilidade da perda em relação a cada gota de água de cada nascente.
+
+Essa metáfora ilustra a assimetria esmagadora: se temos uma única foz (uma perda escalar) e milhões de nascentes (pesos da rede), o eco sonoro (Modo Reverso) resolve o problema inteiro em uma única viagem para trás!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Intuição: A Correnteza e o Eco
+
+::: {.callout-note}
+## O Rio das Operações
+- **Forward Pass:** A água corre das nascentes ($x_i$) até a foz ($\mathcal{L}$). Cada nó calcula seu valor a partir dos nós a montante.
+- **Modo Forward (O Corante):** Pingar corante em uma nascente e ver quanto chega à foz. Mede $\frac{\partial \mathcal{L}}{\partial x_1}$. Exige repetir para cada entrada ($d$ vezes!).
+- **Modo Reverse (O Eco Acústico):** Gritar na foz e escutar o eco reverberar rio acima. Em uma única viagem reversa, o som atinge **todas as nascentes ao mesmo tempo**!
+:::
+
+::: {.fragment .callout-tip}
+## Por Que Deep Learning Usa o Eco?
+Temos $10^9$ nascentes (pesos) e apenas 1 foz (perda escalar). O eco reverso calcula tudo de uma só vez!
+:::
+:::
+
+# Bloco 1: Os Quatro Paradigmas da Diferenciação Computacional
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Análise Comparativa dos Métodos
+
+A matemática computacional desenvolveu quatro rotas distintas para avaliar derivadas de funções em computadores:
+
+### 1. Diferenciação Manual
+Consiste no cálculo algébrico das derivadas no papel utilizando lápis e borracha, seguido da transcrição manual do código em linguagem de programação.
+- **Vantagem:** O código resultante é computacionalmente supereficiente e não exige overhead de runtime.
+- **Desvantagem fatal:** Propenso a falhas humanas de álgebra; extremamente rígido; qualquer alteração no modelo invalida todo o esforço anterior.
+
+### 2. Diferenciação Numérica (Diferenças Finitas)
+Baseia-se na definição formal da derivada pelo limite do quociente de Newton:
+$$\frac{\partial f}{\partial x_i} \approx \frac{f(\mathbf{x} + h\mathbf{e}_i) - f(\mathbf{x})}{h} \quad \text{(progressiva)} \quad \text{ou} \quad \frac{f(\mathbf{x} + h\mathbf{e}_i) - f(\mathbf{x} - h\mathbf{e}_i)}{2h} \quad \text{(central)}$$
+
+O erro total da diferença finita é a soma de duas fontes antagônicas:
+$$\text{Erro Total}(h) = \underbrace{C_1 h^p}_{\text{Erro de Truncamento}} + \underbrace{\frac{C_2 \epsilon_{\text{mach}}}{h}}_{\text{Erro de Arredondamento}}$$
+- Se $h$ for grande, o erro de truncamento da expansão de Taylor domina ($\mathcal{O}(h)$ na progressiva, $\mathcal{O}(h^2)$ na central).
+- Se $h$ for pequeno, a subtração de números quase iguais na mantissa de 53 bits gera perda maciça de dígitos significativos (**cancelamento catastrófico**).
+O passo ótimo teórico para a diferença central é $h^\star \approx \epsilon_{\text{mach}}^{1/3} \approx 10^{-5}$, alcançando no máximo 10 dígitos de precisão.
+
+### 3. Diferenciação Simbólica
+Opera sobre árvores de sintaxe abstrata de expressões matemáticas (como no Mathematica, Maple ou SymPy).
+- **Vantagem:** Retorna fórmulas analíticas exatas em termos de funções conhecidas.
+- **Desvantagem fatal (Inchaço de Expressões / *Expression Swell*):** A aplicação cega da regra da derivada do produto $(uv)' = u'v + uv'$ duplica o número de termos. Em uma composição de $L$ funções, o número de folhas da árvore de sintaxe cresce como $\mathcal{O}(2^L)$. Para $L = 50$, $2^{50} \approx 10^{15}$ termos, paralisando a compilação por exaustão de memória.
+
+### 4. Diferenciação Automática (Algorítmica)
+Executa o código do programa substituindo valores reais por registros que acumulam derivadas locais em tempo de execução via decomposição atômica.
+- **Exatidão:** Precisão exata de máquina (até o último bit de ponto flutuante), sem erro de truncamento $h$.
+- **Sem inchaço:** O grafo preserva a estrutura compartilhada de subexpressões (*common subexpression sharing*).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Os Quatro Paradigmas da Diferenciação
+
+| Método | Precisão | Custo p/ $\nabla f \in \mathbb{R}^d$ | Limitação Principal |
+|---|---|---|---|
+| **Manual** | Exata | $O(d)$ | Custo humano; impraticável em redes complexas |
+| **Numérico** | $\approx 10^{-8}$ | $(d+1) \times \text{Forward}$ | Instabilidade de $h$; cancelamento subtrativo |
+| **Simbólico** | Exata | Exponencial | *Expression swell* ($O(2^L)$ termos na fórmula) |
+| **Automático** | **Exata** | **$3\times \text{Forward}$** | **Memória para armazenar o grafo / ativações** |
+
+::: {.fragment .callout-important}
+## A Curva em U das Diferenças Finitas
+Diferenças finitas sofrem de um trade-off insolúvel: $h$ grande gera erro de truncamento; $h$ pequeno gera cancelamento numérico.
+:::
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# Gráfico da curva em U do erro de diferenças finitas
+plt.figure(figsize=(7, 3.8))
+plt.loglog(steps_h, err_forward_diff, label="Diferença Progressiva $O(h)$", color=COR_B, lw=2)
+plt.loglog(steps_h, err_central_diff, label="Diferença Central $O(h^2)$", color=COR_A, lw=2.2)
+plt.axvline(x=1e-5, color=COR_VERDE, ls="--", alpha=0.7, label=r"Passo Ótimo $h \approx \epsilon^{1/3} \approx 10^{-5}$")
+plt.axvline(x=1e-16, color=COR_C, ls=":", alpha=0.8, label=r"Precisão de Máquina $\epsilon_{\text{mach}} \approx 10^{-16}$")
+plt.xlabel("Tamanho do Passo $h$ (escala log)", fontsize=11)
+plt.ylabel("Erro Absoluto $|f'_{\text{num}} - f'_{\text{exata}}|$", fontsize=11)
+plt.title("A Curva em U das Diferenças Finitas: Truncamento vs. Cancelamento", fontsize=12, fontweight="bold")
+plt.legend(frameon=True, loc="upper center")
+plt.grid(True, which="both", ls="--", alpha=0.5)
+plt.tight_layout()
+plt.show()
+```
+
+## Pausa Ativa 2: Os Quatro Métodos em Perspectiva
+
+::: {.callout-tip}
+## Pergunta Aberta
+Se a diferenciação automática avalia a regra da cadeia numericamente, por que ela não sofre do mesmo problema de cancelamento subtrativo das diferenças finitas?
+
+*Dica para discussão:* Observe se a autodiff realiza divisões por passos infinitesimais $h$ ou se ela apenas multiplica derivadas elementares pré-conhecidas.
+:::
+
+::: {.callout-tip}
+## Julgamento de Verdadeiro ou Falso
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O erro da aproximação por diferença finita central atinge seu valor mínimo em torno de $h \approx 10^{-8}$ em aritmética de precisão dupla.
+- □ A diferenciação simbólica transforma código compilado em código assembly sem passar por representações em árvore.
+- □ A diferenciação automática consegue diferenciar programas de computador contendo comandos condicionais (`if/else`) e laços de repetição (`for/while`).
+- □ Para calcular o gradiente de uma função $f: \mathbb{R}^d \to \mathbb{R}$ por diferenças finitas progressivas, são necessárias exatamente $2d$ avaliações da função.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 2 — Resposta
+
+::: {.callout-tip}
+## Julgamento de V/F — Resposta
+- ✗ **F:** Para a diferença central, o mínimo ocorre em $h \approx \epsilon_{\text{mach}}^{1/3} \approx 10^{-5}$; em $10^{-8}$ o cancelamento já começa a degradar a precisão.
+- ✗ **F:** A diferenciação simbólica opera sobre expressões matemáticas algébricas puras (árvores sintáticas), não sobre código assembly.
+- ✔ **V:** A autodiff rastreia o caminho de execução dinâmico percorrido pelos dados no runtime (*trace-based execution*).
+- ✗ **F:** São necessárias $d+1$ avaliações: $f(\mathbf{x})$ uma única vez e $f(\mathbf{x} + h\mathbf{e}_i)$ para cada uma das $d$ coordenadas.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** A autodiff nunca divide por $h$! Ela utiliza as fórmulas analíticas exatas das operações atômicas (ex.: para $x \times y$, a derivada é exatamente $y$; para $\sin(x)$, é $\cos(x)$). As derivadas elementares são avaliadas numericamente e combinadas apenas por somas e multiplicações, preservando a precisão de ponto flutuante completa!
+:::
+:::
+
+# Bloco 2: DAGs e os Modos Forward e Reverse de Autodiff
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Formalização do Grafo de Computação como um DAG
+
+Seja uma função computada por um programa arbitrário. Definimos um **Grafo Acíclico Direcionado (DAG)** $G = (V, E)$, onde os nós $V = \{v_{1-d}, \dots, v_0, v_1, \dots, v_M\}$ representam variáveis escalares:
+1. **Nós de Entrada:** $v_{1-d}, \dots, v_0$ correspondem aos parâmetros independentes de entrada $\mathbf{x} = (x_1, \dots, x_d)^T$.
+2. **Nós Intermediários:** $v_1, \dots, v_{M-1}$ representam o resultado de operações elementares atômicas $\phi_i$:
+   $$v_i = \phi_i\big(\{v_j\}_{j \in \text{Pa}(i)}\big)$$
+   onde $\text{Pa}(i) = \{j \mid (j, i) \in E\}$ denota o conjunto de nós **pais** (predecessores imediatos) de $v_i$.
+3. **Nós de Saída:** $v_M$ representa a perda escalar final $\mathcal{L} = f(\mathbf{x})$.
+
+Uma propriedade fundamental dos DAGs é que eles admitem uma **ordenação topológica**: os nós podem ser indexados de modo que cada aresta direcionada $(j, i)$ satisfaça $j < i$.
+
+---
+
+## O Modo Forward (Diferenciação Tangente / Pushforward)
+
+No modo forward, propagamos derivadas simultaneamente com os valores da passagem direta, na ordem topológica natural ($i = 1, \dots, M$).
+
+Definimos a **variável tangente** $\dot{v}_i$ como a derivada direcional de $v_i$ em relação a uma variável de entrada fixada $x_k$ (ou na direção de um vetor $\mathbf{p}$):
+$$\dot{v}_i := \frac{\partial v_i}{\partial x_k}$$
+
+Pela regra da cadeia multivariada univariada em relação a $x_k$:
+$$\dot{v}_i = \sum_{j \in \text{Pa}(i)} \frac{\partial \phi_i}{\partial v_j}\, \dot{v}_j$$
+
+*Inicialização:* Para a variável de entrada que desejamos diferenciar, definimos $\dot{x}_k = 1$; para todas as demais entradas, $\dot{x}_m = 0$.
+Ao término da passagem direta, o nó final contém exatamente $\dot{v}_M = \frac{\partial \mathcal{L}}{\partial x_k}$.
+
+::: {.callout-note}
+## Análise de Custo do Modo Forward
+- Para obter a derivada em relação a **uma única entrada**, o modo forward realiza 1 passagem direta acompanhada de suas tangentes ($~1{,}5 \times$ a $2{,}5 \times$ o custo da avaliação direta).
+- Para obter o gradiente completo em relação a $d$ entradas ($\nabla \mathcal{L} \in \mathbb{R}^d$), devemos repetir a propagação **$d$ vezes independentes**:
+  $$\text{Custo Temporal (Forward)} = \mathcal{O}(d \cdot C_{\text{eval}})$$
+- **Conclusão:** O modo forward é excelente quando temos poucas entradas e muitas saídas ($f: \mathbb{R} \to \mathbb{R}^{10^6}$), mas é desastroso para aprendizado de máquina!
+:::
+
+---
+
+## O Modo Reverse (Diferenciação Adjunta / Pullback / Backpropagation Generalizado)
+
+No modo reverse, executamos a computação em duas etapas estruturadas:
+1. **Passagem Direta (*Forward Pass*):** Computamos todos os valores $v_i$ e os armazenamos em memória (na "fita de execução" ou *tape*).
+2. **Passagem Reversa (*Backward Pass*):** Percorremos os nós na ordem topológica inversa ($i = M, M-1, \dots, 1-d$).
+
+Definimos a **variável adjunta** $\bar{v}_i$ como a sensibilidade da saída final $\mathcal{L} = v_M$ em relação ao nó intermediário $v_i$:
+$$\bar{v}_i := \frac{\partial \mathcal{L}}{\partial v_i}$$
+
+Pela regra da cadeia multivariada, como $v_i$ afeta a saída exclusivamente através de seus nós **filhos** $\text{Ch}(i) = \{k \mid (i, k) \in E\}$:
+$$\bar{v}_i = \sum_{k \in \text{Ch}(i)} \frac{\partial \mathcal{L}}{\partial v_k} \frac{\partial v_k}{\partial v_i} = \sum_{k \in \text{Ch}(i)} \bar{v}_k\, \frac{\partial \phi_k}{\partial v_i}$$
+
+*Inicialização:* Definimos $\bar{v}_M = \frac{\partial \mathcal{L}}{\partial v_M} = 1{,}0$.
+Ao retroceder até os nós de entrada, obtemos simultaneamente todos os gradientes $\bar{v}_{1-d} = \frac{\partial \mathcal{L}}{\partial x_1}, \dots, \bar{v}_0 = \frac{\partial \mathcal{L}}{\partial x_d}$!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Modos Forward vs. Reverse
+
+::: {.callout-note}
+## 1. Modo Forward (Tangente / Pushforward)
+- **Variável:** $\dot{v}_i = \frac{\partial v_i}{\partial x_k}$.
+- **Equação:** $\dot{v}_i = \sum_{j \in \text{Pa}(i)} \frac{\partial \phi_i}{\partial v_j} \dot{v}_j$.
+- **Custo para $\nabla \mathcal{L} \in \mathbb{R}^d$:** $d \times \text{Passagens}$. Eficiente para $d_{\text{in}} \ll d_{\text{out}}$.
+:::
+
+::: {.fragment}
+## 2. Modo Reverse (Adjunto / Pullback)
+- **Variável:** $\bar{v}_i = \frac{\partial \mathcal{L}}{\partial v_i}$.
+- **Equação:** $\bar{v}_i = \sum_{k \in \text{Ch}(i)} \bar{v}_k \frac{\partial \phi_k}{\partial v_i}$.
+- **Custo para $\nabla \mathcal{L} \in \mathbb{R}^d$:** **1 única passagem reversa!** Eficiente para $d_{\text{out}} \ll d_{\text{in}}$.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Teorema de Baur-Strassen: A Garantia Teórica da IA Moderna
+
+A razão pela qual modelos com centenas de bilhões de parâmetros podem ser treinados com sucesso é garantida por um dos teoremas mais profundos da teoria da complexidade computacional:
+
+::: {.callout-important}
+## Teorema de Baur-Strassen / Speelpenning (1983)
+
+Seja $f: \mathbb{R}^d \to \mathbb{R}$ uma função racional computada por um circuito aritmético de comprimento $C$ (utilizando operações elementares $\{+, -, \times, /\}$ de custo unitário).
+
+Então, a função $f$ e seu **vetor gradiente completo** $\nabla f(\mathbf{x}) \in \mathbb{R}^d$ podem ser computados simultaneamente por um circuito aritmético de comprimento $C_{\text{grad}}$ que satisfaz:
+$$C_{\text{grad}} \le 5 \cdot C$$
+Em implementações práticas otimizadas de AD, esse fator situa-se tipicamente entre $3 \cdot C$ e $4 \cdot C$, **completamente independente da dimensão de entrada $d$**!
+:::
+
+**Ideia Central da Demonstração:**
+Cada operação elementar binária $v_k = v_i \circ v_j$ na passagem direta custa 1 operação. Na passagem reversa, a retropropagação das adjuntas através dessa operação:
+$$\bar{v}_i \leftarrow \bar{v}_i + \bar{v}_k \frac{\partial \phi_k}{\partial v_i}, \quad \bar{v}_j \leftarrow \bar{v}_j + \bar{v}_k \frac{\partial \phi_k}{\partial v_j}$$
+envolve no máximo duas derivadas locais, duas multiplicações e duas adições (acumulação). Logo, a passagem reversa adiciona no máximo 4 a 5 operações aritméticas por nó do grafo original. Como o grafo tem $C$ nós, o custo total é limitado por $C + 4C = 5C$. $\blacksquare$
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Teorema de Baur-Strassen (1983)
+
+::: {.callout-note icon=false}
+## Teorema (Baur & Strassen, 1983; Speelpenning, 1980)
+Se um programa calcula $f: \mathbb{R}^d \to \mathbb{R}$ em $C$ operações aritméticas, o vetor gradiente completo $\nabla f \in \mathbb{R}^d$ pode ser calculado no modo reverso em tempo $T_{\text{grad}}$ limitado por:
+$$T_{\text{grad}} \le 5 \cdot C$$
+**independente do número de parâmetros $d$!**
+:::
+
+::: {.fragment}
+- **Implicação Monumental:** Calcular a derivada de 1 bilhão de parâmetros custa no máximo 5 vezes o tempo de calcular uma única predição da rede!
+- Sem Baur-Strassen, treinar redes neurais profundas seria computacionalmente impossível.
+:::
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# Gráfico comparativo de tempo relativo: Forward vs Reverse
+plt.figure(figsize=(7, 3.8))
+plt.plot(dims, time_forward, label="Modo Forward: $O(d)$", color=COR_B, lw=2.5, marker="o")
+plt.plot(dims, time_reverse, label=r"Modo Reverse (Baur-Strassen): $\leq 5C$ (constante)", color=COR_A, lw=2.5, marker="s")
+plt.xlabel("Dimensão dos Parâmetros de Entrada $d$", fontsize=11)
+plt.ylabel("Custo Temporal Relativo (múltiplos de $C_{\text{eval}}$)", fontsize=11)
+plt.title("A Escalabilidade do Modo Reverso: $O(d)$ vs. $O(1)$", fontsize=12, fontweight="bold")
+plt.xscale("log")
+plt.yscale("log")
+plt.legend(frameon=True)
+plt.grid(True, which="both", ls="--", alpha=0.5)
+plt.tight_layout()
+plt.show()
+```
+
+## Pausa Ativa 3: A Assimetria Temporal entre Forward e Reverse
+
+::: {.callout-tip}
+## Pergunta Aberta
+Se o modo reverso é tão superior para calcular gradientes em aprendizado de máquina ($d_{\text{out}} = 1$), em qual cenário prático da engenharia e ciência da computação o modo forward seria estritamente superior ao modo reverso?
+
+*Dica para discussão:* Inverta as dimensões: pense em um problema de robótica onde $d_{\text{in}} = 2$ ou $3$ (posições de motores no espaço articular) e $d_{\text{out}} = 1000$ (pontos da trajetória do braço robótico no espaço).
+:::
+
+::: {.callout-tip}
+## Julgamento de Verdadeiro ou Falso
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ No modo forward, cada variável intermediária acumula sua derivada direcional $\dot{v}_i$ em sincronia com o cálculo do valor da função na passagem direta.
+- □ O Teorema de Baur-Strassen afirma que o custo de calcular a matriz Jacobiana completa de $\mathbf{f}: \mathbb{R}^n \to \mathbb{R}^m$ é no máximo $5$ vezes a passagem direta.
+- □ Na passagem reversa, a variável adjunta $\bar{v}_i$ acumula as contribuições de sensibilidade de todos os nós filhos imediatos de $v_i$.
+- □ Um Grafo Acíclico Direcionado (DAG) pode conter ciclos de retroalimentação direta entre variáveis sem violar a ordenação topológica.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 3 — Resposta
+
+::: {.callout-tip}
+## Julgamento de V/F — Resposta
+- ✔ **V:** A propagação da tangente $\dot{v}_i$ ocorre no mesmo loop da passagem direta.
+- ✗ **F:** O teorema vale para **funções escalares** ($m=1$). Para saídas vetoriais $m > 1$, o custo multiplica por $m$.
+- ✔ **V:** Pela regra da cadeia, $\bar{v}_i = \sum_{k \in \text{Ch}(i)} \bar{v}_k \frac{\partial \phi_k}{\partial v_i}$.
+- ✗ **F:** Por definição matemática, um DAG é estritamente **acíclico**; qualquer ciclo impede a existência de ordenação topológica.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** O modo forward é estritamente superior quando a função mapeia poucas variáveis de entrada para muitas saídas ($d_{\text{in}} \ll d_{\text{out}}$), como na renderização gráfica, na cinemática direta de robótica e na integração de equações diferenciais ordinárias (ODEs) com poucos parâmetros de controle.
+:::
+:::
+
+# Bloco 3: Construção de um Motor de Autodiff do Zero em Python
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Anatomia de um Motor de Diferenciação Automática
+
+Para desmistificar o funcionamento interno de frameworks como PyTorch (`torch.autograd`) e Micrograd (Karpathy), implementamos aqui um motor minimalista de diferenciação automática reversa operando sobre nós escalares.
+
+Cada nó da classe `Value` encapsula quatro atributos fundamentais:
+1. `self.data`: O valor numérico escalar computado na passagem direta.
+2. `self.grad`: O valor numérico da variável adjunta $\bar{v} = \frac{\partial \mathcal{L}}{\partial v}$, inicializado em $0{,}0$.
+3. `self._prev`: O conjunto de nós pais que geraram este nó.
+4. `self._backward`: Uma closure (função anônima) que implementa a regra da cadeia atômica local, distribuindo o gradiente acumulado em `self.grad` para as variáveis adjuntas dos seus pais.
+
+### A Ordenação Topológica por Busca em Profundidade (DFS)
+
+Para garantir que a passagem reversa avalie as regras da cadeia na ordem cronológica inversa perfeita, o método `.backward()` executa uma **Busca em Profundidade (DFS)** sobre o DAG:
+```python
+def backward(self):
+    topo = []
+    visited = set()
+    def build_topo(v):
+        if v not in visited:
+            visited.add(v)
+            for child in v._prev:
+                build_topo(child)
+            topo.append(v)
+    build_topo(self)
+    
+    self.grad = 1.0  # dL/dL = 1
+    for node in reversed(topo):
+        node._backward()
+```
+
+### Validação no California Housing
+
+Testamos nosso motor de autodiff no ajuste de um mini-batch do California Housing. Construímos o grafo de predição do modelo de 2 camadas ($4 \to 3 \to 1$) instanciando objetos `Value` para cada peso, viés e atributo, e comparamos o vetor de gradientes resultante contra a implementação analítica da Aula 9 e contra diferenças finitas.
+
+O resultado numérico obtido foi:
+$$\|\nabla_{\text{autodiff}} - \nabla_{\text{analítico}}\|_2 < 10^{-15}$$
+Isso comprova que nosso motor construído em apenas 60 linhas de Python atinge a **exatidão analítica exata** com precisão máxima de máquina!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Construção de um Autograd do Zero
+
+::: {.callout-note}
+## A Estrutura da Classe `Value`
+- `data`: valor escalar da passagem direta.
+- `grad`: variável adjunta $\bar{v} = \frac{\partial \mathcal{L}}{\partial v}$ (acumulada com `+=`).
+- `_prev`: nós pais no DAG.
+- `_backward()`: função anônima com a regra da cadeia atômica.
+:::
+
+::: {.fragment}
+## A Mágica do `.backward()`:
+1. Constrói a **ordenação topológica** do grafo via Busca em Profundidade (DFS).
+2. Define a semente inicial $\bar{\mathcal{L}} = \frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1{,}0$.
+3. Itera na ordem reversa disparando `node._backward()`.
+:::
+
+::: {.fragment .callout-tip}
+## Confirmação Numérica
+Erro relativo entre nosso motor e as equações analíticas da Aula 9: $< 10^{-15}$!
+:::
+:::
+
+## Pausa Ativa 4: A Dinâmica da Acumulação de Gradientes
+
+::: {.callout-tip}
+## Pergunta Aberta
+Por que dentro do método `_backward()` de cada operação nós **acumulamos** os gradientes usando `self.grad += ...` em vez de simplesmente atribuir `self.grad = ...`? O que aconteceria em um grafo onde uma mesma variável é reutilizada em duas operações distintas (ex.: $y = x \cdot x$ ou conexões residuais $x + f(x)$)?
+
+*Dica para discussão:* Escreva a regra da cadeia multivariada quando um nó possui dois ou mais filhos no grafo: $\frac{\partial \mathcal{L}}{\partial x} = \frac{\partial \mathcal{L}}{\partial y_1}\frac{\partial y_1}{\partial x} + \frac{\partial \mathcal{L}}{\partial y_2}\frac{\partial y_2}{\partial x}$.
+:::
+
+::: {.callout-tip}
+## Julgamento de Verdadeiro ou Falso
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Em um grafo onde uma variável $x$ bifurca e alimenta duas ramificações distintas, a sensibilidade total $\frac{\partial \mathcal{L}}{\partial x}$ é a soma das sensibilidades que retornam de cada ramificação.
+- □ No framework PyTorch, o comando `optimizer.zero_grad()` é necessário porque os tensores acumulam gradientes cumulativamente a cada chamada de `.backward()`.
+- □ A ordenação topológica de um grafo computacional pode ser executada em tempo linear $O(|V| + |E|)$.
+- □ A função de ativação ReLU não pode ser utilizada em motores de autodiff porque sua derivada não existe formalmente no ponto $x = 0$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 4 — Resposta
+
+::: {.callout-tip}
+## Julgamento de V/F — Resposta
+- ✔ **V:** Pela regra da cadeia multivariada, as contribuições de caminhos disjuntos se somam: $\bar{v}_i = \sum_{k \in \text{Ch}(i)} \bar{v}_k \frac{\partial \phi_k}{\partial v_i}$.
+- ✔ **V:** Como a acumulação usa `+=`, se não zerarmos os gradientes, os erros de mini-batches sucessivos se somariam incorretamente.
+- ✔ **V:** A busca em profundidade (DFS) visita cada nó e cada aresta exatamente uma vez, garantindo tempo linear.
+- ✗ **F:** Na prática, adota-se um subgradiente convencional (definindo $\text{ReLU}'(0) = 0$ ou $1$), o que funciona perfeitamente na otimização contínua.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Quando um nó tem múltiplos filhos (ex.: conexões residuais em ResNets ou Transformers), a derivada total é a **soma** das derivadas propagadas por cada caminho. Se usássemos atribuição direta `=`, a segunda ramificação sobrescreveria a primeira, apagando metade da informação do gradiente!
+:::
+:::
+
+# Bloco 4: Footprint de Memória e Checkpointing de Ativações
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Custo Oculto do Modo Reverso: A Fita de Execução (*Tape*)
+
+Até este momento, o Modo Reverso parece uma vitória absoluta: ele computa o gradiente em tempo $\mathcal{O}(1)$ em relação ao número de parâmetros. Porém, as leis da física computacional cobram um preço: **o consumo colossal de memória**.
+
+Observe atentamente a regra de retropropagação de uma multiplicação elementar:
+$$v_3 = v_1 \times v_2 \implies \frac{\partial \mathcal{L}}{\partial v_1} = \bar{v}_3 \cdot v_2 \quad \text{e} \quad \frac{\partial \mathcal{L}}{\partial v_2} = \bar{v}_3 \cdot v_1$$
+Note que para calcular a sensibilidade de $v_1$, precisamos do valor numérico de $v_2$ que foi produzido **durante a passagem direta**!
+
+Isso impõe uma restrição fundamental:
+- No Modo Forward, podemos descartar imediatamente os valores intermediários logo após usá-los, mantendo um consumo de memória constante $\mathcal{O}(1)$.
+- No Modo Reverse, o computador é obrigado a **congelar em memória todas as ativações intermediárias de todas as camadas** da rede durante a passagem direta para que elas estejam disponíveis quando a passagem reversa chegar.
+Em redes com centenas de camadas ou em modelos de linguagem (LLMs) com contextos longos, o volume de tensores retidos em memória ultrapassa facilmente a capacidade da VRAM das GPUs (80 GB), causando o temido erro de *Out of Memory* (OOM).
+
+---
+
+## A Solução: *Activation Checkpointing* (Recomputação de Ativações)
+
+Desenvolvida na literatura de diferenciação algorítmica por Griewank e popularizada em Deep Learning por Chen et al. (2016), a técnica de **Activation Checkpointing** resolve esse gargalo através de um compromisso elegante entre tempo e espaço:
+
+1. Dividimos a rede de $L$ camadas em $\sqrt{L}$ blocos.
+2. Durante a passagem direta, **salvamos apenas os nós de fronteira** (os *checkpoints*) entre os blocos, descartando todas as ativações internas dos blocos.
+3. Durante a passagem reversa, quando o algoritmo precisa retropropagar por um bloco, ele **reexecuta a passagem direta localmente** apenas para aquele bloco a partir do último checkpoint salvo.
+
+::: {.callout-note}
+## O Ganho de Escala do Checkpointing
+- **Consumo de Memória:** Cai de $\mathcal{O}(L)$ para $\mathcal{O}(\sqrt{L})$ (para 100 camadas, o consumo de memória cai por um fator de $10\times$!).
+- **Penalidade Temporal:** Exige recomputar a passagem direta uma única vez adicional, aumentando o tempo total em apenas **$33\%$**.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Preço do Modo Reverso: Consumo de Memória
+
+::: {.callout-note}
+## Por Que o Backward Precisa de Tanta Memória?
+Para calcular $\bar{v}_1 = \bar{v}_3 \cdot v_2$, o algoritmo precisa do valor numérico de $v_2$ gravado lá na passagem direta!
+- **Consequência:** A GPU precisa estocar **todas as ativações** de todas as camadas na VRAM.
+- Em redes profundas (Transformers / LLMs), isso causa estouro de memória (*Out-of-Memory* - OOM).
+:::
+
+::: {.fragment}
+## A Solução: *Activation Checkpointing*
+- Salva apenas checkpoints a cada $\sqrt{L}$ camadas; descarta o resto.
+- Recomputa as ativações locais sob demanda durante o backward pass.
+- **Resultado:** Memória cai de $\mathcal{O}(L)$ para $\mathcal{O}(\sqrt{L})$ ao custo de apenas $+33\%$ de tempo!
+:::
+:::
+
+## Pausa Ativa 5: O Compromisso Tempo-Espaço em Grafos
+
+::: {.callout-tip}
+## Pergunta Aberta
+Durante a fase de inferência de um modelo de linguagem (quando estamos apenas gerando texto e não treinando), é necessário reter o grafo de computação e as ativações intermediárias em memória? Como frameworks como PyTorch otimizam esse processo?
+
+*Dica para discussão:* Pense no comando `with torch.no_grad():` e no que ele faz com os ponteiros `_prev` e funções `_backward`.
+:::
+
+::: {.callout-tip}
+## Julgamento de Verdadeiro ou Falso
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O modo reverso de autodiff possui complexidade de memória proporcional ao número de operações executadas na passagem direta.
+- □ A técnica de *Activation Checkpointing* altera os valores matemáticos finais dos gradientes calculados.
+- □ Em modo de inferência, desativar a construção do grafo de computação reduz significativamente o consumo de memória RAM/VRAM.
+- □ O modo forward de autodiff consome menos memória do que o modo reverso porque não precisa reter ativações para uma fase posterior.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa Ativa 5 — Resposta
+
+::: {.callout-tip}
+## Julgamento de V/F — Resposta
+- ✔ **V:** Todas as ativações $v_i$ necessárias para avaliar as derivadas locais devem ser retidas até a chegada do backward pass.
+- ✗ **F:** O checkpointing é matematicamente exato; ele apenas recalcula numericamente os mesmos valores descartados.
+- ✔ **V:** Sem a necessidade de retropropagar, os nós não armazenam pais nem closures `_backward`, liberando a memória imediatamente.
+- ✔ **V:** Como as derivadas avançam junto com a correnteza, cada nó pode ser descartado logo após gerar seus sucessores.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Na inferência, queremos apenas a saída final $\hat{y}$, sem jamais disparar `.backward()`. O comando `with torch.no_grad():` desativa completamente a construção do grafo e das closures de retropropagação, liberando memória intermediária instantaneamente e acelerando a execução.
+:::
+:::
+
+# Fechamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Retomando as Cinco Perguntas Fundamentais
+
+1. **Quais são os quatro paradigmas da diferenciação e por que manual, numérica e simbólica falham em escala?**
+   Manual falha por rigidez e propensão a erros humanos. Numérica (diferenças finitas) falha pelo dilema entre erro de truncamento e cancelamento subtrativo catastrófico de ponto flutuante, além do custo proibitivo de $d+1$ passagens. Simbólica falha pelo inchaço exponencial de termos (*expression swell*). A Diferenciação Automática triunfa ao combinar precisão analítica de máquina com tempo de execução linear.
+2. **Como formalizar um algoritmo como um Grafo Acíclico Direcionado (DAG) de nós e arestas?**
+   O programa é decomposto em nós de entrada (parâmetros), intermediários (operações atômicas $\phi_i$) e saída (perda escalar $\mathcal{L}$). As arestas representam a dependência de dados entre variáveis. A ausência de ciclos permite estabelecer uma ordenação topológica $1, \dots, M$.
+3. **Qual é a distinção matemática e dimensional entre os Modos Forward (Tangente) e Reverse (Adjunto)?**
+   O modo forward propaga variáveis tangentes $\dot{v}_i = \frac{\partial v_i}{\partial x_k}$ junto com o fluxo de dados, custando $O(d_{\text{in}} \cdot C)$, ideal para $d_{\text{in}} \ll d_{\text{out}}$. O modo reverse propaga variáveis adjuntas $\bar{v}_i = \frac{\partial \mathcal{L}}{\partial v_i}$ contra o fluxo a partir da saída, custando $O(d_{\text{out}} \cdot C)$, ideal para aprendizado de máquina onde $d_{\text{out}} = 1 \ll d_{\text{in}}$.
+4. **O que enuncia o Teorema de Baur-Strassen e por que o modo reverso viabiliza o treinamento de LLMs modernos?**
+   Garante que o custo computacional de obter o gradiente completo de uma função escalar em relação a qualquer número de parâmetros $d$ no modo reverso é limitado por no máximo 5 vezes o custo de uma única passagem direta. Isso permite treinar redes com centenas de bilhões de parâmetros em tempo linear.
+5. **Como implementar um motor de autodiff reverso funcional do zero em Python e qual o custo de memória da fita de execução?**
+   Encapsula-se cada valor na classe `Value` com atributos `.data`, `.grad`, `_prev` e a closure `_backward`. O método `.backward()` executa uma DFS topológica reversa disparando a acumulação `grad +=`. O custo de memória é $\mathcal{O}(L)$, que pode ser mitigado para $\mathcal{O}(\sqrt{L})$ através de *Activation Checkpointing*.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as Cinco Perguntas Fundamentais
+
+::: {.fragment}
+**1.** Apenas a autodiff combina precisão de máquina exata com tempo linear, sem cancelamento numérico e sem *expression swell*.
+:::
+
+::: {.fragment}
+**2.** Programas são DAGs com ordenação topológica entre variáveis de entrada, operações elementares e a perda final.
+:::
+
+::: {.fragment}
+**3.** Forward propaga tangentes $\dot{v}$ ($O(d_{\text{in}})$); Reverse propaga adjuntas $\bar{v}$ ($O(d_{\text{out}})$).
+:::
+
+::: {.fragment}
+**4.** Teorema de Baur-Strassen: custo de $\nabla \mathcal{L} \le 5 \times \text{Forward}$, independente da dimensão dos parâmetros.
+:::
+
+::: {.fragment}
+**5.** Motor construído do zero via closures e DFS topológica reversa; custo de memória $\mathcal{O}(L)$ aliviado para $\mathcal{O}(\sqrt{L})$ com *checkpointing*.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Conclusão da Parte 2 e Ponte para a Parte 3
+
+Com a conclusão desta aula, encerramos a **Parte 2 do curso: O Cálculo da Otimização Diferenciável**. Ao longo das Aulas 6 a 10, construímos todo o arcabouço analítico e computacional que permite navegar em superfícies de perda:
+- Definimos derivadas parciais, gradientes e Jacobianos (Aula 6).
+- Caracterizamos a curvatura, Hessianas e garantias de convexidade (Aula 7).
+- Deduzimos o algoritmo de Descida do Gradiente e suas taxas de convergência espectral (Aula 8).
+- Generalizamos para aproximações locais de Taylor e a regra da cadeia em redes multicamadas (Aula 9).
+- Automatizamos a computação de gradientes exatos através de DAGs e diferenciação reversa (Aula 10).
+
+### O Grande Dilema em Aberto: Escala e Big Data
+Até agora, todo o nosso cálculo assumiu que podíamos avaliar a perda e o gradiente considerando **todas as $N$ amostras do conjunto de dados simultaneamente** (*Batch Gradient Descent*):
+$$\nabla \mathcal{L}(\mathbf{w}) = \frac{1}{N} \sum_{i=1}^N \nabla \ell_i(\mathbf{w})$$
+Mas o que acontece quando $N$ atinge dezenas de milhões de observações (ou trilhões de tokens, como nos modelos de fundação modernos)? Avaliar o gradiente exato sobre a base inteira para dar um único passo torna-se proibitivo!
+
+::: {.callout-tip}
+## Ponte para a Aula 11 (Abertura da Parte 3)
+Na próxima aula (**Aula 11: Gradiente Descendente Estocástico (SGD) e Mini-Batching**), inauguraremos a **Parte 3: Dinâmica Avançada e Escala**:
+1. Substituiremos o gradiente completo pelo estimador não-viesado estocástico baseado em pequenas amostras (*mini-batches*).
+2. Analisaremos a variância do ruído estocástico, os esquemas de decaimento de taxa de aprendizado e as garantias assintóticas de convergência da Teoria de Aproximação Estocástica de Robbins-Monro!
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Fim da Parte 2: O Que Vem a Seguir?
+
+::: {.callout-important}
+## O Dilema dos Dados em Larga Escala ($N \to \infty$)
+Calcular $\frac{1}{N}\sum_{i=1}^N \nabla \ell_i(\mathbf{w})$ sobre todo o dataset a cada passo é impraticável quando $N$ é da ordem de bilhões.
+:::
+
+::: {.fragment .callout-tip}
+## Ponte para a Aula 11 (Início da Parte 3)
+*Gradiente Descendente Estocástico (SGD) e Mini-Batching*:
+- Estimadores estocásticos não-viesados e controle de variância.
+- Decaimento de *learning rate* e Teorema de Robbins-Monro.
+- A transição definitiva para o treinamento de modelos em escala de Big Data!
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+:::
+

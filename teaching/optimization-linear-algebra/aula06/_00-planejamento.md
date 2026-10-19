@@ -10,8 +10,8 @@ $X^T X\hat{\mathbf{w}}=X^T\mathbf{y}$) já usou, implicitamente, a ideia
 de "achar o ponto onde a perda para de diminuir" — mas em nenhum
 momento o curso definiu, formalmente, o que "parar de diminuir"
 significa para uma função de várias variáveis. A Aula 6 fecha essa
-lacuna: derivada parcial, gradiente (como vetor-linha, convenção do
-MathML), derivada direcional (com prova própria de que o gradiente
+lacuna: derivada parcial, gradiente (como vetor-coluna; o MathML usa
+linha), derivada direcional (com prova própria de que o gradiente
 aponta na direção de subida mais íngreme, via desigualdade de
 Cauchy-Schwarz da Aula 1) e Jacobiano (generalização para funções
 vetoriais) — aplicados de ponta a ponta ao mesmo problema-fio
@@ -20,7 +20,7 @@ California Housing), recuperando as Equações Normais como o caso
 $\nabla L=\mathbf{0}$.
 
 **Objetivos de aprendizagem:** (a) definir formalmente derivada
-parcial e gradiente (como vetor-linha), aplicando regras de
+parcial e gradiente (como vetor-coluna), aplicando regras de
 diferenciação (soma, produto, cadeia); (b) derivar o gradiente de uma
 perda quadrática por extenso, recuperando as Equações Normais; (c)
 definir derivada direcional e provar que o gradiente aponta na direção
@@ -59,8 +59,8 @@ para a Estratégia B.
    limite diretamente. Pausa Ativa 2.
 
 3. **O Gradiente como Vetor e as Regras de Derivação** (~18 min) —
-   gradiente como vetor-linha (MathML, Def. 5.5 completa + Remark da
-   convenção linha-vs-coluna); regras de soma/produto/cadeia (MathML
+   gradiente como vetor-coluna (MathML, Def. 5.5 completa, transposta;
+   o Remark do MathML sobre linha-vs-coluna motiva a escolha explícita); regras de soma/produto/cadeia (MathML
    §5.2.1); desenvolvimento *principled* completo do gradiente da perda
    quadrática, $\nabla_{\boldsymbol{\beta}}\|X\boldsymbol{\beta}-
    \mathbf{y}\|^2=2(X\boldsymbol{\beta}-\mathbf{y})^TX$, recuperando as
@@ -80,14 +80,15 @@ para a Estratégia B.
    Ativa 4.
 
 5. **O Jacobiano: Generalizando para Funções Vetoriais** (~14 min) —
-   definição formal (MathML, Def. 5.6, convenção *numerator layout*);
+   definição formal (MathML, Def. 5.6, adaptada para *denominator
+   layout*, coerente com o gradiente-coluna);
    exemplo concreto e conectado ao problema-fio: o resíduo
    $\mathbf{r}(\boldsymbol{\beta})=X\boldsymbol{\beta}-\mathbf{y}$ como
    função vetorial $\mathbb{R}^4\to\mathbb{R}^{16\,640}$, cujo Jacobiano
    é exatamente $X$ — a própria matriz de design já usada desde a
    Aula 1; regra da cadeia com Jacobiano recupera o gradiente do
-   Bloco 3 ($\nabla_{\boldsymbol{\beta}}L=2\mathbf{r}^TJ_{\mathbf{r}}=
-   2\mathbf{r}^TX$). Pausa Ativa 5.
+   Bloco 3 ($\nabla_{\boldsymbol{\beta}}L=J_{\mathbf{r}}(2\mathbf{r})=
+   2X^T\mathbf{r}$, com $J_{\mathbf{r}}=X^T$). Pausa Ativa 5.
 
 6. **Verificação Numérica** (~10 min) — gradiente e Jacobiano
    analíticos vs. diferença finita central, no dado real (California
@@ -107,7 +108,7 @@ para a Estratégia B.
 
 ### Fonte 1 — MathML, Definição 5.5 (Partial Derivative), p. 146 (PDF p. 152)
 **Uso pretendido:** definição formal de derivada parcial e do gradiente
-como vetor-linha (Blocos 2-3).
+(Blocos 2-3); a aula a transpõe para vetor-coluna.
 
 **Trecho:**
 > "Definition 5.5 (Partial Derivative). For a function f : Rn → R, x 7→
@@ -120,8 +121,9 @@ como vetor-linha (Blocos 2-3).
 > derivative from Section 5.1."
 
 ### Fonte 2 — MathML, Remark (Gradient as a Row Vector), p. 147 (PDF p. 153)
-**Uso pretendido:** justificar a convenção de gradiente como vetor-linha
-(Bloco 3), citada explicitamente para não parecer arbitrária.
+**Uso pretendido:** registrar que a disposição do gradiente é uma
+convenção (o MathML usa linha); a aula adota coluna (Bloco 3) e diz isso
+explicitamente para não parecer arbitrário.
 
 **Trecho:**
 > "It is not uncommon in the literature to define the gradient vector as
@@ -143,8 +145,9 @@ gradiente da perda quadrática (Bloco 3).
 > ∂/∂x g(f(x)) = (∂g/∂f)(∂f/∂x)."
 
 ### Fonte 4 — MathML, Definição 5.6 (Jacobian) e Remark (numerator layout), p. 150-151 (PDF p. 156-157)
-**Uso pretendido:** definição formal do Jacobiano e da convenção de
-*numerator layout* (Bloco 5).
+**Uso pretendido:** definição formal do Jacobiano; o próprio Remark
+registra que o *denominator layout* (adotado na aula, Bloco 5) é a
+transposta do *numerator layout* do livro.
 
 **Trecho:**
 > "Definition 5.6 (Jacobian). The collection of all first-order partial
@@ -204,7 +207,7 @@ Jacobiano, usando $\mathbf{e}(\boldsymbol{\theta})=\mathbf{y}-\Phi
 \boldsymbol{\theta}$ (sinal oposto ao nosso
 $\mathbf{r}=X\boldsymbol{\beta}-\mathbf{y}=-\mathbf{e}$) e
 $L(\mathbf{e})=\|\mathbf{e}\|^2$. Substitui a nota de exposição própria
-originalmente planejada para $J_{\mathbf{r}}(\boldsymbol{\beta})=X$ —
+originalmente planejada para $J_{\mathbf{r}}(\boldsymbol{\beta})=X^T$ —
 a identificação continua sendo observação nossa (o MathML não nomeia o
 Jacobiano do resíduo como "a matriz de design"), mas a regra da cadeia
 com Jacobiano que a envolve tem citação direta e precisa.

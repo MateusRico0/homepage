@@ -81,7 +81,7 @@ extenso deixa de valer nesse(s) ponto(s). O restante do argumento
 explicitamente na prova, na divisão por $\|\nabla f(\mathbf{x})\|$ —
 sem ela, a Proposição simplesmente não tem nada a dizer. De fato, com
 $\nabla f(\mathbf{x})=\mathbf{0}$, $D_{\mathbf{v}}f(\mathbf{x})=
-\nabla f(\mathbf{x})\cdot\mathbf{v}=0$ para **toda** direção — não há
+\nabla f(\mathbf{x})^T\mathbf{v}=0$ para **toda** direção — não há
 nenhuma direção que aumente $f$ a uma taxa positiva de primeira ordem.
 Esse é, precisamente, o critério de ponto crítico que abre a Aula 7.
 
@@ -102,21 +102,21 @@ Esse é, precisamente, o critério de ponto crítico que abre a Aula 7.
 
 ### Pausa Ativa 5 (Jacobiano) — "Modelo com 2 saídas: como muda a forma do Jacobiano do resíduo?"
 
-**Discussão.** A Definição 5.6 organiza o Jacobiano com uma linha por
-componente de saída e uma coluna por variável de entrada (*numerator
-layout*). Aumentar o número de saídas por observação aumenta o número
-de **linhas**; aumentar o número de atributos (parâmetros) aumenta o
-número de **colunas** — os dois graus de liberdade são independentes
+**Discussão.** A Definição 5.6, no *denominator layout* adotado,
+organiza o Jacobiano com uma linha por variável de entrada e uma coluna
+por componente de saída. Aumentar o número de saídas por observação
+aumenta o número de **colunas**; aumentar o número de atributos
+(parâmetros) aumenta o número de **linhas** — os dois graus de liberdade são independentes
 entre si, e a regra da cadeia com Jacobiano (Bloco 5) vale para
 qualquer composição diferenciável, não só para a perda quadrática desta
 aula.
 
 **V/F resolvido:**
 
-- ✔ *Numerator layout*: linhas = elementos de $f$ — $2$ saídas por
-  observação dobra as linhas.
-- ✔ Colunas = número de parâmetros, independente do número de saídas.
-- ✔ Numerator layout: linhas = elementos de $f$ (aqui, os $10$
+- ✔ *Denominator layout*: colunas = componentes de $f$ — $2$ saídas por
+  observação dobra as colunas.
+- ✔ Linhas = número de parâmetros, independente do número de saídas.
+- ✔ Denominator layout: colunas = componentes de $f$ (aqui, os $10$
   neurônios de saída) — exatamente a Definição 5.6.
 - ✗ A regra da cadeia com Jacobiano (MathML Exemplo 5.11, adaptado)
   vale para qualquer composição diferenciável $g\circ\mathbf{r}$ — a

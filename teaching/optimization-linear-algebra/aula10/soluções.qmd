@@ -1,0 +1,182 @@
+---
+title: "Soluções — Aula 10: Grafos de Computação e Diferenciação Automática"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+
+::: {.callout-tip icon=false}
+Este documento apresenta o gabarito detalhado das questões de Verdadeiro ou Falso
+da [folha de exercícios](exercicios.qmd). Cada afirmação é acompanhada de sua
+justificativa matemática formal.
+:::
+
+## Teste 1 — Os Quatro Paradigmas da Diferenciação
+
+::: {.callout-note icon=false}
+## Afirmações
+- □ A diferenciação analítica manual implementada em código estático possui a menor sobrecarga de memória em tempo de execução entre todos os métodos.
+- □ A diferenciação simbólica decompõe o programa em números de ponto flutuante e acumula derivadas através de variáveis adjuntas locais.
+- □ A técnica de diferenciação automática avalia derivadas com precisão exata de máquina sem introduzir erro de truncamento dependente de um passo $h$.
+- □ O fenômeno do inchaço de expressões (*expression swell*) ocorre em sistemas de álgebra simbólica quando a regra da cadeia e do produto replicam subexpressões compartilhadas repetidamente.
+:::
+
+::: {.callout-tip icon=false}
+## Justificativas
+- ✔ **V:** Como as fórmulas são pré-compiladas diretamente em operações aritméticas sem armazenar grafos ou closures dinâmicas, o consumo de memória é mínimo.
+- ✗ **F:** A diferenciação simbólica manipula expressões algébricas puras (fórmulas); quem decompõe o programa e acumula valores numéricos de adjuntas é a **diferenciação automática**.
+- ✔ **V:** A autodiff aplica as fórmulas analíticas exatas das operações atômicas sem usar aproximações de quocientes com limites $h \to 0$.
+- ✔ **V:** A aplicação sucessiva da regra do produto $(uv)' = u'v + uv'$ sem fatoração de nós comuns gera um crescimento exponencial de termos na árvore sintática.
+:::
+
+---
+
+## Teste 2 — Instabilidade Numérica e Diferenças Finitas
+
+::: {.callout-note icon=false}
+## Afirmações
+- □ O erro da aproximação por diferença finita progressiva simples $\frac{f(x+h)-f(x)}{h}$ é governado assintoticamente por um erro de truncamento de ordem $\mathcal{O}(h^2)$.
+- □ Para qualquer função diferenciável em computador real, quanto menor for a escolha do passo $h > 0$, mais precisa será a derivada calculada por diferenças finitas.
+- □ O cancelamento subtrativo catastrófico ocorre quando subtraímos dois números de ponto flutuante quase idênticos, eliminando os dígitos mais significativos da mantissa.
+- □ O cálculo do vetor gradiente $\nabla f \in \mathbb{R}^d$ via diferenças finitas centrais exige exatamente $2d$ avaliações da função original.
+:::
+
+::: {.callout-tip icon=false}
+## Justificativas
+- ✗ **F:** A diferença progressiva simples possui erro de truncamento linear $\mathcal{O}(h)$; a diferença **central** $\frac{f(x+h)-f(x-h)}{2h}$ é que possui erro $\mathcal{O}(h^2)$.
+- ✗ **F:** Em computadores reais, quando $h < \sqrt{\epsilon_{\text{mach}}}$, o erro de cancelamento subtrativo $\frac{\epsilon_{\text{mach}}}{h}$ cresce vertiginosamente, degradando a precisão.
+- ✔ **V:** Ao subtrair $f(x+h) - f(x)$ para $h$ minúsculo, os bits de maior ordem se anulam, deixando apenas ruído de arredondamento nos bits de menor peso.
+- ✔ **V:** Para cada uma das $d$ coordenadas, precisamos avaliar $f(\mathbf{x} + h\mathbf{e}_i)$ e $f(\mathbf{x} - h\mathbf{e}_i)$, totalizando $2d$ chamadas da função.
+:::
+
+---
+
+## Teste 3 — Grafos Acíclicos Direcionados (DAGs) e Topologia
+
+::: {.callout-note icon=false}
+## Afirmações
+- □ Em um Grafo Acíclico Direcionado (DAG) computacional, cada nó representa uma operação ou variável e cada aresta direcionada indica a dependência de fluxo de dados.
+- □ A existência de ciclos direcionados em um grafo de computação é compatível com a construção de uma ordenação topológica bem definida.
+- □ A ordenação topológica de um DAG pode ser construída linearmente no número de nós e arestas utilizando uma Busca em Profundidade (DFS).
+- □ Em um grafo computacional, a passagem direta (*forward pass*) avalia os nós na ordem topológica natural, enquanto a passagem reversa avalia os nós na ordem topológica inversa.
+:::
+
+::: {.callout-tip icon=false}
+## Justificativas
+- ✔ **V:** Arestas $(u, v)$ indicam que a avaliação de $v$ depende diretamente do valor previamente calculado em $u$.
+- ✗ **F:** Se houver um ciclo $u \to v \to u$, é impossível ordenar os nós de modo que todas as arestas apontem para a frente; ciclos impedem a existência de ordenação topológica.
+- ✔ **V:** O algoritmo clássico de Tarjan/Kahn baseado em DFS visita cada nó e cada aresta uma única vez, operando em tempo $\mathcal{O}(|V| + |E|)$.
+- ✔ **V:** Para avaliar $v_i$, seus pais devem estar prontos (ordem topológica); para avaliar $\bar{v}_i$, seus filhos devem ter propagado suas adjuntas (ordem inversa).
+:::
+
+---
+
+## Teste 4 — Modo Forward (Diferenciação Tangente)
+
+::: {.callout-note icon=false}
+## Afirmações
+- □ No modo forward de autodiff, a variável tangente $\dot{v}_i$ representa a taxa de variação de $v_i$ em relação a uma variável de entrada selecionada.
+- □ O modo forward de diferenciação automática não exige o armazenamento prévio dos nós intermediários em memória após o uso na passagem direta.
+- □ Para calcular a matriz Jacobiana completa de uma função $\mathbf{f}: \mathbb{R}^n \to \mathbb{R}^m$, o modo forward exige exatamente $m$ passagens pelo grafo.
+- □ O modo forward é computacionalmente mais eficiente do que o modo reverso quando o número de variáveis de entrada é muito menor do que o número de saídas ($n \ll m$).
+:::
+
+::: {.callout-tip icon=false}
+## Justificativas
+- ✔ **V:** A variável tangente é formalmente definida por $\dot{v}_i = \frac{\partial v_i}{\partial x_k}$ para uma direção de entrada fixada.
+- ✔ **V:** Como as derivadas tangentes avançam simultaneamente com a avaliação direta, os nós intermediários podem ser desalocados assim que geram seus sucessores.
+- ✗ **F:** No modo forward, cada passagem calcula uma coluna do Jacobiano (derivada por uma entrada); logo, são necessárias $n$ passagens (e não $m$).
+- ✔ **V:** O custo do modo forward é $\mathcal{O}(n \cdot C)$, enquanto o do reverso é $\mathcal{O}(m \cdot C)$; se $n \ll m$, o modo forward é ordens de magnitude mais rápido.
+:::
+
+---
+
+## Teste 5 — Modo Reverse (Diferenciação Adjunta)
+
+::: {.callout-note icon=false}
+## Afirmações
+- □ A variável adjunta $\bar{v}_i$ no modo reverso é formalmente definida como a derivada parcial da saída final $\mathcal{L}$ em relação à variável intermediária $v_i$.
+- □ A semente inicial da passagem reversa para uma função com saída escalar $\mathcal{L}$ é sempre fixada como $\bar{\mathcal{L}} = 1{,}0$.
+- □ Se um nó intermediário $v_i$ possuir múltiplos nós filhos no grafo, sua variável adjunta total $\bar{v}_i$ é obtida multiplicando as sensibilidades recebidas de cada filho.
+- □ O algoritmo clássico de *Backpropagation* utilizado em Redes Neurais é uma instância particular do modo reverso de diferenciação automática aplicado a grafos em camadas.
+:::
+
+::: {.callout-tip icon=false}
+## Justificativas
+- ✔ **V:** Por definição, a variável adjunta expressa a sensibilidade terminal $\bar{v}_i = \frac{\partial \mathcal{L}}{\partial v_i}$.
+- ✔ **V:** Como $\bar{\mathcal{L}} = \frac{\partial \mathcal{L}}{\partial \mathcal{L}} = 1{,}0$, essa constante atua como a condição de contorno terminal da cadeia.
+- ✗ **F:** Pela regra da cadeia multivariada, as contribuições dos nós filhos **se somam**: $\bar{v}_i = \sum_{k \in \text{Ch}(i)} \bar{v}_k \frac{\partial \phi_k}{\partial v_i}$.
+- ✔ **V:** O backpropagation é a aplicação exata da diferenciação adjunta em grafos com topologia sequencial densa ou convolucional.
+:::
+
+---
+
+## Teste 6 — O Teorema de Baur-Strassen e Complexidade
+
+::: {.callout-note icon=false}
+## Afirmações
+- □ O Teorema de Baur-Strassen garante que o cálculo do gradiente completo de uma função escalar no modo reverso custa no máximo 5 vezes o tempo de avaliar a função direta.
+- □ A cota de complexidade do Teorema de Baur-Strassen depende logaritmicamente da dimensão do espaço de entrada $d$.
+- □ Em termos de memória, o modo reverso de autodiff consome espaço estritamente constante $\mathcal{O}(1)$ em relação à profundidade do grafo.
+- □ A complexidade de tempo do modo reverso para uma função vetorial $\mathbf{f}: \mathbb{R}^n \to \mathbb{R}^m$ escala linearmente com a dimensão de saída $m$.
+:::
+
+::: {.callout-tip icon=false}
+## Justificativas
+- ✔ **V:** Para qualquer circuito aritmético escalar de custo $C$, o gradiente é avaliado em no máximo $5C$ operações elementares.
+- ✗ **F:** A cota de Baur-Strassen é **universalmente independente** de $d$; o fator $\le 5$ aplica-se quer $d=10$ quer $d=10^{11}$.
+- ✗ **F:** O modo reverso exige estocar as ativações intermediárias da passagem direta, consumindo memória linear $\mathcal{O}(L)$ em relação ao tamanho do grafo.
+- ✔ **V:** Como cada passagem reversa propaga o sinal de uma única componente de saída escalar, calcular o Jacobiano de $m$ saídas requer $m$ passagens reversas ($\mathcal{O}(m \cdot C)$).
+:::
+
+---
+
+## Teste 7 — Arquitetura de Motores de Autodiff e Acumulação
+
+::: {.callout-note icon=false}
+## Afirmações
+- □ Em motores de autodiff reverso como PyTorch e Micrograd, o gradiente de cada nó deve ser acumulado com o operador de adição `+=` para suportar grafos com bifurcações e reutilização de variáveis.
+- □ A chamada do método `.backward()` em um nó não-escalar exige o fornecimento explícito de um vetor de pesos para compor a projeção Jacobiano-vetor (*Vector-Jacobian Product* - VJP).
+- □ Se uma variável intermediária for criada sem que seu gradiente seja computado, o grafo de computação é quebrado e nenhum nó anterior poderá receber derivadas.
+- □ O comando `torch.no_grad()` reduz o uso de memória durante a inferência porque impede o armazenamento de tensores intermediários e closures de retropropagação.
+:::
+
+::: {.callout-tip icon=false}
+## Justificativas
+- ✔ **V:** Quando uma variável alimenta múltiplos caminhos, a regra da cadeia exige a soma de todas as derivadas parciais incidentes.
+- ✔ **V:** Para saídas vetoriais $\mathbf{y}$, o método `.backward(v)` calcula o produto vetor-Jacobiano $\mathbf{v}^T J$, exigindo a especificação de $\mathbf{v}$.
+- ✗ **F:** Apenas nós desconectados da saída deixam de receber gradientes; a propagação reversa percorre normalmente qualquer caminho conectado no DAG.
+- ✔ **V:** Sem a flag de diferenciação, o framework não constrói nós de grafo nem aloca closures de retropropagação, liberando memória instantaneamente.
+:::
+
+---
+
+## Teste 8 — Complexidade de Memória e Activation Checkpointing
+
+::: {.callout-note icon=false}
+## Afirmações
+- □ A fita de execução (*tape*) do modo reverso necessita armazenar todas as ativações intermediárias da passagem direta que participam como operandos nas derivadas locais.
+- □ A técnica de *Activation Checkpointing* reduz o footprint de memória de uma rede de $L$ camadas de $\mathcal{O}(L)$ para $\mathcal{O}(\sqrt{L})$.
+- □ O ganho de memória do *Activation Checkpointing* é obtido ao descartar as ativações intermediárias e recalculá-las localmente sob demanda durante a passagem reversa.
+- □ A aplicação de *Activation Checkpointing* reduz a precisão matemática dos gradientes calculados devido a erros adicionais de truncamento na recomputação.
+:::
+
+::: {.callout-tip icon=false}
+## Justificativas
+- ✔ **V:** Na regra $\frac{\partial(u \times v)}{\partial u} = v$, o valor numérico de $v$ deve ser recuperado da passagem direta.
+- ✔ **V:** Ao particionar $L$ camadas em $\sqrt{L}$ blocos de tamanho $\sqrt{L}$, o armazenamento de pico passa a ser $\mathcal{O}(\sqrt{L})$.
+- ✔ **V:** Os checkpoints servem de âncoras para reexecutar o forward pass estritamente no bloco que está sendo retropropagado no momento.
+- ✗ **F:** O checkpointing é matematicamente exato; ele reexecuta exatamente as mesmas operações aritméticas originais, preservando a precisão bit a bit.
+:::
+
