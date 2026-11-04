@@ -1,7 +1,7 @@
 ---
 title: "Projeto Final — Aprendizado Não Supervisionado"
-subtitle: "Modelos de Recomendação e Análise de Espaços Latentes: Baselines, Fatoração Matricial, Modelos Generativos e Geometria de Representações"
-date: "2026-10-31"
+subtitle: "Modelos de recomendação e análise de espaços latentes"
+date: "2026-11-04"
 author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
 lang: pt-BR
 ---
@@ -11,292 +11,300 @@ lang: pt-BR
 ---
 
 ::: {.callout-tip}
-### Arquivos de Apoio do Projeto para Download
-* [📥 **Baixar Notebook Base do Projeto (`unsupervised_assignment_2s2026.ipynb`)**](./unsupervised_assignment_2s2026.ipynb)
-* [⚙️ **Baixar Especificação de Dependências com `uv` (`pyproject.toml`)**](./pyproject.toml)
+### Arquivos de apoio
+* [📥 **Notebook base do projeto (`unsupervised_assignment_2s2026.ipynb`)**](./unsupervised_assignment_2s2026.ipynb)
+* [⚙️ **Dependências para o `uv` (`pyproject.toml`)**](./pyproject.toml)
 :::
 
 ---
 
-## Objetivo do Trabalho e o que Almejar Entregar
+## Objetivo
 
-O objetivo deste projeto é desenvolver e avaliar a capacidade dos alunos no **ciclo completo de modelagem e investigação não supervisionada de representações latentes**, conectando a prática computacional ao **rigor teórico, probabilístico e geométrico** abordado ao longo de MC847.
+Em sistemas de recomendação, queremos prever as notas que faltam a partir de um histórico parcial de interações. Neste projeto, vocês vão treinar modelos que fazem suposições diferentes sobre esse problema e investigar o que cada um aprende.
 
-Em sistemas de recomendação, o problema central de prever avaliações não observadas a partir de um histórico parcial de interações é fundamentalmente um problema de **completar informação**: dada uma matriz esparsa de notas, quais preferências latentes explicam os padrões observados?
+Ao longo do trabalho, tentem responder a estas perguntas:
 
-Nesta disciplina, modelos de aprendizado não supervisionado não são tratados como heurísticas empíricas desconectadas, mas como **modelos estatísticos estruturados** que operam sob hipóteses distributivas explícitas, princípios variacionais (ELBO) e pressupostos geométricos sobre os espaços latentes compartilhados.
+* **O que cada modelo supõe?**
+  * O que muda ao passar de um modelo determinístico (PCA com imputação ou fatoração de matrizes) para um modelo probabilístico (PPCA e VAE)?
+  * O que implica supor ruído gaussiano com variância $\sigma^2$ fixa nas notas?
+* **O que o espaço latente contém?**
+  * O que os vetores de usuários ($\mathbf{z}_u$) e de filmes ($\mathbf{w}_i$) codificam?
+  * Dá para recuperar informações que **não foram usadas no treino**, como idade, gênero e ocupação dos usuários, ou gêneros, ano e popularidade dos filmes?
+  * Isso pode ser medido, além de observado em gráficos 2D?
+* **Os espaços dos diferentes modelos têm a mesma estrutura?**
+  * Modelos lineares e não lineares aproximam os mesmos vizinhos?
+* **O que vocês conseguem investigar por conta própria?**
+  * Na Etapa 3, cada grupo formula uma pergunta e uma hipótese que possa ser refutada, e desenha um experimento para testá-la.
 
-A equipe deve almejar entregar uma **investigação científica aprofundada**, respondendo a questões conceituais centrais:
-
-* **Quais são as premissas estruturais e distributivas de cada família de modelos?**
-  * O que muda ao passar de uma aproximação puramente determinística (PCA com imputação ou fatoração matricial) para um modelo gerador probabilístico completo (PPCA e VAE)?
-  * Quais são as consequências teóricas e práticas de assumir distribuições gaussianas com ruído isotrópico $\sigma^2$ sobre as avaliações observadas?
-* **Como a geometria do espaço latente reflete a semântica do domínio?**
-  * O que os vetores latentes de usuários ($\mathbf{z}_u$) e itens ($\mathbf{w}_i$) aprendidos pelos diferentes modelos realmente codificam?
-  * É possível recuperar metadados externos que **não foram utilizados durante o treinamento** (idade, gênero, ocupação dos usuários; gêneros, ano e popularidade dos filmes)?
-  * A organização semântica pode ser mensurada e validada quantitativamente além de inspeções visuais em 2D?
-* **Os espaços latentes aprendidos sob diferentes premissas compartilham a mesma topologia?**
-  * Espaços com funções de compatibilidade lineares preservam a mesma vizinhança de modelos não lineares?
-* **O grupo é capaz de formular e testar uma hipótese científica original?**
-  * Estabelecer uma pergunta de pesquisa, formular uma hipótese falseável com previsão mensurável e desenhar um protocolo de experimentação honesto na terceira etapa do projeto.
-* **O código é determinístico e reprodutível de forma transparente?**
-  * Entrega do notebook estruturado e pipeline autocontido gerenciado via [`uv`](https://docs.astral.sh/uv/) com resolução exata de dependências.
+::: {.callout-note}
+### O que é avaliado
+A nota não depende da métrica obtida pelo modelo, mas da qualidade das hipóteses, da aplicação correta do protocolo e da análise das evidências. Resultados negativos ou inconclusivos valem, se vierem com análise crítica.
+:::
 
 ---
 
-## Formação das Equipes
+## Equipes
 
 ::: {.callout-important}
-### Regra de Composição dos Grupos
-Este trabalho **deverá ser realizado por 2 ou 3 alunos, impreterivelmente**.
-
-Não serão permitidos trabalhos individuais, nem grupos compostos por 4 ou mais estudantes. A formulação conjunta de hipóteses teóricas, a discussão crítica sobre a geometria dos espaços latentes e a divisão estruturada dos experimentos empíricos fazem parte dos objetivos formativos da atividade.
+### Composição dos grupos
+O trabalho **deve ser feito por 2 ou 3 alunos**. Não serão aceitos trabalhos individuais nem grupos com 4 ou mais estudantes.
 :::
 
 ---
 
-## O Conjunto de Dados: MovieLens 100K
+## Dados: MovieLens 100K
 
-O projeto utiliza o conjunto de dados de referência **MovieLens 100K** ([Harper e Konstan, 2015](https://www.scirp.org/reference/referencespapers?referenceid=3586299)), disponível no notebook base da disciplina:
+O projeto usa o **MovieLens 100K** ([Harper e Konstan, 2015](https://doi.org/10.1145/2827872)), carregado pelo notebook base:
 
-* **Matriz de Avaliações ($R$):** 100.000 avaliações inteiras (escala de 1 a 5) atribuídas por $n = 943$ usuários a $m = 1.682$ filmes. Cada usuário possui pelo menos 20 notas registradas.
-* **Esparsidade:** A matriz apresenta densidade de apenas $\approx 6{,}3\%$, ou seja, mais de $93\%$ dos pares usuário–item não possuem notas observadas.
-* **Metadados de Usuários:** Idade, gênero e ocupação (21 categorias profissionais).
-* **Metadados de Filmes:** Título, ano de lançamento e 19 indicadores binários de gênero (classificação multi-rótulo).
+* **Notas ($R$):** 100.000 notas inteiras, de 1 a 5, dadas por $n = 943$ usuários a $m = 1.682$ filmes. Cada usuário tem pelo menos 20 notas.
+* **Esparsidade:** a densidade é de cerca de $6{,}3\%$, ou seja, mais de $93\%$ dos pares usuário–filme não têm nota.
+* **Usuários:** idade, gênero e ocupação (21 categorias).
+* **Filmes:** título, ano e 19 indicadores de gênero. Um filme pode ter vários gêneros.
 
 ::: {.callout-warning}
-### Natureza dos Dados: Ausência Não Aleatória (*Missing Not At Random* — MNAR)
-Em sistemas de recomendação do mundo real, a ausência de uma nota não pode ser tratada como um processo puramente aleatório (*Missing Completely at Random*). Usuários tendem a avaliar filmes que escolheram assistir (viés de seleção e exposição), e filmes populares acumulam ordens de magnitude a mais de avaliações do que filmes de nicho. 
-
-Isso significa que o conjunto observado de treino é amostrado sob forte viés de observação. Manter essa distinção em mente é indispensável durante a análise crítica dos resultados.
+### A ausência de notas não é aleatória
+Um usuário pode não ter avaliado um filme por falta de interesse, por não o conhecer ou por esquecimento, e filmes populares recebem muito mais notas que os de nicho. Portanto, os dados de treino e de teste são enviesados. Levem isso em conta ao analisar os resultados.
 :::
 
 ---
 
-## Formulação Matemática Unificada
+## Formulação do problema
 
-Para conectar todos os métodos analisados, adotamos uma formulação aditiva geral para a previsão da nota $R_{ui}$ do usuário $u$ para o item $i$:
+A nota $R_{ui}$ do usuário $u$ para o filme $i$ é modelada por:
 
 $$R_{ui} = \mu + b_u + b_i + f(\mathbf{z}_u, \mathbf{w}_i) + \epsilon_{ui}$$
 
 onde:
 
-* $\mu \in \mathbb{R}$ representa a média global das avaliações observadas.
-* $b_u \in \mathbb{R}$ é o viés (*bias*) intrínseco do usuário $u$ (grau de severidade/generosidade nas notas).
-* $b_i \in \mathbb{R}$ é o viés intrínseco do filme $i$ (popularidade/aclamação geral média).
-* $\mathbf{z}_u \in \mathbb{R}^k$ e $\mathbf{w}_i \in \mathbb{R}^k$ são os vetores de representação no espaço latente compartilhado de dimensão $k$.
-* $f(\mathbf{z}_u, \mathbf{w}_i)$ é a função de compatibilidade latente (tipicamente o produto interno $\mathbf{z}_u^\top \mathbf{w}_i$ ou uma transformação neural).
-* $\epsilon_{ui}$ representa o erro de modelagem residual ou ruído estocástico.
+* $\mu$ é a média global das notas.
+* $b_u$ é o viés do usuário $u$: o quanto ele costuma dar notas acima ou abaixo da média.
+* $b_i$ é o viés do filme $i$: o quanto ele costuma receber notas acima ou abaixo da média. Ele não mede quantas pessoas viram o filme.
+* $\mathbf{z}_u, \mathbf{w}_i \in \mathbb{R}^k$ são os vetores latentes do usuário e do filme.
+* $f(\mathbf{z}_u, \mathbf{w}_i)$ mede a compatibilidade entre eles, em geral pelo produto interno $\mathbf{z}_u^\top \mathbf{w}_i$.
+* $\epsilon_{ui}$ é o erro.
+
+Nem todo modelo usa todos os termos. O PCA com imputação e o PPCA, por exemplo, têm uma média por filme e nenhum viés de usuário.
 
 ::: {.callout-note}
-### Formulação Transdutiva
-Conforme estruturado no notebook de apoio, os modelos adotam uma **abordagem transdutiva**: eles aprendem parâmetros e distribuições posteriores para o conjunto finito e fechado de usuários e filmes observados no treino, permitindo o máximo de liberdade de parametrização sem a necessidade de definir um mapeamento indutivo a partir de atributos brutos.
+### Modelos transdutivos
+Os modelos aprendem vetores apenas para os usuários e filmes presentes no treino. Um usuário é só um identificador, e suas notas não são usadas como atributos. Isso dá a cada usuário parâmetros próprios, mas o modelo não generaliza para usuários ou filmes novos sem novo treino.
 :::
 
 ---
 
-## Roteiro e Estrutura das Atividades
+## Protocolo experimental
 
-O projeto é organizado em **três etapas complementares**. O notebook inicial [`unsupervised_assignment_2s2026.ipynb`](./unsupervised_assignment_2s2026.ipynb) fornece o esqueleto computacional, o protocolo de divisão dos dados e as implementações de base para as Etapas 1 e 2.
+Todos os modelos, inclusive os mais simples, seguem o mesmo protocolo. Variem uma coisa de cada vez.
+
+* **Hipótese antes do experimento:** escrevam a hipótese e a previsão **antes** de rodar cada experimento.
+* **Divisão dos dados:** 80% das notas para treino e 20% para teste, estratificadas por usuário, com a função `split_ratings` do notebook.
+* **Métricas:** RMSE (principal) e MAE, com previsões limitadas a $[1, 5]$. Usem NLL quando o modelo definir uma verossimilhança. Métricas de lista seguem a Tarefa 1.3.
+* **Escolha de hiperparâmetros:** por validação cruzada com $K$ *folds* **dentro do treino**. O teste é usado uma única vez, para reportar o resultado final, depois de treinar com todo o treino.
+* **Incerteza:** comparem resultados com intervalos de confiança, seja pela média e desvio padrão entre os *folds*, seja por *bootstrap* no conjunto de teste.
+* **Interpretação:** separem o que um resultado diz sobre a previsão do que ele diz sobre a representação latente.
+* **Fontes e bibliotecas:** citem suas fontes. Vocês podem usar bibliotecas externas ou reescrever os modelos, desde que digam quais usaram e expliquem como mantiveram a fidelidade ao modelo.
+
+---
+
+## Etapas
+
+O projeto tem três etapas. O [notebook base](./unsupervised_assignment_2s2026.ipynb) traz o código de referência das Etapas 1 e 2.
+
+---
+
+### Etapa 1: Baselines e fatoração de matrizes
+
+Aqui construímos os modelos de referência, sem suposições probabilísticas.
+
+* **Tarefa 1.1: baseline aditiva**
+  * Treinem o modelo sem interação latente, ajustando os vieses por regressão linear com regularização $L_2$ ($\lambda_u, \lambda_i$):
+    $$R_{ui} = \mu + b_u + b_i + \epsilon_{ui}$$
+  * Reportem RMSE e MAE no teste.
+  * **Para discutir:** o que os vieses aprendidos dizem sobre os usuários e os filmes?
+* **Tarefa 1.2: PCA com imputação**
+  * Preencham as notas faltantes com a média do filme no treino, formando $\tilde{R}$, e apliquem PCA com $k$ componentes:
+    $$\hat{R}_{ui} = \bar{R}_i + \mathbf{z}_u^\top \mathbf{w}_i$$
+  * Escolham $k$ pelo protocolo e reportem RMSE e MAE no teste.
+  * **Para discutir:** aumentar $k$ melhora as previsões, traz ganhos decrescentes ou piora o desempenho? O que a imputação pode distorcer?
+* **Tarefa 1.3: fatoração de matrizes**
+  * Ajustem os vetores latentes usando só os pares observados $\Omega$, sem imputação:
+    $$\min_{b, \mathbf{Z}, \mathbf{W}} \sum_{(u,i)\in\Omega} \left(r_{ui} - \mu - b_u - b_i - \mathbf{z}_u^\top \mathbf{w}_i\right)^2 + \lambda_b \left(\sum_u b_u^2 + \sum_i b_i^2\right) + \lambda_z \left(\sum_u \|\mathbf{z}_u\|_2^2 + \sum_i \|\mathbf{w}_i\|_2^2\right)$$
+    No código de referência, $\mu$ é fixada na média do treino.
+  * Treinem por descida de gradiente estocástica (SGD) e escolham $k$, $\lambda_b$ e $\lambda_z$ pelo protocolo.
+  * **Comparação obrigatória:** com vieses ($\hat{R}_{ui} = \mu + b_u + b_i + \mathbf{z}_u^\top \mathbf{w}_i$) e sem vieses ($\hat{R}_{ui} = \mu + \mathbf{z}_u^\top \mathbf{w}_i$, que é o que faz `use_biases=False`). Quanto vem dos efeitos aditivos e quanto vem das interações latentes?
+  * **Métricas de lista:** além de RMSE e MAE, gerem para cada usuário a lista dos 10 filmes com maior nota prevista e calculem pelo menos uma métrica de lista (**Precision@10**, **Hit-Rate@10** ou **NDCG@10**) para todos os modelos que preveem nota. Digam no relatório o que conta como acerto (por exemplo, um filme de teste com nota 4 ou mais) e quais filmes são candidatos (por exemplo, os que o usuário não avaliou no treino), porque essas escolhas mudam bastante o resultado.
+  * **Para discutir:** o modelo com menor RMSE é o que gera as melhores listas? Por quê?
+
+---
+
+### Etapa 2: Modelos probabilísticos e espaço latente
+
+Agora passamos a descrever as notas com uma distribuição de probabilidade, o que torna explícitas a incerteza e o ruído.
+
+* **Tarefa 2.1: PCA probabilístico (PPCA) para matrizes esparsas**
+  * O modelo é linear e gaussiano:
+    $$\mathbf{z}_u \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_k), \qquad R_{ui} \mid \mathbf{z}_u \sim \mathcal{N}\left(\mu_i + \mathbf{z}_u^\top \mathbf{w}_i, \sigma^2\right)$$
+  * Treinem com o algoritmo **EM**, em que cada usuário contribui só com os filmes que avaliou. Notas ausentes são dados não observados, e não zeros.
+  * Escolham $k$ e $\sigma^2$ pelo protocolo e comparem o RMSE com o da Etapa 1.
+  * **Para discutir:** a configuração com menor RMSE é também a de melhor NLL média? Como $\sigma^2$ afeta a distribuição das notas? Como o prior gaussiano influencia as representações? O que implica estimar um vetor para cada usuário conhecido no treino?
+* **Tarefa 2.2: autoencoder variacional (VAE)**
+  * Cada usuário tem uma média $\mathbf{m}_u$ e uma variância diagonal $\mathbf{s}_u^2$ próprias, aprendidas como parâmetros (não há rede codificadora que receba as notas). A amostragem usa o truque da reparametrização: $\mathbf{z}_u = \mathbf{m}_u + \mathbf{s}_u \odot \boldsymbol{\epsilon}$, com $\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_k)$.
+  * O treino maximiza o ELBO, ponderado por $\beta$ e a menos de constantes:
+    $$\mathcal{L}_u = \mathbb{E}_{q_\phi(\mathbf{z}_u)}\left[ -\frac{1}{2\sigma^2} \sum_{i\in\Omega_u} (r_{ui} - g_\theta(\mathbf{z}_u)_i)^2 \right] - \beta \, \mathrm{D}_{\mathrm{KL}}\left( q_\phi(\mathbf{z}_u) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{I}_k) \right)$$
+  * **Comparação 1:** treinem o VAE com decodificador linear ($g_\theta(\mathbf{z}) = \boldsymbol{\mu} + \mathbf{W}\mathbf{z}$) e comparem com o PPCA, usando os mesmos $k$ e $\sigma^2$ (RMSE, MAE e NLL no teste).
+  * **Comparação 2:** troquem o decodificador linear por um não linear (no notebook, uma camada oculta com Tanh). A flexibilidade extra melhora as previsões ou leva a sobreajuste?
+  * **Sensibilidade:** variem um hiperparâmetro de cada vez, entre $\beta$, $\sigma^2$ ou $k$. Verifiquem a convergência pela curva em `history` antes de comparar os modelos.
+  * **Tempo de execução:** comparem o tempo de treino e de inferência da fatoração (SGD), do PPCA (que inverte uma matriz $k \times k$ por usuário a cada passo E) e do VAE (linear e não linear). O que seria viável com milhões de interações?
+* **Tarefa 2.3: análise dos espaços latentes**
+  * Comparem os espaços de **PCA com imputação**, **fatoração de matrizes**, **PPCA** e **VAE**, com um $k$ de sua escolha. Para os filmes, usem o VAE com decodificador linear, o único do notebook que gera `item_embeddings`.
+  * **Visualização:** projetem os vetores em 2D com PCA e t-SNE, colorindo os pontos com informações não usadas no treino (idade, gênero, ocupação; gêneros, ano, popularidade).
+  * **Medição:** treinem modelos supervisionados lineares sobre os vetores originais de dimensão $k$: `Ridge` para variáveis contínuas e `LogisticRegression`, avaliada por ROC-AUC, para categorias.
+    * **Evitem vazamento:** avaliem esses modelos com validação cruzada ou numa partição separada. Medir $R^2$ ou ROC-AUC nos mesmos dados do ajuste infla o resultado.
+  * **Comparação entre espaços:** os espaços podem ser invariantes a rotação, reflexão e escala. Alinhem os vetores antes de comparar, ou usem medidas que dispensem o alinhamento, como a correlação de distâncias e a sobreposição dos vizinhos mais próximos de cada filme (por exemplo, com similaridade de Jaccard).
+
+---
+
+### Etapa 3: Projeto do grupo
+
+Cada grupo propõe uma investigação própria: uma melhoria de modelo ou uma análise mais profunda de algum aspecto do problema. Vale partir de uma pergunta que surgiu nas etapas anteriores.
+
+::: {.callout-important}
+### Antes de rodar (Tarefa 3.1)
+Escrevam no relatório:
+
+1. **A pergunta:** o que vocês querem responder?
+2. **A hipótese:** que mecanismo justifica o que vocês esperam?
+3. **O experimento:** qual é o modelo de referência e qual é a mudança proposta?
+4. **A previsão:** o que deve subir, descer ou mudar nas métricas?
+5. **O que refutaria a hipótese:** qual resultado mostraria que ela está errada?
+
+Ao final, comparem o que foi previsto com o que foi observado, e digam o que isso ensina sobre a previsão e sobre o espaço latente.
+:::
+
+O grupo pode escolher uma das sugestões abaixo ou propor outra, desde que bem justificada.
+
+#### Sugestão A: Ausência não aleatória
+* **Motivação:** usuários ativos e filmes populares aparecem muito mais nos dados.
+* **Mudança:** estimar a probabilidade de observação $P(O_{ui} = 1)$ e pesar a perda pelo seu inverso ([Schnabel et al., 2016](https://arxiv.org/abs/1602.05352)):
+  $$\mathcal{L}_{\mathrm{IPW}} = \sum_{(u,i)\in\Omega} \frac{(r_{ui} - \hat{R}_{ui})^2}{P(O_{ui} = 1)}$$
+* **Pergunta:** isso melhora as previsões para filmes pouco avaliados? O que acontece com os populares?
+* **Atenção:** o conjunto de teste também é enviesado. Digam como vocês levam isso em conta na avaliação.
+
+#### Sugestão B: Metadados como *features*
+* **Motivação:** tratar usuários e filmes só como identificadores impede a generalização e dificulta o *cold start*.
+* **Mudança:** usar os atributos do usuário ($\mathbf{x}_u$) e do filme para definir a média do prior dos vetores latentes, como em $\mathbf{z}_u \sim \mathcal{N}(h_\psi(\mathbf{x}_u), \mathbf{I})$.
+* **Pergunta:** isso melhora as previsões para usuários com pouco histórico?
+* **Atenção:** todo usuário tem pelo menos 20 notas. Definam o que é "pouco histórico", por exemplo escondendo notas de parte dos usuários.
+
+#### Sugestão C: Geometria da compatibilidade
+* **Motivação:** os modelos anteriores medem a compatibilidade pelo produto interno $\mathbf{z}_u^\top \mathbf{w}_i$, que não é uma distância e não obedece à desigualdade triangular. Trocá-lo por uma função aprendida também nem sempre ajuda: [Rendle et al. (2020)](https://arxiv.org/abs/2005.09683) mostram um caso em que o produto interno bem ajustado supera um MLP.
+* **Mudança:** usar uma distância, como $-\|\mathbf{z}_u - \mathbf{w}_i\|_2$, ou uma pequena rede que receba $\mathbf{z}_u$ e $\mathbf{w}_i$.
+* **Pergunta:** isso muda o que o espaço codifica, o erro de previsão e a qualidade das listas?
+
+#### Sugestão D: Estrutura do espaço latente no VAE
+* **Motivação:** a escolha de hiperparâmetros olhou para o erro de previsão, e não para a geometria do espaço latente.
+* **Mudança:** variar de forma sistemática $\beta$ ([$\beta$-VAE](https://openreview.net/forum?id=Sy2fzU9gl)), a dimensão $k$ ou a regularização.
+* **Pergunta:** o que muda no espaço aprendido, em termos de estabilidade de clusters, correlação com metadados e erro de previsão? Valores maiores de $\beta$ pioram a reconstrução em troca de uma estrutura mais legível?
+
+---
+
+## Relatório
+
+O relatório deve ser claro e direto, em PDF, com **10 a 15 páginas** de conteúdo (sem contar capa, referências e apêndices), organizado em 6 seções. Os tamanhos abaixo são indicativos.
+
+### 1. Problema, dados e protocolo *(cerca de 1 página)*
+* O problema de recomendação como aprendizado transdutivo em matrizes esparsas, com a notação usada: $R, \mathbf{z}_u, \mathbf{w}_i, \Omega$.
+* Análise dos dados: distribuição das notas, esparsidade, sinais de ausência não aleatória e perfil dos metadados.
+* Protocolo: divisão treino/teste, validação cruzada, intervalos de confiança e métricas (RMSE, MAE, NLL e a métrica de lista, com a definição de acerto e de candidatos).
+
+### 2. Modelos e suposições *(2 a 3 páginas)*
+* O que cada modelo supõe e como é ajustado:
+  * Baseline: vieses por mínimos quadrados regularizados.
+  * PCA com imputação: aproximação de posto $k$ e efeitos da imputação pela média.
+  * Fatoração de matrizes: perda nos dados observados, regularização $L_2$ e SGD.
+  * PPCA: modelo gerador, algoritmo EM e posterior gaussiana.
+  * VAE: média e variância aprendidas por usuário, truque da reparametrização e ELBO.
+* Comparação entre modelos determinísticos e probabilísticos.
+
+### 3. Resultados das Etapas 1 e 2 *(3 a 4 páginas)*
+* Tabela com todos os modelos no teste, com intervalos de confiança: RMSE e MAE; NLL para PPCA e VAE; e a métrica de lista.
+* Comparação entre erro da nota (RMSE) e qualidade das listas.
+* Fatoração com e sem vieses.
+* PPCA e VAE linear com as mesmas suposições.
+* Efeito do decodificador não linear e sensibilidade a $\beta$, $\sigma^2$ ou $k$.
+* Convergência dos modelos, incluindo a curva em `history` do VAE.
+* Tempo de treino e de inferência.
+
+### 4. Análise dos espaços latentes *(2 a 3 páginas)*
+* Projeções 2D (PCA e t-SNE) dos quatro modelos.
+* Tabela com $R^2$ (`Ridge`) e ROC-AUC (`LogisticRegression`) em dados não usados no ajuste, para os metadados de usuários e filmes.
+* Comparação de distâncias e vizinhanças entre os modelos.
+* Discussão: que informação cada espaço organiza melhor?
+
+### 5. Projeto do grupo *(cerca de 3 páginas)*
+* Pergunta, hipótese, experimento, previsão e o que refutaria a hipótese.
+* O que foi implementado.
+* Resultados: a hipótese foi confirmada ou refutada?
+* O que o resultado ensina sobre o problema ou sobre o espaço latente.
+
+### 6. Conclusões *(cerca de 1 página)*
+* Principais achados.
+* Limitações, como a abordagem transdutiva e o viés de seleção.
+* Próximos passos.
+
+---
+
+## O que entregar
+
+Ao final do semestre, cada equipe entrega:
+
+### 1. Relatório em PDF
+Organizado nas 6 seções acima, com 10 a 15 páginas de conteúdo.
+
+### 2. Repositório reprodutível com `uv`
+O repositório deve ter a estrutura abaixo. Baixem o notebook e o `pyproject.toml` nesta página e criem os demais arquivos.
 
 ```
 unsupervised-assignment/
-├── data/                         # Conjunto MovieLens 100K baixado automaticamente
-├── unsupervised_assignment_2s2026.ipynb # Notebook com código base e templates
-├── pyproject.toml                # Especificação de dependências via uv
-├── uv.lock                       # Lockfile determinístico
-└── README.md                     # Instruções de reprodução
+├── data/                                # MovieLens 100K, baixado pelo notebook
+├── unsupervised_assignment_2s2026.ipynb # notebook preenchido e executado
+├── pyproject.toml                       # dependências
+├── uv.lock                              # versões exatas, gerado pelo uv
+├── .python-version                      # versão do Python usada (ex.: 3.12)
+└── README.md                            # como reproduzir
 ```
 
----
+O `README.md` deve dizer como reproduzir o ambiente:
 
-### Etapa 1: Baselines e Modelagem Matricial Determinística
+```bash
+# 1. Criar o ambiente
+uv sync
 
-O objetivo desta etapa é construir estimadores determinísticos de referência, partindo de efeitos aditivos puros até a fatoração matricial direta sobre dados esparsos.
+# 2. Abrir o Jupyter Lab
+uv run --with jupyter jupyter lab
+```
 
-* **Tarefa 1.1 — Baseline Aditiva de Primeira Ordem:**
-  * Implementação do modelo restrito sem interações latentes:
-    $$R_{ui} = \mu + b_u + b_i + \epsilon_{ui}$$
-  * Ajuste dos vieses via regressão linear regularizada com penalidades $L_2$ ($\lambda_u, \lambda_i$).
-  * Avaliação de RMSE e MAE no conjunto de teste com predições recortadas no intervalo $[1, 5]$.
-  * **Investigação conceitual:** O que a distribuição dos vieses aprendidos revela empiricamente sobre o comportamento dos avaliadores e a recepção dos filmes?
-* **Tarefa 1.2 — PCA com Imputação pela Média:**
-  * Preenchimento da matriz de notas faltantes com a média observada do respectivo item no conjunto de treino ($\tilde{R}$).
-  * Aproximação de posto $k$ via PCA clássico:
-    $$\hat{R}_{ui} = \bar{R}_i + \mathbf{z}_u^\top \mathbf{w}_i$$
-  * Seleção do número ótimo de componentes principais $k$.
-  * **Investigação conceitual:** Como o erro de generalização varia com $k$? Por que a imputação ingênua distorce a geometria latente e gera patologias no aprendizado de representações?
-* **Tarefa 1.3 — Fatoração de Matrizes com Otimização Estocástica:**
-  * Otimização direta sobre o conjunto de pares observados $\Omega$, sem imputação artificial:
-    $$\min_{\mu, b, \mathbf{Z}, \mathbf{W}} \sum_{(u,i)\in\Omega} \left(r_{ui} - \mu - b_u - b_i - \mathbf{z}_u^\top \mathbf{w}_i\right)^2 + \lambda_b \left(\sum_u b_u^2 + \sum_i b_i^2\right) + \lambda_z \left(\sum_u \|\mathbf{z}_u\|_2^2 + \sum_i \|\mathbf{w}_i\|_2^2\right)$$
-  * Treinamento por descida de gradiente estocástica (SGD) e seleção sistemática da dimensão latente $k$ e dos coeficientes de regularização $\lambda_b, \lambda_z$.
-  * **Estudo de ablação obrigatório:** Comparação direta da fatoração **com vieses** versus **sem vieses** ($\hat{R}_{ui} = \mathbf{z}_u^\top \mathbf{w}_i$), mantendo o mesmo protocolo experimental. Qual a contribuição isolada dos efeitos aditivos marginais em relação às interações latentes de segunda ordem?
-  * **Avaliação Orientada à Decisão (Métricas Top-$K$):** Além de reportar RMSE e MAE no teste, avalie os modelos sob a perspectiva de decisão em sistemas reais: gere a lista ordenada dos $K=10$ filmes com maiores notas previstas para cada usuário e calcule métricas de ranking (como **Precision@10**, **Hit-Rate@10** ou **NDCG@10**).
-    * *Reflexão conceitual:* O modelo que minimiza o erro médio quadrático (RMSE) necessariamente entrega a melhor ordenação dos itens de maior interesse? O que acontece ao penalizar erros em notas intermediárias vs. acertar os filmes favoritos?
+Fixem as sementes aleatórias (`set_seed(42)`) para que tabelas e figuras possam ser reproduzidas.
 
 ---
 
-### Etapa 2: Suposições sobre a Estrutura Latente e Modelagem Probabilística
+## Avaliação
 
-Nesta etapa, a modelagem abandona a perspectiva estritamente geométrica de ajuste por mínimos quadrados e assume uma **perspectiva geradora probabilística**, formalizando a incerteza dos dados e das variáveis latentes.
-
-* **Tarefa 2.1 — PCA Probabilístico (PPCA) para Matrizes Esparsas:**
-  * Modelo generativo linear gaussiano:
-    $$\mathbf{z}_u \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_k), \qquad R_{ui} \mid \mathbf{z}_u \sim \mathcal{N}\left(\mu_i + \mathbf{z}_u^\top \mathbf{w}_i, \sigma^2\right)$$
-  * Ajuste dos parâmetros ($\mu_i, \mathbf{w}_i$) e das posteriores latentes via algoritmo **Expectation-Maximization (EM)** adaptado para avaliações esparsas (onde cada usuário contribui no passo E apenas com os filmes que avaliou).
-  * Seleção da dimensão latente $k$ e da variância do ruído $\sigma^2$ no conjunto de validação.
-  * **Investigação conceitual:** A parametrização que minimiza o erro quadrático (RMSE) coincide com a que minimiza a log-verossimilhança negativa (*Negative Log-Likelihood* — NLL)? Qual o papel regulador do prior gaussiano $\mathcal{N}(\mathbf{0}, \mathbf{I}_k)$ sobre as representações latentes?
-* **Tarefa 2.2 — Autoencoder Variacional (VAE) e Decodificação Não Linear:**
-  * Codificador por embeddings estimando médias posteriores $\mathbf{m}_u$ e variâncias diagonais $\mathbf{s}_u^2$, amostradas via o truque da reparametrização: $\mathbf{z}_u = \mathbf{m}_u + \mathbf{s}_u \odot \boldsymbol{\epsilon}$, com $\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \mathbf{I}_k)$.
-  * Maximização do Limite Inferior da Evidência (*Evidence Lower Bound* — ELBO) ponderado pelo coeficiente $\beta$:
-    $$\mathcal{L}_u = \mathbb{E}_{q_\phi(\mathbf{z}_u)}\left[ -\frac{1}{2\sigma^2} \sum_{i\in\Omega_u} (r_{ui} - g_\theta(\mathbf{z}_u)_i)^2 \right] - \beta \, \mathrm{D}_{\mathrm{KL}}\left( q_\phi(\mathbf{z}_u) \,\|\, \mathcal{N}(\mathbf{0}, \mathbf{I}_k) \right)$$
-  * **Experimento comparativo 1:** Treinar o VAE com decodificador linear ($g_\theta(\mathbf{z}) = \boldsymbol{\mu} + \mathbf{W}\mathbf{z}$) e comparar diretamente com o PPCA sob os mesmos valores de $k$ e $\sigma^2$ (avaliando convergência, RMSE, MAE e NLL).
-  * **Experimento comparativo 2:** Substituir o decodificador linear por uma rede neural profunda não linear (MLP). A não linearidade melhora a capacidade preditiva ou amplifica o risco de sobreajuste na presença de dados esparsos?
-  * Estudo de sensibilidade isolando um hiperparâmetro crítico ($\beta$, $\sigma^2$ ou $k$).
-  * **Trade-off Computacional e Latência de Inferência:** Compare o tempo de convergência de treinamento e o tempo de inferência (custo para prever avaliações para todos os usuários) entre a Fatoração Matricial (SGD), o PPCA (inversão matricial de ordem $k \times k$ para cada usuário a cada passo E) e o VAE (linear vs. não linear). Discuta a viabilidade prática de cada formulação em sistemas com milhões de interações.
-* **Tarefa 2.3 — Visualização e Análise Geométrica dos Espaços Latentes:**
-  * Comparação dos 4 modelos que aprendem representações vetoriais latentes: **PCA Imputado**, **Fatoração de Matrizes**, **PPCA** e **VAE**.
-  * **Inspeção Visual:** Projeções bidimensionais com PCA e t-SNE, colorindo usuários e filmes com metadados externos mantidos ocultos durante o treino (idade, gênero, ocupação; gêneros de filmes, ano, popularidade).
-  * **Sondagem Quantitativa (*Linear Probing* sem Vazamento):** Para evitar julgamentos puramente subjetivos em gráficos 2D, treinar estimadores supervisionados lineares sobre os vetores latentes brutos de dimensão $k$ (`Ridge` para atributos contínuos como idade e ano; `LogisticRegression` avaliada por ROC-AUC para atributos categóricos como ocupações e gêneros de filme).
-    * *Garantia contra Data Leakage:* O ajuste dos regressores/classificadores de sondagem **deve obrigatoriamente utilizar validação cruzada ou uma partição independente de treino/teste sobre os metadados**. Avaliar o $R^2$ ou ROC-AUC sobre os mesmos dados usados para ajustar a sonda constitui vazamento e inflaciona a riqueza semântica real do espaço.
-  * **Comparação Estrutural e Topológica:** Alinhamento de representações entre modelos, análise de correlação de distâncias e sobreposição dos $k$ vizinhos mais próximos (*Jaccard similarity* da vizinhança latente de filmes).
-
----
-
-### Etapa 3: Projeto de Investigação Autoral do Grupo
-
-Na última etapa, a equipe deve propor e executar um **projeto de investigação científica autoral**. Não se trata de uma simples variação cosmética de parâmetros, mas de uma intervenção conceitualmente motivada.
-
-::: {.callout-important}
-### Protocolo Científico Obrigatório (Tarefa 3.1)
-Antes de rodar os experimentos, o grupo deve explicitar formalmente no relatório:
-1. **A Pergunta de Pesquisa:** Qual questão conceitual específica o grupo deseja responder?
-2. **A Hipótese Teórica:** Qual mecanismo estatístico ou geométrico justifica a expectativa do grupo?
-3. **A Previsão Observável:** O que quantitativamente deve subir, descer ou mudar nas métricas?
-4. **O Critério de Falseamento:** Qual resultado empírico refutará a hipótese formulada?
-:::
-
-O grupo pode escolher uma das quatro trilhas sugeridas a seguir, ou formular uma proposta própria devidamente fundamentada:
-
-#### Trilha A: Correção de Ausência Não Aleatória (*Inverse Propensity Weighting* — IPW)
-* **Motivação:** Usuários ativos e filmes de grande bilheteria recebem a esmagadora maioria das notas. Ajustar o modelo sem correção prioriza os itens populares e penaliza filmes de nicho.
-* **Intervenção:** Modelar a probabilidade marginal de observação $P(O_{ui} = 1)$ e reponderar a função de perda pelo inverso da propensão ([Schnabel et al., 2016](https://arxiv.org/abs/1602.05352)):
-  $$\mathcal{L}_{\mathrm{IPW}} = \sum_{(u,i)\in\Omega} \frac{(r_{ui} - \hat{R}_{ui})^2}{P(O_{ui} = 1)}$$
-* **Questão:** A reponderação melhora a precisão em filmes raramente avaliados sem degradar excessivamente o desempenho global?
-
-#### Trilha B: Injeção de Metadados nos Priors Latentes
-* **Motivação:** Tratar cada usuário e filme apenas como um identificador arbitrário impede a generalização e agrava o problema de partida a frio (*cold-start*).
-* **Intervenção:** Utilizar os atributos demográficos do usuário ($\mathbf{x}_u$) e atributos dos filmes para parametrizar a média da distribuição a priori dos vetores latentes, ou seja, $\mathbf{z}_u \sim \mathcal{N}(h_\psi(\mathbf{x}_u), \mathbf{I})$.
-* **Questão:** O condicionamento nos metadados melhora o desempenho preditivo para usuários com poucas avaliações registradas?
-
-#### Trilha C: Geometria Não Euclidiana da Função de Compatibilidade
-* **Motivação:** Todos os modelos clássicos medem compatibilidade pelo produto interno $\mathbf{z}_u^\top \mathbf{w}_i$. Entretanto, o produto interno não satisfaz a desigualdade triangular, o que pode impedir que afinidades transitivas sejam respeitadas no espaço latente.
-* **Intervenção:** Substituir o produto interno por distâncias métricas (ex.: distância Euclidiana ao quadrado $-\|\mathbf{z}_u - \mathbf{w}_i\|_2^2$) ou por redes neurais de interação bilateral ([Rendle et al., 2020](https://arxiv.org/abs/2005.09683)).
-* **Questão:** A alteração da geometria de interação altera o que é codificado nos vetores latentes e a qualidade do ordenamento de recomendações?
-
-#### Trilha D: Desemaranhamento (*Disentanglement*) e Topologia Latente no VAE
-* **Motivação:** A sintonia de hiperparâmetros foca exclusivamente no erro quadrático, ignorando a regularidade e a interpretabilidade do manifold latente.
-* **Intervenção:** Investigar o regime de regularização variacional explorando a formulação do $\beta$-VAE. Variações sistemáticas de $\beta$, da dimensionalidade $k$ e da capacidade do decodificador.
-* **Questão:** Quais valores de $\beta$ induzem representações latentes ortogonais e correlacionadas com fatores semânticos independentes (gêneros específicos, décadas)? Qual o preço pago em termos de reconstrução (*reconstruction-disentanglement trade-off*)?
-
----
-
-## Estrutura do Relatório Técnico
-
-O relatório final deve ser redigido com clareza, concisão e rigor formal (estimativa total: **10 a 15 páginas** em formato PDF), organizado nas 6 seções a seguir:
-
-### 1. Contextualização, Formulação Matemática e Análise de Dados *(1 a 2 páginas)*
-* Apresentação formal do problema de sistemas de recomendação como aprendizado transdutivo sobre matrizes esparsas.
-* Notação matemática formal unificada: $\mathbf{X}, \mathbf{z}_u, \mathbf{w}_i, \Omega$.
-* Inspeção dos dados: distribuição de notas, esparsidade, diagnóstico da ausência não aleatória (MNAR) e perfil dos metadados.
-* Protocolo de validação: detalhamento da separação treino/teste estratificada por usuário e definição das métricas (RMSE, MAE e NLL).
-
-### 2. Formalismo Teórico e Premissas dos Modelos *(2 a 3 páginas)*
-* Dedução analítica e hipóteses teóricas de cada família investigada:
-  * Baseline Aditiva: formulação dos vieses via mínimos quadrados regularizados.
-  * PCA Imputado: posto reduzido, projeções ortogonais e patologias da imputação pela média.
-  * Fatoração de Matrizes: formulação de perda sobre dados observados, regularização $L_2$ e dinâmica de SGD.
-  * PPCA: formulação geradora probabilística, derivação do algoritmo EM e cálculo analítico da posterior gaussiana.
-  * VAE: parametrização amortizada, truque da reparametrização e decomposição do ELBO com divergência KL.
-* Análise comparativa das premissas: contrastar modelos determinísticos versus generativos probabilísticos.
-
-### 3. Resultados Empíricos das Etapas 1 e 2 *(3 a 4 páginas)*
-* Tabela consolidada comparando todos os modelos na partição de teste (RMSE e MAE para todos; NLL para PPCA e VAE; métricas de recomendação Top-$K$ como Precision@10 e NDCG@10).
-* Análise da divergência entre minimização de erro pontual (RMSE) e qualidade de ordenação/decisão prática (Top-$K$).
-* Estudo de ablação da Fatoração de Matrizes: modelo com vieses vs. sem vieses.
-* Comparação entre PPCA e VAE linear: convergência e correspondência sob as mesmas suposições teóricas.
-* Efeito da não linearidade no decodificador do VAE e análise de sensibilidade de hiperparâmetros ($\beta, \sigma^2, k$).
-* Diagnóstico de convergência através das curvas de aprendizado/perda registradas em `history`.
-* Trade-offs práticos: comparação de tempo de treino e latência de inferência por usuário entre as diferentes abordagens.
-
-### 4. Investigação Geométrica e Semântica dos Espaços Latentes *(2 a 3 páginas)*
-* Visualizações bidimensionais comparativas (PCA vs. t-SNE) entre os quatro modelos que aprendem embeddings.
-* Resultados da sondagem quantitativa (*Linear Probing* sem vazamento): tabela com $R^2$ (Ridge) e ROC-AUC (Regressão Logística) avaliados em partição independente, quantificando a presença de idade, gênero, ocupações, gêneros de filmes e popularidade nos vetores latentes puros.
-* Análise de alinhamento estrutural e sobreposição de vizinhanças latentes entre os modelos.
-* Discussão: qual formulação produz representações mais alinhadas à semântica do domínio?
-
-### 5. Projeto Autoral de Investigação do Grupo *(3 páginas)*
-* Explicitação formal da pergunta de pesquisa, hipótese, previsão e critério de falseamento.
-* Descrição detalhada do protocolo experimental implementado e das modificações algorítmicas realizadas.
-* Apresentação e discussão dos resultados empíricos: a hipótese foi confirmada ou refutada?
-* O que o resultado obtido ensina sobre a geometria latente ou sobre a dinâmica do problema?
-
-### 6. Conclusões e Diagnóstico Crítico *(1 página)*
-* Síntese dos achados conceituais e empíricos da investigação.
-* Limitações metodológicas identificadas (efeito transdutivo, viés de seleção não corrigido, etc.).
-* Propostas concretas de desdobramentos futuros.
-
----
-
-## Entregáveis do Projeto
-
-Ao término do semestre, a equipe deverá submeter:
-
-### 1. Relatório Técnico Completo (PDF)
-* Documento em formato PDF estruturado rigorosamente nas 6 seções descritas acima.
-* Tamanho entre **10 e 15 páginas** de conteúdo (excluindo capa, referências e eventuais apêndices).
-
-### 2. Notebook Concluído e Repositório Reprodutível com `uv`
-Todo o código experimental deve estar contido em um repositório limpo, documentado e 100% determinístico.
-
-O gerenciamento de dependências e ambiente virtual do projeto **deve obrigatoriamente utilizar o [`uv`](https://docs.astral.sh/uv/)**, contendo:
-
-* **`unsupervised_assignment_2s2026.ipynb`:** notebook base devidamente preenchido com todos os blocos de código executados, gráficos gerados e discussões textuais preenchidas nas células indicadas.
-* **`pyproject.toml`:** especificação padrão (PEP 621) declarando as dependências do projeto (PyTorch, scikit-learn, pandas, numpy, seaborn, etc.).
-* **`uv.lock`:** arquivo de bloqueio determinístico gerado pelo `uv`, garantindo paridade exata de execução em qualquer máquina.
-* **`.python-version`:** versão do interpretador Python utilizada (ex.: `3.12` ou `3.13`).
-* **`README.md`:** instruções claras para sincronização e execução do ambiente:
-  ```bash
-  # 1. Sincronizar o ambiente virtual determinístico
-  uv sync
-
-  # 2. Executar o Jupyter Lab para rodar os experimentos
-  uv run --with jupyter jupyter lab
-  ```
-* Sementes aleatórias estritamente fixadas (`set_seed(42)`) para garantir reprodutibilidade exata de todas as tabelas e figuras.
-
----
-
-## Critérios de Avaliação e Rubrica
-
-Conforme estipulado no [Plano de Desenvolvimento da Disciplina (PDD)](./pdd.qmd), o Trabalho Final ($TF$) compõe **40% da nota do semestre**:
+Conforme o [Plano de Desenvolvimento da Disciplina (PDD)](./pdd.qmd), o Trabalho Final ($TF$) vale **40% da nota do semestre**:
 
 $$NF = 0{,}20\,T_1 + 0{,}20\,T_2 + 0{,}20\,T_3 + 0{,}40\,TF$$
 
-A avaliação será pautada pela profundidade conceitual, rigor estatístico e qualidade da modelagem, seguindo a rubrica de pontuação:
-
-| Dimensão | Peso | Critérios Avaliados |
+| Dimensão | Peso | O que será observado |
 |:---|:---:|:---|
-| **Fundamentação Teórica e Formulação Matemática** | 20% | Rigor analítico na apresentação das hipóteses teóricas de cada família de modelos (baselines aditivas, PCA, fatoração de matrizes, PPCA e VAE); formulação matemática consistente e correlação com o conteúdo da disciplina. |
-| **Modelagem, Ablações e Avaliação de Decisão** | 25% | Execução metodológica impecável das Etapas 1 e 2; seleção sistemática de hiperparâmetros; estudo de ablação dos vieses na fatoração matricial; avaliação de métricas de decisão/ranking Top-$K$; comparação honesta entre PPCA e VAEs (linear e profundo), incluindo análise de custos computacionais. |
-| **Investigação Geométrica e Semântica dos Espaços Latentes** | 20% | Qualidade das visualizações 2D; aplicação rigorosa de sondagem linear supervisionada (*linear probing*) com protocolo estrito contra *data leakage*; análise crítica de alinhamento e sobreposição de vizinhança entre espaços latentes. |
-| **Originalidade e Rigor no Projeto Autoral (Etapa 3)** | 20% | Clareza na formulação prévia da hipótese falseável e na previsão quantitativa; adequação do desenho experimental à pergunta formulada; maturidade científica na discussão dos resultados (confirmando ou refutando a hipótese). |
-| **Reprodutibilidade, Código com `uv` e Qualidade do Relatório** | 15% | Clareza e fluidez do texto no relatório PDF (10–15 páginas); organização do código e notebook; ambiente virtual padronizado e determinístico com `uv` (`pyproject.toml`, `uv.lock`); reprodutibilidade integral de figuras e tabelas. |
+| **Fundamentação e formulação matemática** | 20% | Apresentação correta das suposições de cada modelo (baseline, PCA, fatoração, PPCA e VAE) e relação com o conteúdo da disciplina. |
+| **Modelagem, comparações e métricas de lista** | 25% | Execução correta das Etapas 1 e 2 segundo o protocolo: escolha de hiperparâmetros, comparação com e sem vieses, métricas de lista, comparação entre PPCA e VAEs (linear e não linear) e análise de tempo. |
+| **Análise dos espaços latentes** | 20% | Qualidade das visualizações, medição com modelos lineares sem vazamento e comparação entre espaços. |
+| **Projeto do grupo (Etapa 3)** | 20% | Clareza da hipótese e da previsão, adequação do experimento à pergunta e qualidade da discussão, seja a hipótese confirmada ou refutada. |
+| **Reprodutibilidade e relatório** | 15% | Clareza do relatório (10 a 15 páginas), organização do código e do notebook, ambiente com `uv` (`pyproject.toml`, `uv.lock`) e reprodução de figuras e tabelas. |
 
 ---
 
 ::: {.callout-important}
-### Integridade Acadêmica e Plágio
-Todo o texto analítico, gráficos e implementações autorais do projeto devem ser de autoria estrita dos integrantes da equipe. Ferramentas auxiliares de assistência de código devem ser utilizadas com responsabilidade e transparência. Cópias literais de códigos não autorizados, apropriação indevida de análises de terceiros ou fraudes em dados resultarão em nota zero no trabalho final ($TF = 0$) e comunicação formal à diretoria do Instituto de Computação da UNICAMP, conforme as diretrizes do PDD e o regimento acadêmico geral.
+### Integridade acadêmica e plágio
+Textos, gráficos e implementações devem ser de autoria da equipe. Ferramentas de assistência de código devem ser usadas com responsabilidade e transparência. Cópia não autorizada de código, apropriação de análises de terceiros ou fraude em dados resultarão em nota zero no trabalho final ($TF = 0$) e comunicação formal à diretoria do Instituto de Computação da UNICAMP, conforme o PDD e o regimento acadêmico.
 :::
-
