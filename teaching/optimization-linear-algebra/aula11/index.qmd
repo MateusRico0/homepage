@@ -196,6 +196,7 @@ Quando as variáveis de entrada exibem escalas heterogêneas ou correlações ac
 
 - O SGD adota uma **taxa de aprendizado escalar única** $\alpha$ para todos os parâmetros:
   $$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \mathbf{g}_k$$
+
 - Em paisagens anisotrópicas ($\kappa = \lambda_{\max}/\lambda_{\min} \gg 1$), coordenadas diferentes exigem passos de escalas totalmente distintas!
 :::
 :::
@@ -281,6 +282,7 @@ Se executarmos o Gradiente Descendente euclidiano, a taxa máxima de aprendizado
 - Teto de estabilidade: $\alpha < \frac{2}{\lambda_{\max}} \approx 0{,}0003$.
 - Contração na direção suave:
   $$\rho = 1 - \alpha \lambda_{\min} \approx 0{,}99991$$
+
 - Reduzir o resíduo à metade exige mais de **7.700 iterações** de descida em lote!
 :::
 :::
@@ -322,8 +324,6 @@ Julgue V ou F — a questão só conta se acertar os 4 itens:
 :::
 :::
 
----
-
 # Intuição — A Bacia Elíptica e a Lente Métrica
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
@@ -362,6 +362,18 @@ O **Precondicionamento Diagonal**, por sua vez, é uma versão pragmática dessa
 - As elipses concêntricas tornam-se esferas concêntricas: o passo aponta diretamente para o minimizador!
 :::
 :::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Visualização: Deformação Métrica em Bacia Elíptica
+
+O gráfico abaixo ilustra como a transformação métrica gerada por $H^{-1/2}$ converte as curvas de nível elípticas em círculos perfeitos:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Visualização: Deformação Métrica em Bacia Elíptica
+
+Deformação de elipses em círculos sob a lente da Hessiana:
 :::
 
 ```{python}
@@ -403,101 +415,229 @@ plt.tight_layout()
 plt.show()
 ```
 
----
-
 # Bloco 1: A Aproximação Quadrática de Taylor e o Método de Newton
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-## A Minimização do Modelo Substituto Local
+## A Minimização do Modelo Substituto Local e o Papel dos Restos de Taylor
 
-Considere uma função de perda duas vezes continuamente diferenciável $f: \mathbb{R}^d \to \mathbb{R}$. Na vizinhança de uma iteração corrente $\mathbf{w}_k$, podemos expandir a função através da **Série de Taylor multivariada**:
-$$f(\mathbf{w}_k + \Delta\mathbf{w}) = f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w} + \frac{1}{2} \Delta\mathbf{w}^T \nabla^2 f(\mathbf{w}_k) \Delta\mathbf{w} + \mathcal{O}(\|\Delta\mathbf{w}\|^3)$$
+Para compreender a fundamentação matemática do Método de Newton, é essencial contrastá-lo com a derivação rigorosa do Gradiente Descendente através da **Série de Taylor com Resto**.
 
-Enquanto o Gradiente Descendente convencional se apoia apenas na aproximação linear (de 1ª ordem) combinada a um termo de penalidade quadrática isotrópica ($\frac{1}{2\alpha}\|\Delta\mathbf{w}\|^2$), o **Método de Newton** abraça a curvatura natural da função, definindo o modelo quadrático local substituto:
-$$q(\Delta\mathbf{w}) \triangleq f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w} + \frac{1}{2} \Delta\mathbf{w}^T H_k \Delta\mathbf{w}$$
-onde $H_k \triangleq \nabla^2 f(\mathbf{w}_k) \in \mathbb{R}^{d \times d}$ é a matriz Hessiana simétrica calculada em $\mathbf{w}_k$.
+Considere uma função de perda suficientemente diferenciável $f: \mathbb{R}^d \to \mathbb{R}$. Na vizinhança da iteração corrente $\mathbf{w}_k$, podemos expandir a função em diferentes ordens de aproximação.
 
-Para encontrar o deslocamento $\Delta\mathbf{w}$ que minimiza esse modelo parabólico, calculamos o vetor gradiente de $q$ em relação a $\Delta\mathbf{w}$ e impomos a condição de otimalidade de primeira ordem:
-$$\nabla_{\Delta\mathbf{w}} q(\Delta\mathbf{w}) = \nabla f(\mathbf{w}_k) + H_k \Delta\mathbf{w} = \mathbf{0}$$
+### 1. O Passo do Gradiente: Taylor de 1ª Ordem com Resto
 
-Supondo que a Hessiana seja estritamente positiva definida ($H_k \succ 0$), a matriz é invertível e o minimizador do modelo quadrático é dado de forma única por:
-$$\Delta\mathbf{w}_{\text{nt}} = -H_k^{-1} \nabla f(\mathbf{w}_k)$$
+A expansão de Taylor de primeira ordem com resto de Lagrange é dada por:
+$$f(\mathbf{w}_k + \Delta\mathbf{w}) = f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w} + R_1(\Delta\mathbf{w})$$
+onde o termo residual exato de segunda ordem é:
+$$R_1(\Delta\mathbf{w}) = \frac{1}{2}\Delta\mathbf{w}^T \nabla^2 f(\boldsymbol{\xi}) \Delta\mathbf{w}, \quad \text{para algum } \boldsymbol{\xi} \in [\mathbf{w}_k, \mathbf{w}_k + \Delta\mathbf{w}]$$
 
-A atualização de parâmetros do **Método de Newton Puro** é dada por:
-$$\mathbf{w}_{k+1} = \mathbf{w}_k - [\nabla^2 f(\mathbf{w}_k)]^{-1} \nabla f(\mathbf{w}_k)$$
+Observe o impasse fundamental: se tentássemos minimizar diretamente apenas a parte linear $f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w}$, o problema seria ilimitado inferiormente ($\inf_{\Delta\mathbf{w}} \nabla f^T \Delta\mathbf{w} = -\infty$). Um plano inclinado não possui fundo!
+
+Para tornar a minimização factível, precisamos de um modelo substituto. Na **Aula 8**, sob a hipótese de $L$-suavidade ($\|\nabla^2 f(\boldsymbol{\xi})\|_2 \le L$), vimos que o Lema da Descida majora o resto $R_1$ pelo pior caso esférico isotrópico:
+$$R_1(\Delta\mathbf{w}) \le \frac{L}{2} \|\Delta\mathbf{w}\|_2^2 \implies R_1(\Delta\mathbf{w}) \approx \frac{1}{2\alpha} \|\Delta\mathbf{w}\|_2^2$$
+
+O **modelo substituto de 1ª ordem do GD** é, portanto:
+$$m_{\text{GD}}(\Delta\mathbf{w}) \triangleq f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w} + \frac{1}{2\alpha} \|\Delta\mathbf{w}\|_2^2$$
+
+Minimizando esse modelo esférico:
+$$\nabla_{\Delta\mathbf{w}} m_{\text{GD}}(\Delta\mathbf{w}) = \nabla f(\mathbf{w}_k) + \frac{1}{\alpha}\Delta\mathbf{w} = \mathbf{0} \implies \Delta\mathbf{w}_{\text{GD}} = -\alpha \nabla f(\mathbf{w}_k)$$
+
+*O que ficou faltando no Gradiente Descendente?*
+Ficou faltando o **resto de segunda ordem real** $R_1(\Delta\mathbf{w})$. O GD ignorou completamente a curvatura direcional e as correlações cruzadas entre coordenadas, substituindo a Hessiana por uma esfera cega $\frac{1}{\alpha} I$.
+
+---
+
+### 2. O Passo de Newton: Taylor de 2ª Ordem com Resto
+
+Em vez de jogar fora o resto de 2ª ordem e substituí-lo por uma penalidade esférica, o **Método de Newton** incorpora a curvatura real da função calculada no ponto $\mathbf{w}_k$, expandindo a Série de Taylor até o termo quadrático:
+$$f(\mathbf{w}_k + \Delta\mathbf{w}) = \underbrace{f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w} + \frac{1}{2}\Delta\mathbf{w}^T H_k \Delta\mathbf{w}}_{q(\Delta\mathbf{w})} + R_2(\Delta\mathbf{w})$$
+onde $H_k \triangleq \nabla^2 f(\mathbf{w}_k)$ é a matriz Hessiana calculada em $\mathbf{w}_k$ e o novo resto é de **terceira ordem**:
+$$R_2(\Delta\mathbf{w}) = \mathcal{O}(\|\Delta\mathbf{w}\|^3) = \frac{1}{6} \nabla^3 f(\boldsymbol{\xi})[\Delta\mathbf{w}, \Delta\mathbf{w}, \Delta\mathbf{w}]$$
+
+O **modelo substituto de 2ª ordem de Newton** minimiza o paraboloide tangente $q(\Delta\mathbf{w})$, desconsiderando o resto $R_2$:
+$$\min_{\Delta\mathbf{w}} \; q(\Delta\mathbf{w}) = f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w} + \frac{1}{2} \Delta\mathbf{w}^T H_k \Delta\mathbf{w}$$
+
+Aplicando as condições de otimalidade da **Aula 7**:
+1. **Condição de 1ª Ordem:** Anulando a derivada em relação a $\Delta\mathbf{w}$:
+   $$\nabla_{\Delta\mathbf{w}} q(\Delta\mathbf{w}) = \nabla f(\mathbf{w}_k) + H_k \Delta\mathbf{w} = \mathbf{0} \implies H_k \Delta\mathbf{w} = -\nabla f(\mathbf{w}_k)$$
+2. **Condição de 2ª Ordem:** Como $\nabla^2_{\Delta\mathbf{w}} q = H_k \succ 0$, a matriz é invertível e o ponto crítico é um **mínimo global estrito** de $q$:
+   $$\Delta\mathbf{w}_{\text{nt}} = -H_k^{-1} \nabla f(\mathbf{w}_k)$$
+
+*O que fica faltando no Método de Newton?*
+Fica faltando o **resto de terceira ordem** $R_2(\Delta\mathbf{w}) = \mathcal{O}(\|\Delta\mathbf{w}\|^3)$!
+*   **Caso Exato (Formas Quadráticas):** Se $f(\mathbf{w})$ for estritamente quadrática (como nos Mínimos Quadrados da Aula 3 e Aula 8), as derivadas de ordem 3+ são identicamente nulas ($\nabla^3 f \equiv \mathbf{0} \implies R_2 \equiv 0$). O modelo quadrático coincide rigorosamente com a função real em todo o espaço, e Newton converge em **1 único passo**!
+*   **Caso Geral (Não-Linear):** Se $f$ tiver termos cúbicos ou superiores, $R_2 \neq 0$. O passo de Newton só é uma aproximação fiel **localmente**, na vizinhança onde o deslocamento $\|\Delta\mathbf{w}\|$ é suficientemente pequeno para que o erro residual de 3ª ordem $\|\Delta\mathbf{w}\|^3$ seja desprezível diante da curvatura de 2ª ordem.
+
+---
+
+### 3. A Regra de Atualização e a Auto-Calibração de Escala
+
+Como $\Delta\mathbf{w} \triangleq \mathbf{w} - \mathbf{w}_k$ representa o vetor de deslocamento relativo, a próxima iteração $\mathbf{w}_{k+1}$ é a translação pelo passo ótimo:
+$$\mathbf{w}_{k+1} \triangleq \mathbf{w}_k + \Delta\mathbf{w}_{\text{nt}} = \mathbf{w}_k - [\nabla^2 f(\mathbf{w}_k)]^{-1} \nabla f(\mathbf{w}_k)$$
+
+*Por que Newton não possui taxa de aprendizado hiperparamétrica $\alpha$?*
+Observe a análise dimensional:
+* O gradiente $[\nabla f]$ possui dimensão de $[\text{perda}] / [\text{parâmetro}]$.
+* A Hessiana $[H]$ possui dimensão de $[\text{perda}] / [\text{parâmetro}]^2$, de modo que sua inversa $[H^{-1}]$ tem dimensão de $[\text{parâmetro}]^2 / [\text{perda}]$.
+* O produto $[H^{-1} \nabla f]$ resulta em:
+  $$\frac{[\text{parâmetro}]^2}{[\text{perda}]} \times \frac{[\text{perda}]}{[\text{parâmetro}]} = [\text{parâmetro}]$$
+
+No Gradiente Descendente, o passo é $-\alpha \nabla f$; como o gradiente é uma taxa de variação (inclinação), o hiperparâmetro $\alpha$ precisa atuar artificialmente como um fator de conversão de unidades para transformar inclinação em distância. Em Newton, a curvatura $H^{-1}$ já realiza essa conversão de forma analítica e exata: nas direções onde a parábola é muito fechada ($\lambda_i$ grande), $H^{-1}$ encurta o passo; onde a parábola é rasa ($\lambda_i$ pequeno), $H^{-1}$ estica o passo, atingindo o vértice da bacia diretamente.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Derivação Analítica do Passo de Newton
+## Derivação do Passo do Gradiente (Taylor de 1ª Ordem)
 
 ::: {.fragment}
-**1. Modelo Quadrático de Taylor:**
-$$q(\Delta\mathbf{w}) = f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w} + \frac{1}{2} \Delta\mathbf{w}^T H_k \Delta\mathbf{w}$$
+**1. Expansão de Taylor com Resto de 2ª Ordem:**
+$$f(\mathbf{w}_k + \Delta\mathbf{w}) = f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w} + R_1(\Delta\mathbf{w})$$
+
+- Resto exato: $R_1(\Delta\mathbf{w}) = \frac{1}{2}\Delta\mathbf{w}^T \nabla^2 f(\boldsymbol{\xi})\Delta\mathbf{w}$ (sem resto, $\inf \nabla f^T \Delta\mathbf{w} = -\infty$).
 :::
 
 ::: {.fragment}
-**2. Condição de Otimalidade de Primeira Ordem:**
-$$\nabla_{\Delta\mathbf{w}} q(\Delta\mathbf{w}) = \nabla f(\mathbf{w}_k) + H_k \Delta\mathbf{w} = \mathbf{0}$$
+**2. Penalidade Esférica (Lema da Descida, Aula 8):**
+$$R_1(\Delta\mathbf{w}) \approx \frac{1}{2\alpha}\|\Delta\mathbf{w}\|_2^2 \implies m_{\text{GD}}(\Delta\mathbf{w}) = f(\mathbf{w}_k) + \nabla f^T \Delta\mathbf{w} + \frac{1}{2\alpha}\|\Delta\mathbf{w}\|^2$$
 :::
 
 ::: {.fragment}
-**3. O Passo de Newton (com $H_k \succ 0$):**
-$$\Delta\mathbf{w}_{\text{nt}} = -H_k^{-1} \nabla f(\mathbf{w}_k)$$
+**3. Passo Ótimo:**
+$$\nabla_{\Delta\mathbf{w}} m_{\text{GD}} = \nabla f(\mathbf{w}_k) + \frac{1}{\alpha}\Delta\mathbf{w} = \mathbf{0} \implies \Delta\mathbf{w}_{\text{GD}} = -\alpha \nabla f(\mathbf{w}_k)$$
+:::
+
+::: {.fragment .callout-warning}
+## O Que Falta no Gradiente Descendente?
+O **resto de 2ª ordem real**: toda a curvatura anisotrópica foi substituída por uma penalidade esférica isotrópica $\frac{1}{\alpha} I$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Derivação do Passo de Newton (Taylor de 2ª Ordem)
+
+::: {.fragment}
+**1. Expansão de 2ª Ordem com Resto de 3ª Ordem:**
+$$f(\mathbf{w}_k + \Delta\mathbf{w}) = \underbrace{f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w} + \frac{1}{2} \Delta\mathbf{w}^T H_k \Delta\mathbf{w}}_{q(\Delta\mathbf{w})} + R_2(\Delta\mathbf{w})$$
+
+- Newton **incorpora a curvatura real** $H_k = \nabla^2 f(\mathbf{w}_k)$; o novo resto é $R_2 = \mathcal{O}(\|\Delta\mathbf{w}\|^3)$.
+:::
+
+::: {.fragment}
+**2. Minimizando o Modelo Quadrático $q(\Delta\mathbf{w})$:**
+$$\nabla_{\Delta\mathbf{w}} q(\Delta\mathbf{w}) = \nabla f(\mathbf{w}_k) + H_k \Delta\mathbf{w} = \mathbf{0} \implies \Delta\mathbf{w}_{\text{nt}} = -H_k^{-1} \nabla f(\mathbf{w}_k)$$
 :::
 
 ::: {.fragment .callout-note icon=false}
-## Regra de Atualização de Newton
-$$\mathbf{w}_{k+1} = \mathbf{w}_k - [\nabla^2 f(\mathbf{w}_k)]^{-1} \nabla f(\mathbf{w}_k)$$
-Não há taxa de aprendizado hiperparamétrica $\alpha$: a escala do passo é ditada automaticamente pela curvatura inversa $H_k^{-1}$!
+## O Que Falta no Método de Newton?
+O **resto de 3ª ordem** $R_2 = \mathcal{O}(\|\Delta\mathbf{w}\|^3)$!
+
+- Se $f$ for quadrática $\implies R_2 \equiv 0$ (**modelo exato em todo $\mathbb{R}^d$, 1 passo!**).
+- Se $f$ for geral $\implies R_2 \neq 0$ (o passo só é confiável onde $\|\Delta\mathbf{w}\|^3 \ll \|\Delta\mathbf{w}\|^2$).
 :::
-:::
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-## O Decremento de Newton e o Critério de Parada
-
-Como saber quão próximo o modelo está do ponto de mínimo sem conhecer o valor ótimo $f(\mathbf{w}^\star)$?
-
-No Gradiente Descendente, costuma-se monitorar a norma euclidiana do gradiente $\|\nabla f(\mathbf{w})\|_2$. Contudo, essa quantidade depende arbitrariamente da escala das variáveis. No Método de Newton, a medida canônica de subotimalidade é o **Decremento de Newton** $\lambda(\mathbf{w})$:
-$$\lambda(\mathbf{w}) \triangleq \left( \nabla f(\mathbf{w})^T [\nabla^2 f(\mathbf{w})]^{-1} \nabla f(\mathbf{w}) \right)^{1/2}$$
-
-O quadrado do decremento de Newton possui um significado geométrico transparente: ele quantifica exatamente o dobro da redução de custo prevista pelo modelo quadrático substituto:
-$$f(\mathbf{w}) - \min_{\Delta\mathbf{w}} q(\Delta\mathbf{w}) = f(\mathbf{w}) - q(\Delta\mathbf{w}_{\text{nt}}) = \frac{1}{2}\lambda(\mathbf{w})^2$$
-
-Além disso, $\lambda(\mathbf{w})$ fornece um limite superior rigoroso para a distância até o valor ótimo: se $f$ for fortemente convexa com parâmetro $\mu$, então $f(\mathbf{w}) - f(\mathbf{w}^\star) \le \frac{1}{2\mu}\lambda(\mathbf{w})^2$. Critérios de parada modernos encerram a otimização quando $\frac{1}{2}\lambda(\mathbf{w})^2 \le \epsilon_{\text{tol}}$.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## O Decremento de Newton
+## A Regra de Atualização e a Auto-Calibração de Escala
 
 ::: {.fragment}
-**Definição:**
-$$\lambda(\mathbf{w}) = \sqrt{ \nabla f(\mathbf{w})^T [\nabla^2 f(\mathbf{w})]^{-1} \nabla f(\mathbf{w}) }$$
+**1. Translação pelo Passo Ótimo:**
+$$\mathbf{w}_{k+1} \triangleq \mathbf{w}_k + \Delta\mathbf{w}_{\text{nt}} = \mathbf{w}_k - [\nabla^2 f(\mathbf{w}_k)]^{-1} \nabla f(\mathbf{w}_k)$$
 :::
 
 ::: {.fragment}
-**Interpretação Geométrica (Boyd & Vandenberghe §9.5):**
-$$f(\mathbf{w}) - q(\Delta\mathbf{w}_{\text{nt}}) = \frac{1}{2}\lambda(\mathbf{w})^2$$
-- Mede o decréscimo de custo prometido pelo modelo de 2ª ordem.
-- É a norma do gradiente na métrica da curvatura: $\|\nabla f(\mathbf{w})\|_{H^{-1}}$.
-:::
+**2. Análise Dimensional: Por que Newton Dispensa $\alpha$?**
+$$[H_k^{-1} \nabla f] = \underbrace{\frac{[\text{param}]^2}{[\text{perda}]}}_{[H^{-1}]} \times \underbrace{\frac{[\text{perda}]}{[\text{param}]}}_{[\nabla f]} = [\text{param}]$$
 
-::: {.fragment .callout-tip}
-## Critério de Parada
-O algoritmo atinge a vizinhança de convergência quadrática quando $\frac{1}{2}\lambda(\mathbf{w})^2 \le \epsilon$.
+- O GD precisa de $\alpha$ para converter inclinação em distância.
+- Em Newton, $H^{-1}$ já calcula analiticamente a distância física exata até o fundo da bacia!
 :::
 :::
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-## Teorema da Invariância Afim e Convergência Quadrática
+## Como Surge o Decremento de Newton?
+
+Após calcular o passo de Newton $\Delta\mathbf{w}_{\text{nt}} = -H_k^{-1}\nabla f(\mathbf{w}_k)$, surge uma questão natural: **quanto o modelo quadrático prevê que a função de perda vai diminuir se dermos esse passo?**
+
+Para responder, calculamos a diferença entre o valor do modelo na posição atual ($q(\mathbf{0}) = f(\mathbf{w}_k)$) e o valor atingido no vértice da parábola ($q(\Delta\mathbf{w}_{\text{nt}})$):
+$$q(\Delta\mathbf{w}_{\text{nt}}) = f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w}_{\text{nt}} + \frac{1}{2}\Delta\mathbf{w}_{\text{nt}}^T H_k \Delta\mathbf{w}_{\text{nt}}$$
+
+Substituindo $\Delta\mathbf{w}_{\text{nt}} = -H_k^{-1}\nabla f(\mathbf{w}_k)$:
+$$q(\Delta\mathbf{w}_{\text{nt}}) = f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \left(-H_k^{-1}\nabla f(\mathbf{w}_k)\right) + \frac{1}{2}\left(-H_k^{-1}\nabla f(\mathbf{w}_k)\right)^T H_k \left(-H_k^{-1}\nabla f(\mathbf{w}_k)\right)$$
+$$= f(\mathbf{w}_k) - \nabla f(\mathbf{w}_k)^T H_k^{-1} \nabla f(\mathbf{w}_k) + \frac{1}{2}\nabla f(\mathbf{w}_k)^T \underbrace{H_k^{-T} H_k H_k^{-1}}_{= H_k^{-1}} \nabla f(\mathbf{w}_k)$$
+
+Como $H_k$ é simétrica ($H_k^{-T} = H_k^{-1}$), os dois termos quadráticos se combinam:
+$$q(\Delta\mathbf{w}_{\text{nt}}) = f(\mathbf{w}_k) - \frac{1}{2}\nabla f(\mathbf{w}_k)^T H_k^{-1} \nabla f(\mathbf{w}_k)$$
+
+Portanto, a **queda prevista de custo** pelo modelo quadrático é dada exatamente por:
+$$f(\mathbf{w}_k) - q(\Delta\mathbf{w}_{\text{nt}}) = \frac{1}{2}\nabla f(\mathbf{w}_k)^T H_k^{-1} \nabla f(\mathbf{w}_k)$$
+
+A forma quadrática $\nabla f(\mathbf{w}_k)^T H_k^{-1} \nabla f(\mathbf{w}_k)$ surge espontaneamente no coração da otimização de segunda ordem. Para expressar essa grandeza na mesma escala dimensional do gradiente (em vez do seu quadrado), define-se o **Decremento de Newton** $\lambda(\mathbf{w})$ como sua raiz quadrada:
+$$\lambda(\mathbf{w}) \triangleq \left( \nabla f(\mathbf{w})^T [\nabla^2 f(\mathbf{w})]^{-1} \nabla f(\mathbf{w}) \right)^{1/2}$$
+
+Assim, a redução prometida pelo modelo expressa-se compactamente como:
+$$f(\mathbf{w}) - \min_{\Delta\mathbf{w}} q(\Delta\mathbf{w}) = \frac{1}{2}\lambda(\mathbf{w})^2$$
+
+Além disso, $\lambda(\mathbf{w})$ admite duas interpretações geométricas imediatas:
+1.  **Norma do Gradiente na Métrica de Curvatura:** Como $H \succ 0$, $H^{-1}$ define uma métrica Riemanniana no espaço tangente. O decremento é a norma induzida: $\lambda(\mathbf{w}) = \|\nabla f(\mathbf{w})\|_{H^{-1}}$.
+2.  **Comprimento do Passo de Newton:** Ponderando pela Hessiana, $\|\Delta\mathbf{w}_{\text{nt}}\|_H = (\Delta\mathbf{w}_{\text{nt}}^T H \Delta\mathbf{w}_{\text{nt}})^{1/2} = \lambda(\mathbf{w})$.
+3.  **Critério de Parada:** Em funções fortemente convexas ($f(\mathbf{w}) - f(\mathbf{w}^\star) \le \frac{1}{2\mu}\lambda(\mathbf{w})^2$), o algoritmo encerra o treinamento com garantia de precisão quando $\frac{1}{2}\lambda(\mathbf{w})^2 \le \epsilon_{\text{tol}}$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Como Surge o Decremento de Newton?
+
+::: {.fragment}
+**A Pergunta:** Quanto o modelo $q(\Delta\mathbf{w})$ promete que a perda vai diminuir com o passo $\Delta\mathbf{w}_{\text{nt}} = -H_k^{-1}\mathbf{g}_k$?
+:::
+
+::: {.fragment}
+**Avaliando o modelo no passo ótimo:**
+$$q(\Delta\mathbf{w}_{\text{nt}}) = f(\mathbf{w}_k) + \mathbf{g}_k^T (-H_k^{-1}\mathbf{g}_k) + \frac{1}{2}(-H_k^{-1}\mathbf{g}_k)^T H_k (-H_k^{-1}\mathbf{g}_k)$$
+$$= f(\mathbf{w}_k) - \mathbf{g}_k^T H_k^{-1}\mathbf{g}_k + \frac{1}{2}\mathbf{g}_k^T H_k^{-1}\mathbf{g}_k$$
+$$q(\Delta\mathbf{w}_{\text{nt}}) = f(\mathbf{w}_k) - \frac{1}{2}\mathbf{g}_k^T H_k^{-1}\mathbf{g}_k$$
+:::
+
+::: {.fragment .callout-important}
+## A Redução Prevista no Custo
+$$f(\mathbf{w}_k) - q(\Delta\mathbf{w}_{\text{nt}}) = \frac{1}{2} \mathbf{g}_k^T H_k^{-1} \mathbf{g}_k$$
+A quantidade $\mathbf{g}_k^T H_k^{-1} \mathbf{g}_k$ mede o dobro da descida prevista pelo modelo!
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Decremento de Newton: Interpretação e Parada
+
+::: {.fragment}
+**Definição do Decremento de Newton $\lambda(\mathbf{w})$:**
+$$\lambda(\mathbf{w}) \triangleq \sqrt{\mathbf{g}^T H^{-1} \mathbf{g}} \implies f(\mathbf{w}) - q(\Delta\mathbf{w}_{\text{nt}}) = \frac{1}{2}\lambda(\mathbf{w})^2$$
+:::
+
+::: {.fragment}
+**Interpretações Geométricas:**
+
+- **Norma do gradiente na métrica da curvatura:** $\lambda(\mathbf{w}) = \|\nabla f(\mathbf{w})\|_{H^{-1}}$.
+- **Comprimento ponderado do passo:** $\|\Delta\mathbf{w}_{\text{nt}}\|_H = \sqrt{\Delta\mathbf{w}^T H \Delta\mathbf{w}} = \lambda(\mathbf{w})$.
+- **Derivada direcional ao longo do passo:** $\nabla f^T \Delta\mathbf{w}_{\text{nt}} = -\lambda(\mathbf{w})^2$.
+:::
+
+::: {.fragment .callout-tip}
+## Critério de Parada Rigoroso
+Sob forte convexidade, $f(\mathbf{w}) - f(\mathbf{w}^\star) \le \frac{1}{2\mu}\lambda(\mathbf{w})^2$.
+O algoritmo encerra com segurança quando $\frac{1}{2}\lambda(\mathbf{w})^2 \le \epsilon$.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Teorema da Invariância Afim e o Contraste com o GD
 
 Uma das propriedades mais elegantes do Método de Newton é sua **Invariância Afim**:
 
 ::: {.callout-note icon=false}
-## Teorema: Invariância Afim do Método de Newton (Boyd §9.5.1)
+## Teorema: Invariância Afim do Método de Newton (Boyd & Vandenberghe §9.5.1)
 Seja $f: \mathbb{R}^d \to \mathbb{R}$ uma função duas vezes diferenciável e considere uma mudança linear de coordenadas arbitrária dada por $\tilde{\mathbf{w}} = A \mathbf{w}$, onde $A \in \mathbb{R}^{d \times d}$ é uma matriz inversível. Defina a função no novo sistema de coordenadas como $\phi(\tilde{\mathbf{w}}) \triangleq f(A^{-1}\tilde{\mathbf{w}})$.
 
 Então, o passo de Newton $\Delta\tilde{\mathbf{w}}_{\text{nt}}$ calculado para $\phi$ em $\tilde{\mathbf{w}}$ satisfaz rigorosamente:
 $$\Delta\tilde{\mathbf{w}}_{\text{nt}} = A \Delta\mathbf{w}_{\text{nt}}$$
+e o passo mapeado de volta ao espaço original recupera exatamente o passo original: $A^{-1}\Delta\tilde{\mathbf{w}}_{\text{nt}} = \Delta\mathbf{w}_{\text{nt}}$.
 :::
 
 *Demonstração:*
@@ -509,9 +649,39 @@ Calculando o passo de Newton no novo espaço:
 $$\Delta\tilde{\mathbf{w}}_{\text{nt}} = -[\nabla_{\tilde{\mathbf{w}}}^2 \phi(\tilde{\mathbf{w}})]^{-1} \nabla_{\tilde{\mathbf{w}}} \phi(\tilde{\mathbf{w}}) = -\left[ A^{-T} \nabla^2 f(\mathbf{w}) A^{-1} \right]^{-1} \left( A^{-T} \nabla f(\mathbf{w}) \right)$$
 $$= -\left[ A \left(\nabla^2 f(\mathbf{w})\right)^{-1} A^T \right] A^{-T} \nabla f(\mathbf{w}) = -A [\nabla^2 f(\mathbf{w})]^{-1} \nabla f(\mathbf{w}) = A \Delta\mathbf{w}_{\text{nt}} \quad \blacksquare$$
 
-**Significado Prático:** Newton é totalmente cego à escolha das unidades de medida dos dados! Se multiplicarmos a renda familiar por $1000$ ou convertermos quilômetros em milhas, a sequência de iterações do Método de Newton permanece perfeitamente inalterada no espaço físico original. O Gradiente Descendente euclidiano, por outro lado, sofre mutações drásticas sob transformações de escala.
+Mapeando de volta para o espaço original de parâmetros $\mathbf{w} = A^{-1}\tilde{\mathbf{w}}$:
+$$\Delta\mathbf{w} = A^{-1} \Delta\tilde{\mathbf{w}}_{\text{nt}} = A^{-1}(A \Delta\mathbf{w}_{\text{nt}}) = \Delta\mathbf{w}_{\text{nt}}$$
 
-Além disso, sob condições brandas (Hessiana Lipschitz contínua e fortemente convexa), Newton exibe **Convergência Quadrática Local**:
+### Por que o Gradiente Descendente Falha na Invariância Afim?
+
+Vejamos agora o que acontece quando executamos o Gradiente Descendente clássico no espaço transformado $\tilde{\mathbf{w}}$:
+$$\Delta\tilde{\mathbf{w}}_{\text{GD}} = -\alpha \nabla_{\tilde{\mathbf{w}}} \phi(\tilde{\mathbf{w}}) = -\alpha A^{-T} \nabla_{\mathbf{w}} f(\mathbf{w})$$
+
+Mapeando esse passo de volta para o espaço original $\mathbf{w} = A^{-1}\tilde{\mathbf{w}}$:
+$$\Delta\mathbf{w}_{\text{equiv}} = A^{-1} \Delta\tilde{\mathbf{w}}_{\text{GD}} = -\alpha A^{-1} A^{-T} \nabla_{\mathbf{w}} f(\mathbf{w}) = -\alpha (A^T A)^{-1} \nabla_{\mathbf{w}} f(\mathbf{w})$$
+
+Observe o resultado: o passo equivalente no espaço original **não é** $-\alpha \nabla f(\mathbf{w})$, mas sim $-\alpha (A^T A)^{-1} \nabla f(\mathbf{w})$!
+*   A equivalência $\Delta\mathbf{w}_{\text{equiv}} = \Delta\mathbf{w}_{\text{GD}}$ ocorre se e somente se $(A^T A)^{-1} = I \iff A^T A = I$, ou seja, **se $A$ for uma matriz ortogonal** (rotações ou reflexões puras).
+*   Se a transformação envolver qualquer mudança de escala entre variáveis (por exemplo, $A = \text{diag}(100, 1)$), $(A^T A)^{-1} \neq I$, e a direção seguida pelo GD torna-se completamente distorcida! O GD depende criticamente das unidades de medida dos dados.
+
+### Por Que a Invariância Afim é Crucial no Aprendizado de Máquina?
+
+A invariância afim não é mera elegância formal; ela resolve quatro dos maiores desafios práticos da otimização em Machine Learning:
+
+1.  **O Fim da Dependência de Normalização de Dados (`StandardScaler`):**
+    No Gradiente Descendente, se treinamos um modelo com features em escalas díspares — por exemplo, a idade em anos ($10 \text{ a } 80$) e a renda em centavos ($10^6 \text{ a } 10^8$) —, o número de condição $\kappa = \lambda_{\max}/\lambda_{\min}$ explode para $10^{12}$. O GD exige uma taxa de aprendizado microscópica $\alpha \le 2/L$ para não divergir na direção da renda, o que faz a convergência ao longo do eixo da idade praticamente congelar. Por isso, a padronização via z-score (`StandardScaler`) é uma **muleta obrigatória** para o GD.
+    Para o **Método de Newton**, a normalização é algebricamente supérflua: medir a renda em centavos, reais ou milhões produz **exatamente a mesma sequência de parâmetros no espaço original**, convergindo no mesmo número de passos!
+
+2.  **Imunidade a Correlações e Multicolinearidade:**
+    Quando atributos são correlacionados (como metragem quadrada e número de quartos no dataset California Housing), as curvas de nível da perda tornam-se elipses rotacionadas oblíquas. O GD perpendicular às curvas de nível sofre ziguezague severo. Newton calcula os termos cruzados fora da diagonal $\frac{\partial^2 f}{\partial w_i \partial w_j}$ e elimina o efeito da correlação instantaneamente.
+
+3.  **Geometria Intrínseca vs. Geometria Arbitrária de Coordenadas:**
+    O vetor gradiente $\nabla f$ só aponta para a "descida mais íngreme" porque adotamos arbitrariamente o produto interno euclidiano padrão $\langle \mathbf{u}, \mathbf{v} \rangle = \mathbf{u}^T \mathbf{v}$. Se rotacionarmos ou esticarmos o sistema de coordenadas, essa noção geométrica se quebra. A Hessiana define a **métrica Riemanniana intrínseca da superfície de perda**: Newton não segue a descida mais íngreme do sistema de eixos do usuário, mas sim o gradiente natural intrínseco da função!
+
+4.  **A Ponte Conceitual para o Precondicionamento:**
+    Se a invariância afim completa de Newton é o ideal teórico supremo mas custa impeditivos $\mathcal{O}(d^3)$, e o GD tem custo linear $\mathcal{O}(d)$ mas possui zero invariância, surge a pergunta que moldou a otimização em Deep Learning: *podemos projetar um algoritmo que custe $\mathcal{O}(d)$ e seja invariante ao menos sob mudanças de escala axiais (matrizes diagonais)?* Essa é a motivação direta do **Precondicionamento Diagonal** e de métodos como **AdaGrad** e **RMSProp**.
+
+Além da invariância, sob condições brandas (Hessiana Lipschitz contínua e fortemente convexa), Newton exibe **Convergência Quadrática Local**:
 $$\|\mathbf{w}_{k+1} - \mathbf{w}^\star\| \le M \|\mathbf{w}_k - \mathbf{w}^\star\|^2$$
 Uma vez que o modelo entra no raio de atração quadrática, o número de casas decimais de precisão exata **dobra a cada iteração** (ex.: erro $10^{-2} \to 10^{-4} \to 10^{-8} \to 10^{-16}$).
 :::
@@ -520,7 +690,7 @@ Uma vez que o modelo entra no raio de atração quadrática, o número de casas 
 ## Invariância Afim de Newton
 
 ::: {.fragment}
-**Mudança de Coordenadas:** $\tilde{\mathbf{w}} = A \mathbf{w}$ ($A$ inversível), $\phi(\tilde{\mathbf{w}}) = f(A^{-1}\tilde{\mathbf{w}})$.
+**Mudança Linear de Coordenadas:** $\tilde{\mathbf{w}} = A \mathbf{w}$ ($A$ inversível), $\phi(\tilde{\mathbf{w}}) = f(A^{-1}\tilde{\mathbf{w}})$.
 :::
 
 ::: {.fragment}
@@ -529,13 +699,65 @@ Uma vez que o modelo entra no raio de atração quadrática, o número de casas 
 :::
 
 ::: {.fragment}
-**O Passo no Novo Espaço:**
+**O Passo de Newton no Novo Espaço:**
 $$\Delta\tilde{\mathbf{w}}_{\text{nt}} = -[\nabla^2 \phi]^{-1} \nabla \phi = -[A (\nabla^2 f)^{-1} A^T] A^{-T} \nabla f = A \Delta\mathbf{w}_{\text{nt}}$$
 :::
 
-::: {.fragment .callout-important}
-## Consequência
-O Método de Newton gera a **mesma trajetória exata** independentemente de reescalonamentos ou rotações das variáveis. O Gradiente Descendente **não** possui essa propriedade!
+::: {.fragment .callout-note icon=false}
+## Retorno ao Espaço Original
+$$A^{-1}\Delta\tilde{\mathbf{w}}_{\text{nt}} = A^{-1}(A \Delta\mathbf{w}_{\text{nt}}) = \Delta\mathbf{w}_{\text{nt}}$$
+A trajetória de Newton é **rigorosamente invariante** para qualquer matriz inversível $A$ (escalas, rotações ou cisalhamentos).
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Por Que o Gradiente Descendente Quebra sob Escala?
+
+::: {.fragment}
+**Passo de GD no espaço transformado $\tilde{\mathbf{w}}$:**
+$$\Delta\tilde{\mathbf{w}}_{\text{GD}} = -\alpha \nabla_{\tilde{\mathbf{w}}} \phi = -\alpha A^{-T} \nabla_{\mathbf{w}} f(\mathbf{w})$$
+:::
+
+::: {.fragment}
+**Mapeando de volta para o espaço original ($A^{-1}\Delta\tilde{\mathbf{w}}$):**
+$$\Delta\mathbf{w}_{\text{equiv}} = A^{-1}(-\alpha A^{-T} \nabla f) = -\alpha (A^T A)^{-1} \nabla f(\mathbf{w})$$
+:::
+
+::: {.fragment}
+**O Contraste Fundamental:**
+
+$$\Delta\mathbf{w}_{\text{equiv}} = -\alpha (A^T A)^{-1} \nabla f \;\neq\; -\alpha \nabla f$$
+
+- Só coincide com o GD original se $(A^T A)^{-1} = I \iff A^T A = I$ (**matriz ortogonal / rotação pura**).
+:::
+
+::: {.fragment .callout-warning}
+## Conclusão Prática
+Se $A$ mudar a escala de um atributo (ex.: $A = \text{diag}(100, 1)$), a trajetória do GD deforma-se por $(A^T A)^{-1}$. O GD é **escravo das unidades de medida**; Newton é **afim-invariante**!
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Por Que a Invariância Afim É Crucial na Prática?
+
+::: {.fragment}
+**1. Imunidade à Escala das Variáveis (`StandardScaler`):**
+
+- **No GD:** Misturar metros e milímetros explode $\kappa$ para $10^6$ $\implies$ z-score é muleta obrigatória.
+- **Em Newton:** Com ou sem normalização, a trajetória e os passos físicos são **rigorosamente idênticos**!
+:::
+
+::: {.fragment}
+**2. Imunidade a Correlações entre Variáveis:**
+
+- Features correlacionadas geram ravinas elípticas rotacionadas e ziguezague no GD.
+- As derivadas mistas $\frac{\partial^2 f}{\partial w_i \partial w_j}$ de $H$ cancelam a rotação e caminham direto ao vértice.
+:::
+
+::: {.fragment .callout-tip}
+## A Ponte Conceitual para o Precondicionamento
+Newton tem invariância afim completa ($\mathcal{O}(d^3)$); o GD tem zero ($\mathcal{O}(d)$).
+O **Precondicionamento Diagonal** busca resgatar a invariância sob escalas a custo linear $\mathcal{O}(d)$!
 :::
 :::
 
@@ -574,8 +796,6 @@ Julgue V ou F — a questão só conta se acertar os 4 itens:
 **Voltando à pergunta:** Exatamente **1 iteração**! Pois $H_0 = A$ e $\nabla f(\mathbf{w}_0) = A\mathbf{w}_0 - \mathbf{b}$, de modo que $\mathbf{w}_1 = \mathbf{w}_0 - A^{-1}(A\mathbf{w}_0 - \mathbf{b}) = A^{-1}\mathbf{b}$. O decremento $\lambda(\mathbf{w})^2$ mede o dobro do ganho residual previsto pelo modelo quadrático local.
 :::
 :::
-
----
 
 # Bloco 2: As Três Patologias de Newton em Aprendizado de Máquina
 
@@ -717,12 +937,10 @@ Julgue V ou F — a questão só conta se acertar os 4 itens:
 :::
 :::
 
----
-
 # Bloco 3: A Geometria do Precondicionamento e a Matriz Diagonal
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-## Mudança Métrica de Variáveis
+## Mudança Métrica de Variáveis e a Origem de $P^{-1/2}$
 
 O dilema é evidente:
 *   O Gradiente Descendente custa apenas $\mathcal{O}(d)$, mas sofre em superfícies mal-condicionadas com ziguezagues infinitos.
@@ -730,46 +948,88 @@ O dilema é evidente:
 
 Como capturar os benefícios de escala de Newton sem pagar a penalidade cúbica? A resposta matemática reside na teoria do **Precondicionamento**.
 
-Considere uma transformação linear geral e inversível do espaço de parâmetros:
-$$\tilde{\mathbf{w}} = P^{1/2} \mathbf{w}$$
-onde $P \in \mathbb{R}^{d \times d}$ é uma matriz simétrica estritamente positiva definida ($P \succ 0$), denominada **Matriz de Precondicionamento**.
+### O Objetivo Geométrico: Esfericizar o Terreno
 
-A função expressa no espaço transformado é $\phi(\tilde{\mathbf{w}}) \triangleq f(P^{-1/2} \tilde{\mathbf{w}})$. Aplicando a regra da cadeia, o gradiente em relação à variável $\tilde{\mathbf{w}}$ é:
-$$\nabla_{\tilde{\mathbf{w}}} \phi(\tilde{\mathbf{w}}) = P^{-1/2} \nabla_{\mathbf{w}} f(\mathbf{w})$$
+No bloco anterior, vimos que sob uma mudança linear de coordenadas $\tilde{\mathbf{w}} = M \mathbf{w}$ (com $M$ inversível), a Hessiana no espaço transformado deforma-se segundo:
+$$\nabla_{\tilde{\mathbf{w}}}^2 \phi = M^{-T} H M^{-1}$$
 
-Se dermos um passo de Gradiente Descendente clássico no espaço transformado $\tilde{\mathbf{w}}$ com taxa $\alpha$:
-$$\tilde{\mathbf{w}}_{k+1} = \tilde{\mathbf{w}}_k - \alpha \nabla_{\tilde{\mathbf{w}}} \phi(\tilde{\mathbf{w}}_k)$$
-e multiplicarmos ambos os lados à esquerda por $P^{-1/2}$ para retornar à parametrização original $\mathbf{w} = P^{-1/2} \tilde{\mathbf{w}}$, obtemos:
-$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha P^{-1} \nabla_{\mathbf{w}} f(\mathbf{w}_k)$$
+O que desejamos para que o Gradiente Descendente convirja em linha reta, sem oscilações transversais? Desejamos que no novo espaço $\tilde{\mathbf{w}}$ as curvas de nível sejam perfeitamente **esféricas** — isto é, que a Hessiana transformada seja a matriz identidade:
+$$M^{-T} H M^{-1} \approx I \iff H \approx M^T M$$
 
-Essa é a forma universal do **Gradiente Descendente Precondicionado**:
+Se buscarmos uma transformação simétrica ($M^T = M$), essa condição exige que:
+$$M^2 \approx H \implies M \approx H^{1/2}$$
+
+Portanto, se escolhermos uma matriz simétrica estritamente positiva definida $P \succ 0$ que sirva como aproximação da curvatura ($P \approx H$), pelo Teorema Espectral (Aula 4) existe uma única **raiz quadrada simétrica** $P^{1/2} \succ 0$ que satisfaz $P^{1/2} P^{1/2} = P$.
+
+A mudança de variáveis natural para esfericizar o terreno é:
+$$\tilde{\mathbf{w}} \triangleq P^{1/2} \mathbf{w} \iff \mathbf{w} = P^{-1/2} \tilde{\mathbf{w}}$$
+
+### Por que o fator $P^{-1/2}$ aparece no gradiente e no passo?
+
+1.  **A Regra da Cadeia no Espaço Transformado:**
+    Definindo a função de custo na nova coordenada como $\phi(\tilde{\mathbf{w}}) \triangleq f(P^{-1/2} \tilde{\mathbf{w}})$, a regra da cadeia vetorial estabelece que o gradiente em relação a $\tilde{\mathbf{w}}$ é:
+    $$\nabla_{\tilde{\mathbf{w}}} \phi(\tilde{\mathbf{w}}) = (P^{-1/2})^T \nabla_{\mathbf{w}} f(\mathbf{w}) = P^{-1/2} \nabla_{\mathbf{w}} f(\mathbf{w})$$
+    (Como $P$ e sua inversa são simétricas, $(P^{-1/2})^T = P^{-1/2}$). O primeiro fator $P^{-1/2}$ surge da projeção da inclinação no espaço reescalonado.
+
+2.  **O Passo de Gradiente Descendente no Espaço Esférico:**
+    No espaço $\tilde{\mathbf{w}}$, as elipses foram arredondadas. Damos um passo euclidiano padrão com taxa $\alpha$:
+    $$\Delta\tilde{\mathbf{w}} = -\alpha \nabla_{\tilde{\mathbf{w}}} \phi(\tilde{\mathbf{w}}) = -\alpha P^{-1/2} \nabla_{\mathbf{w}} f(\mathbf{w})$$
+
+3.  **A Conversão de Volta para o Espaço Físico Original:**
+    Para saber como atualizar os parâmetros reais $\mathbf{w}$, aplicamos a relação inversa $\mathbf{w} = P^{-1/2} \tilde{\mathbf{w}}$:
+    $$\Delta\mathbf{w} = P^{-1/2} \Delta\tilde{\mathbf{w}} = P^{-1/2} \left( -\alpha P^{-1/2} \nabla_{\mathbf{w}} f(\mathbf{w}) \right) = -\alpha \underbrace{P^{-1/2} P^{-1/2}}_{= P^{-1}} \nabla_{\mathbf{w}} f(\mathbf{w})$$
+
+Os dois fatores $P^{-1/2}$ se fundem naturalmente: o primeiro decorre da **regra da cadeia** ao medir a inclinação no espaço esfericizado; o segundo decorre da **mudança de base inversa** ao trazer o deslocamento de volta ao espaço original!
+
+A atualização resultante é a fórmula universal do **Gradiente Descendente Precondicionado**:
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha P^{-1} \nabla f(\mathbf{w}_k)$$
 *   Se $P = I$: recuperamos o Gradiente Descendente euclidiano padrão ($\mathcal{O}(d)$).
 *   Se $P = \nabla^2 f(\mathbf{w}_k)$ e $\alpha = 1$: recuperamos o Método de Newton Puro ($\mathcal{O}(d^3)$).
+*   Se $P = D$ (diagonal): obtemos passos desacoplados por coordenada em tempo linear ($\mathcal{O}(d)$)!
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## A Geometria do Precondicionamento
+## A Geometria do Precondicionamento: Esfericização
 
 ::: {.fragment}
-**Transformação de Base:** $\tilde{\mathbf{w}} = P^{1/2} \mathbf{w}$ com $P \succ 0$ simétrica positiva definida.
+**1. Por que Deformar o Espaço?**
+
+- Sob mudança de coordenadas $\tilde{\mathbf{w}} = M\mathbf{w}$, a nova Hessiana passa a ser $M^{-T} H M^{-1}$.
+- Para que o terreno se torne esférico e isotrópico ($M^{-T} H M^{-1} \approx I$):
+  $$H \approx M^T M$$
 :::
 
 ::: {.fragment}
-**Gradiente no Espaço Deformado:**
-$$\nabla_{\tilde{\mathbf{w}}} \phi = P^{-1/2} \nabla_{\mathbf{w}} f(\mathbf{w})$$
+**2. A Escolha da Métrica $M = P^{1/2}$:**
+
+- Seja $P \approx H$ simétrica estritamente positiva definida ($P \succ 0$).
+- Pela raiz simétrica (Teorema Espectral): escolhemos $M = P^{1/2}$ ($M^T M = P^{1/2} P^{1/2} = P$).
 :::
 
 ::: {.fragment}
-**Passo de GD no Novo Espaço revertido para o Espaço Original:**
-$$P^{1/2}\mathbf{w}_{k+1} = P^{1/2}\mathbf{w}_k - \alpha P^{-1/2} \nabla f(\mathbf{w}_k)$$
-$$\implies \mathbf{w}_{k+1} = \mathbf{w}_k - \alpha P^{-1} \nabla f(\mathbf{w}_k)$$
+**3. O Gradiente no Espaço Deformado:**
+$$\tilde{\mathbf{w}} = P^{1/2} \mathbf{w} \iff \mathbf{w} = P^{-1/2} \tilde{\mathbf{w}}$$
+$$\nabla_{\tilde{\mathbf{w}}} \phi(\tilde{\mathbf{w}}) = (P^{-1/2})^T \nabla_{\mathbf{w}} f(\mathbf{w}) = P^{-1/2} \nabla f(\mathbf{w})$$
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Passo Precondicionado Universal
+
+::: {.fragment}
+**1. Passo no Espaço Esférico revertido ao Espaço Original:**
+$$\Delta\tilde{\mathbf{w}} = -\alpha \nabla_{\tilde{\mathbf{w}}} \phi = -\alpha P^{-1/2} \nabla f(\mathbf{w})$$
+$$\Delta\mathbf{w} = P^{-1/2} \Delta\tilde{\mathbf{w}} = -\alpha \underbrace{P^{-1/2} P^{-1/2}}_{= P^{-1}} \nabla f(\mathbf{w})$$
+
+- O 1º $P^{-1/2}$ vem da **regra da cadeia**; o 2º vem da **mudança de base inversa**.
 :::
 
 ::: {.fragment .callout-note icon=false}
-## O Espectro de Otimizadores
-- $P = I \implies$ Gradiente Descendente Clássico (Custo $\mathcal{O}(d)$)
-- $P = H \implies$ Método de Newton Exato (Custo $\mathcal{O}(d^3)$)
-- $P = \text{diag}(\dots) \implies$ **Precondicionamento Diagonal** (Custo $\mathcal{O}(d)$!)
+## Regra Precondicionada Universal: $\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha P^{-1} \nabla f(\mathbf{w}_k)$
+
+- $P = I \implies$ Gradiente Descendente euclidiano clássico ($\mathcal{O}(d)$)
+- $P = H \implies$ Método de Newton com $\alpha = 1$ ($\mathcal{O}(d^3)$)
+- $P = D \implies$ **Precondicionamento Diagonal** ($\mathcal{O}(d)$!)
 :::
 :::
 
@@ -856,20 +1116,31 @@ Julgue V ou F — a questão só conta se acertar os 4 itens:
 :::
 :::
 
----
-
 # Bloco 4: Escalas Adaptativas na Prática: AdaGrad e RMSProp
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-## Como Estimar a Curvatura Usando Apenas Primeiras Derivadas?
+## O Contexto do SGD e Por Que Evitar Segundas Derivadas
 
-Estabelecemos que a regra desacoplada $w_{i, k+1} = w_{i, k} - \frac{\alpha}{s_{i, k}} g_{i, k}$ custa $\mathcal{O}(d)$. Contudo, resta um desafio fundamental: **de onde extrair os coeficientes de escala $s_{i, k}$?**
+Estabelecemos que a regra desacoplada $w_{i, k+1} = w_{i, k} - \frac{\alpha}{s_{i, k}} g_{i, k}$ custa $\mathcal{O}(d)$. Contudo, resta um desafio fundamental: **de onde extrair os coeficientes de escala $s_{i, k}$ na prática do Aprendizado de Máquina?**
 
-Calcular a diagonal analítica da Hessiana ($\frac{\partial^2 f}{\partial w_i^2}$) ainda exige passes computacionais adicionais e não resolve o problema quando a curvatura é ruidosa ou negativa.
+### O Cenário Real: Otimização Estocástica (SGD)
 
-A brilhante intuição inaugurada por Duchi et al. (2011) foi perceber que **a história das primeiras derivadas fornece um substituto empírico formidável da curvatura**:
-*   Se ao longo de várias iterações uma coordenada $i$ exibe gradientes de grande magnitude ($|g_{t, i}| \gg 0$), isso revela que a função tem inclinação íngreme nessa direção $\to$ $s_{i}$ deve ser grande para moderar o avanço.
-*   Se uma coordenada recebe gradientes minúsculos ou quase nulos na maior parte do tempo (como um parâmetro associado a uma palavra rara em um vocabulário de NLP) $\to$ $s_i$ deve ser pequeno para permitir passos largos quando o gradiente finalmente ocorrer.
+No aprendizado moderno (e em redes neurais profundas), quase nunca temos acesso à perda sobre o conjunto de dados completo de uma só vez. Operamos com o **Gradiente Descendente Estocástico (SGD)** sobre pequenos lotes de dados (*mini-batches* $B_t$ de tamanho 32, 64 ou 256). O gradiente computado $\mathbf{g}_t = \nabla f_{B_t}(\mathbf{w}_t)$ é uma variável aleatória ruidosa.
+
+### A Extrema Instabilidade das Estimativas de 2ª Ordem no SGD
+
+Por que simplesmente não calcular a diagonal da Hessiana amostral $\text{diag}(\nabla^2 f_{B_t}(\mathbf{w}))$ a cada iteração?
+1. **Ruído e Variância Amostral Gigantesca:** Em pequenos lotes, as segundas derivadas sofrem de uma variância amostral ordens de magnitude superior à do gradiente. A curvatura de um mini-batch raramente reflete a geometria da perda populacional.
+2. **Indefinição e Curvatura Negativa Espúria:** Em terrenos não-convexos, o ruído amostral frequentemente gera derivadas parciais de 2ª ordem negativas na diagonal. Se $s_{i, t} < 0$, o passo precondicionado apontaria na direção de *subida* da perda!
+3. **Custo Computacional Proibitivo:** Obter segundas derivadas exige passes de autograd de ordem superior, degradando o throughput computacional em GPUs.
+
+### A Solução: Proxy de Curvatura Baseado em 1ª Ordem
+
+A genialidade de algoritmos como **AdaGrad** (Duchi et al., 2011) e **RMSProp** (Hinton, 2012) foi perceber que **eles foram criados especificamente dentro do contexto de SGD**.
+
+Em vez de arriscar estimativas de 2ª ordem altamente instáveis, eles utilizam a **história acumulada dos próprios gradientes estocásticos de 1ª ordem** ($g_{t, i}^2$) como uma estimativa empírica estável e barata da escala local:
+*   Se ao longo de várias iterações uma coordenada $i$ exibe gradientes de grande magnitude ($|g_{t, i}| \gg 0$), isso revela que a função tem inclinação íngreme ou alta oscilação estocástica nessa direção $\to$ $s_{i}$ deve ser grande para atenuar o passo e garantir estabilidade.
+*   Se uma coordenada recebe gradientes minúsculos ou esparsos na maior parte do tempo (como um parâmetro associado a uma palavra rara em NLP) $\to$ $s_i$ deve ser pequeno para permitir passos largos quando o gradiente finalmente ocorrer.
 
 ### 1. Otimizador AdaGrad (Duchi, Hazan & Singer, 2011)
 
@@ -891,10 +1162,34 @@ Em redes neurais profundas com milhares de épocas, o AdaGrad acumula tanta ener
 :::
 
 ::: {.content-visible when-format="revealjs"}
+## Escalas Adaptativas no Contexto de SGD
+
+::: {.fragment}
+**1. O Cenário Real: Otimização Estocástica (SGD)**
+
+- No aprendizado supervisionado, operamos quase sempre com **mini-batches** ($B_t$).
+- O gradiente observado $\mathbf{g}_t = \nabla f_{B_t}(\mathbf{w}_t)$ possui alto ruído estatístico.
+:::
+
+::: {.fragment}
+**2. A Extrema Instabilidade de 2ª Ordem no SGD:**
+
+- **Variância extrema:** A Hessiana varia drasticamente entre lotes sucessivos.
+- **Curvatura negativa espúria:** O ruído amostral gera $s_i < 0$, que faria o passo subir a perda!
+- **Custo proibitivo:** Diferenciação de 2ª ordem por lote degrada o throughput em GPUs.
+:::
+
+::: {.fragment .callout-tip}
+## A Solução de AdaGrad e RMSProp
+Nascem **dentro do SGD**: usam a energia das **primeiras derivadas** ($g_{t, i}^2$) como proxy empírico da escala local, contornando a instabilidade de 2ª ordem a custo linear $\mathcal{O}(d)$!
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
 ## Otimizador AdaGrad (Duchi et al., 2011)
 
 ::: {.fragment}
-**Intuição:** Usar a magnitude dos gradientes de 1ª ordem passados como proxy da curvatura local.
+**Intuição:** Acumular a energia dos gradientes estocásticos passados ($g_{\tau, i}^2$) para calibrar a escala por coordenada em dados esparsos.
 :::
 
 ::: {.fragment}
@@ -955,10 +1250,23 @@ $$\mathbf{w}_{t+1} = \mathbf{w}_t - \frac{\alpha}{\sqrt{\mathbf{v}_t} + \epsilon
 
 ::: {.fragment .callout-note icon=false}
 ## Vantagens
+
 - Memória temporal efetiva de $\approx \frac{1}{1-\beta_2}$ iterações.
 - Se o gradiente diminuir, $v_t$ decresce e o passo efetivo **aumenta**.
 - Nunca congela prematuramente: tornou-se a espinha dorsal de otimizadores em Deep Learning!
 :::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Dinâmica Comparada: AdaGrad vs. RMSProp
+
+Avaliamos abaixo a trajetória dos algoritmos em uma bacia com número de condição $\kappa = 100$ e a evolução das respectivas taxas efetivas de aprendizado $\alpha_t^{\text{eff}}$:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Dinâmica Comparada: AdaGrad vs. RMSProp
+
+Trajetória em ravina elíptica e evolução da taxa de aprendizado efetiva:
 :::
 
 ```{python}
@@ -1042,8 +1350,6 @@ Julgue V ou F — a questão só conta se acertar os 4 itens:
 :::
 :::
 
----
-
 # Fechamento
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
@@ -1109,10 +1415,11 @@ E, coroando o Bloco 3, realizaremos a grande síntese da otimização moderna: a
 ::: {.column width="50%"}
 **O Que Vimos Hoje (Aula 11):**
 
-- O precondicionamento diagonal equaliza a velocidade por coordenada:
+- Precondicionamento diagonal equaliza escalas:
   $$w_{i, k+1} = w_{i, k} - \frac{\alpha}{\sqrt{v_{t, i}} + \epsilon} g_{t, i}$$
+
 - Resolve o descompasso de escalas ($\kappa \gg 1$).
-- Mas **não possui inércia direcional**: oscila se o gradiente apontar transversalmente!
+- **Falta inércia direcional:** ainda oscila se o gradiente apontar transversalmente!
 :::
 
 ::: {.column width="50%"}
@@ -1120,8 +1427,9 @@ E, coroando o Bloco 3, realizaremos a grande síntese da otimização moderna: a
 
 - Adicionar **massa física e momento**:
   $$m_t = \beta_1 m_{t-1} + (1 - \beta_1) g_t$$
-- O Momento de Polyak e o Acelerador de Nesterov.
-- **A Grande Síntese:** Unir o $m_t$ (1º momento) com o $v_t$ do RMSProp (2º momento) $\implies$ **O Otimizador Adam e AdamW**!
+
+- Momento de Polyak e Aceleração de Nesterov.
+- **A Grande Síntese:** Unir $m_t$ (1º momento) com $v_t$ (2º momento) $\implies$ **Otimizador Adam e AdamW**!
 :::
 :::
 
