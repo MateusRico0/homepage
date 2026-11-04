@@ -1,0 +1,1130 @@
+---
+title: "Aula 11: Otimização de Segunda Ordem (Método de Newton) e Precondicionamento Diagonal"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-10-23"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: python3
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all .slides-link aria-label="Ver slides da aula" title="Ver slides da aula"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Voltar à lista de aulas" title="Voltar à lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar, load_dataset
+disable_progress_bar()
+
+import numpy as np
+import matplotlib.pyplot as plt
+from IPython.display import Markdown
+import warnings
+warnings.filterwarnings("ignore")
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({"figure.dpi": 120, "font.size": 11})
+
+COR_A     = "#0085CA"   # azul institucional — elemento principal
+COR_B     = "#FF5E00"   # laranja — contraste / ênfase
+COR_C     = "#E03C31"   # vermelho — alerta / erro / ruído
+COR_NEU   = "#5D6D7E"   # neutro escuro
+COR_VERDE = "#1B9E77"   # verde — confirmação / ótimo
+
+def brl(x, nd=2):
+    """Número com vírgula decimal e espaço fino de milhar."""
+    s = f"{x:,.{nd}f}"
+    return Markdown(s.replace(",", "\\,").replace(".", "{,}"))
+
+def sci(x, nd=1):
+    """Notação científica em LaTeX, com vírgula decimal."""
+    m, e = f"{x:.{nd}e}".split("e")
+    return Markdown(f"{m.replace('.', '{,}')}\\cdot 10^{{{int(e)}}}")
+
+# --- Dataset-fio: California Housing -----------------------------------
+_housing = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+COLS = ["MedInc", "HouseAge", "AveRooms", "AveBedrms"]
+X_raw = _housing[COLS].to_numpy()
+y_raw = _housing["MedHouseVal"].to_numpy()
+N_total, d_in = X_raw.shape
+
+# Matriz com dados brutos + intercepto
+X_raw_b = np.c_[np.ones(N_total), X_raw]
+H_raw = (1.0 / N_total) * (X_raw_b.T @ X_raw_b)
+eigvals_raw = np.linalg.eigvalsh(H_raw)
+kappa_raw = float(eigvals_raw[-1] / eigvals_raw[0])
+
+# Matriz padronizada Z-score + intercepto
+mu_X = np.mean(X_raw, axis=0)
+std_X = np.std(X_raw, axis=0)
+X_pad = (X_raw - mu_X) / std_X
+X_pad_b = np.c_[np.ones(N_total), X_pad]
+d_total = d_in + 1
+
+H_pad = (1.0 / N_total) * (X_pad_b.T @ X_pad_b)
+eigvals_pad = np.linalg.eigvalsh(H_pad)
+kappa_pad = float(eigvals_pad[-1] / eigvals_pad[0])
+
+# Solução analítica exata (Mínimos Quadrados)
+w_star = np.linalg.lstsq(X_pad_b, y_raw, rcond=None)[0]
+f_star = 0.5 * np.mean((X_pad_b @ w_star - y_raw)**2)
+
+# Simulação 2D ilustrativa em bacia elíptica mal-condicionada
+# f(w1, w2) = 0.5 * (100 * w1^2 + w2^2)
+def quad_f(w):
+    return 0.5 * (100.0 * w[0]**2 + w[1]**2)
+
+def quad_grad(w):
+    return np.array([100.0 * w[0], w[1]])
+
+w0 = np.array([1.5, 1.5])
+n_iters = 30
+
+# GD clássico
+w_gd_hist = [w0.copy()]
+w_curr = w0.copy()
+lr_gd = 0.018  # estável pois < 2/100 = 0.02
+for _ in range(n_iters):
+    w_curr -= lr_gd * quad_grad(w_curr)
+    w_gd_hist.append(w_curr.copy())
+w_gd_hist = np.array(w_gd_hist)
+
+# Newton Puro (1 passo atinge ótimo)
+w_newton_hist = np.array([w0.copy(), np.array([0.0, 0.0])])
+
+# AdaGrad
+w_adagrad_hist = [w0.copy()]
+w_curr = w0.copy()
+G = np.zeros(2)
+lr_ada = 0.5
+for _ in range(n_iters):
+    g = quad_grad(w_curr)
+    G += g**2
+    w_curr -= (lr_ada / (np.sqrt(G) + 1e-8)) * g
+    w_adagrad_hist.append(w_curr.copy())
+w_adagrad_hist = np.array(w_adagrad_hist)
+
+# RMSProp
+w_rmsprop_hist = [w0.copy()]
+w_curr = w0.copy()
+v = np.zeros(2)
+lr_rms = 0.2
+beta2 = 0.8
+for _ in range(n_iters):
+    g = quad_grad(w_curr)
+    v = beta2 * v + (1.0 - beta2) * (g**2)
+    w_curr -= (lr_rms / (np.sqrt(v) + 1e-8)) * g
+    w_rmsprop_hist.append(w_curr.copy())
+w_rmsprop_hist = np.array(w_rmsprop_hist)
+```
+
+# Revisão e Introdução
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Revisão Cuidadosa: O Que a Aula 10 Deixou Pronto
+
+Na **Aula 10**, investigamos o treinamento estocástico em larga escala com o **Gradiente Descendente Estocástico (SGD)** e o **Mini-Batching**. Provamos que avaliar somas finitas sobre $N$ amostras a cada iteração torna-se proibitivo quando os conjuntos de dados atingem milhões de exemplos ($\mathcal{O}(Nd)$ por passo). Ao sortear lotes de tamanho $B \ll N$, reduzimos o custo computacional por atualização e exploramos a arquitetura vetorial massiva de processadores modernos (BLAS-3 e Tensor Cores), reduzindo a variância do ruído amostral por um fator de $1/B$.
+
+No entanto, tanto o SGD quanto o Batch Gradient Descent (BGD) clássico compartilham uma limitação estrutural severa: **eles operam com uma única taxa de aprendizado escalar global $\alpha$ aplicada uniformemente a todos os parâmetros do modelo**. 
+
+Na **Aula 8**, vimos que a taxa de contração de erro do gradiente descendente em uma forma quadrática é governada pelo **número de condição** da matriz Hessiana:
+$$\kappa = \frac{\lambda_{\max}}{\lambda_{\min}}$$
+Quando as variáveis de entrada exibem escalas heterogêneas ou correlações acentuadas, o número de condição atinge valores na ordem de milhares ou milhões ($\kappa \gg 1$). Nesse cenário, um valor de $\alpha$ grande o bastante para avançar nas direções de baixa curvatura ($\lambda_{\min}$) causa oscilações catastróficas e divergência nas direções íngremes ($\lambda_{\max}$). Inversamente, escolher $\alpha < 2/\lambda_{\max}$ para garantir estabilidade condena o modelo a rastejar de forma paralisante ao longo das direções suaves.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Da Aula 10: O Que Já Temos
+
+::: {.columns}
+::: {.column width="50%"}
+**Conquistas da Aula 10:**
+
+- O **SGD** e o **Mini-Batching** resolveram o gargalo de memória e tempo em Big Data.
+- O mini-batch $B$ reduz a variância por $\sigma^2/B$ e satura GPUs.
+- As condições de Robbins-Monro asseguram convergência assintótica.
+:::
+
+::: {.column width="50%"}
+**A Limitação que Restou:**
+
+- O SGD adota uma **taxa de aprendizado escalar única** $\alpha$ para todos os parâmetros:
+  $$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \mathbf{g}_k$$
+- Em paisagens anisotrópicas ($\kappa = \lambda_{\max}/\lambda_{\min} \gg 1$), coordenadas diferentes exigem passos de escalas totalmente distintas!
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Ideia Central: Da Bússola Cega à Curvatura de Segunda Ordem
+
+O gradiente $\nabla f(\mathbf{w})$ é uma bússola de **primeira ordem**: ele informa rigorosamente para onde o terreno sobe com maior inclinação instantânea, mas é completamente cego sobre como essa inclinação varia conforme nos deslocamos.
+
+Para saber quão longe podemos pisar sem ultrapassar o fundo da bacia, precisamos de informação de **segunda ordem**: a matriz **Hessiana** $\nabla^2 f(\mathbf{w})$. Se a função puder ser aproximada localmente por uma parábola, o vértice dessa parábola pode ser calculado diretamente em um único passo.
+
+Esta aula investiga essa transição matemática fundamental:
+1. O que seria o algoritmo perfeito sob curvatura exata? $\to$ O **Método de Newton Multivariado**.
+2. Por que esse método ideal colapsa computacionalmente em modelos reais? $\to$ O custo cúbico $\mathcal{O}(d^3)$ e as armadilhas de não-convexidade.
+3. Como aproximar a curvatura de forma barata e escalável? $\to$ O **Precondicionamento Diagonal** e as taxas de aprendizado adaptativas do **AdaGrad** e **RMSProp**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Ideia Central: Curvatura e Escala
+
+::: {.fragment}
+- O **Gradiente ($\nabla f$)** é de 1ª ordem: aponta para onde a função sobe, mas desconhece a curvatura do terreno.
+:::
+::: {.fragment}
+- A **Hessiana ($\nabla^2 f$)** é de 2ª ordem: mede a abertura e a rotação da bacia elíptica em cada direção.
+:::
+::: {.fragment .callout-important}
+## A Pergunta Central
+Se conhecêssemos a curvatura local exata, qual seria o passo ideal? E quando esse passo for computacionalmente proibitivo ($\mathcal{O}(d^3)$), como aproximá-lo em tempo linear $\mathcal{O}(d)$?
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Roteiro da Aula
+
+Nesta aula, responderemos a quatro perguntas centrais:
+1. **O Modelo Quadrático:** Como a expansão de Taylor multivariada deduz analiticamente o passo de Newton e por que ele é imune a transformações lineares de coordenadas?
+2. **As Patologias em Larga Escala:** Por que a inversão exata da Hessiana falha em aprendizado profundo ($\mathcal{O}(d^3)$ em tempo, $\mathcal{O}(d^2)$ em espaço e atração fatal por pontos de sela)?
+3. **A Geometria do Precondicionamento:** Como a mudança de variáveis desacopla o espaço de parâmetros e por que a restrição a matrizes diagonais reduz a complexidade para $\mathcal{O}(d)$?
+4. **Escalas Adaptativas por Coordenada:** Como o AdaGrad e o RMSProp utilizam o histórico de gradientes de 1ª ordem para construir taxas adaptativas sem calcular segundas derivadas?
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Roteiro da Aula
+
+1. **O Modelo Quadrático:** Dedução analítica de Newton via Série de Taylor e invariância afim.
+2. **Patologias de Newton em ML:** Custo cúbico $\mathcal{O}(d^3)$, memória quadrática $\mathcal{O}(d^2)$ e colapso em pontos de sela.
+3. **Precondicionamento Diagonal:** Mudança métrica de coordenadas e desacoplamento linear $\mathcal{O}(d)$.
+4. **AdaGrad e RMSProp:** Acúmulo histórico de derivadas e médias móveis exponenciais (EMA).
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Problema Motivador: O Descompasso no California Housing
+
+Considere a base de dados do **California Housing** sem padronização prévia, predizendo o valor mediano dos imóveis a partir de variáveis com naturezas físicas distintas:
+*   `MedInc`: Renda mediana das famílias (em dezenas de milhares de dólares, variando entre $0{,}5$ e $15$).
+*   `AveBedrms`: Número médio de dormitórios (variando em torno de $1$).
+
+Ao computarmos a matriz Hessiana empírica $H = \frac{1}{N} X^T X$ dos dados brutos, o autovalor máximo atinge $\lambda_{\max} \approx 6{,}3 \cdot 10^3$, enquanto o menor autovalor é $\lambda_{\min} \approx 0{,}27$. O número de condição resultante é:
+$$\kappa \approx 23.460{,}5$$
+
+Se executarmos o Gradiente Descendente euclidiano, a taxa máxima de aprendizado admitida sem divergir é $\alpha < \frac{2}{\lambda_{\max}} \approx 0{,}0003$. Com essa taxa, a coordenada de alta variância caminha de forma estável, mas a coordenada associada a $\lambda_{\min}$ tem contração por passo de apenas $(1 - \alpha \lambda_{\min}) \approx 0{,}99991$. Para reduzir o erro nessa variável suave por míseros 50%, seriam necessárias mais de **7.700 iterações**!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Problema Motivador: California Housing
+
+::: {.columns}
+::: {.column width="50%"}
+**Dados Brutos sem Padronização:**
+
+- `MedInc` varia em escalas de dezenas.
+- `AveBedrms` varia em frações unitárias.
+- Hessiana empírica:
+  $$\lambda_{\max} \approx 6.300, \quad \lambda_{\min} \approx 0{,}27$$
+  $$\kappa \approx 23.460{,}5$$
+:::
+
+::: {.column width="50%"}
+**O Dilema do Gradiente:**
+
+- Teto de estabilidade: $\alpha < \frac{2}{\lambda_{\max}} \approx 0{,}0003$.
+- Contração na direção suave:
+  $$\rho = 1 - \alpha \lambda_{\min} \approx 0{,}99991$$
+- Reduzir o resíduo à metade exige mais de **7.700 iterações** de descida em lote!
+:::
+:::
+:::
+
+## A Limitação do Passo Escalar Único
+
+::: {.callout-tip}
+## O Dilema da Taxa Global
+
+Suponha uma função quadrática $f(w_1, w_2) = \frac{1}{2}(1000 w_1^2 + w_2^2)$. O que acontece ao aplicar Gradiente Descendente com passo escalar único $\alpha$? Qual é o valor máximo de $\alpha$ para evitar divergência em $w_1$? Sob esse $\alpha$, quantas iterações são necessárias para reduzir o erro em $w_2$ por um fator de 10?
+:::
+
+::: {.callout-tip}
+## Diagnóstico de Condicionamento
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Em uma superfície com número de condição $\kappa = 1000$, o maior autovalor da Hessiana impõe o teto da taxa de aprendizado admissível ($\alpha < 2/\lambda_{\max}$).
+- □ Ao selecionar $\alpha = 1/\lambda_{\max}$, a coordenada associada a $\lambda_{\min}$ atinge o valor ótimo em uma única iteração.
+- □ A padronização de variáveis por escore $Z$ elimina completamente todas as discrepâncias de curvatura em modelos não-lineares arbitrários.
+- □ Em modelos com representações esparsas (como one-hot encoding em PLN), atributos raros recebem gradientes nulos na maioria dos passos, de modo que um passo escalar pequeno global retarda excessivamente seu aprendizado.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Limitação do Passo Escalar Único — Resposta
+
+::: {.callout-tip}
+## Diagnóstico de Condicionamento — Resposta
+
+- ✔ **Verdadeiro.** A dinâmica espectral de erro $(I - \alpha H)$ diverge se $|1 - \alpha \lambda_{\max}| \ge 1 \implies \alpha < 2/\lambda_{\max}$.
+- ✗ **Falso.** Sob $\alpha = 1/\lambda_{\max}$, a coordenada de $\lambda_{\min}$ contrai por $1 - \frac{1}{\kappa} = 0{,}999$, exigindo milhares de passos.
+- ✗ **Falso.** O $Z$-score equaliza apenas as variâncias marginais na entrada; não remove curvaturas cruzadas nem resolve não-linearidades em redes profundas.
+- ✔ **Verdadeiro.** Gradientes esparsos requerem passos maiores quando ativados, o que é impossível sob uma taxa escalar única atenuada por atributos densos.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Para $w_1$, $\alpha < 2/1000 = 0{,}002$. Com $\alpha = 0{,}001$, a contração em $w_2$ é $1 - 0{,}001 \times 1 = 0{,}999$. Para reduzir o erro em $10\times$ ($(0{,}999)^k \le 0{,}1$), são necessárias $\approx \mathbf{2.301}$ iterações!
+:::
+:::
+
+---
+
+# Intuição — A Bacia Elíptica e a Lente Métrica
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Vale Estreito e a Ilusão do Gradiente
+
+Imagine uma tigela perfeitamente esférica esculpida em mármore. Se soltarmos uma esfera em qualquer ponto da borda, a força gravitacional aponta exatamente para o ponto mais baixo no centro. Em uma bacia esférica, a direção do gradiente descendente $-\nabla f(\mathbf{w})$ coincide rigorosamente com o vetor que conecta a posição atual ao minimizador global $\mathbf{w}^\star$.
+
+Agora imagine que esmagamos lateralmente essa bacia, transformando-a em uma calha estreita com proporção de 100 para 1. As curvas de nível deixam de ser círculos concêntricos e tornam-se elipses extremamente achatadas.
+
+Nesse vale elíptico:
+*   Nas laterais íngremes, o gradiente aponta quase transversalmente às curvas de nível — ou seja, perpendicularmente à calha!
+*   Ele manda o otimizador atravessar o vale de um lado para o outro, em ziguezague frenético, em vez de apontar para o fundo ao longo do eixo longitudinal.
+
+O **Método de Newton** pode ser interpretado como uma **lente geométrica**: ele mede a curvatura em todas as direções via Hessiana e aplica uma deformação métrica inversa ($H^{-1}$). Essa lente distorce o espaço de volta, transformando as elipses achatadas em círculos perfeitos. Nesse espaço corrigido pela curvatura, um único passo de gradiente aponta diretamente para o centro!
+
+O **Precondicionamento Diagonal**, por sua vez, é uma versão pragmática dessa lente: em vez de corrigir rotações complexas, ele apenas estica ou encolhe os eixos cartesianos independentemente, equalizando a largura e o comprimento das coordenadas sem girar o espaço.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Lente Métrica de Newton
+
+::: {.columns}
+::: {.column width="50%"}
+**O Espaço Euclidiano Padrão:**
+
+- Bacia elíptica altamente alongada ($\kappa = 100$).
+- O gradiente aponta perpendicular às curvas de nível (na direção íngreme transversal).
+- Resultado: ziguezague severo entre as paredes do vale.
+:::
+
+::: {.column width="50%"}
+**A Correção por Curvatura:**
+
+- A Hessiana $H$ mapeia as direções de estiramento do vale.
+- Multiplicar por $H^{-1}$ atua como uma lente: "redistribui" as distâncias métricas.
+- As elipses concêntricas tornam-se esferas concêntricas: o passo aponta diretamente para o minimizador!
+:::
+:::
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+
+# Painel 1: Bacia Elíptica Original com Ziguezague de GD
+w1_vals = np.linspace(-2.0, 2.0, 200)
+w2_vals = np.linspace(-2.0, 2.0, 200)
+W1, W2 = np.meshgrid(w1_vals, w2_vals)
+Z_ellip = 0.5 * (10.0 * W1**2 + W2**2)
+
+cs1 = axes[0].contour(W1, W2, Z_ellip, levels=15, cmap="Blues_r", alpha=0.7)
+axes[0].plot(w_gd_hist[:, 0], w_gd_hist[:, 1], 'o-', color=COR_B, label="Gradiente Descendente", markersize=4)
+axes[0].plot(w_newton_hist[:, 0], w_newton_hist[:, 1], 's--', color=COR_VERDE, label="Passo de Newton", markersize=7)
+axes[0].plot(0, 0, '*', color=COR_C, markersize=12, label="Ótimo $\\mathbf{w}^\\star$")
+axes[0].set_title("Espaço Original (Curvas Elípticas)\nZiguezague do Gradiente vs. Salto de Newton")
+axes[0].set_xlabel("$w_1$ (Alta Curvatura)")
+axes[0].set_ylabel("$w_2$ (Baixa Curvatura)")
+axes[0].legend(loc="upper left", frameon=True)
+
+# Painel 2: Espaço Pré-condicionado (Transformação Métrica)
+# Transformação w_tilde = H^{1/2} w => Z_circle = 0.5 * (w_tilde_1^2 + w_tilde_2^2)
+W1_t = np.sqrt(10.0) * W1
+W2_t = W2
+Z_circ = 0.5 * (W1_t**2 + W2_t**2)
+axes[1].contour(W1_t, W2_t, Z_circ, levels=15, cmap="Greens_r", alpha=0.7)
+w_newton_t = np.array([[np.sqrt(10.0)*1.5, 1.5], [0.0, 0.0]])
+axes[1].plot(w_newton_t[:, 0], w_newton_t[:, 1], 's--', color=COR_VERDE, label="Trajetória Corrigida", markersize=7)
+axes[1].plot(0, 0, '*', color=COR_C, markersize=12, label="Ótimo")
+axes[1].set_title("Espaço Deformado por $H^{-1/2}$\nCurvas Perfeitamente Circulares")
+axes[1].set_xlabel("$\\tilde{w}_1 = \\sqrt{\\lambda_1} w_1$")
+axes[1].set_ylabel("$\\tilde{w}_2 = \\sqrt{\\lambda_2} w_2$")
+axes[1].legend(loc="upper left", frameon=True)
+
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+# Bloco 1: A Aproximação Quadrática de Taylor e o Método de Newton
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Minimização do Modelo Substituto Local
+
+Considere uma função de perda duas vezes continuamente diferenciável $f: \mathbb{R}^d \to \mathbb{R}$. Na vizinhança de uma iteração corrente $\mathbf{w}_k$, podemos expandir a função através da **Série de Taylor multivariada**:
+$$f(\mathbf{w}_k + \Delta\mathbf{w}) = f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w} + \frac{1}{2} \Delta\mathbf{w}^T \nabla^2 f(\mathbf{w}_k) \Delta\mathbf{w} + \mathcal{O}(\|\Delta\mathbf{w}\|^3)$$
+
+Enquanto o Gradiente Descendente convencional se apoia apenas na aproximação linear (de 1ª ordem) combinada a um termo de penalidade quadrática isotrópica ($\frac{1}{2\alpha}\|\Delta\mathbf{w}\|^2$), o **Método de Newton** abraça a curvatura natural da função, definindo o modelo quadrático local substituto:
+$$q(\Delta\mathbf{w}) \triangleq f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w} + \frac{1}{2} \Delta\mathbf{w}^T H_k \Delta\mathbf{w}$$
+onde $H_k \triangleq \nabla^2 f(\mathbf{w}_k) \in \mathbb{R}^{d \times d}$ é a matriz Hessiana simétrica calculada em $\mathbf{w}_k$.
+
+Para encontrar o deslocamento $\Delta\mathbf{w}$ que minimiza esse modelo parabólico, calculamos o vetor gradiente de $q$ em relação a $\Delta\mathbf{w}$ e impomos a condição de otimalidade de primeira ordem:
+$$\nabla_{\Delta\mathbf{w}} q(\Delta\mathbf{w}) = \nabla f(\mathbf{w}_k) + H_k \Delta\mathbf{w} = \mathbf{0}$$
+
+Supondo que a Hessiana seja estritamente positiva definida ($H_k \succ 0$), a matriz é invertível e o minimizador do modelo quadrático é dado de forma única por:
+$$\Delta\mathbf{w}_{\text{nt}} = -H_k^{-1} \nabla f(\mathbf{w}_k)$$
+
+A atualização de parâmetros do **Método de Newton Puro** é dada por:
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - [\nabla^2 f(\mathbf{w}_k)]^{-1} \nabla f(\mathbf{w}_k)$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Derivação Analítica do Passo de Newton
+
+::: {.fragment}
+**1. Modelo Quadrático de Taylor:**
+$$q(\Delta\mathbf{w}) = f(\mathbf{w}_k) + \nabla f(\mathbf{w}_k)^T \Delta\mathbf{w} + \frac{1}{2} \Delta\mathbf{w}^T H_k \Delta\mathbf{w}$$
+:::
+
+::: {.fragment}
+**2. Condição de Otimalidade de Primeira Ordem:**
+$$\nabla_{\Delta\mathbf{w}} q(\Delta\mathbf{w}) = \nabla f(\mathbf{w}_k) + H_k \Delta\mathbf{w} = \mathbf{0}$$
+:::
+
+::: {.fragment}
+**3. O Passo de Newton (com $H_k \succ 0$):**
+$$\Delta\mathbf{w}_{\text{nt}} = -H_k^{-1} \nabla f(\mathbf{w}_k)$$
+:::
+
+::: {.fragment .callout-note icon=false}
+## Regra de Atualização de Newton
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - [\nabla^2 f(\mathbf{w}_k)]^{-1} \nabla f(\mathbf{w}_k)$$
+Não há taxa de aprendizado hiperparamétrica $\alpha$: a escala do passo é ditada automaticamente pela curvatura inversa $H_k^{-1}$!
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Decremento de Newton e o Critério de Parada
+
+Como saber quão próximo o modelo está do ponto de mínimo sem conhecer o valor ótimo $f(\mathbf{w}^\star)$?
+
+No Gradiente Descendente, costuma-se monitorar a norma euclidiana do gradiente $\|\nabla f(\mathbf{w})\|_2$. Contudo, essa quantidade depende arbitrariamente da escala das variáveis. No Método de Newton, a medida canônica de subotimalidade é o **Decremento de Newton** $\lambda(\mathbf{w})$:
+$$\lambda(\mathbf{w}) \triangleq \left( \nabla f(\mathbf{w})^T [\nabla^2 f(\mathbf{w})]^{-1} \nabla f(\mathbf{w}) \right)^{1/2}$$
+
+O quadrado do decremento de Newton possui um significado geométrico transparente: ele quantifica exatamente o dobro da redução de custo prevista pelo modelo quadrático substituto:
+$$f(\mathbf{w}) - \min_{\Delta\mathbf{w}} q(\Delta\mathbf{w}) = f(\mathbf{w}) - q(\Delta\mathbf{w}_{\text{nt}}) = \frac{1}{2}\lambda(\mathbf{w})^2$$
+
+Além disso, $\lambda(\mathbf{w})$ fornece um limite superior rigoroso para a distância até o valor ótimo: se $f$ for fortemente convexa com parâmetro $\mu$, então $f(\mathbf{w}) - f(\mathbf{w}^\star) \le \frac{1}{2\mu}\lambda(\mathbf{w})^2$. Critérios de parada modernos encerram a otimização quando $\frac{1}{2}\lambda(\mathbf{w})^2 \le \epsilon_{\text{tol}}$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Decremento de Newton
+
+::: {.fragment}
+**Definição:**
+$$\lambda(\mathbf{w}) = \sqrt{ \nabla f(\mathbf{w})^T [\nabla^2 f(\mathbf{w})]^{-1} \nabla f(\mathbf{w}) }$$
+:::
+
+::: {.fragment}
+**Interpretação Geométrica (Boyd & Vandenberghe §9.5):**
+$$f(\mathbf{w}) - q(\Delta\mathbf{w}_{\text{nt}}) = \frac{1}{2}\lambda(\mathbf{w})^2$$
+- Mede o decréscimo de custo prometido pelo modelo de 2ª ordem.
+- É a norma do gradiente na métrica da curvatura: $\|\nabla f(\mathbf{w})\|_{H^{-1}}$.
+:::
+
+::: {.fragment .callout-tip}
+## Critério de Parada
+O algoritmo atinge a vizinhança de convergência quadrática quando $\frac{1}{2}\lambda(\mathbf{w})^2 \le \epsilon$.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Teorema da Invariância Afim e Convergência Quadrática
+
+Uma das propriedades mais elegantes do Método de Newton é sua **Invariância Afim**:
+
+::: {.callout-note icon=false}
+## Teorema: Invariância Afim do Método de Newton (Boyd §9.5.1)
+Seja $f: \mathbb{R}^d \to \mathbb{R}$ uma função duas vezes diferenciável e considere uma mudança linear de coordenadas arbitrária dada por $\tilde{\mathbf{w}} = A \mathbf{w}$, onde $A \in \mathbb{R}^{d \times d}$ é uma matriz inversível. Defina a função no novo sistema de coordenadas como $\phi(\tilde{\mathbf{w}}) \triangleq f(A^{-1}\tilde{\mathbf{w}})$.
+
+Então, o passo de Newton $\Delta\tilde{\mathbf{w}}_{\text{nt}}$ calculado para $\phi$ em $\tilde{\mathbf{w}}$ satisfaz rigorosamente:
+$$\Delta\tilde{\mathbf{w}}_{\text{nt}} = A \Delta\mathbf{w}_{\text{nt}}$$
+:::
+
+*Demonstração:*
+Pela regra da cadeia multivariada, o gradiente e a Hessiana no espaço transformado são:
+$$\nabla_{\tilde{\mathbf{w}}} \phi(\tilde{\mathbf{w}}) = A^{-T} \nabla_{\mathbf{w}} f(\mathbf{w})$$
+$$\nabla_{\tilde{\mathbf{w}}}^2 \phi(\tilde{\mathbf{w}}) = A^{-T} \nabla_{\mathbf{w}}^2 f(\mathbf{w}) A^{-1}$$
+
+Calculando o passo de Newton no novo espaço:
+$$\Delta\tilde{\mathbf{w}}_{\text{nt}} = -[\nabla_{\tilde{\mathbf{w}}}^2 \phi(\tilde{\mathbf{w}})]^{-1} \nabla_{\tilde{\mathbf{w}}} \phi(\tilde{\mathbf{w}}) = -\left[ A^{-T} \nabla^2 f(\mathbf{w}) A^{-1} \right]^{-1} \left( A^{-T} \nabla f(\mathbf{w}) \right)$$
+$$= -\left[ A \left(\nabla^2 f(\mathbf{w})\right)^{-1} A^T \right] A^{-T} \nabla f(\mathbf{w}) = -A [\nabla^2 f(\mathbf{w})]^{-1} \nabla f(\mathbf{w}) = A \Delta\mathbf{w}_{\text{nt}} \quad \blacksquare$$
+
+**Significado Prático:** Newton é totalmente cego à escolha das unidades de medida dos dados! Se multiplicarmos a renda familiar por $1000$ ou convertermos quilômetros em milhas, a sequência de iterações do Método de Newton permanece perfeitamente inalterada no espaço físico original. O Gradiente Descendente euclidiano, por outro lado, sofre mutações drásticas sob transformações de escala.
+
+Além disso, sob condições brandas (Hessiana Lipschitz contínua e fortemente convexa), Newton exibe **Convergência Quadrática Local**:
+$$\|\mathbf{w}_{k+1} - \mathbf{w}^\star\| \le M \|\mathbf{w}_k - \mathbf{w}^\star\|^2$$
+Uma vez que o modelo entra no raio de atração quadrática, o número de casas decimais de precisão exata **dobra a cada iteração** (ex.: erro $10^{-2} \to 10^{-4} \to 10^{-8} \to 10^{-16}$).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Invariância Afim de Newton
+
+::: {.fragment}
+**Mudança de Coordenadas:** $\tilde{\mathbf{w}} = A \mathbf{w}$ ($A$ inversível), $\phi(\tilde{\mathbf{w}}) = f(A^{-1}\tilde{\mathbf{w}})$.
+:::
+
+::: {.fragment}
+- Gradiente transformado: $\nabla \phi = A^{-T} \nabla f$
+- Hessiana transformada: $\nabla^2 \phi = A^{-T} \nabla^2 f A^{-1}$
+:::
+
+::: {.fragment}
+**O Passo no Novo Espaço:**
+$$\Delta\tilde{\mathbf{w}}_{\text{nt}} = -[\nabla^2 \phi]^{-1} \nabla \phi = -[A (\nabla^2 f)^{-1} A^T] A^{-T} \nabla f = A \Delta\mathbf{w}_{\text{nt}}$$
+:::
+
+::: {.fragment .callout-important}
+## Consequência
+O Método de Newton gera a **mesma trajetória exata** independentemente de reescalonamentos ou rotações das variáveis. O Gradiente Descendente **não** possui essa propriedade!
+:::
+:::
+
+## O Passo de Newton e a Invariância Afim
+
+::: {.callout-tip}
+## O Salto em Formas Quadráticas
+
+Seja $f(\mathbf{w}) = \frac{1}{2}\mathbf{w}^T A \mathbf{w} - \mathbf{b}^T \mathbf{w}$ com $A \succ 0$. Quantas iterações o Método de Newton exige para encontrar a solução exata $\mathbf{w}^\star = A^{-1}\mathbf{b}$ partindo de um $\mathbf{w}_0$ arbitrário? Qual é o papel geométrico do decremento de Newton $\lambda(\mathbf{w})^2$?
+:::
+
+::: {.callout-tip}
+## Propriedades de Segunda Ordem
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Se $f$ for uma forma quadrática estritamente convexa, a expansão de Taylor de segunda ordem é exata, tornando o resíduo de ordem superior identicamente nulo.
+- □ O passo de Newton $\Delta\mathbf{w}_{\text{nt}} = -H^{-1}\nabla f$ tem unidade dimensional compatível com o vetor de parâmetros $\mathbf{w}$.
+- □ Se reescalonarmos os dados transformando $\mathbf{w} \to c \mathbf{w}$ com $c > 0$, o passo do Gradiente Descendente clássico é multiplicado por $1/c$, preservando a mesma trajetória geométrica.
+- □ O decremento de Newton $\lambda(\mathbf{w})^2 = \nabla f(\mathbf{w})^T H^{-1} \nabla f(\mathbf{w})$ é estritamente não-negativo para qualquer função convexa e anula-se se e somente se $\nabla f(\mathbf{w}) = \mathbf{0}$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Passo de Newton e a Invariância Afim — Resposta
+
+::: {.callout-tip}
+## Propriedades de Segunda Ordem — Resposta
+
+- ✔ **Verdadeiro.** Para polinomiais de grau 2, derivadas de ordem 3+ são zero; o modelo local é idêntico à função global.
+- ✔ **Verdadeiro.** $[\text{Hessiana}]^{-1}[\text{Gradiente}] = ([\text{perda}]/[\text{param}]^2)^{-1} ([\text{perda}]/[\text{param}]) = [\text{param}]$.
+- ✗ **Falso.** O GD euclidiano **muda** de trajetória sob reescalonamentos; apenas Newton é invariante a escala.
+- ✔ **Verdadeiro.** Como $H \succ 0 \implies H^{-1} \succ 0$, $\mathbf{v}^T H^{-1} \mathbf{v} \ge 0$, atingindo zero apenas quando $\nabla f = \mathbf{0}$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Exatamente **1 iteração**! Pois $H_0 = A$ e $\nabla f(\mathbf{w}_0) = A\mathbf{w}_0 - \mathbf{b}$, de modo que $\mathbf{w}_1 = \mathbf{w}_0 - A^{-1}(A\mathbf{w}_0 - \mathbf{b}) = A^{-1}\mathbf{b}$. O decremento $\lambda(\mathbf{w})^2$ mede o dobro do ganho residual previsto pelo modelo quadrático local.
+:::
+:::
+
+---
+
+# Bloco 2: As Três Patologias de Newton em Aprendizado de Máquina
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Por Que Redes Neurais Não São Treinadas com Newton Puro?
+
+Diante da convergência quadrática e da imunidade a escalas, seria tentador decretar que o Método de Newton deveria substituir todos os otimizadores existentes. No entanto, em Aprendizado de Máquina moderno, o Método de Newton puro é quase **inutilizável** em sua forma bruta.
+
+Existem três barreiras teóricas e práticas intransponíveis:
+
+### Patologia 1: O Muro Computacional $\mathcal{O}(d^3)$ e de Memória $\mathcal{O}(d^2)$
+
+Em problemas reais de aprendizado supervisionado, o número de parâmetros $d$ varia de dezenas de milhares (modelos lineares e convolucionais leves) a centenas de bilhões (Large Language Models):
+1.  **Armazenamento da Hessiana ($\mathcal{O}(d^2)$):**
+    Uma rede modesta com $d = 10^6$ parâmetros exige uma matriz Hessiana de $10^{12}$ elementos em ponto flutuante. Em precisão float32 (4 bytes por float), armazenar **uma única matriz Hessiana** requer **$4$ Terabytes de memória RAM**! Para um modelo de 70 bilhões de parâmetros (como Llama-3-70B), seriam necessários cerca de **$20$ Zetabytes** — mais do que toda a RAM física existente em supercomputadores do planeta.
+2.  **Inversão do Sistema Linear ($\mathcal{O}(d^3)$):**
+    Resolver o sistema linear $H \Delta\mathbf{w} = -\mathbf{g}$ via Eliminação Gaussiana ou Decomposição de Cholesky consome $\approx \frac{1}{3}d^3$ operações aritméticas (FLOPs). Para $d = 10^6$, isso equivale a $\approx 3{,}3 \times 10^{17}$ FLOPs **por passo de atualização**. Enquanto um passo de SGD consome milissegundos, uma única iteração de Newton levaria dias.
+
+### Patologia 2: A Armadilha dos Pontos de Sela e Não-Convexidade
+
+O modelo quadrático de Taylor assume tacitamente que $H_k \succ 0$ (curvatura positiva em todas as direções). Contudo, funções de perda de redes neurais profundas são altamente **não-convexas**:
+*   Em regiões onde a Hessiana é indefinida (possui autovalores positivos e negativos), impor $\nabla q(\Delta\mathbf{w}) = \mathbf{0}$ encontra o ponto estacionário do modelo quadrático, que pode ser um **ponto de sela** ou até um **máximo local**!
+*   Se um autovalor for negativo ($\lambda_i < 0$), o passo de Newton ao longo desse autovetor move-se no sentido de **maximizar** a função ($\mathbf{g}^T \Delta\mathbf{w} > 0$), arremessando os pesos montanha acima.
+*   Em espaços de alta dimensão, Dauphin et al. (2014) provaram que pontos de sela proliferam exponencialmente em relação aos mínimos locais, tornando o método de Newton um "ímã de pontos de sela".
+
+### Patologia 3: Incompatibilidade com Ruído Estocástico
+
+Calcular a Hessiana exata sobre o dataset completo de tamanho $N$ custa $\mathcal{O}(Nd^2)$. Se tentarmos estimar a Hessiana sobre um mini-batch de tamanho $B \ll N$:
+$$\hat{H} = \frac{1}{B}\sum_{i \in \mathcal{B}} \nabla^2 f_i(\mathbf{w})$$
+o posto dessa matriz amostral é no máximo $B$. Para $B < d$, a matriz $\hat{H}$ é estritamente **singular** (posto incompleto), impossibilitando sua inversão direta! Mesmo que $B \ge d$, os autovalores menores de $\hat{H}$ são dominados por ruído amostral violento: ao inverter a matriz, o inverso dos autovalores ruidosos ($1/\hat{\lambda}_i$) amplifica o ruído estocástico por ordens de magnitude.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## As Três Patologias de Newton
+
+::: {.columns}
+::: {.column width="33%"}
+**1. Gargalo $\mathcal{O}(d^3)$**
+
+- Armazenar $H$: $\mathcal{O}(d^2)$. Para $d = 10^6 \implies \mathbf{4\text{ TB}}$ de RAM.
+- Inverter $H$: $\mathcal{O}(d^3) \approx 3{,}3 \cdot 10^{17}$ FLOPs por iteração!
+- Inviável para qualquer rede moderna.
+:::
+
+::: {.column width="33%"}
+**2. Pontos de Sela**
+
+- Em redes não-convexas, $H$ possui autovalores negativos ($\lambda_i < 0$).
+- Newton busca pontos críticos: ele salta na direção de **máximos locais** e selas!
+- Ímã de pontos de sela em alta dimensão.
+:::
+
+::: {.column width="33%"}
+**3. Ruído de Mini-Batch**
+
+- Avaliar $H$ completa custa $\mathcal{O}(Nd^2)$.
+- Avaliar em lote $B < d$ gera matriz singular ($\text{posto}(\hat{H}) \le B$).
+- Autovalores pequenos amplificam o ruído amostral por $1/\hat{\lambda}_i$.
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Remédio Clássico: Newton Amortecido e Regularizado
+
+A engenharia numérica clássica atenua essas patologias através da **Regularização de Levenberg-Marquardt** (também conhecida como método de Newton amortecido ou *trust-region*):
+$$(H_k + \lambda_k I) \Delta\mathbf{w} = -\nabla f(\mathbf{w}_k)$$
+onde $\lambda_k > 0$ é um parâmetro de amortecimento escalar adaptativo.
+
+Pelo Teorema Espectral ($H_k = Q \Lambda Q^T$), a matriz modificada tem decomposição:
+$$H_k + \lambda_k I = Q (\Lambda + \lambda_k I) Q^T$$
+Os novos autovalores são $\lambda_i + \lambda_k$. Escolhendo $\lambda_k > |\min(0, \lambda_{\min})|$, garantimos que todos os autovalores tornem-se estritamente positivos ($\lambda_i + \lambda_k > 0$), restaurando a descida estrita e a invertibilidade.
+
+Além disso, observe o comportamento assintótico:
+*   Se $\lambda_k \to 0$: recuperamos o **Método de Newton Puro**.
+*   Se $\lambda_k \to \infty$: a identidade domina ($(H_k + \lambda_k I)^{-1} \approx \frac{1}{\lambda_k}I$), e a atualização aproxima-se do **Gradiente Descendente Euclidiano** com taxa de aprendizado $\alpha = 1/\lambda_k$.
+
+Embora Levenberg-Marquardt cure a patologia dos pontos de sela, ele **não resolve o muro computacional $\mathcal{O}(d^3)$**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Regularização de Levenberg-Marquardt
+
+::: {.fragment}
+**Sistema Linear Modificado:**
+$$(H_k + \lambda_k I)\Delta\mathbf{w} = -\nabla f(\mathbf{w}_k), \quad \text{com } \lambda_k > 0$$
+:::
+
+::: {.fragment}
+**Espectro dos Autovalores:**
+$$\lambda_i(H_k + \lambda_k I) = \lambda_i(H_k) + \lambda_k$$
+Basta escolher $\lambda_k > |\lambda_{\min}|$ para garantir que a matriz seja estritamente positiva definida!
+:::
+
+::: {.fragment}
+**Interpolação Suave:**
+$$\lambda_k \to 0 \implies \text{Newton Puro} \qquad\Longleftrightarrow\qquad \lambda_k \to \infty \implies \text{Gradiente Descendente}$$
+:::
+
+::: {.fragment .callout-warning}
+## Limitação Persistente
+Resolve a indefinição de sinal, mas **ainda custa $\mathcal{O}(d^3)$** para resolver o sistema linear!
+:::
+:::
+
+## Patologias de Newton em Alta Dimensão
+
+::: {.callout-tip}
+## O Salto no Ponto de Sela
+
+Considere a função hiperbólica $f(w_1, w_2) = w_1^2 - w_2^2$, que possui um ponto de sela em $(0, 0)$. Calcule o passo de Newton a partir do ponto inicial $\mathbf{w}_0 = (1, 1)^T$. Para onde o algoritmo se desloca? O que ocorreria se o ponto inicial fosse $(0, 1)^T$?
+:::
+
+::: {.callout-tip}
+## Escala Computacional de Newton
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Em um ponto de sela onde a Hessiana possui autovalores estritamente negativos, a direção $-\nabla^2 f(\mathbf{w})^{-1}\nabla f(\mathbf{w})$ pode apontar no sentido de crescimento da perda ($\nabla f^T \Delta\mathbf{w} > 0$).
+- □ A fatoração de Cholesky de uma matriz Hessiana $d \times d$ requer complexidade temporal $\mathcal{O}(d^2)$ e consumo de memória linear $\mathcal{O}(d)$.
+- □ A regularização de Levenberg-Marquardt $(H + \lambda I)^{-1}\nabla f$ com $\lambda > |\min_i \lambda_i|$ garante que a matriz invertida seja simétrica positiva definida.
+- □ Em modelos modernos com 70 bilhões de parâmetros (LLMs), o armazenamento de uma única matriz Hessiana em precisão de 32 bits exigiria menos de 1 Terabyte de memória.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Patologias de Newton em Alta Dimensão — Resposta
+
+::: {.callout-tip}
+## Escala Computacional de Newton — Resposta
+
+- ✔ **Verdadeiro.** Se $\lambda_i < 0$, $-\mathbf{g}^T H^{-1} \mathbf{g}$ pode ser positivo; Newton salta montanha acima ao longo do eixo de sela.
+- ✗ **Falso.** Cholesky consome $\frac{1}{3}d^3$ operações aritméticas ($\mathcal{O}(d^3)$) e exige armazenar toda a matriz ($\mathcal{O}(d^2)$).
+- ✔ **Verdadeiro.** Adicionar $\lambda I$ desloca todo o espectro por $+\lambda$, tornando todos os autovalores estritamente positivos.
+- ✗ **Falso.** $d^2 \approx (7 \cdot 10^{10})^2 \approx 4{,}9 \cdot 10^{21}$ floats $\approx \mathbf{20\text{ Zetabytes}}$ de memória RAM!
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** $\nabla f(\mathbf{w}_0) = (2, -2)^T$, $H = \text{diag}(2, -2) \implies H^{-1} = \text{diag}(1/2, -1/2)$. O passo é $\Delta\mathbf{w} = -(1, 1)^T \implies \mathbf{w}_1 = (0, 0)^T$. O algoritmo salta diretamente para o ponto de sela! Se partisse de $(0, 1)^T$ com $f = -1$, saltaria para $(0, 0)^T$ com $f = 0$, **aumentando o erro**!
+:::
+:::
+
+---
+
+# Bloco 3: A Geometria do Precondicionamento e a Matriz Diagonal
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Mudança Métrica de Variáveis
+
+O dilema é evidente:
+*   O Gradiente Descendente custa apenas $\mathcal{O}(d)$, mas sofre em superfícies mal-condicionadas com ziguezagues infinitos.
+*   O Método de Newton elimina o mau condicionamento e equaliza todas as direções, mas custa impeditivos $\mathcal{O}(d^3)$.
+
+Como capturar os benefícios de escala de Newton sem pagar a penalidade cúbica? A resposta matemática reside na teoria do **Precondicionamento**.
+
+Considere uma transformação linear geral e inversível do espaço de parâmetros:
+$$\tilde{\mathbf{w}} = P^{1/2} \mathbf{w}$$
+onde $P \in \mathbb{R}^{d \times d}$ é uma matriz simétrica estritamente positiva definida ($P \succ 0$), denominada **Matriz de Precondicionamento**.
+
+A função expressa no espaço transformado é $\phi(\tilde{\mathbf{w}}) \triangleq f(P^{-1/2} \tilde{\mathbf{w}})$. Aplicando a regra da cadeia, o gradiente em relação à variável $\tilde{\mathbf{w}}$ é:
+$$\nabla_{\tilde{\mathbf{w}}} \phi(\tilde{\mathbf{w}}) = P^{-1/2} \nabla_{\mathbf{w}} f(\mathbf{w})$$
+
+Se dermos um passo de Gradiente Descendente clássico no espaço transformado $\tilde{\mathbf{w}}$ com taxa $\alpha$:
+$$\tilde{\mathbf{w}}_{k+1} = \tilde{\mathbf{w}}_k - \alpha \nabla_{\tilde{\mathbf{w}}} \phi(\tilde{\mathbf{w}}_k)$$
+e multiplicarmos ambos os lados à esquerda por $P^{-1/2}$ para retornar à parametrização original $\mathbf{w} = P^{-1/2} \tilde{\mathbf{w}}$, obtemos:
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha P^{-1} \nabla_{\mathbf{w}} f(\mathbf{w}_k)$$
+
+Essa é a forma universal do **Gradiente Descendente Precondicionado**:
+*   Se $P = I$: recuperamos o Gradiente Descendente euclidiano padrão ($\mathcal{O}(d)$).
+*   Se $P = \nabla^2 f(\mathbf{w}_k)$ e $\alpha = 1$: recuperamos o Método de Newton Puro ($\mathcal{O}(d^3)$).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Geometria do Precondicionamento
+
+::: {.fragment}
+**Transformação de Base:** $\tilde{\mathbf{w}} = P^{1/2} \mathbf{w}$ com $P \succ 0$ simétrica positiva definida.
+:::
+
+::: {.fragment}
+**Gradiente no Espaço Deformado:**
+$$\nabla_{\tilde{\mathbf{w}}} \phi = P^{-1/2} \nabla_{\mathbf{w}} f(\mathbf{w})$$
+:::
+
+::: {.fragment}
+**Passo de GD no Novo Espaço revertido para o Espaço Original:**
+$$P^{1/2}\mathbf{w}_{k+1} = P^{1/2}\mathbf{w}_k - \alpha P^{-1/2} \nabla f(\mathbf{w}_k)$$
+$$\implies \mathbf{w}_{k+1} = \mathbf{w}_k - \alpha P^{-1} \nabla f(\mathbf{w}_k)$$
+:::
+
+::: {.fragment .callout-note icon=false}
+## O Espectro de Otimizadores
+- $P = I \implies$ Gradiente Descendente Clássico (Custo $\mathcal{O}(d)$)
+- $P = H \implies$ Método de Newton Exato (Custo $\mathcal{O}(d^3)$)
+- $P = \text{diag}(\dots) \implies$ **Precondicionamento Diagonal** (Custo $\mathcal{O}(d)$!)
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Aproximação Diagonal: O Ponto Doce de $\mathcal{O}(d)$
+
+A grande sacada computacional é: e se restringirmos a matriz de precondicionamento $P$ a ser estritamente **diagonal**?
+$$D_k = \begin{bmatrix} s_{1, k} & 0 & \dots & 0 \\ 0 & s_{2, k} & \dots & 0 \\ \vdots & \vdots & \ddots & \vdots \\ 0 & 0 & \dots & s_{d, k} \end{bmatrix} \succ 0 \quad (s_{i, k} > 0)$$
+
+As consequências práticas são revolucionárias:
+1.  **Inversão Trivial e Instantânea:**
+    A inversa de uma matriz diagonal não requer Cholesky nem fatoração: basta calcular o recíproco escalar de cada elemento:
+    $$D_k^{-1} = \text{diag}\left(\frac{1}{s_{1, k}}, \frac{1}{s_{2, k}}, \dots, \frac{1}{s_{d, k}}\right)$$
+    Complexidade temporal de inversão: exatamente **$d$ divisões escalares** ($\mathcal{O}(d)$)!
+2.  **Armazenamento Vetorial:**
+    Armazenar $D_k$ consome exatamente um vetor de dimensão $d$ ($\mathcal{O}(d)$ em memória RAM).
+3.  **Desacoplamento Completo por Coordenada:**
+    A atualização matricial $\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha D_k^{-1} \nabla f(\mathbf{w}_k)$ quebra-se em $d$ regras unidimensionais totalmente independentes:
+    $$w_{i, k+1} = w_{i, k} - \alpha \frac{g_{i, k}}{s_{i, k}}, \quad \text{para cada } i = 1, \dots, d$$
+
+Cada parâmetro $w_i$ recebe sua própria taxa de aprendizado efetiva adaptativa:
+$$\alpha_{i, k}^{\text{eff}} \triangleq \frac{\alpha}{s_{i, k}}$$
+Se a coordenada $i$ possuir alta curvatura ($s_i$ grande), seu passo é reduzido para evitar instabilidade. Se a coordenada $i$ for suave ($s_i$ pequeno), seu passo é amplificado para acelerar o progresso!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Ponto Doce: Precondicionamento Diagonal
+
+::: {.columns}
+::: {.column width="50%"}
+**Estrutura Diagonal:**
+$$D = \text{diag}(s_1, s_2, \dots, s_d) \succ 0$$
+
+- Inversão analítica imediata:
+  $$D^{-1} = \text{diag}\left(\frac{1}{s_1}, \dots, \frac{1}{s_d}\right)$$
+- Memória: apenas $d$ escalares ($\mathcal{O}(d)$).
+- FLOPs: $d$ divisões por passo ($\mathcal{O}(d)$).
+:::
+
+::: {.column width="50%"}
+**Atualização por Coordenada:**
+$$w_{i, k+1} = w_{i, k} - \frac{\alpha}{s_{i, k}} g_{i, k}$$
+
+- Cada parâmetro $i$ possui sua própria taxa de aprendizado efetiva:
+  $$\alpha_i^{\text{eff}} = \frac{\alpha}{s_i}$$
+- Coordenadas íngremes são atenuadas; coordenadas planas são aceleradas!
+:::
+:::
+:::
+
+## Precondicionamento Diagonal
+
+::: {.callout-tip}
+## O Desacoplamento Matricial
+
+Mostre algebricamente por que a multiplicação matriz-vetor $D^{-1}\mathbf{g}$ com $D = \text{diag}(s_1, \dots, s_d)$ possui custo computacional linear $\mathcal{O}(d)$. Por que essa operação pode ser distribuída perfeitamente em threads paralelas em uma GPU?
+:::
+
+::: {.callout-tip}
+## Propriedades do Precondicionamento
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O precondicionamento diagonal equivale a aplicar uma mudança linear de variáveis onde cada coordenada $w_i$ é reescalonada por $\sqrt{s_i}$ independentemente.
+- □ Uma matriz de precondicionamento diagonal é capaz de rotacionar os eixos de coordenadas para cancelar covariâncias cruzadas não-diagonais da Hessiana.
+- □ Se escolhermos $s_i = \frac{\partial^2 f}{\partial w_i^2}$, o passo por coordenada recupera o método de Newton unidimensional aplicado a cada parâmetro isoladamente.
+- □ O custo de memória de armazenar uma matriz de precondicionamento diagonal cresce quadraticamente com a dimensão do espaço de parâmetros ($\mathcal{O}(d^2)$).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Precondicionamento Diagonal — Resposta
+
+::: {.callout-tip}
+## Propriedades do Precondicionamento — Resposta
+
+- ✔ **Verdadeiro.** $\tilde{w}_i = \sqrt{s_i} w_i \implies \frac{\partial f}{\partial \tilde{w}_i} = \frac{1}{\sqrt{s_i}} \frac{\partial f}{\partial w_i}$; o passo resultante é exatamente $w_i - \frac{\alpha}{s_i} g_i$.
+- ✗ **Falso.** Matrizes diagonais realizam apenas estiramentos axiais; não induzem rotações de coordenadas nem eliminam covariâncias fora da diagonal.
+- ✔ **Verdadeiro.** É a chamada aproximação de Newton Diagonal, descartando as derivadas parciais mistas $\partial^2 f / \partial w_i \partial w_j$.
+- ✗ **Falso.** O armazenamento é estritamente linear $\mathcal{O}(d)$ (um único vetor com as $d$ entradas diagonais).
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Como $D$ é diagonal, $[D^{-1}\mathbf{g}]_i = \frac{1}{s_i} g_i$. Isso é o produto de Hadamard elemento a elemento de dois vetores de tamanho $d$. Cada thread de uma GPU pode calcular sua componente $i$ em registradores locais de forma independente, sem troca de mensagens entre blocos de execução (*embarrassingly parallel*).
+:::
+:::
+
+---
+
+# Bloco 4: Escalas Adaptativas na Prática: AdaGrad e RMSProp
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Como Estimar a Curvatura Usando Apenas Primeiras Derivadas?
+
+Estabelecemos que a regra desacoplada $w_{i, k+1} = w_{i, k} - \frac{\alpha}{s_{i, k}} g_{i, k}$ custa $\mathcal{O}(d)$. Contudo, resta um desafio fundamental: **de onde extrair os coeficientes de escala $s_{i, k}$?**
+
+Calcular a diagonal analítica da Hessiana ($\frac{\partial^2 f}{\partial w_i^2}$) ainda exige passes computacionais adicionais e não resolve o problema quando a curvatura é ruidosa ou negativa.
+
+A brilhante intuição inaugurada por Duchi et al. (2011) foi perceber que **a história das primeiras derivadas fornece um substituto empírico formidável da curvatura**:
+*   Se ao longo de várias iterações uma coordenada $i$ exibe gradientes de grande magnitude ($|g_{t, i}| \gg 0$), isso revela que a função tem inclinação íngreme nessa direção $\to$ $s_{i}$ deve ser grande para moderar o avanço.
+*   Se uma coordenada recebe gradientes minúsculos ou quase nulos na maior parte do tempo (como um parâmetro associado a uma palavra rara em um vocabulário de NLP) $\to$ $s_i$ deve ser pequeno para permitir passos largos quando o gradiente finalmente ocorrer.
+
+### 1. Otimizador AdaGrad (Duchi, Hazan & Singer, 2011)
+
+O **AdaGrad** (*Adaptive Gradient Algorithm*) define o fator de precondicionamento como a raiz quadrada da soma de todos os gradientes quadrados observados no passado:
+$$G_{t, i} = G_{t-1, i} + g_{t, i}^2 = \sum_{\tau=1}^t g_{\tau, i}^2$$
+
+A regra de atualização vetorial é:
+$$\mathbf{w}_{t+1} = \mathbf{w}_t - \frac{\alpha}{\sqrt{\mathbf{G}_t} + \epsilon} \odot \mathbf{g}_t$$
+onde $\odot$ denota produto de Hadamard elemento a elemento e $\epsilon > 0$ (ex.: $10^{-8}$) é uma constante minúscula para evitar divisão por zero.
+
+*O Triunfo do AdaGrad:* Em dados com alta esparsidade (sistemas de recomendação, modelos de linguagem clássicos), o AdaGrad brilha: atributos raros mantêm $G_{t, i} \approx 0$, recebendo taxas de aprendizado muito mais agressivas do que atributos frequentes.
+
+*A Patologia Fatal do AdaGrad:*
+Como $g_{\tau, i}^2 \ge 0$, a sequência $G_{t, i}$ é **estritamente não-decrescente**:
+$$G_{t, i} \ge G_{t-1, i} \implies \lim_{t \to \infty} G_{t, i} = \infty$$
+Consequentemente, a taxa de aprendizado efetiva cai continuamente para zero:
+$$\lim_{t \to \infty} \frac{\alpha}{\sqrt{G_{t, i}} + \epsilon} = 0$$
+Em redes neurais profundas com milhares de épocas, o AdaGrad acumula tanta energia gradiente em fases iniciais que a taxa de aprendizado efetiva colapsa antes que o modelo chegue perto do minimizador: **o treinamento congela prematuramente**!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Otimizador AdaGrad (Duchi et al., 2011)
+
+::: {.fragment}
+**Intuição:** Usar a magnitude dos gradientes de 1ª ordem passados como proxy da curvatura local.
+:::
+
+::: {.fragment}
+**Acumulador de Energia:**
+$$G_{t, i} = G_{t-1, i} + g_{t, i}^2 = \sum_{\tau=1}^t g_{\tau, i}^2$$
+:::
+
+::: {.fragment}
+**Regra de Atualização:**
+$$\mathbf{w}_{t+1} = \mathbf{w}_t - \frac{\alpha}{\sqrt{\mathbf{G}_t} + \epsilon} \odot \mathbf{g}_t$$
+:::
+
+::: {.fragment .callout-warning}
+## A Patologia do Congelamento
+$g^2 \ge 0 \implies G_t$ cresce monotonamente. A taxa de aprendizado efetiva $\frac{\alpha}{\sqrt{G_t}}$ decai irreversivelmente para zero, congelando o treinamento antes da convergência em redes profundas!
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## 2. Otimizador RMSProp (Geoffrey Hinton, 2012)
+
+Em suas famosas aulas de rede neural na plataforma Coursera (Aula 6e, 2012), Geoffrey Hinton propôs a cura definitiva para o congelamento do AdaGrad: **descartar a história remota e reter apenas a variância local recente**.
+
+Em vez de somar todos os gradientes passados até o infinito, o **RMSProp** (*Root Mean Square Propagation*) utiliza uma **Média Móvel Exponencial (EMA)** dos gradientes ao quadrado:
+$$v_{t, i} = \beta_2 v_{t-1, i} + (1 - \beta_2) g_{t, i}^2$$
+onde $\beta_2 \in (0, 1)$ é o fator de decaimento exponencial (tipicamente fixado em $\beta_2 = 0{,}9$ ou $0{,}99$).
+
+A regra de atualização de parâmetros é:
+$$\mathbf{w}_{t+1} = \mathbf{w}_t - \frac{\alpha}{\sqrt{\mathbf{v}_t} + \epsilon} \odot \mathbf{g}_t$$
+
+*Propriedades Notáveis do RMSProp:*
+1.  **Memória com Janela Móvel Eficaz:**
+    Expandindo a recursão $v_t = (1-\beta_2)\sum_{k=0}^{t-1} \beta_2^k g_{t-k}^2$, percebe-se que as iterações passadas têm peso decaindo geometricamente. A janela temporal de memória efetiva abrange aproximadamente:
+    $$\tau_{\text{mem}} \approx \frac{1}{1 - \beta_2} \text{ iterações}$$
+    Para $\beta_2 = 0{,}9$, o otimizador olha para as últimas $\approx 10$ iterações; para $\beta_2 = 0{,}99$, para as últimas $\approx 100$ iterações.
+2.  **Taxa Adaptativa Não-Saturante:**
+    Se o otimizador atravessar uma região íngreme e posteriormente entrar em um vale suave e plano onde os gradientes diminuem, o acumulador $v_t$ **decai**, fazendo a taxa efetiva de aprendizado $\alpha / \sqrt{v_t}$ **subir novamente**! O modelo nunca congela.
+3.  **Normalização por Desvio Padrão:**
+    A raiz $\sqrt{v_{t, i}}$ estima o desvio padrão quadrático médio (*root mean square*) do gradiente recente. O passo resultante $\frac{g_t}{\sqrt{v_t}}$ tem magnitude aproximadamente unitária em termos de escala, transformando a atualização em algo próximo de um passo de sinal calibrado.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Otimizador RMSProp (Hinton, 2012)
+
+::: {.fragment}
+**Cura do Congelamento:** Substituir a soma infinita por Média Móvel Exponencial (EMA).
+:::
+
+::: {.fragment}
+**Rastreamento do Segundo Momento Não-Central:**
+$$v_{t, i} = \beta_2 v_{t-1, i} + (1 - \beta_2) g_{t, i}^2, \quad \beta_2 \in [0{,}9, 0{,}99]$$
+:::
+
+::: {.fragment}
+**Regra de Atualização:**
+$$\mathbf{w}_{t+1} = \mathbf{w}_t - \frac{\alpha}{\sqrt{\mathbf{v}_t} + \epsilon} \odot \mathbf{g}_t$$
+:::
+
+::: {.fragment .callout-note icon=false}
+## Vantagens
+- Memória temporal efetiva de $\approx \frac{1}{1-\beta_2}$ iterações.
+- Se o gradiente diminuir, $v_t$ decresce e o passo efetivo **aumenta**.
+- Nunca congela prematuramente: tornou-se a espinha dorsal de otimizadores em Deep Learning!
+:::
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+
+# Painel 1: Trajetória no espaço de parâmetros (Bacia Elíptica)
+W1_sub, W2_sub = np.meshgrid(np.linspace(-0.2, 1.8, 150), np.linspace(-0.2, 1.8, 150))
+Z_sub = 0.5 * (100.0 * W1_sub**2 + W2_sub**2)
+axes[0].contour(W1_sub, W2_sub, Z_sub, levels=20, cmap="viridis", alpha=0.5)
+
+axes[0].plot(w_gd_hist[:, 0], w_gd_hist[:, 1], '.-', color=COR_B, label=f"GD (lr={lr_gd})", alpha=0.7)
+axes[0].plot(w_adagrad_hist[:, 0], w_adagrad_hist[:, 1], '.-', color=COR_NEU, label=f"AdaGrad (lr={lr_ada})", alpha=0.8)
+axes[0].plot(w_rmsprop_hist[:, 0], w_rmsprop_hist[:, 1], '.-', color=COR_VERDE, label=f"RMSProp (lr={lr_rms})", linewidth=2)
+axes[0].plot(0, 0, '*', color=COR_C, markersize=12, label="Ótimo")
+axes[0].set_title("Navegação em Ravina Mal-Condicionada\n($f = 50 w_1^2 + 0{,}5 w_2^2, \\kappa = 100$)")
+axes[0].set_xlabel("$w_1$ (Curvatura Alta)")
+axes[0].set_ylabel("$w_2$ (Curvatura Baixa)")
+axes[0].legend(loc="upper right", frameon=True)
+
+# Painel 2: Evolução das Taxas Efetivas de Aprendizado
+iters_arr = np.arange(1, n_iters + 1)
+# Simular evolução de G e v para w2 constante g2 = 1.0
+g_const = 1.0
+G_sim = np.cumsum(np.ones(n_iters) * g_const**2)
+v_sim = np.zeros(n_iters)
+curr_v = 0.0
+for k in range(n_iters):
+    curr_v = 0.9 * curr_v + 0.1 * (g_const**2)
+    v_sim[k] = curr_v
+
+alpha_eff_adagrad = 0.5 / np.sqrt(G_sim)
+alpha_eff_rmsprop = 0.5 / np.sqrt(v_sim)
+
+axes[1].plot(iters_arr, alpha_eff_adagrad, 'o-', color=COR_NEU, label="AdaGrad (Taxa Efetiva $\\alpha/\\sqrt{G_t}$)")
+axes[1].plot(iters_arr, alpha_eff_rmsprop, 's-', color=COR_VERDE, label="RMSProp (Taxa Efetiva $\\alpha/\\sqrt{v_t}$)")
+axes[1].set_title("Evolução da Taxa de Aprendizado Efetiva\n(Saturação Monotônica vs. Ponto Fixo)")
+axes[1].set_xlabel("Iterações ($t$)")
+axes[1].set_ylabel("Passo Efetivo $\\alpha_t^{\\text{eff}}$")
+axes[1].legend(loc="upper right", frameon=True)
+
+plt.tight_layout()
+plt.show()
+```
+
+## AdaGrad vs. RMSProp
+
+::: {.callout-tip}
+## O Destino dos Otimizadores
+
+Por que o AdaGrad é considerado o algoritmo clássico de escolha para problemas com vocabulários esparsos em Processamento de Linguagem Natural, mas falhou ao ser aplicado no treinamento de redes neurais convolucionais profundas em visão computacional? De que forma a média móvel exponencial do RMSProp sana esse impasse?
+:::
+
+::: {.callout-tip}
+## Dinâmica de Escalas Adaptativas
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ No AdaGrad, a sequência de acumuladores $G_{t, i} = \sum_{\tau=1}^t g_{\tau, i}^2$ é monotonicamente não-decrescente em $t$.
+- □ O decaimento da taxa de aprendizado efetiva no AdaGrad satisfaz $\lim_{t\to\infty} \frac{\alpha}{\sqrt{G_{t, i}} + \epsilon} = 0$ sempre que o gradiente ao longo da coordenada não for identicamente nulo.
+- □ No RMSProp, o fator $\beta_2$ define a constante de tempo da memória móvel, atribuindo peso efetivo às últimas $\approx \frac{1}{1-\beta_2}$ iterações.
+- □ O RMSProp substitui a necessidade de calcular gradientes estocásticos por estimativas de segunda ordem da curvatura calculadas via diferenças finitas.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## AdaGrad vs. RMSProp — Resposta
+
+::: {.callout-tip}
+## Dinâmica de Escalas Adaptativas — Resposta
+
+- ✔ **Verdadeiro.** Como $g^2 \ge 0$, a soma acumulada de quadrados nunca diminui ($G_{t} \ge G_{t-1}$).
+- ✔ **Verdadeiro.** Para séries divergentes de gradientes quadrados, o denominador cresce indefinidamente e a taxa efetiva vai a zero.
+- ✔ **Verdadeiro.** Trata-se da meia-vida de decaimento geométrico $\sum k \beta_2^k (1-\beta_2) \approx \frac{1}{1-\beta_2}$.
+- ✗ **Falso.** O RMSProp é puramente de primeira ordem; utiliza apenas gradientes estocásticos obtidos via autodiff.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Em textos, palavras raras aparecem pouco e mantêm $G_{t, i}$ pequeno, permitindo passos grandes quando finalmente ocorrem (o trunfo do AdaGrad). Em redes profundas de visão, contudo, o treinamento dura centenas de milhares de passos; $G_t$ cresce tanto que o modelo congela precocemente. O RMSProp utiliza a EMA para "esquecer" o passado remoto, mantendo a taxa ativa durante todo o treinamento.
+:::
+:::
+
+---
+
+# Fechamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Retomando as 4 Perguntas
+
+1. **O que é o passo de Newton e por que ele é invariante?**
+   É o minimizador do modelo quadrático de Taylor local de 2ª ordem ($\Delta\mathbf{w}_{\text{nt}} = -H^{-1}\nabla f$). Ele possui convergência quadrática local e é invariante sob qualquer transformação linear afim de variáveis ($\tilde{\mathbf{w}} = A \mathbf{w}$), tornando-o imune a escalas heterogêneas dos dados.
+2. **Por que o Método de Newton puro colapsa em larga escala em ML?**
+   Pelo custo cúbico $\mathcal{O}(d^3)$ para inverter a Hessiana, custo quadrático $\mathcal{O}(d^2)$ de memória RAM (impraticável para milhões/bilhões de parâmetros) e pela atração perigosa por pontos de sela e máximos locais quando a Hessiana não é positiva definida.
+3. **Como a teoria do precondicionamento diagonal resolve esse gargalo?**
+   Ao restringir a matriz métrica $P$ a ser uma matriz diagonal positiva $D = \text{diag}(s_1, \dots, s_d)$, a inversão matricial reduz-se a $d$ divisões escalares triviais ($\mathcal{O}(d)$ em tempo e memória), desacoplando completamente a atualização em regras independentes por coordenada.
+4. **Como o AdaGrad e o RMSProp constroem taxas adaptativas?**
+   O AdaGrad acumula os quadrados históricos de todas as primeiras derivadas ($G_t = \sum g^2$), beneficiando dados esparsos mas congelando prematuramente. O RMSProp introduz a média móvel exponencial ($v_t = \beta_2 v_{t-1} + (1-\beta_2)g^2$), permitindo que a taxa de aprendizado se adapte continuamente à variância local sem nunca saturar.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as 4 Perguntas
+
+1. **Passo de Newton:** Minimizador exato da Série de Taylor quadrática ($\Delta\mathbf{w}_{\text{nt}} = -H^{-1}\mathbf{g}$). Invariante sob transformações afins, converge quadraticamente perto do ótimo.
+2. **Patologias em ML:** Custo proibitivo $\mathcal{O}(d^3)$, memória $\mathcal{O}(d^2)$ e armadilha em pontos de sela onde $H$ possui autovalores negativos.
+3. **Precondicionamento Diagonal:** Transforma o espaço métrico e desacopla as coordenadas, reduzindo a complexidade de inversão e armazenamento para $\mathcal{O}(d)$.
+4. **AdaGrad e RMSProp:** Usam as primeiras derivadas passadas como estimador da curvatura. O AdaGrad congela por acúmulo infinito; o RMSProp resolve com Média Móvel Exponencial (EMA).
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Que Fica em Aberto
+
+O **RMSProp** representou um salto gigantesco: ele calibra de forma autônoma a escala de atualização de cada parâmetro do modelo, garantindo que coordenadas suaves avancem com vigor enquanto coordenadas íngremes sejam contidas.
+
+Contudo, repare no que o RMSProp **não** faz:
+*   A atualização do RMSProp depende **unicamente do gradiente instantâneo $\mathbf{g}_t$ da iteração corrente** (normalizado pela raiz da variância recente $\sqrt{v_t}$).
+*   Se o gradiente estocástico sofrer de ruído pontual ou se o relevo formar um desfiladeiro com inclinação transversal mista, o RMSProp continua suscetível a ziguezaguear a cada iteração, pois não possui **memória direcional** nem inércia temporal.
+*   Em termos da física clássica: o RMSProp ajustou o atrito individual de cada patinador, mas ele ainda não possui **massa nem quantidade de movimento**!
+
+## Ponte para a Aula 12: Inércia Mecânica e a Síntese do Adam
+
+Como dotar o otimizador de memória direcional persistente para atravessar ravinas estreitas sem oscilar lateralmente?
+
+Na física clássica, uma esfera de massa $m$ rolando morro abaixo acumula velocidade na direção persistente do vale: solavancos e ruídos transversais são filtrados pela sua **inércia mecânica**.
+
+Na **Aula 12: Momento, Curvatura e Métodos Acelerados**, investigaremos a dinâmica espectral do **Momento de Polyak (*Heavy-Ball*)** e do **Gradiente Acelerado de Nesterov (NAG)**. 
+
+E, coroando o Bloco 3, realizaremos a grande síntese da otimização moderna: a fusão do **Primeiro Momento com Inércia** (Polyak) com o **Segundo Momento Adaptativo** (RMSProp), dando origem ao algoritmo hegemônico do aprendizado profundo contemporâneo: o **Adam (Adaptive Moment Estimation)** e sua correção **AdamW**.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Síntese: Do Passo Escalar ao RMSProp
+
+| Otimizador | Informação Usada | Custo por Passo | Memória | Comportamento em $\kappa \gg 1$ |
+| :--- | :---: | :---: | :---: | :--- |
+| **GD / SGD** | $\nabla f$ (1ª ordem) | $\mathcal{O}(d)$ | $\mathcal{O}(d)$ | Ziguezague severo sob taxa escalar única |
+| **Newton Puro** | $\nabla f$ e $\nabla^2 f$ (2ª ordem) | $\mathcal{O}(d^3)$ | $\mathcal{O}(d^2)$ | Ótimo em 1 passo, mas proibitivo em escala |
+| **AdaGrad** | Histórico $\sum g^2$ | $\mathcal{O}(d)$ | $\mathcal{O}(d)$ | Ótimo em esparsos; congela em redes profundas |
+| **RMSProp** | EMA $\beta_2 v + (1-\beta_2)g^2$ | $\mathcal{O}(d)$ | $\mathcal{O}(d)$ | Escalas adaptativas perenes por coordenada |
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Ponte para a Aula 12: Momento e o Otimizador Adam
+
+::: {.columns}
+::: {.column width="50%"}
+**O Que Vimos Hoje (Aula 11):**
+
+- O precondicionamento diagonal equaliza a velocidade por coordenada:
+  $$w_{i, k+1} = w_{i, k} - \frac{\alpha}{\sqrt{v_{t, i}} + \epsilon} g_{t, i}$$
+- Resolve o descompasso de escalas ($\kappa \gg 1$).
+- Mas **não possui inércia direcional**: oscila se o gradiente apontar transversalmente!
+:::
+
+::: {.column width="50%"}
+**O Próximo Passo (Aula 12):**
+
+- Adicionar **massa física e momento**:
+  $$m_t = \beta_1 m_{t-1} + (1 - \beta_1) g_t$$
+- O Momento de Polyak e o Acelerador de Nesterov.
+- **A Grande Síntese:** Unir o $m_t$ (1º momento) com o $v_t$ do RMSProp (2º momento) $\implies$ **O Otimizador Adam e AdamW**!
+:::
+:::
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
+
