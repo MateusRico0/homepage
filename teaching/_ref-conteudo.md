@@ -22,10 +22,10 @@ Copie o YAML (`format:`, `jupyter: homepage`, `execute:`) e o bloco de links do 
 ## Ideia Central
 ## Roteiro da Aula
 ## Problema Motivador
-## <Pausa Ativa>
+## <Pausa>
 
 # Intuição — <imagem mental>
-# Bloco 1: <título>          (... uma Pausa Ativa ao fim de cada bloco)
+# Bloco 1: <título>          (... uma Pausa ao fim de cada bloco)
 # Bloco k: <título>
 
 # Fechamento
@@ -37,7 +37,7 @@ Copie o YAML (`format:`, `jupyter: homepage`, `execute:`) e o bloco de links do 
 
 Cada `##` de conteúdo existe em duas versões intercaladas: o bloco de notas (prosa) e o bloco de slides (fragmentos), com o chunk de figura compartilhado logo depois dos dois.
 
-## Pausa Ativa {#pausa-ativa}
+## Pausa {#pausa}
 
 Fica fora de `content-visible` (aparece nas notas e nos slides). A resposta fica só nos slides.
 
@@ -213,7 +213,7 @@ A heurística usada em cada item não aparece no arquivo.
 
 ### Metodologia dos itens de V/F {#metodologia-vf}
 
-Vale para Pausas Ativas e Exercícios. Quem decorou sem entender a mecânica deve errar; quem entendeu acerta sem nunca ter visto a frase. Cada item nasce de uma destas heurísticas (a lista não é exaustiva):
+Vale para Pausas e Exercícios. Quem decorou sem entender a mecânica deve errar; quem entendeu acerta sem nunca ter visto a frase. Cada item nasce de uma destas heurísticas (a lista não é exaustiva):
 
 1. **Contrafactual:** inverter uma premissa essencial e afirmar a consequência.
 2. **Caso limite:** $N\to\infty$, $\lambda\to 0$, ausência total de um fator.

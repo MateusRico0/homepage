@@ -1,0 +1,202 @@
+---
+title: "Soluções — Aula 10: Sistemas de Recomendação: Fatoração de Matrizes (SVD e NMF)"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "today"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+
+::: {.callout-note icon=false}
+Este documento apresenta as resoluções completas e detalhadas das questões analíticas e o gabarito comentado item a item dos testes conceituais de Verdadeiro/Falso da **Aula 10: Sistemas de Recomendação: Fatoração de Matrizes (SVD e NMF)**.
+:::
+
+---
+
+## Questões Discursivas
+
+### Questão 1: Dedução das Equações de Mínimos Quadrados Alternados (ALS)
+
+#### (a) Desacoplamento da Perda por Usuário
+A perda regularizada restrita ao conjunto de observações $\Omega$ é dada por:
+$$\mathcal{L}(P, Q) = \frac{1}{2}\sum_{(u, i) \in \Omega} (\tilde{r}_{ui} - \mathbf{p}_u^T \mathbf{q}_i)^2 + \frac{\lambda}{2}\sum_{u=1}^M \|\mathbf{p}_u\|_2^2 + \frac{\lambda}{2}\sum_{i=1}^N \|\mathbf{q}_i\|_2^2$$
+Reescrevendo a soma dupla agrupando os termos por usuário:
+$$\sum_{(u, i) \in \Omega} (\tilde{r}_{ui} - \mathbf{p}_u^T \mathbf{q}_i)^2 = \sum_{u=1}^M \sum_{i \in \mathcal{I}_u} (\tilde{r}_{ui} - \mathbf{p}_u^T \mathbf{q}_i)^2$$
+onde $\mathcal{I}_u$ é o conjunto de itens avaliados pelo usuário $u$.
+Fixando a matriz de itens $Q$, o termo $\frac{\lambda}{2}\sum_{i=1}^N \|\mathbf{q}_i\|_2^2$ torna-se uma constante aditiva que não depende de $P$. Portanto, a perda total decompõe-se exatamente como uma soma de perdas independentes:
+$$\mathcal{L}(P \mid Q) = \sum_{u=1}^M \mathcal{L}_u(\mathbf{p}_u) + \text{constante}$$
+onde:
+$$\mathcal{L}_u(\mathbf{p}_u) = \frac{1}{2}\sum_{i \in \mathcal{I}_u} (\tilde{r}_{ui} - \mathbf{p}_u^T \mathbf{q}_i)^2 + \frac{\lambda}{2} \|\mathbf{p}_u\|_2^2$$
+Como cada função $\mathcal{L}_u$ depende exclusivamente do vetor $\mathbf{p}_u$ do usuário $u$, e é uma forma quadrática com Hessiana $\sum_{i \in \mathcal{I}_u} \mathbf{q}_i \mathbf{q}_i^T + \lambda I_K \succ 0$, a minimização de $P$ desacopla-se em $M$ problemas estritamente convexos independentes.
+
+#### (b) Derivação da Solução Fechada
+Calculando o vetor gradiente de $\mathcal{L}_u$ em relação a $\mathbf{p}_u$:
+$$\nabla_{\mathbf{p}_u} \mathcal{L}_u = \sum_{i \in \mathcal{I}_u} \left(\mathbf{p}_u^T \mathbf{q}_i - \tilde{r}_{ui}\right) \mathbf{q}_i + \lambda \mathbf{p}_u$$
+Utilizando a comutatividade do produto escalar $\mathbf{p}_u^T \mathbf{q}_i = \mathbf{q}_i^T \mathbf{p}_u$ e rearranjando a multiplicação por $\mathbf{q}_i$:
+$$\nabla_{\mathbf{p}_u} \mathcal{L}_u = \sum_{i \in \mathcal{I}_u} \mathbf{q}_i (\mathbf{q}_i^T \mathbf{p}_u) - \sum_{i \in \mathcal{I}_u} \tilde{r}_{ui} \mathbf{q}_i + \lambda \mathbf{p}_u = \left( \sum_{i \in \mathcal{I}_u} \mathbf{q}_i \mathbf{q}_i^T + \lambda I_K \right) \mathbf{p}_u - \sum_{i \in \mathcal{I}_u} \tilde{r}_{ui} \mathbf{q}_i$$
+Igualando o gradiente a zero ($\nabla_{\mathbf{p}_u} \mathcal{L}_u = \mathbf{0}$):
+$$\left( \sum_{i \in \mathcal{I}_u} \mathbf{q}_i \mathbf{q}_i^T + \lambda I_K \right) \mathbf{p}_u = \sum_{i \in \mathcal{I}_u} \tilde{r}_{ui} \mathbf{q}_i$$
+Como $\lambda > 0$, a matriz entre parênteses é simétrica estritamente positiva definida e, portanto, invertível para qualquer quantidade de itens avaliados. Multiplicando pela inversa à esquerda:
+$$\mathbf{p}_u = \left( \sum_{i \in \mathcal{I}_u} \mathbf{q}_i \mathbf{q}_i^T + \lambda I_K \right)^{-1} \sum_{i \in \mathcal{I}_u} \tilde{r}_{ui} \mathbf{q}_i$$
+o que demonstra a solução analítica exata.
+
+#### (c) Importância para Computação Paralela Distribuída
+Como cada vetor $\mathbf{p}_u$ depende unicamente dos itens avaliados pelo usuário $u$ e da matriz $Q$, o cálculo para o usuário $u_1$ é totalmente independente do cálculo para o usuário $u_2$. Em uma infraestrutura de processamento distribuído (como Apache Spark com RDDs ou DataFrames):
+1. A matriz $Q$ (que cabe na memória RAM dos nós de computação, pois $N \times K$ é relativamente pequena) é transmitida via *broadcast* para todos os nós;
+2. As linhas de avaliações dos $M$ usuários são particionadas horizontalmente entre os nós do cluster;
+3. Cada máquina resolve seus sistemas lineares $K \times K$ de forma perfeitamente paralela, sem nenhuma comunicação de rede inter-processos durante o passo! Essa arquitetura de *embarrassingly parallel* confere ao ALS escalabilidade linear imbatível.
+
+---
+
+### Questão 2: Dedução das Regras Multiplicativas de Lee & Seung (2001) para a Perda de Frobenius
+
+#### (a) Decomposição do Gradiente em Termos Positivos
+A função de perda é dada por:
+$$\mathcal{L}(W, H) = \frac{1}{2} \|V - W H\|_F^2 = \frac{1}{2} \sum_{i=1}^M \sum_{j=1}^N \left( v_{ij} - \sum_{l=1}^K W_{il} H_{lj} \right)^2$$
+Tomando a derivada parcial em relação a uma entrada específica $H_{kj}$:
+$$\frac{\partial \mathcal{L}}{\partial H_{kj}} = \sum_{i=1}^M \left( \sum_{l=1}^K W_{il} H_{lj} - v_{ij} \right) W_{ik} = \sum_{i=1}^M (W H)_{ij} W_{ik} - \sum_{i=1}^M v_{ij} W_{ik}$$
+Reconhecendo as operações matriciais:
+- $\sum_{i=1}^M W_{ik} (W H)_{ij} = (W^T (W H))_{kj} = (W^T W H)_{kj}$;
+- $\sum_{i=1}^M W_{ik} v_{ij} = (W^T V)_{kj}$.
+
+Portanto, a derivada parcial matricial é:
+$$\nabla_H \mathcal{L} = W^T W H - W^T V$$
+Em coordenadas escalares:
+$$\frac{\partial \mathcal{L}}{\partial H_{kj}} = (W^T W H)_{kj} - (W^T V)_{kj}$$
+Como $V \ge 0, W \ge 0$ e $H \ge 0$, os dois termos $(W^T W H)_{kj}$ e $(W^T V)_{kj}$ são somas e produtos de números não-negativos, sendo ambos estritamente não-negativos.
+
+#### (b) Conexão com a Descida do Gradiente Adaptativa
+Um passo geral de descida do gradiente com taxa adaptativa $\eta_{kj}$ tem a forma:
+$$H_{kj} \leftarrow H_{kj} - \eta_{kj} \frac{\partial \mathcal{L}}{\partial H_{kj}}$$
+Substituindo a decomposição da derivada obtida no item (a):
+$$H_{kj} \leftarrow H_{kj} - \eta_{kj} \left( (W^T W H)_{kj} - (W^T V)_{kj} \right)$$
+Escolhendo a taxa de passo adaptativa $\eta_{kj} = \frac{H_{kj}}{(W^T W H)_{kj}}$:
+$$H_{kj} \leftarrow H_{kj} - \frac{H_{kj}}{(W^T W H)_{kj}} (W^T W H)_{kj} + \frac{H_{kj}}{(W^T W H)_{kj}} (W^T V)_{kj}$$
+Cancelando o termo idêntico no denominador:
+$$H_{kj} \leftarrow H_{kj} - H_{kj} + H_{kj} \frac{(W^T V)_{kj}}{(W^T W H)_{kj}} = H_{kj} \frac{(W^T V)_{kj}}{(W^T W H)_{kj}}$$
+o que resulta exatamente na regra multiplicativa de Lee & Seung.
+
+#### (c) Preservação da Não-Negatividade sem Projeção
+Se as matrizes iniciais forem estritamente positivas ($W^{(0)} > 0$ e $H^{(0)} > 0$), e os dados $V \ge 0$:
+1. O numerador $(W^T V)_{kj} = \sum_i W_{ik} v_{ij} \ge 0$;
+2. O denominador $(W^T W H)_{kj} = \sum_i \sum_l W_{ik} W_{il} H_{lj} > 0$;
+3. A razão multiplicativa $\frac{(W^T V)_{kj}}{(W^T W H)_{kj}} \ge 0$ é garantidamente não-negativa.
+
+Como o novo valor é o produto do valor anterior (não-negativo) por um fator não-negativo, temos $H_{kj}^{\text{novo}} \ge 0$ em todas as iterações. É impossível que a variável cruze a fronteira para o domínio negativo, eliminando a necessidade de qualquer operador de truncamento ou projeção artificial.
+
+---
+
+### Questão 3: O Dilema da Não-Unicidade da NMF e Matrizes Monomiais
+
+#### (a) Invariância da Reconstrução
+Seja $\tilde{W} = W A$ e $\tilde{H} = A^{-1} H$. Pela associatividade da multiplicação matricial:
+$$\tilde{W} \tilde{H} = (W A) (A^{-1} H) = W (A A^{-1}) H = W I_K H = W H = V$$
+Logo, qualquer matriz invertível $A$ preserva exatamente a matriz reconstruída $V$.
+
+#### (b) Matrizes Monomiais como Soluções Válidas
+Uma matriz monomial $A \in \mathbb{R}^{K \times K}$ é definida como $A = P D$, onde $P$ é uma matriz de permutação e $D = \operatorname{diag}(d_1, \dots, d_K)$ com $d_k > 0$.
+1. Como $P$ contém apenas 0s e 1s, e $D$ contém entradas positivas, todos os elementos de $A$ são não-negativos: $A \ge 0$.
+2. A inversa de uma matriz monomial é dada por $A^{-1} = (P D)^{-1} = D^{-1} P^{-1} = D^{-1} P^T$. Como $D^{-1} = \operatorname{diag}(1/d_1, \dots, 1/d_K)$ possui apenas entradas positivas e $P^T$ é também uma matriz de permutação não-negativa, temos $A^{-1} \ge 0$.
+3. Se $W \ge 0$ e $A \ge 0$, o produto $\tilde{W} = W A \ge 0$.
+4. Se $H \ge 0$ e $A^{-1} \ge 0$, o produto $\tilde{H} = A^{-1} H \ge 0$.
+Assim, $(\tilde{W}, \tilde{H})$ satisfaz estritamente as restrições da NMF. Essa transformação apenas permuta a ordem dos fatores latentes e reescalona suas magnitudes por constantes positivas inversas, correspondendo a uma ambiguidade inofensiva.
+
+#### (c) Espaço Aberto e a Não-Unicidade Contínua (Donoho & Stodden, 2004)
+Geometricamente, as colunas de $W$ representam as arestas extremas de um cone convexo cônico $\mathcal{C}(W) = \{\mathbf{v} \mid \mathbf{v} = W \mathbf{h}, \mathbf{h} \ge 0\}$.
+Para que a fatoração seja exata, todas as colunas de dados de $V$ devem estar contidas no interior desse cone: $\mathbf{v}_j \in \mathcal{C}(W)$.
+Se os dados não tocam as fronteiras dos eixos coordenados, existe um "espaço aberto" (*open gap*) entre o feixe de pontos e os limites do primeiro quadrante.
+Nessa situação, podemos girar ou inclinar continuamente os vetores geradores $\mathbf{w}_k$ para dentro ou para fora nesse espaço vazio (correspondendo a matrizes contínuas $A$ que não são monomiais), mantendo todos os pontos dentro do novo cone $\mathcal{C}(\tilde{W})$ e preservando $\tilde{W} \ge 0$ e $\tilde{H} \ge 0$.
+Portanto, a solução encontrada pelas regras de otimização depende sensivelmente da inicialização, e os fatores latentes individuais não são matematicamente identificáveis de forma única sem restrições suplementares (como esparsidade $L_1$).
+
+---
+
+### Questão 4: Preditores de Linha de Base e Regularização Bayesiana
+
+#### (a) Derivação do Estimador de Viés Regularizado
+A função de perda regularizada para um usuário isolado é:
+$$\mathcal{L}(b_u) = \frac{1}{2}\sum_{i \in \mathcal{I}_u} (r_{ui} - \mu - b_u)^2 + \frac{\lambda}{2} b_u^2$$
+Derivando em relação a $b_u$:
+$$\frac{d \mathcal{L}}{d b_u} = \sum_{i \in \mathcal{I}_u} -(r_{ui} - \mu - b_u) + \lambda b_u = -\sum_{i \in \mathcal{I}_u} (r_{ui} - \mu) + \sum_{i \in \mathcal{I}_u} b_u + \lambda b_u$$
+Como a soma de $b_u$ sobre $\mathcal{I}_u$ resulta em $|\mathcal{I}_u| b_u$:
+$$\frac{d \mathcal{L}}{d b_u} = -\sum_{i \in \mathcal{I}_u} (r_{ui} - \mu) + (|\mathcal{I}_u| + \lambda) b_u$$
+Igualando a zero:
+$$(|\mathcal{I}_u| + \lambda) b_u = \sum_{i \in \mathcal{I}_u} (r_{ui} - \mu) \implies b_u = \frac{\sum_{i \in \mathcal{I}_u} (r_{ui} - \mu)}{|\mathcal{I}_u| + \lambda}$$
+Multiplicando e dividindo por $|\mathcal{I}_u|$:
+$$b_u = \left(\frac{|\mathcal{I}_u|}{|\mathcal{I}_u| + \lambda}\right) \left[ \frac{1}{|\mathcal{I}_u|}\sum_{i \in \mathcal{I}_u} (r_{ui} - \mu) \right] = \left(\frac{|\mathcal{I}_u|}{|\mathcal{I}_u| + \lambda}\right) \bar{r}_u$$
+
+#### (b) Comportamento em Amostras Pequenas vs Grandes ($\lambda = 20$)
+- **Caso 1: Usuário Novo com 1 Avaliação ($|\mathcal{I}_u| = 1$):**
+  Suponha que ele avaliou um filme atribuindo nota 5 quando a média era $\mu = 3$, gerando $\bar{r}_u = +2{,}0$.
+  O viés estimado será:
+  $$b_u = \left(\frac{1}{1 + 20}\right) (+2{,}0) = \frac{1}{21} (+2{,}0) \approx +0{,}095$$
+  O viés é fortemente amortecido de $+2{,}0$ para quase zero ($+0{,}095$). O modelo evita rotular o usuário como extremamente generoso com base em apenas uma evidência amostral.
+- **Caso 2: Usuário Veterano com 500 Avaliações ($|\mathcal{I}_u| = 500$):**
+  $$b_u = \left(\frac{500}{500 + 20}\right) \bar{r}_u = \frac{500}{520} \bar{r}_u \approx 0{,}9615 \cdot \bar{r}_u$$
+  A regularização preserva $96{,}2\%$ da média empírica do usuário. Como há evidência empírica abundante, o modelo confia plenamente nos dados observados.
+
+#### (c) Conexão com Encolhimento Bayesiano (*Shrinkage*)
+Essa fórmula é a expressão exata do estimador de Máxima Verossimilhança a Posteriori (MAP) sob uma priori Gaussiana $b_u \sim \mathcal{N}(0, \sigma^2_0)$ e verossimilhança Gaussiana dos resíduos com variância $\sigma^2$:
+$$\lambda = \frac{\sigma^2}{\sigma^2_0}$$
+O hiperparâmetro $\lambda$ atua como um número fictício de "pseudo-observações" que puxam o viés em direção à média nula da priori. Esse mecanismo de encolhimento bayesiano impede que a esparsidade dos dados crie artefatos espúrios no sistema de recomendação.
+
+---
+
+## Testes Conceituais
+
+### Teste 1: A Natureza dos Dados e o Colapso da SVD Clássica
+*   **(A) Verdadeiro.** O Teorema de Eckart-Young-Mirsky opera sobre a norma de Frobenius completa da matriz $\|R - \hat{R}\|_F^2 = \sum_{u=1}^M \sum_{i=1}^N (r_{ui} - \hat{r}_{ui})^2$, exigindo que toda entrada seja conhecida.
+*   **(B) Falso.** Em sistemas industriais reais (Netflix, Spotify), a proporção de avaliações ausentes é tipicamente superior a $99\%$ (esparsidade de $99{,}5\%$ a $99{,}9\%$).
+*   **(C) Verdadeiro.** Preencher células não avaliadas com zero faz com que o modelo trate filmes desconhecidos como se tivessem recebido nota zero (pior que a pior avaliação de 1 estrela), gerando predições sistematicamente subestimadas.
+*   **(D) Falso.** A imputação pela média destrói a variabilidade real entre usuários e itens e sobrecarrega a computação da SVD, forçando o modelo a ajustar milhões de valores artificiais idênticos.
+
+### Teste 2: O Modelo de Fatores Latentes e Preditores de Linha de Base
+*   **(A) Verdadeiro.** O cerne da filtragem colaborativa bilinear é que $\hat{r}_{ui}$ depende do alinhamento angular e magnitude entre o perfil do usuário $\mathbf{p}_u$ e a assinatura do item $\mathbf{q}_i$: $\mathbf{p}_u^T \mathbf{q}_i = \sum_k p_{uk} q_{ik}$.
+*   **(B) Verdadeiro.** O viés $b_i$ mede o desvio médio do item em relação ao catálogo (obras aclamadas recebem $b_i > 0$ e filmes de baixa qualidade recebem $b_i < 0$), independentemente de quem os assista.
+*   **(C) Verdadeiro.** A penalização de Tikhonov puxa os vieses de usuários com poucos dados para zero, evitando que um único voto casual de 5 estrelas infle o viés do usuário para valores extremos.
+*   **(D) Falso.** O produto interno $\mathbf{p}_u^T \mathbf{q}_i$ somado aos vieses pode, em princípio, resultar em qualquer valor real (ex.: $0{,}4$ ou $5{,}8$). Na implementação prática, é necessário aplicar uma função de saturação (clipping) para manter a nota entre 1 e 5.
+
+### Teste 3: Otimização Bilinear via SGD de Funk
+*   **(A) Falso.** O produto bilinear $\mathbf{p}_u^T \mathbf{q}_i$ cria uma superfície de perda não-convexa conjunta, repleta de múltiplos mínimos locais e pontos de sela.
+*   **(B) Verdadeiro.** Como $\nabla_{\mathbf{p}_u} \mathcal{L}_{ui} = -e_{ui} \mathbf{q}_i + \lambda \mathbf{p}_u$, a correção nos fatores do usuário é guiada diretamente pelas características do filme avaliado.
+*   **(C) Verdadeiro.** O SGD opera exclusivamente sobre as entradas conhecidas $|\Omega|$. Para cada nota observada, realiza-se um produto interno e atualizações vetoriais em $\mathcal{O}(K)$, resultando em complexidade linear $\mathcal{O}(|\Omega| \cdot K)$ por época.
+*   **(D) Verdadeiro.** Se $e_{ui} = 0$, a derivada do erro zera, mas o gradiente de regularização $\lambda \mathbf{p}_u$ continua ativo: $\mathbf{p}_u \leftarrow (1 - \gamma \lambda)\mathbf{p}_u$. O vetor sofre uma contração suave.
+
+### Teste 4: O Algoritmo Alternating Least Squares (ALS)
+*   **(A) Verdadeiro.** Mantendo $Q$ fixo, a perda decompõe-se em $M$ problemas independentes de regressão linear regularizada (Ridge), cada um com Hessiana positiva definida e mínimo global único.
+*   **(B) Verdadeiro.** Como cada meia-etapa do ALS resolve exatamente o minimizador global da subperda em relação ao bloco de variáveis ativas, a perda total é monotônica não-crescente a cada iteração.
+*   **(C) Verdadeiro.** A solução fechada para cada usuário requer inverter a matriz $(Q_{\mathcal{I}_u}^T Q_{\mathcal{I}_u} + \lambda I)$, que possui dimensão $K \times K$ (onde tipicamente $K \in [20, 100]$).
+*   **(D) Falso.** A regularização $L_2$ é fundamental no ALS e preserva a linearidade do sistema, atuando como o termo $\lambda I_K$ que garante a invertibilidade estrita da matriz normal.
+
+### Teste 5: A Filosofia e a Geometria da NMF
+*   **(A) Verdadeiro.** Os autovetores da PCA possuem entradas positivas e negativas que combinam adições e subtrações globais para reconstruir imagens, criando representações holísticas abstratas.
+*   **(B) Verdadeiro.** Ao proibir números negativos nas matrizes de base e coeficientes ($W \ge 0, H \ge 0$), cancelamentos subtrativos são inviabilizados, forçando o modelo a expressar cada dado puramente como a soma de partes construtivas.
+*   **(C) Verdadeiro.** Toda coluna reconstruída $\hat{\mathbf{v}}_j = W \mathbf{h}_j = \sum_k h_{kj} \mathbf{w}_k$ com $h_{kj} \ge 0$ é uma combinação cônica dos vetores de base $\mathbf{w}_k$, residindo obrigatoriamente dentro do cone convexo gerado por $W$.
+*   **(D) Falso.** A NMF é um problema de otimização não-convexa com múltiplos mínimos locais e sensibilidade aos pontos iniciais $W^{(0)}$ e $H^{(0)}$.
+
+### Teste 6: Funções de Perda e Modelagem Probabilística na NMF
+*   **(A) Verdadeiro.** Minimizar a distância de Frobenius $\|V - WH\|_F^2$ corresponde à maximização de log-verossimilhança sob a suposição de que $v_{ij} \sim \mathcal{N}((WH)_{ij}, \sigma^2)$ com ruído gaussiano aditivo independente.
+*   **(B) Verdadeiro.** A divergência KL generalizada deduz-se diretamente da verossimilhança de variáveis de Poisson $v_{ij} \sim \operatorname{Poisson}((WH)_{ij})$, ideal para contagens de palavras e eventos discretos.
+*   **(C) Falso.** A divergência de Kullback-Leibler é intrinsecamente assimétrica: $\mathcal{D}_{KL}(V \parallel WH) \neq \mathcal{D}_{KL}(WH \parallel V)$.
+*   **(D) Verdadeiro.** Ambas as medidas são distâncias estatísticas próprias que assumem valor estritamente zero se e somente se as matrizes forem identicamente iguais ($WH = V$).
+
+### Teste 7: As Regras de Atualização Multiplicativas de Lee & Seung
+*   **(A) Verdadeiro.** Cada elemento é atualizado multiplicativamente por uma razão de matrizes positivas: $H_{kj} \leftarrow H_{kj} \frac{(W^T V)_{kj}}{(W^T WH)_{kj}}$.
+*   **(B) Verdadeiro.** Se $H_{kj} = 0$, o produto $0 \cdot R_{kj} = 0$. O zero é um ponto absorvente fixo das regras multiplicativas.
+*   **(C) Falso.** As regras multiplicativas preservam a não-negatividade de forma nativa e automática, não necessitando de nenhuma etapa de projeção.
+*   **(D) Verdadeiro.** Em um ponto crítico estacionário onde $\nabla_H \mathcal{L} = \mathbf{0}$, temos $(W^T WH)_{kj} = (W^T V)_{kj}$. A razão torna-se 1, mantendo os parâmetros estáticos.
+
+### Teste 8: Não-Unicidade, Identificabilidade e Aplicações
+*   **(A) Falso.** A SVD possui bases ortogonais únicas a menos de troca de sinal e permutação de autovalores. A NMF não impõe ortogonalidade e admite famílias contínuas de transformações cônicas invertíveis.
+*   **(B) Verdadeiro.** Como $(W A)(A^{-1} H) = W H$, multiplicar uma coluna de $W$ por $c > 0$ e dividir a linha de $H$ por $c$ preserva exatamente a matriz reconstruída e a não-negatividade.
+*   **(C) Verdadeiro.** Donoho & Stodden (2004) provaram que se houver espaço aberto entre os dados e as faces do ortante, existem infinitas rotações cônicas que satisfazem as restrições da NMF.
+*   **(D) Verdadeiro.** A penalização de esparsidade $L_1$ induz zeros nos fatores, forçando os vetores a ancorarem nas bordas do cone e restringindo a ambiguidade de rotação da NMF.
+

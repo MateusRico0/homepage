@@ -1,0 +1,130 @@
+---
+title: "Exercícios — Aula 10: Gradiente Descendente Estocástico (SGD) e Mini-Batching"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado das questões discursivas e dos testes conceituais de Verdadeiro/Falso está em
+[`soluções.qmd`](soluções.qmd). Encontrou um erro numa questão? Corrija
+diretamente neste arquivo e abra um *pull request*.
+:::
+
+## Contexto e Notação
+
+Nesta lista, consideramos problemas de otimização contínua em Aprendizado de Máquina formulados como minimização de **somas finitas** sobre $N$ exemplos de treinamento $\{(\mathbf{x}_i, y_i)\}_{i=1}^N$:
+
+$$F(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N f_i(\mathbf{w}), \quad \mathbf{w} \in \mathbb{R}^d$$
+
+onde cada $f_i(\mathbf{w}) := \ell(h(\mathbf{x}_i; \mathbf{w}), y_i)$ é a perda no $i$-ésimo exemplo, assumida continuamente diferenciável. Adotamos as seguintes definições e convenções:
+
+- **Gradiente do Lote Completo (BGD):** $\nabla F(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N \nabla f_i(\mathbf{w}) \in \mathbb{R}^{d \times 1}$ (vetor-coluna).
+- **Gradiente Estocástico Puro ($B = 1$):** $\mathbf{g}_k(\mathbf{w}) = \nabla f_{i_k}(\mathbf{w})$, onde $i_k \sim \text{Uniforme}\{1, \dots, N\}$.
+- **Decomposição em Sinal e Ruído:** $\mathbf{g}_k(\mathbf{w}) = \nabla F(\mathbf{w}) + \boldsymbol{\xi}_k$, com média condicional nula $\mathbb{E}[\boldsymbol{\xi}_k \mid \mathbf{w}] = \mathbf{0}$.
+- **Matriz de Covariância do Ruído:** $\Sigma(\mathbf{w}) = \mathbb{E}[\boldsymbol{\xi}_k \boldsymbol{\xi}_k^T] \in \mathbb{R}^{d \times d}$, com variância escalar total $\sigma^2(\mathbf{w}) = \operatorname{tr}(\Sigma(\mathbf{w})) = \frac{1}{N}\sum_{i=1}^N \|\nabla f_i(\mathbf{w}) - \nabla F(\mathbf{w})\|^2$.
+- **Estimador por Mini-Batch ($B \ge 1$):** Para um subconjunto $\mathcal{B} \subset \{1, \dots, N\}$ de tamanho $|\mathcal{B}| = B$:
+  $$\mathbf{g}_{\mathcal{B}}(\mathbf{w}) = \frac{1}{B}\sum_{i \in \mathcal{B}} \nabla f_i(\mathbf{w})$$
+  - Com reposição: $\operatorname{Var}(\mathbf{g}_{\mathcal{B}}) = \frac{\sigma^2(\mathbf{w})}{B}$.
+  - Sem reposição: $\operatorname{Var}(\mathbf{g}_{\mathcal{B}}) = \left(\frac{N - B}{N - 1}\right) \frac{\sigma^2(\mathbf{w})}{B}$.
+- **Condições de Robbins-Monro (1951):** Sequência de passos $\{\alpha_k\}$ que satisfaz $\sum_{k=1}^\infty \alpha_k = \infty$ e $\sum_{k=1}^\infty \alpha_k^2 < \infty$.
+- **Bola de Ruído (*Noise Ball*):** Sob taxa constante $\alpha$ em problemas $\mu$-fortemente convexos, o erro assintótico estaciona em $\lim_{k \to \infty} \mathbb{E}[\|\mathbf{w}_k - \mathbf{w}^\star\|^2] \le \frac{\alpha \sigma^2}{2\mu}$.
+
+---
+
+## Questões Discursivas
+
+1. **Dedução da Redução de Variância no Mini-Batching com e sem Reposição.**
+   Considere o problema de soma finita $F(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N f_i(\mathbf{w})$ com variância populacional $\sigma^2(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N \|\nabla f_i(\mathbf{w}) - \nabla F(\mathbf{w})\|^2$.
+   (a) Suponha que o mini-batch $\mathcal{B} = \{i_1, \dots, i_B\}$ seja gerado por sorteio uniforme i.i.d. **com reposição** de tamanho $B$. Demonstre formalmente que $\mathbb{E}[\mathbf{g}_{\mathcal{B}}(\mathbf{w})] = \nabla F(\mathbf{w})$ e que $\mathbb{E}[\|\mathbf{g}_{\mathcal{B}}(\mathbf{w}) - \nabla F(\mathbf{w})\|^2] = \frac{\sigma^2(\mathbf{w})}{B}$.
+   (b) Suponha agora que $\mathcal{B}$ seja selecionado uniformemente ao acaso **sem reposição** (amostragem hipergeométrica de tamanho $B$). Defina as variáveis indicadoras $I_i = \mathbb{I}(i \in \mathcal{B})$ e calcule $\mathbb{E}[I_i]$ e $\operatorname{Cov}(I_i, I_j)$ para $i \neq j$. A partir desses resultados, deduza o clássico fator de população finita:
+   $$\mathbb{E}[\|\mathbf{g}_{\mathcal{B}}(\mathbf{w}) - \nabla F(\mathbf{w})\|^2] = \left(\frac{N - B}{N - 1}\right) \frac{\sigma^2(\mathbf{w})}{B}$$
+   (c) Analise o comportamento da fórmula obtida em (b) nos casos extremos $B = 1$ e $B = N$, interpretando geometricamente o que ocorre na escala de variância.
+
+2. **A Dinâmica da Bola de Ruído e o Equilíbrio Estacionário sob Passo Constante.**
+   Seja $F(\mathbf{w}) = \frac{1}{2}(\mathbf{w} - \mathbf{w}^\star)^T A (\mathbf{w} - \mathbf{w}^\star)$ uma forma quadrática estritamente convexa, onde $A \in \mathbb{R}^{d \times d}$ é simétrica positiva definida com autovalores no intervalo $[\mu, L]$, com $0 < \mu \le L$. Considere o algoritmo de SGD com passo constante $\alpha > 0$:
+   $$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha (\nabla F(\mathbf{w}_k) + \boldsymbol{\xi}_k)$$
+   onde $\mathbb{E}[\boldsymbol{\xi}_k \mid \mathbf{w}_k] = \mathbf{0}$ e $\mathbb{E}[\|\boldsymbol{\xi}_k\|^2 \mid \mathbf{w}_k] \le \sigma^2$.
+   (a) Mostre que o erro de passo $\mathbf{e}_k := \mathbf{w}_k - \mathbf{w}^\star$ obedece à relação:
+   $$\|\mathbf{e}_{k+1}\|^2 = \|(I - \alpha A)\mathbf{e}_k\|^2 - 2\alpha \langle (I - \alpha A)\mathbf{e}_k, \boldsymbol{\xi}_k \rangle + \alpha^2 \|\boldsymbol{\xi}_k\|^2$$
+   (b) Assumindo que o passo satisfaz $0 < \alpha < \frac{1}{L}$, prove por indução que:
+   $$\mathbb{E}[\|\mathbf{e}_k\|^2] \le (1 - 2\alpha \mu)^k \|\mathbf{e}_0\|^2 + \alpha^2 \sigma^2 \sum_{j=0}^{k-1} (1 - 2\alpha \mu)^j$$
+   (c) Calcule o limite de $\mathbb{E}[\|\mathbf{e}_k\|^2]$ quando $k \to \infty$. Explique por que o raio da "bola de confusão" é diretamente proporcional a $\alpha$ e inversamente proporcional à curvatura $\mu$.
+
+3. **Análise de Convergência sob as Condições de Robbins-Monro.**
+   Considere o decaimento polinomial da taxa de aprendizado da forma $\alpha_k = \frac{\alpha_0}{k^p}$, com $\alpha_0 > 0$ e $p > 0$.
+   (a) Determine o intervalo exato de valores de $p$ para os quais a sequência $\{\alpha_k\}$ satisfaz simultaneamente as duas condições de Robbins-Monro ($\sum_{k=1}^\infty \alpha_k = \infty$ e $\sum_{k=1}^\infty \alpha_k^2 < \infty$).
+   (b) Suponha que um praticante escolha $p = 1{,}5$. Explique formalmente por que essa escolha viola o critério de Robbins-Monro e descreva a patologia que pode ocorrer durante o treinamento se a inicialização $\mathbf{w}_0$ estiver muito distante do ótimo global.
+   (c) Suponha que outro praticante adote $p = 0{,}5$ ($\alpha_k = \alpha_0/\sqrt{k}$). Mostre qual das duas condições é violada e deduza o que ocorre com a variância acumulada pelo ruído estocástico quando $k \to \infty$.
+
+---
+
+## Testes Conceituais
+
+### Teste 1: A Formulação de Somas Finitas e o Batch Gradient Descent
+
+*   (A) A complexidade de tempo de execução de uma única iteração do Batch Gradient Descent em uma perda de soma finita com $N$ exemplos em $\mathbb{R}^d$ é $\mathcal{O}(Nd)$.
+*   (B) Em um conjunto de dados com $N = 10^7$ exemplos, o BGD necessita de $10^7$ avaliações de gradientes individuais de amostras para realizar um único passo de atualização dos parâmetros.
+*   (C) O gradiente da perda média empírica $F(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N f_i(\mathbf{w})$ é igual à média geométrica dos vetores gradientes individuais $\nabla f_i(\mathbf{w})$.
+*   (D) Se dobrarmos o número de amostras $N$ duplicando exatamente cada dado existente no conjunto de treino, o vetor gradiente global $\nabla F(\mathbf{w})$ avaliado em qualquer $\mathbf{w}$ permanece rigorosamente idêntico.
+
+### Teste 2: O Gradiente Estocástico e o Teorema do Estimador Não-Enviesado
+
+*   (A) A propriedade de não-enviesamento $\mathbb{E}_{i_k}[\nabla f_{i_k}(\mathbf{w})] = \nabla F(\mathbf{w})$ é válida somente se as funções de perda individuais $f_i(\mathbf{w})$ forem estritamente convexas.
+*   (B) O cálculo da esperança matemática condicional do gradiente estocástico assume que o índice $i_k$ é sorteado de acordo com uma distribuição uniforme sobre $\{1, \dots, N\}$.
+*   (C) A cada iteração individual $k$ do SGD puro, a perda empírica global $F(\mathbf{w})$ é garantida de decrescer: $F(\mathbf{w}_{k+1}) \le F(\mathbf{w}_k)$.
+*   (D) O custo computacional por iteração do SGD puro é $\mathcal{O}(d)$, sendo assintoticamente independente do número total de amostras $N$.
+
+### Teste 3: A Estrutura do Ruído Estocástico e a Condição de Interpolação
+
+*   (A) O vetor de ruído estocástico é definido por $\boldsymbol{\xi}_k = \nabla f_{i_k}(\mathbf{w}_k) - \nabla F(\mathbf{w}_k)$, possuindo esperança condicional nula: $\mathbb{E}[\boldsymbol{\xi}_k \mid \mathbf{w}_k] = \mathbf{0}$.
+*   (B) No minimizador global $\mathbf{w}^\star$ de uma perda convexa com dados reais e resíduos não-nulos, a matriz de covariância do ruído $\Sigma(\mathbf{w}^\star)$ é estritamente positiva definida ($\Sigma(\mathbf{w}^\star) \succ 0$).
+*   (C) A chamada "condição de interpolação" ocorre quando o modelo ajusta perfeitamente todas as amostras de treino simultaneamente ($f_i(\mathbf{w}^\star) = 0, \forall i$), fazendo com que a variância do gradiente estocástico colapse a zero no ponto ótimo.
+*   (D) Se todas as $N$ amostras do dataset possuírem funções de perda idênticas ($f_1 = f_2 = \dots = f_N$), o ruído estocástico $\boldsymbol{\xi}_k$ é nulo em todo o espaço de parâmetros.
+
+### Teste 4: A Álgebra e a Estatística do Mini-Batching
+
+*   (A) Na amostragem com reposição de um lote de tamanho $B$, a variância do estimador $\mathbf{g}_{\mathcal{B}}$ decai proporcionalmente a $1/B$.
+*   (B) Na amostragem sem reposição, quando o tamanho do mini-batch atinge o tamanho total do conjunto de dados ($B = N$), a variância do estimador anula-se devido ao fator de correção $(N-B)/(N-1)$.
+*   (C) Um mini-batch de tamanho $B = 64$ avalia 64 gradientes por passo e, portanto, reduz o desvio-padrão do ruído do gradiente por um fator de 64 em relação ao SGD puro.
+*   (D) A amostragem de mini-batches sem reposição particiona o conjunto de treinamento de modo que cada amostra é visitada exatamente uma vez ao longo de uma época completa.
+
+### Teste 5: A Física do Hardware, Vetorização e Throughput
+
+*   (A) Executar o SGD puro com $B = 1$ em uma GPU moderna resulta em subutilização maciça dos núcleos de processamento devido ao predomínio de latências de chamada de instruções e acesso à memória (*memory-bound*).
+*   (B) O agrupamento de amostras em um mini-batch permite converter operações vetor-vetor (BLAS-1) em multiplicações matriz-matriz (BLAS-3), usufruindo da hierarquia de caches rápidas e aceleração SIMD/Tensor Cores.
+*   (C) Aumentar o tamanho do mini-batch de $B = 1.024$ para $B = 4.096$ em uma GPU já saturada sempre quadruplica o número de amostras processadas por segundo (*throughput*).
+*   (D) O ganho em velocidade de processamento por amostra obtido ao aumentar $B$ apresenta retornos decrescentes a partir do momento em que a largura de banda de memória e a ocupação dos núcleos da GPU são plenamente saturadas.
+
+### Teste 6: O Paradoxo da Taxa Constante e a Bola de Ruído
+
+*   (A) O SGD executado com taxa de aprendizado estritamente constante $\alpha > 0$ converge assintoticamente para o minimizador exato $\mathbf{w}^\star$ de qualquer função quadrática fortemente convexa.
+*   (B) O raio assintótico da região esférica de flutuação ("bola de confusão") em torno de $\mathbf{w}^\star$ é diretamente proporcional à taxa de aprendizado $\alpha$ e à variância do ruído $\sigma^2$.
+*   (C) Em problemas com forte convexidade acentuada (grande curvatura $\mu$), o confinamento espacial imposto pelo poço de potencial comprime o diâmetro da bola de ruído estacionária.
+*   (D) Se um algoritmo de SGD com passo constante atinge exatamente o ponto $\mathbf{w}^\star$ na iteração $k$, o passo seguinte $\mathbf{w}_{k+1}$ permanecerá em $\mathbf{w}^\star$ caso $\nabla F(\mathbf{w}^\star) = \mathbf{0}$.
+
+### Teste 7: As Condições de Convergência de Robbins-Monro
+
+*   (A) A condição $\sum_{k=1}^\infty \alpha_k = \infty$ garante que o otimizador não estagne prematuramente por esgotamento de passo antes de alcançar o ponto de mínimo.
+*   (B) A condição $\sum_{k=1}^\infty \alpha_k^2 < \infty$ garante que a variância acumulada pelo ruído estocástico ao longo de infinitas iterações seja finita, forçando o amortecimento das flutuações térmicas.
+*   (C) A sequência harmônica $\alpha_k = \frac{\alpha_0}{k}$ satisfaz rigorosamente ambas as condições de Robbins-Monro.
+*   (D) A taxa de aprendizado com decaimento geométrico $\alpha_k = \alpha_0 \gamma^k$ (com $0 < \gamma < 1$) cumpre a primeira condição de Robbins-Monro ($\sum \alpha_k = \infty$).
+
+### Teste 8: Paisagens Não-Convexas, Escape de Selas e Mínimos Planos
+
+*   (A) Em problemas não-convexos de alta dimensão, o ruído estocástico do SGD auxilia o algoritmo a escapar de pontos de sela estritos onde o gradiente determinístico é nulo.
+*   (B) Mínimos estreitos e pontiagudos (*sharp minima*) possuem alta curvatura local e tendem a ejetar os parâmetros do modelo devido à alta amplitude das perturbações estocásticas do SGD.
+*   (C) O treinamento de redes neurais com mini-batches excessivamente grandes ($B \gg 10.000$) frequentemente leva a soluções que generalizam pior para dados de teste do que aquelas obtidas com mini-batches moderados ($B \approx 64$).
+*   (D) O cronograma *Cosine Annealing* reduz monotonicamente a taxa de aprendizado seguindo um perfil suave de cosseno, permitindo grande mobilidade inicial e congelamento fino nas iterações finais.
+

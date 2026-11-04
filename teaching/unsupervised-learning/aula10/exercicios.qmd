@@ -1,0 +1,134 @@
+---
+title: "Exercícios — Aula 10: Sistemas de Recomendação: Fatoração de Matrizes (SVD e NMF)"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "today"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+## Contexto e Notação
+
+Nesta lista, consideramos problemas de aprendizado não supervisionado e semi-supervisionado em matrizes de dados massivas e esparsas, com ênfase em sistemas de recomendação e decomposições interpretáveis:
+
+- $R \in \mathbb{R}^{M \times N}$ é uma matriz de interações entre $M$ usuários e $N$ itens, onde a grande maioria das entradas é desconhecida;
+- $\Omega = \{(u, i) \mid r_{ui} \text{ é observado}\}$ denota o conjunto de pares com avaliações conhecidas;
+- $\mathcal{I}_u = \{i \mid (u, i) \in \Omega\}$ é o conjunto de itens avaliados pelo usuário $u$, e $\mathcal{U}_i = \{u \mid (u, i) \in \Omega\}$ é o conjunto de usuários que avaliaram o item $i$;
+- O modelo de **Fatores Latentes com Linha de Base** estima a avaliação por:
+  $$\hat{r}_{ui} = \mu + b_u + b_i + \mathbf{p}_u^T \mathbf{q}_i$$
+  onde $\mu$ é a média global, $b_u \in \mathbb{R}$ é o viés do usuário, $b_i \in \mathbb{R}$ é o viés do item, e $\mathbf{p}_u, \mathbf{q}_i \in \mathbb{R}^K$ são os vetores latentes em dimensão $K \ll \min(M, N)$;
+- A função de custo regularizada é:
+  $$\mathcal{L} = \frac{1}{2}\sum_{(u, i) \in \Omega} (r_{ui} - \hat{r}_{ui})^2 + \frac{\lambda}{2}\left( \sum_u b_u^2 + \sum_i b_i^2 + \sum_u \|\mathbf{p}_u\|_2^2 + \sum_i \|\mathbf{q}_i\|_2^2 \right)$$
+- A **Fatoração de Matrizes Não-Negativa (NMF)** aproxima uma matriz não-negativa $V \in \mathbb{R}_{\ge 0}^{M \times N}$ pelo produto de fatores não-negativos:
+  $$V \approx W H, \quad \text{onde } W \in \mathbb{R}_{\ge 0}^{M \times K} \quad \text{e} \quad H \in \mathbb{R}_{\ge 0}^{K \times N}$$
+- As distâncias de ajuste padrão para NMF são:
+  - Norma de Frobenius: $\frac{1}{2}\|V - WH\|_F^2 = \frac{1}{2}\sum_{ij} (v_{ij} - (WH)_{ij})^2$;
+  - Divergência KL generalizada: $\mathcal{D}_{KL}(V \parallel WH) = \sum_{ij} \left( v_{ij} \ln \frac{v_{ij}}{(WH)_{ij}} - v_{ij} + (WH)_{ij} \right)$.
+:::
+
+## Questões Discursivas
+
+1. **Dedução das Equações de Mínimos Quadrados Alternados (ALS):**
+   Considere o problema de fatoração de matrizes regularizado sobre o conjunto de pares observados $\Omega$. Suponha que os termos de viés $\mu, b_u, b_i$ já tenham sido subtraídos das notas observadas, gerando os resíduos centralizados $\tilde{r}_{ui} := r_{ui} - \mu - b_u - b_i$.
+   (a) Fixando a matriz de itens $Q \in \mathbb{R}^{N \times K}$, mostre que a função de perda $\mathcal{L}$ se desacopla em $M$ problemas de otimização estritamente convexos e independentes, um para cada usuário $u$:
+   $$\mathcal{L}_u(\mathbf{p}_u) = \frac{1}{2}\sum_{i \in \mathcal{I}_u} (\tilde{r}_{ui} - \mathbf{p}_u^T \mathbf{q}_i)^2 + \frac{\lambda}{2} \|\mathbf{p}_u\|_2^2$$
+   (b) Calcule o gradiente $\nabla_{\mathbf{p}_u} \mathcal{L}_u$ e iguale-o a zero para deduzir a solução fechada analítica do vetor $\mathbf{p}_u$:
+   $$\mathbf{p}_u = \left( \sum_{i \in \mathcal{I}_u} \mathbf{q}_i \mathbf{q}_i^T + \lambda I_K \right)^{-1} \sum_{i \in \mathcal{I}_u} \tilde{r}_{ui} \mathbf{q}_i$$
+   (c) Por que essa propriedade torna o algoritmo ALS ideal para implementação em clusters de computação paralela distribuída (como Apache Spark)?
+
+2. **Dedução das Regras Multiplicativas de Lee & Seung (2001) para a Perda de Frobenius:**
+   Considere a minimização da distância euclidiana na NMF:
+   $$\mathcal{L}(W, H) = \frac{1}{2}\|V - W H\|_F^2 = \frac{1}{2}\operatorname{tr}\left((V - WH)(V - WH)^T\right)$$
+   sujeito a $W_{ik} \ge 0$ e $H_{kj} \ge 0$.
+   (a) Calcule a derivada parcial $\frac{\partial \mathcal{L}}{\partial H_{kj}}$ e mostre que ela pode ser escrita como a diferença de dois termos estritamente não-negativos:
+   $$\frac{\partial \mathcal{L}}{\partial H_{kj}} = (W^T W H)_{kj} - (W^T V)_{kj}$$
+   (b) Considere um passo clássico de descida do gradiente: $H_{kj} \leftarrow H_{kj} - \eta_{kj} \frac{\partial \mathcal{L}}{\partial H_{kj}}$. Mostre que se escolhermos a taxa de aprendizado adaptativa dependente da entrada:
+   $$\eta_{kj} = \frac{H_{kj}}{(W^T W H)_{kj}}$$
+   o passo de descida aditivo transforma-se exatamente na célebre regra de atualização multiplicativa:
+   $$H_{kj} \leftarrow H_{kj} \frac{(W^T V)_{kj}}{(W^T W H)_{kj}}$$
+   (c) Demonstre por que essa regra garante que, partindo de $H_{kj}^{(0)} > 0$, o valor de $H_{kj}$ nunca se tornará negativo, dispensando qualquer operação de projeção truncada.
+
+3. **O Dilema da Não-Unicidade da NMF e Matrizes Monomiais:**
+   Dada uma fatoração exata $V = W H$ com $W \in \mathbb{R}_{\ge 0}^{M \times K}$ e $H \in \mathbb{R}_{\ge 0}^{K \times N}$, seja $A \in \mathbb{R}^{K \times K}$ uma matriz invertível qualquer.
+   (a) Mostre que $\tilde{W} = W A$ e $\tilde{H} = A^{-1} H$ fornecem o mesmo produto $\tilde{W}\tilde{H} = V$.
+   (b) Definimos uma matriz monomial como o produto de uma matriz de permutação por uma matriz diagonal com entradas estritamente positivas. Prove que se $A$ for uma matriz monomial, então $A \ge 0$ e $A^{-1} \ge 0$, garantindo que $(\tilde{W}, \tilde{H})$ seja sempre uma fatoração não-negativa válida.
+   (c) Com base nos resultados de Donoho & Stodden (2004), explique o que acontece quando as colunas de $V$ estão contidas estritamente no interior do ortante positivo, deixando espaço aberto entre os dados e os eixos coordenados. Por que isso implica a existência de infinitas soluções NMF geometricamente distintas?
+
+4. **Preditores de Linha de Base e Regularização Bayesiana:**
+   Considere o problema de estimar os vieses de usuários $b_u$ isoladamente em um grande sistema de recomendação.
+   Suponha que para um usuário $u$, a média das notas dadas seja calculada por $\bar{r}_u = \frac{1}{|\mathcal{I}_u|} \sum_{i \in \mathcal{I}_u} (r_{ui} - \mu)$.
+   (a) Mostre que o minimizador da perda quadrática regularizada $\mathcal{L}(b_u) = \frac{1}{2}\sum_{i \in \mathcal{I}_u} (r_{ui} - \mu - b_u)^2 + \frac{\lambda}{2} b_u^2$ é dado por:
+   $$b_u = \frac{\sum_{i \in \mathcal{I}_u} (r_{ui} - \mu)}{|\mathcal{I}_u| + \lambda} = \left(\frac{|\mathcal{I}_u|}{|\mathcal{I}_u| + \lambda}\right) \bar{r}_u$$
+   (b) Analise o comportamento de $b_u$ quando o usuário avaliou apenas 1 filme ($|\mathcal{I}_u| = 1$) versus quando avaliou 500 filmes ($|\mathcal{I}_u| = 500$), adotando $\lambda = 20$.
+   (c) Conecte essa fórmula ao conceito estatístico de encolhimento bayesiano (*shrinkage*) em direção à priori.
+
+---
+
+## Testes Conceituais
+
+### Teste 1: A Natureza dos Dados e o Colapso da SVD Clássica
+
+*   (A) A SVD truncada clássica baseada no Teorema de Eckart-Young-Mirsky minimiza o erro quadrático médio em todas as entradas da matriz, assumindo que nenhuma entrada é desconhecida.
+*   (B) Em sistemas de recomendação do mundo real, a proporção de avaliações ausentes em uma matriz usuário-item costuma ser inferior a $50\%$.
+*   (C) Se substituirmos todas as avaliações ausentes por zeros em uma matriz de notas de 1 a 5, o modelo resultante tenderá a prever que os usuários rejeitam a grande maioria dos itens não assistidos.
+*   (D) Preencher as entradas ausentes com a média global do catálogo preserva intacta a variância das preferências e viabiliza a aplicação direta da SVD sem distorções nos fatores latentes.
+
+### Teste 2: O Modelo de Fatores Latentes e Preditores de Linha de Base
+
+*   (A) No modelo de fatores latentes, a preferência de um usuário por um item é modelada pelo produto interno entre o vetor de perfil do usuário $\mathbf{p}_u$ e o vetor de atributos do item $\mathbf{q}_i$.
+*   (B) O termo de viés do item $b_i$ captura o fato de que certas obras recebem notas sistematicamente mais altas ou mais baixas do que a média global, independentemente das preferências específicas do usuário.
+*   (C) A regularização $L_2$ nos parâmetros de viés ($\lambda b_u^2$ e $\lambda b_i^2$) impede que usuários com apenas uma avaliação tenham vieses estimados em valores extremos que prejudiquem a generalização.
+*   (D) A nota final prevista $\hat{r}_{ui} = \mu + b_u + b_i + \mathbf{p}_u^T \mathbf{q}_i$ é necessariamente restrita ao intervalo fechado $[1, 5]$ pelas propriedades intrínsecas da álgebra bilinear.
+
+### Teste 3: Otimização Bilinear via SGD de Funk
+
+*   (A) A função de custo da fatoração de matrizes regularizada é globalmente convexa em relação a todas as variáveis $(P, Q, \mathbf{b}_u, \mathbf{b}_i)$ simultaneamente.
+*   (B) A cada iteração do SGD de Funk sobre uma avaliação observada $r_{ui}$, o vetor latente $\mathbf{p}_u$ é atualizado utilizando o gradiente que depende do vetor latente $\mathbf{q}_i$ do filme.
+*   (C) A complexidade computacional de uma época completa do algoritmo SGD de Funk é proporcional a $\mathcal{O}(|\Omega| \cdot K)$, dependendo unicamente do número de notas observadas e da dimensão latente.
+*   (D) Se um usuário possuir avaliação perfeita exatamente igual à linha de base e aos fatores latentes atuais ($r_{ui} = \hat{r}_{ui}$), os vetores $\mathbf{p}_u$ e $\mathbf{q}_i$ sofrem uma contração de encolhimento devido ao termo de regularização $\lambda$.
+
+### Teste 4: O Algoritmo Alternating Least Squares (ALS)
+
+*   (A) Fixando a matriz de fatores de itens $Q$, a otimização da matriz de usuários $P$ é um problema puramente linear que admite solução global analítica fechada e única para cada usuário.
+*   (B) O algoritmo ALS garante que a função de perda nunca aumente entre iterações sucessivas de alternância.
+*   (C) No ALS, o cálculo do vetor latente de um usuário específico $\mathbf{p}_u$ requer a inversão de uma matriz de dimensão $K \times K$, onde $K$ é o número de fatores latentes.
+*   (D) O ALS não pode ser utilizado caso haja termos de regularização $L_2$, pois a penalização quadrática destrói a linearidade das equações normais.
+
+### Teste 5: A Filosofia e a Geometria da NMF
+
+*   (A) A PCA clássica aplicada a imagens faciais produz autovetores com coeficientes positivos e negativos que se cancelam mutuamente, gerando bases holísticas sem correspondência anatômica isolada.
+*   (B) A restrição de não-negatividade na NMF ($W \ge 0, H \ge 0$) impede que o modelo subtraia componentes, forçando a representação de dados a ser estritamente aditiva.
+*   (C) O cone convexo gerado pelas colunas da matriz $W$ na NMF contém necessariamente todas as colunas da matriz de dados original que admitem reconstrução exata.
+*   (D) A NMF é um método determinístico que encontra exatamente o mínimo global da perda independentemente dos valores de inicialização de $W$ e $H$.
+
+### Teste 6: Funções de Perda e Modelagem Probabilística na NMF
+
+*   (A) A distância euclidiana de Frobenius na NMF é derivada estatisticamente sob a hipótese de ruído gaussiano aditivo com variância constante.
+*   (B) A divergência de Kullback-Leibler generalizada (ou $I$-divergence) é apropriada quando os dados representam contagens não-negativas discretas, correspondendo a um modelo de verossimilhança de Poisson.
+*   (C) A divergência de Kullback-Leibler generalizada entre duas matrizes $V$ e $WH$ é estritamente simétrica: $\mathcal{D}_{KL}(V \parallel WH) \equiv \mathcal{D}_{KL}(WH \parallel V)$.
+*   (D) Se a reconstrução for perfeita ($WH = V$), tanto a distância de Frobenius quanto a divergência de Kullback-Leibler generalizada assumem valor zero.
+
+### Teste 7: As Regras de Atualização Multiplicativas de Lee & Seung
+
+*   (A) As regras multiplicativas de Lee & Seung atualizam as matrizes multiplicando cada elemento anterior por uma razão entre termos positivos da derivada.
+*   (B) Se um elemento de $W$ ou $H$ for inicializado com zero, as regras multiplicativas de Lee & Seung nunca conseguirão torná-lo estritamente positivo nas iterações seguintes.
+*   (C) As regras multiplicativas de Lee & Seung requerem uma etapa explícita de projeção euclidiana para truncar números negativos ao final de cada iteração.
+*   (D) Quando os fatores atingem um ponto crítico estacionário onde o gradiente se anula, os fatores de escala multiplicativos das regras de Lee & Seung tornam-se iguais a 1.
+
+### Teste 8: Não-Unicidade, Identificabilidade e Aplicações
+
+*   (A) A decomposição NMF $V = WH$ é única a menos de rotações arbitrárias ortogonais, assim como a Decomposição em Valores Singulares (SVD).
+*   (B) Multiplicar uma coluna de $W$ por uma constante positiva $c > 0$ e dividir a linha correspondente de $H$ por $c$ resulta em uma nova fatoração NMF perfeitamente válida com o mesmo erro de reconstrução.
+*   (C) De acordo com Donoho & Stodden (2004), a presença de espaço aberto entre os dados e as fronteiras do ortante não-negativo gera uma família contínua de soluções NMF equivalentes.
+*   (D) Adicionar uma penalização de esparsidade $L_1$ sobre os coeficientes da NMF (Sparse NMF) auxilia a ancorar os fatores latentes nas arestas extremas do cone de dados, reduzindo a ambiguidade da não-unicidade.
+

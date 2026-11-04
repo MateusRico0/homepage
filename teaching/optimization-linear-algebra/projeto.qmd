@@ -1,0 +1,510 @@
+---
+title: "Projeto Final — Álgebra Linear e Otimização para Machine Learning"
+subtitle: "Fundamentos Algébricos, Geometria de Perda, Análise Espectral e Dinâmica de Otimização"
+date: "2026-10-31"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+---
+
+[← Voltar para a página da disciplina](./index.qmd)
+
+---
+
+::: {.callout-tip}
+### Arquivos de Apoio do Projeto para Download
+* [📥 **Baixar Notebook Guia do Projeto (`projeto_guia_algebra_otimizacao.ipynb`)**](./projeto_guia_algebra_otimizacao.ipynb)
+* [⚙️ **Baixar Especificação de Dependências com `uv` (`pyproject.toml`)**](./pyproject.toml)
+:::
+
+---
+
+## Objetivo do Trabalho e o que Almejar Entregar
+
+O objetivo deste projeto final é avaliar a compreensão teórica profunda e a capacidade de implementação analítica e algorítmica dos estudantes nos **fundamentos de Álgebra Linear e Otimização Contínua aplicados ao Aprendizado de Máquina**, conectando cada derivação formal aos mecanismos que governam os modelos preditivos e seus algoritmos de treinamento.
+
+Na disciplina, os algoritmos e estimadores de Machine Learning não são tratados como heurísticas empíricas nem como chamadas prontas de bibliotecas de alto nível (*black boxes*). Pelo contrário: são investigados a partir da **geometria dos espaços vetoriais, projeções ortogonais, decomposições matriciais fundamentais (Espectral e SVD), curvatura de superfícies de custo (Jacobianos e Hessianas) e dinâmicas espectrais de convergência**.
+
+Portanto, cada equipe deve entregar um memorial analítico e computacional rigoroso, atendendo aos seguintes princípios centrais:
+
+* **Demonstrações e Derivações Analíticas Completas:**
+  * Todas as passagens matemáticas, propriedades algébricas, resoluções de sistemas lineares e deduções de gradientes/Hessianas devem ser apresentadas passo a passo, justificando cada igualdade e implicação teórica.
+* **Validação Numérica Exclusiva em NumPy Puro:**
+  * Cada questão analítica é acompanhada de uma validação numérica em Python. É **obrigatório o uso exclusivo da biblioteca `numpy`** para implementar as rotinas, solvers, decomposições e otimizadores, sem recorrer a funções automáticas de bibliotecas de modelagem (como `scikit-learn`, `scipy.optimize` ou `pytorch`).
+* **Reprodutibilidade Determinística via `uv`:**
+  * O código do projeto deve ser empacotado e gerenciado com [`uv`](https://docs.astral.sh/uv/), garantindo lockfile determinístico e execução transparente de todas as validações numéricas.
+
+---
+
+## Formação das Equipes
+
+::: {.callout-important}
+### Regra de Composição dos Grupos
+Este trabalho **deverá ser realizado em equipes de 2 ou 3 alunos, impreterivelmente**.
+
+Não serão aceitos trabalhos individuais nem grupos com 4 ou mais integrantes. A discussão colaborativa das passagens matemáticas e o pareamento no desenvolvimento dos algoritmos matriciais fazem parte dos objetivos pedagógicos da disciplina.
+:::
+
+---
+
+## Instruções Gerais e Diretrizes Metodológicas
+
+::: {.callout-note}
+### Requisitos de Submissão e Rigor
+1. **Passo a Passo Mandatório:** Demonstrações, derivações algébricas e cálculos manuais devem ser detalhados explicitamente no relatório. Não serão atribuídos pontos a respostas finais desprovidas do memorial de cálculo correspondente.
+2. **Conexão Teoria-Código:** Cada seção possui um roteiro de validação numérica em Python (`numpy`). O código submetido deve reproduzir com exatidão numérica (respeitando tolerâncias de ponto flutuante da ordem de $10^{-10}$ a $10^{-15}$) os valores deduzidos analiticamente.
+3. **Notação Consistente:** Adote a notação formal estabelecida nas aulas: vetores como colunas ($\mathbf{u}, \mathbf{v} \in \mathbb{R}^d$), produto interno euclidiano $\langle \mathbf{u}, \mathbf{v} \rangle = \mathbf{u}^T \mathbf{v}$, matrizes em maiúsculas ($\mathbf{X}, \mathbf{A}, \mathbf{B}$), subespaços como $\operatorname{Col}(\mathbf{X})$ e postos como $\operatorname{rk}(\mathbf{X})$.
+:::
+
+---
+
+## Conjunto de Dados do Projeto
+
+Para viabilizar tanto a resolução analítica manual exaustiva quanto a verificação computacional imediata, o projeto estrutura-se sobre dois subsistemas de dados bem caracterizados.
+
+### 2.1 Dataset Principal $\mathcal{D}$: Avaliação Imobiliária
+
+Foram coletadas $N=6$ amostras com $d=2$ características contínuas:
+
+* $x_1$: área média dos imóveis (em dezenas de $\text{m}^2$);
+* $x_2$: idade média dos imóveis (em anos).
+
+A cada amostra associam-se:
+
+* O preço médio de mercado $y_i \in \mathbb{R}$ (em centenas de milhares de reais, variável alvo para modelos de regressão);
+* A classe de perfil socioeconômico $c_i \in \{0, 1\}$ (rótulo binário para modelos de classificação).
+
+| Amostra ($i$) | $x_{i1}$ (Área) | $x_{i2}$ (Idade) | $y_i$ (Preço) | $c_i$ (Perfil) |
+|:---:|:---:|:---:|:---:|:---:|
+| **1** | $5{,}0$ | $30{,}0$ | $2{,}5$ | $0$ |
+| **2** | $7{,}0$ | $38{,}0$ | $3{,}8$ | $0$ |
+| **3** | $9{,}0$ | $40{,}0$ | $4{,}2$ | $1$ |
+| **4** | $3{,}5$ | $19{,}0$ | $1{,}9$ | $0$ |
+| **5** | $8{,}0$ | $15{,}0$ | $4{,}5$ | $1$ |
+| **6** | $2{,}0$ | $35{,}0$ | $1{,}2$ | $0$ |
+
+: Dataset $\mathcal{D} = \{(x_{i1}, x_{i2}, y_i, c_i)\}_{i=1}^{6}$ {#tbl-dataset-d}
+
+Um novo imóvel de consulta $\mathbf{x}_{\text{novo}} = \begin{bmatrix} 6{,}0 & 20{,}0 \end{bmatrix}^T$ precisa ser avaliado pelo seu modelo.
+
+::: {.callout-note}
+Este dataset $\mathcal{D}$ é utilizado nas **Questões 1, 2, 5 e 6**.
+:::
+
+### 2.2 Matrizes-Toy $\mathcal{A}$ e $\mathcal{B}$
+
+Para as questões que exigem cálculo analítico completo (projeções, autovalores, SVD, gradientes e Hessianas multivariadas), utilizamos dois sistemas lineares sintéticos controlados:
+
+$$\mathcal{A} = \begin{bmatrix} 1 & 1 \\ 0 & 1 \\ 1 & 0 \end{bmatrix}, \qquad \mathbf{y}_{\mathcal{A}} = \begin{bmatrix} 4 \\ 1 \\ 1 \end{bmatrix}$$
+
+$$\mathcal{B} = \begin{bmatrix} 2 & 1 & 3 \\ 0 & 2 & 2 \\ 1 & 0 & 1 \end{bmatrix}, \qquad \mathbf{y}_{\mathcal{B}} = \begin{bmatrix} 5 \\ 2 \\ 1 \end{bmatrix}$$
+
+::: {.callout-warning}
+### Atenção à estrutura de $\mathcal{B}$
+Note que a terceira coluna de $\mathcal{B}$ foi deliberadamente construída como a soma exata das duas primeiras: $\mathbf{x}_3 = \mathbf{x}_1 + \mathbf{x}_2$. 
+
+A matriz $\mathcal{A}$ é usada na **Questão 3** e a matriz $\mathcal{B}$ na **Questão 4**.
+:::
+
+---
+
+## Questão 1: Normas, Métricas, Escala e o Algoritmo $k$-NN
+
+### Parte A: Normas, Métricas e Impacto de Escala
+
+1. Compute analiticamente a distância entre o ponto de consulta $\mathbf{x}_{\text{novo}} = \begin{bmatrix} 6{,}0 & 20{,}0 \end{bmatrix}^T$ e todas as 6 amostras do dataset $\mathcal{D}$ sob as três normas fundamentais de $\mathbb{R}^2$:
+   * **Norma $L_1$ (Manhattan):** $d_1(\mathbf{u}, \mathbf{v}) = |u_1 - v_1| + |u_2 - v_2|$;
+   * **Norma $L_2$ (Euclidiana):** $d_2(\mathbf{u}, \mathbf{v}) = \sqrt{(u_1 - v_1)^2 + (u_2 - v_2)^2}$;
+   * **Norma $L_\infty$ (Máximo/Chebyshev):** $d_\infty(\mathbf{u}, \mathbf{v}) = \max(|u_1 - v_1|, |u_2 - v_2|)$.
+   
+   Organize os resultados em uma tabela indicando o valor numérico exato de cada distância e a ordem de proximidade (ranking dos vizinhos) induzida por cada norma.
+2. A escala dos atributos ($x_1$ varia na faixa $2{,}0$--$9{,}0$; $x_2$ na faixa $15{,}0$--$40{,}0$) afeta o cálculo das distâncias? Explique geometricamente o que ocorre com as bolas métricas (conjuntos de nível $\{\mathbf{x} : \|\mathbf{x} - \mathbf{x}_{\text{novo}}\|_2 \le r\}$) quando uma das características possui magnitude/variância muito superior às demais, e explique por que essa distorção interfere criticamente na classificação por vizinhos mais próximos ($k$-NN).
+3. Seja a dissimilaridade baseada no cosseno definida por:
+   $$d_{\cos}(\mathbf{u}, \mathbf{v}) = 1 - \frac{\langle \mathbf{u}, \mathbf{v}\rangle}{\|\mathbf{u}\|_2 \|\mathbf{v}\|_2}$$
+   Demonstre formalmente, através de um contraexemplo em $\mathbb{R}^2$ com três vetores unitários de sua escolha (ou analiticamente), que $d_{\cos}$ **não é uma métrica formal**, por violar a desigualdade triangular:
+   $$d_{\cos}(\mathbf{u}, \mathbf{w}) \le d_{\cos}(\mathbf{u}, \mathbf{v}) + d_{\cos}(\mathbf{v}, \mathbf{w})$$
+
+### Parte B: O Algoritmo $k$-NN e a Hipótese de Suavidade
+
+1. Utilizando a distância euclidiana ($L_2$) calculada na Parte A:
+   * Determine a classe prevista $\hat{c}_{\text{novo}}$ para $\mathbf{x}_{\text{novo}}$ via $k$-NN com $k=1$ e $k=3$ (adotando voto majoritário simples);
+   * Determine o preço estimado $\hat{y}_{\text{novo}}$ via regressão $k$-NN com $k=3$ (média aritmética simples dos alvos $y_i$ dos 3 vizinhos mais próximos).
+2. A fundamentação do algoritmo $k$-NN repousa sobre a **hipótese de suavidade** (*smoothness assumption*). Discuta analítica e geometricamente como os dois cenários extremos do hiperparâmetro $k$ ($k=1$ e $k=N=6$) afetam o compromisso entre **viés e variância** e a complexidade das fronteiras de decisão no espaço de atributos.
+
+::: {.callout-tip}
+### Validação em Python (`numpy`)
+Implemente um script que compute de forma totalmente vetorizada a matriz de distâncias sob as três normas, ordene os vizinhos e confirme numericamente as predições de classificação e regressão para $\mathbf{x}_{\text{novo}}$.
+:::
+
+---
+
+## Questão 2: Regressão Linear, Posto de Matrizes e Mínimos Quadrados Clássicos (OLS)
+
+### Parte A: Formulação Matricial, Tipos de Sistemas e Posto
+
+1. Defina formalmente a matriz de design $\mathbf{X} \in \mathbb{R}^{6 \times 3}$ para o dataset $\mathcal{D}$, incluindo o termo de *bias* / intercepto (coluna unitária na primeira posição, $x_0 = 1$), e o vetor de alvos contínuos $\mathbf{y} \in \mathbb{R}^6$.
+2. Escreva a equação de regressão linear exata $\mathbf{X}\mathbf{w} = \mathbf{y}$, onde $\mathbf{w} = \begin{bmatrix} w_0 & w_1 & w_2 \end{bmatrix}^T$.
+   * Classifique esse sistema linear quanto à sua dimensão ($N=6$ equações e $d+1=3$ incógnitas).
+   * Calcule o posto da matriz de atributos $\operatorname{rk}(\mathbf{X})$ e o posto da matriz aumentada $\operatorname{rk}([\mathbf{X} \mid \mathbf{y}])$.
+   * Utilizando o **Teorema do Posto (Rouché--Capelli)**, demonstre por que o sistema $\mathbf{X}\mathbf{w} = \mathbf{y}$ é incompatível (isto é, não admite solução exata). O que isso significa geometricamente em termos do espaço-coluna $\operatorname{Col}(\mathbf{X})$ e fisicamente na modelagem de dados reais com ruído?
+3. Suponha que seja introduzida uma quarta coluna artificial nos dados: $x_3 = 2{,}5 \cdot x_1$, diretamente proporcional à área.
+   * Como essa inclusão afeta o posto $\operatorname{rk}(\mathbf{X})$ da nova matriz de design $\mathbf{X} \in \mathbb{R}^{6 \times 4}$ e o posto da matriz de Gram $\mathbf{X}^T \mathbf{X} \in \mathbb{R}^{4 \times 4}$?
+   * O que caracteriza o fenômeno da **multicolinearidade exata** e qual é o seu impacto sobre a unicidade do vetor de parâmetros $\mathbf{w}$? As **previsões** $\hat{\mathbf{y}} = \mathbf{X}\mathbf{w}$ deixam de ser únicas? Justifique formalmente.
+
+### Parte B: Resolução por Mínimos Quadrados e Interpretação
+
+1. Dado que o sistema não possui solução exata, formulamos o problema de Mínimos Quadrados Ordinários (OLS) buscando minimizar a norma euclidiana do resíduo: $\min_{\mathbf{w}} \|\mathbf{X}\mathbf{w} - \mathbf{y}\|_2^2$.
+   * Monte explicitamente a matriz $\mathbf{X}^T \mathbf{X} \in \mathbb{R}^{3 \times 3}$ e o vetor $\mathbf{X}^T \mathbf{y} \in \mathbb{R}^3$ para o dataset $\mathcal{D}$.
+   * Escreva as **Equações Normais** $\mathbf{X}^T \mathbf{X} \hat{\mathbf{w}} = \mathbf{X}^T \mathbf{y}$ e encontre o vetor de pesos ótimo $\hat{\mathbf{w}} = \begin{bmatrix} \hat{w}_0 & \hat{w}_1 & \hat{w}_2 \end{bmatrix}^T$, detalhando os passos de inversão ou eliminação gaussiana.
+2. Prove algebricamente que o vetor de resíduos ótimo $\hat{\mathbf{e}} = \mathbf{y} - \mathbf{X}\hat{\mathbf{w}}$ é estritamente ortogonal a todas as colunas de $\mathbf{X}$, ou seja, $\mathbf{X}^T \hat{\mathbf{e}} = \mathbf{0}$. Verifique essa condição numericamente e interprete geometricamente por que a ortogonalidade caracteriza a projeção de menor distância euclidiana.
+3. Calcule a previsão da regressão linear para o ponto de consulta:
+   $$\hat{y}_{\text{lin}} = \hat{w}_0 + \hat{w}_1 (6{,}0) + \hat{w}_2 (20{,}0)$$
+   Compare o valor obtido com o resultado da regressão local via $k$-NN obtido na Questão 1 (Item B.1). Explique a diferença conceitual e operacional fundamental entre uma aproximação paramétrica global (Mínimos Quadrados) e uma aproximação não-paramétrica local ($k$-NN).
+
+::: {.callout-tip}
+### Validação em Python (`numpy`)
+Escreva um script que determine os postos via eliminação ou posto numérico, resolva as Equações Normais tanto via `np.linalg.solve` quanto via `np.linalg.lstsq`, comprove que $\|\mathbf{X}^T(\mathbf{y} - \mathbf{X}\hat{\mathbf{w}})\|_\infty < 10^{-10}$ e compute a estimativa de $\hat{y}_{\text{lin}}$.
+:::
+
+---
+
+## Questão 3: Projeção Ortogonal, Teorema Espectral e Decomposição em Valores Singulares (SVD)
+
+Considere a matriz de design $\mathcal{A} \in \mathbb{R}^{3 \times 2}$ e o vetor de alvos $\mathbf{y}_{\mathcal{A}} \in \mathbb{R}^3$ definidos na Seção 2.2:
+$$\mathcal{A} = \begin{bmatrix} 1 & 1 \\ 0 & 1 \\ 1 & 0 \end{bmatrix}, \qquad \mathbf{y}_{\mathcal{A}} = \begin{bmatrix} 4 \\ 1 \\ 1 \end{bmatrix}$$
+O sistema $\mathcal{A}\mathbf{w} = \mathbf{y}_{\mathcal{A}}$ é sobredeterminado ($N = 3 > d = 2$).
+
+### Parte A: Projeção Ortogonal, Equações Normais e Complemento Ortogonal
+
+1. Verifique que $\mathbf{y}_{\mathcal{A}} \notin \operatorname{Col}(\mathcal{A})$ encontrando uma equação linear ou condição de pertinência satisfeita por todos os vetores de $\operatorname{Col}(\mathcal{A})$, e monte explicitamente as Equações Normais $\mathcal{A}^T \mathcal{A} \hat{\mathbf{w}} = \mathcal{A}^T \mathbf{y}_{\mathcal{A}}$.
+2. Resolva analiticamente o sistema linear para encontrar o vetor ótimo $\hat{\mathbf{w}} \in \mathbb{R}^2$ e determine a projeção ortogonal $\hat{\mathbf{y}} = \mathcal{A}\hat{\mathbf{w}} \in \operatorname{Col}(\mathcal{A})$.
+3. Calcule o vetor de resíduos $\hat{\mathbf{e}} = \mathbf{y}_{\mathcal{A}} - \hat{\mathbf{y}}$:
+   * Demonstre que $\mathcal{A}^T \hat{\mathbf{e}} = \mathbf{0}$, provando que $\hat{\mathbf{e}} \in \operatorname{Col}(\mathcal{A})^{\perp}$;
+   * Escreva a decomposição única de $\mathbf{y}_{\mathcal{A}}$ segundo a soma direta dos subespaços ortogonais $\mathbb{R}^3 = \operatorname{Col}(\mathcal{A}) \oplus \operatorname{Col}(\mathcal{A})^{\perp}$.
+
+### Parte B: Teorema Espectral, Autovalores e Definitude Positiva
+
+1. Calcule analiticamente a matriz de Gram simétrica $\mathbf{S} = \mathcal{A}^T \mathcal{A} \in \mathbb{R}^{2 \times 2}$.
+   * Encontre as raízes do polinômio característico $\det(\mathbf{S} - \lambda \mathbf{I}) = 0$ para obter os autovalores $\lambda_1, \lambda_2$.
+   * Determine os respectivos autovetores unitários ortogonais $\mathbf{q}_1, \mathbf{q}_2$ e construa a **Decomposição Espectral** $\mathbf{S} = \mathbf{Q} \mathbf{\Lambda} \mathbf{Q}^T$, confirmando a ortogonalidade $\mathbf{Q}^T \mathbf{Q} = \mathbf{I}$ garantida pelo Teorema Espectral Real.
+2. Prove formalmente que $\mathbf{S}$ é estritamente definida positiva ($\mathbf{S} > 0$), tanto pela condição da forma quadrática ($\mathbf{w}^T \mathbf{S} \mathbf{w} > 0, \forall \mathbf{w} \neq \mathbf{0}$) quanto pelo sinal dos seus autovalores.
+3. Determine o número de condição exato de $\mathbf{S}$, dado por $\kappa(\mathbf{S}) = \lambda_{\max}/\lambda_{\min}$, e o número de condição de $\mathcal{A}$, dado por $\kappa(\mathcal{A}) = \sigma_{\max}/\sigma_{\min}$.
+   * Prove formalmente que $\kappa(\mathbf{S}) = [\kappa(\mathcal{A})]^2$.
+   * Explique as consequências práticas dessa relação para a estabilidade numérica na resolução de problemas de mínimos quadrados via Equações Normais ($\mathbf{X}^T\mathbf{X}$) versus abordagens baseadas em decomposição QR ou SVD.
+
+### Parte C: Decomposição em Valores Singulares (SVD)
+
+1. A partir dos autovalores e autovetores calculados para $\mathcal{A}^T \mathcal{A}$, construa passo a passo a **SVD reduzida** $\mathcal{A} = \mathbf{U} \mathbf{\Sigma} \mathbf{V}^T$:
+   * Obtenha os valores singulares $\sigma_i = \sqrt{\lambda_i(\mathcal{A}^T \mathcal{A})}$;
+   * Defina a matriz $\mathbf{V} \in \mathbb{R}^{2 \times 2}$ contendo os vetores singulares à direita;
+   * Obtenha os vetores singulares à esquerda $\mathbf{u}_i \in \mathbb{R}^3$ via a ação normalizada de $\mathcal{A}$:
+     $$\mathbf{u}_i = \frac{1}{\sigma_i} \mathcal{A} \mathbf{v}_i, \qquad i = 1, 2$$
+2. Escreva a expansão espectral de $\mathcal{A}$ como a soma de $r = \operatorname{rk}(\mathcal{A})$ matrizes de posto 1:
+   $$\mathcal{A} = \sum_{i=1}^{2} \sigma_i \mathbf{u}_i \mathbf{v}_i^T$$
+   Substitua os vetores numéricos obtidos e comprove analiticamente que a soma recupera com exatidão a matriz $\mathcal{A}$ original.
+
+### Parte D: Aproximação de Baixo Posto, Eckart--Young--Mirsky e Decomposição Polar
+
+1. Determine a melhor aproximação de posto 1 para $\mathcal{A}$, denotada por $\hat{\mathcal{A}}^{(1)} = \sigma_1 \mathbf{u}_1 \mathbf{v}_1^T$, exibindo explicitamente suas entradas numéricas.
+2. Com base no **Teorema de Eckart--Young--Mirsky**, qual é o erro exato dessa aproximação medido na norma espectral (norma $L_2$ induzida) $\|\mathcal{A} - \hat{\mathcal{A}}^{(1)}\|_2$? Justifique analiticamente e confirme calculando a norma espectral da matriz de erro residual $\mathcal{A} - \hat{\mathcal{A}}^{(1)}$.
+3. Obtenha a **Decomposição Polar** $\mathcal{A} = \mathbf{O} \mathbf{P}$, onde $\mathbf{O} = \mathbf{U} \mathbf{V}^T$ e $\mathbf{P} = \mathbf{V} \mathbf{\Sigma} \mathbf{V}^T$. Verifique que $\mathbf{O}$ possui colunas ortonormais e que $\mathbf{P}$ é simétrica semidefinida positiva. Explique o significado físico-geométrico das componentes $\mathbf{O}$ (transformação isométrica de rotação/reflexão) e $\mathbf{P}$ (deformação/esticamento puro ao longo dos eixos principais).
+
+::: {.callout-tip}
+### Validação em Python (`numpy`)
+Implemente um script que resolva $\hat{\mathbf{w}}$ via `np.linalg.solve` e `np.linalg.lstsq`, cheque $\|\mathcal{A}^T \hat{\mathbf{e}}\|_\infty < 10^{-14}$, calcule a SVD via `np.linalg.svd` conferindo a igualdade com os autovalores de $\mathcal{A}^T\mathcal{A}$, e verifique que $\|\mathcal{A} - \hat{\mathcal{A}}^{(1)}\|_2 = \sigma_2$.
+:::
+
+---
+
+## Questão 4: Cálculo Diferenciável, Gradientes, Hessiana e Vales Planos (Ridge Regression)
+
+Considere a matriz $\mathcal{B} \in \mathbb{R}^{3 \times 3}$ e o vetor de alvos $\mathbf{y}_{\mathcal{B}} \in \mathbb{R}^3$ definidos na Seção 2.2:
+$$\mathcal{B} = \begin{bmatrix} 2 & 1 & 3 \\ 0 & 2 & 2 \\ 1 & 0 & 1 \end{bmatrix}, \qquad \mathbf{y}_{\mathcal{B}} = \begin{bmatrix} 5 \\ 2 \\ 1 \end{bmatrix}$$
+Lembre-se de que a terceira coluna de $\mathcal{B}$ foi construída como $\mathbf{x}_3 = \mathbf{x}_1 + \mathbf{x}_2$. A função de perda quadrática sobre o vetor de parâmetros $\boldsymbol{\beta} = \begin{bmatrix} \beta_1 & \beta_2 & \beta_3 \end{bmatrix}^T \in \mathbb{R}^3$ é dada por:
+$$L(\boldsymbol{\beta}) = \|\mathcal{B}\boldsymbol{\beta} - \mathbf{y}_{\mathcal{B}}\|_2^2$$
+
+### Parte A: Derivadas Parciais, Gradiente e Derivada Direcional
+
+1. Escreva $L(\beta_1, \beta_2, \beta_3)$ explicitando os resíduos escalares de cada amostra:
+   $$r_i(\boldsymbol{\beta}) = \mathcal{B}_{i1}\beta_1 + \mathcal{B}_{i2}\beta_2 + \mathcal{B}_{i3}\beta_3 - y_i, \qquad i = 1, 2, 3$$
+   Calcule **termo a termo** (utilizando a regra da soma e a regra da cadeia unidimensional) as derivadas parciais:
+   $$\frac{\partial L}{\partial \beta_1}, \qquad \frac{\partial L}{\partial \beta_2}, \qquad \frac{\partial L}{\partial \beta_3}$$
+2. Mostre detalhadamente como o vetor gradiente $\nabla_{\boldsymbol{\beta}} L(\boldsymbol{\beta}) = \begin{bmatrix} \frac{\partial L}{\partial \beta_1} & \frac{\partial L}{\partial \beta_2} & \frac{\partial L}{\partial \beta_3} \end{bmatrix}^T$ reorganiza algebricamente essas derivadas parciais na forma matricial compacta:
+   $$\nabla_{\boldsymbol{\beta}} L(\boldsymbol{\beta}) = 2\mathcal{B}^T(\mathcal{B}\boldsymbol{\beta} - \mathbf{y}_{\mathcal{B}})$$
+3. Para um vetor unitário arbitrário $\mathbf{v} \in \mathbb{R}^3$ ($\|\mathbf{v}\|_2 = 1$), defina a derivada direcional $D_{\mathbf{v}} L(\boldsymbol{\beta})$ através da função unidimensional $g(h) = L(\boldsymbol{\beta} + h\mathbf{v})$. Demonstre que:
+   $$D_{\mathbf{v}} L(\boldsymbol{\beta}) = \nabla L(\boldsymbol{\beta})^T \mathbf{v}$$
+   Em seguida, aplicando a **Desigualdade de Cauchy--Schwarz**, prove rigorosamente que a direção unitária que maximiza a taxa instantânea de decréscimo (direção de maior descida) é:
+   $$\mathbf{v}^* = -\frac{\nabla L(\boldsymbol{\beta})}{\|\nabla L(\boldsymbol{\beta})\|_2}$$
+4. Avalie numericamente o valor da perda $L(\boldsymbol{\beta}_0)$ e do vetor gradiente $\nabla L(\boldsymbol{\beta}_0)$ no ponto $\boldsymbol{\beta}_0 = \begin{bmatrix} 1 & 1 & 1 \end{bmatrix}^T$. Determine a direção unitária de maior descida $\mathbf{u}^*$ e a taxa instantânea de redução da perda correspondente.
+
+### Parte B: Jacobiano, Hessiana e a Condição de Segunda Ordem
+
+1. Defina a função vetorial de resíduos $\mathbf{r}(\boldsymbol{\beta}) = \mathcal{B}\boldsymbol{\beta} - \mathbf{y}_{\mathcal{B}} \in \mathbb{R}^3$.
+   * Escreva a matriz Jacobiana $\mathbf{J}_{\mathbf{r}}(\boldsymbol{\beta})$ adotando a convenção *denominator layout* ($\mathbf{J}_{\mathbf{r}}(\boldsymbol{\beta})_{ij} = \frac{\partial r_j}{\partial \beta_i}$) e prove que $\mathbf{J}_{\mathbf{r}}(\boldsymbol{\beta}) = \mathcal{B}^T$ para todo $\boldsymbol{\beta}$.
+   * Escrevendo $L(\boldsymbol{\beta}) = g(\mathbf{r}(\boldsymbol{\beta}))$, com $g(\mathbf{r}) = \mathbf{r}^T \mathbf{r} = \|\mathbf{r}\|_2^2$, aplique a regra da cadeia vetorial multivariada $\nabla_{\boldsymbol{\beta}} L = \mathbf{J}_{\mathbf{r}}(\boldsymbol{\beta})\, \nabla_{\mathbf{r}} g$ para deduzir $\nabla_{\boldsymbol{\beta}} L = 2\mathcal{B}^T \mathbf{r}(\boldsymbol{\beta})$. Destaque por que essa formulação vetorial em cadeia é a base teórica exata do algoritmo de *backpropagation*.
+2. Calcule a matriz Hessiana $\nabla^2_{\boldsymbol{\beta}} L(\boldsymbol{\beta})$ diferenciando o vetor gradiente, provando que:
+   $$\nabla^2_{\boldsymbol{\beta}} L(\boldsymbol{\beta}) = 2\mathcal{B}^T \mathcal{B}, \qquad \forall \boldsymbol{\beta} \in \mathbb{R}^3$$
+   Prove que $L$ é convexa para **qualquer** matriz $\mathcal{B}$, mostrando que para todo $\mathbf{v} \in \mathbb{R}^3$:
+   $$\mathbf{v}^T \left(2\mathcal{B}^T \mathcal{B}\right) \mathbf{v} = 2\|\mathcal{B}\mathbf{v}\|_2^2 \ge 0$$
+3. Calcule explicitamente os autovalores da Hessiana $\nabla^2 L(\boldsymbol{\beta}) = 2\mathcal{B}^T \mathcal{B}$. Mostre que o menor autovalor é exatamente $\lambda_{\min} = 0$ e explique por que a existência de curvatura nula caracteriza a topografia geométrica de um **vale plano** (*flat valley*).
+
+### Parte C: Vales Planos e Infinitas Soluções de Mínimos Quadrados
+
+1. Encontre uma base para o núcleo de $\mathcal{B}$, determinando um vetor não-nulo $\mathbf{n} \in \mathcal{N}(\mathcal{B})$ tal que $\mathcal{B}\mathbf{n} = \mathbf{0}$.
+2. Prove analiticamente que, se $\boldsymbol{\beta}^*$ é uma solução qualquer das Equações Normais ($\mathcal{B}^T\mathcal{B}\boldsymbol{\beta}^* = \mathcal{B}^T \mathbf{y}_{\mathcal{B}}$), então **qualquer ponto** sobre a reta:
+   $$\boldsymbol{\beta}(t) = \boldsymbol{\beta}^* + t\,\mathbf{n}, \qquad \forall t \in \mathbb{R}$$
+   satisfaz simultaneamente $\nabla L(\boldsymbol{\beta}(t)) = \mathbf{0}$ e produz rigorosamente o mesmo valor de perda: $L(\boldsymbol{\beta}(t)) = L(\boldsymbol{\beta}^*)$.
+
+### Parte D: Regularização Ridge e Fechamento do Vale Plano
+
+1. Considere a perda modificada com penalização de norma $L_2$ (Regressão Ridge / Regularização de Tikhonov):
+   $$L_\lambda(\boldsymbol{\beta}) = \|\mathcal{B}\boldsymbol{\beta} - \mathbf{y}_{\mathcal{B}}\|_2^2 + \lambda \|\boldsymbol{\beta}\|_2^2, \qquad \lambda > 0$$
+   Calcule o novo gradiente e a nova Hessiana, provando que $\nabla^2 L_\lambda(\boldsymbol{\beta}) = 2(\mathcal{B}^T\mathcal{B} + \lambda \mathbf{I})$.
+2. Utilizando o Teorema Espectral, prove que todos os autovalores $\mu_i$ de $\nabla^2 L_\lambda$ satisfazem $\mu_i \ge 2\lambda > 0$, garantindo que a superfície $L_\lambda$ é **estritamente convexa** em todo o espaço $\mathbb{R}^3$.
+3. Demonstre que $L_\lambda$ possui um único minimizador global estrito dado por:
+   $$\boldsymbol{\beta}_\lambda = (\mathcal{B}^T\mathcal{B} + \lambda \mathbf{I})^{-1} \mathcal{B}^T \mathbf{y}_{\mathcal{B}}$$
+   Calcule numericamente o vetor ótimo $\boldsymbol{\beta}_\lambda$ para o parâmetro de regularização $\lambda = 1$.
+
+### Parte E: Validação Numérica
+
+1. Escreva um script em Python (utilizando apenas `numpy`) que:
+   * Compare o vetor gradiente analítico em $\boldsymbol{\beta}_0$ com a aproximação numérica por **diferença finita central** ($h = 10^{-5}$):
+     $$\frac{\partial L}{\partial \beta_j} \approx \frac{L(\boldsymbol{\beta} + h\mathbf{e}_j) - L(\boldsymbol{\beta} - h\mathbf{e}_j)}{2h}$$
+     exibindo a diferença absoluta máxima encontrada;
+   * Calcule e imprima os autovalores da Hessiana não regularizada $2\mathcal{B}^T\mathcal{B}$ e da Hessiana regularizada $2(\mathcal{B}^T\mathcal{B} + \mathbf{I})$;
+   * Avalie e plote ou tabule os valores de $L(\boldsymbol{\beta}^* + t\,\mathbf{n})$ e $L_\lambda(\boldsymbol{\beta}_\lambda + t\,\mathbf{n})$ para uma grade de valores de $t \in [-2, 2]$, comprovando empiricamente que a perda não regularizada permanece rigorosamente invariante enquanto a perda Ridge apresenta curvatura estrita dada por $2\lambda \|\mathbf{n}\|_2^2$.
+2. Explique o compromisso (*trade-off*) existente entre o erro de truncamento $\mathcal{O}(h^2)$ e o erro de arredondamento de máquina $\mathcal{O}(\epsilon_{\text{máq}}/h)$ na fórmula de diferença finita central. Em seguida, prove por que, para a função de perda puramente quadrática desta questão, **o erro de truncamento analítico é identicamente nulo**, de forma que qualquer discrepância observada à medida que $h \to 0$ decorre unicamente do cancelamento catastrófico de ponto flutuante.
+
+---
+
+## Questão 5: Análise de Convergência da Descida do Gradiente, Condicionamento e Regressão Logística
+
+Considere a minimização irrestrita de uma função continuamente diferenciável $f: \mathbb{R}^d \to \mathbb{R}$.
+
+### Parte A: Direção de Maior Descida, $L$-Suavidade e Lema da Descida
+
+1. Pela Desigualdade de Cauchy--Schwarz, prove que, sob a norma euclidiana, a direção unitária $\mathbf{u}^*$ ($\|\mathbf{u}\|_2 = 1$) que minimiza a derivada direcional $D_{\mathbf{u}} f(\mathbf{w}) = \nabla f(\mathbf{w})^T \mathbf{u}$ é:
+   $$\mathbf{u}^* = -\frac{\nabla f(\mathbf{w})}{\|\nabla f(\mathbf{w})\|_2}$$
+   justificando formalmente por que a regra de atualização da Descida do Gradiente adota $\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k)$.
+2. Defina formalmente o conceito de **$L$-suavidade** (gradiente $L$-Lipschitziano) e demonstre que, para funções duas vezes continuamente diferenciáveis ($C^2$), essa condição é equivalente a uma limitação uniforme sobre o maior autovalor da matriz Hessiana:
+   $$\lambda_{\max}(\nabla^2 f(\mathbf{w})) \le L, \qquad \forall \mathbf{w} \in \mathbb{R}^d$$
+3. A partir do Teorema Fundamental do Cálculo aplicado à função auxiliar $g(t) = f(\mathbf{x} + t(\mathbf{y} - \mathbf{x}))$ para $t \in [0, 1]$, deduza a **desigualdade do majorante quadrático**: se $f$ é $L$-suave, então para quaisquer $\mathbf{x}, \mathbf{y} \in \mathbb{R}^d$:
+   $$f(\mathbf{y}) \le f(\mathbf{x}) + \nabla f(\mathbf{x})^T (\mathbf{y} - \mathbf{x}) + \frac{L}{2}\|\mathbf{y} - \mathbf{x}\|_2^2$$
+4. Substituindo o passo de descida $\mathbf{y} = \mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k)$ no majorante quadrático, prove o **Lema da Descida**:
+   * O decréscimo estrito $f(\mathbf{w}_{k+1}) < f(\mathbf{w}_k)$ é garantido para qualquer ponto com gradiente não nulo se, e somente se, a taxa de aprendizado satisfizer $0 < \alpha < \frac{2}{L}$;
+   * O passo teoricamente ótimo que maximiza o decréscimo garantido da cota superior é $\alpha^* = \frac{1}{L}$, resultando no limite:
+     $$f(\mathbf{w}_{k+1}) \le f(\mathbf{w}_k) - \frac{1}{2L}\|\nabla f(\mathbf{w}_k)\|_2^2$$
+
+### Parte B: Dinâmica Espectral do Erro e a Taxa de Contração de Chebyshev
+
+Considere a otimização da forma quadrática estritamente convexa $f(\mathbf{w}) = \frac{1}{2}\mathbf{w}^T \mathbf{A} \mathbf{w} - \mathbf{b}^T \mathbf{w}$, onde $\mathbf{A} = \mathbf{A}^T > 0$ com autovalores $0 < \lambda_{\min} = \lambda_d \le \dots \le \lambda_1 = \lambda_{\max}$, cujo minimizador único satisfaz $\mathbf{A}\mathbf{w}^* = \mathbf{b}$.
+
+1. Mostre que o vetor de erro dos parâmetros $\mathbf{e}_k = \mathbf{w}_k - \mathbf{w}^*$ evolui iterativamente segundo o sistema dinâmico linear discreto:
+   $$\mathbf{e}_{k+1} = (\mathbf{I} - \alpha \mathbf{A}) \mathbf{e}_k$$
+2. Aplicando a Decomposição Espectral $\mathbf{A} = \mathbf{Q} \mathbf{\Lambda} \mathbf{Q}^T$, projete o erro na base modal dos autovetores definindo $\tilde{\mathbf{e}}_k = \mathbf{Q}^T \mathbf{e}_k$. Prove que a dinâmica das componentes do erro se desacopla completamente em $d$ equações escalares independentes:
+   $$\tilde{e}_{k+1, i} = (1 - \alpha \lambda_i) \tilde{e}_{k, i}, \qquad i = 1, \dots, d$$
+3. Formule o problema *minimax* de Chebyshev que busca minimizar a pior taxa de contração assintótica do erro modal:
+   $$\min_{\alpha > 0} \max_{i} |1 - \alpha \lambda_i| = \min_{\alpha > 0} \max \left\{ 1 - \alpha \lambda_{\min}, \; \alpha \lambda_{\max} - 1 \right\}$$
+   Prove analiticamente que o valor ótimo ocorre precisamente na interseção das duas retas limites, resultando na **taxa de aprendizado ótima de Chebyshev**:
+   $$\alpha^* = \frac{2}{\lambda_{\max} + \lambda_{\min}}$$
+   e na taxa ótima de contração do erro:
+   $$\rho^* = \frac{\kappa - 1}{\kappa + 1}, \qquad \text{onde } \kappa = \frac{\lambda_{\max}}{\lambda_{\min}}$$
+4. Prove que a distância à função de perda ótima decai geometricamente segundo:
+   $$f(\mathbf{w}_k) - f^* \le (\rho^*)^{2k} \left( f(\mathbf{w}_0) - f^* \right)$$
+
+### Parte C: Mau Condicionamento e Padronização $z$-Score como Pré-Condicionamento
+
+1. Explique geometricamente por que um número de condição elevado ($\kappa \gg 1$) faz com que o vetor gradiente aponte em direções quase ortogonais ao minimizador $\mathbf{w}^*$, desencadeando o fenômeno de oscilação transversal e convergência lenta (ziguezague nas ravinas).
+2. Mostre que a padronização das características via $z$-score sobre a matriz de dados centrada $\mathbf{X}_c$, expressa pela transformação linear $\tilde{\mathbf{X}} = \mathbf{X}_c \mathbf{D}^{-1/2}$ com $\mathbf{D} = \operatorname{diag}(s_1^2, \dots, s_d^2)$, transforma a Hessiana média $\mathbf{H} = \frac{1}{N}\mathbf{X}_c^T \mathbf{X}_c$ na **matriz de correlação amostral de Pearson** $\tilde{\mathbf{H}} = \mathbf{D}^{-1/2} \mathbf{H} \mathbf{D}^{-1/2}$, cuja diagonal principal é composta exclusivamente por elementos unitários ($\tilde{H}_{jj} = 1$).
+   * Aplique esse cálculo ao dataset $\mathcal{D}$: calcule e compare o número de condição da matriz não padronizada $\kappa(2\mathbf{X}^T\mathbf{X})$ com o da matriz após a padronização $z$-score $\kappa(2\tilde{\mathbf{X}}^T\tilde{\mathbf{X}})$ (incluindo em ambos a coluna de bias).
+3. Demonstre analiticamente que executar a Descida do Gradiente convencional sobre os dados padronizados $\tilde{\mathbf{X}}$ é algebricamente equivalente a executar a **Descida do Gradiente Pré-Condicionada (PGD)** sobre o espaço original dos dados utilizando o pré-condicionador diagonal de Jacobi $\mathbf{M} = \mathbf{D}$, na qual cada parâmetro $w_j$ recebe uma taxa de aprendizado efetiva individual reescalada por $\alpha/s_j^2$.
+
+### Parte D: Regressão Logística e Prova de Estrita Convexidade
+
+Para classificar as classes de perfil socioeconômico $c_i \in \{0, 1\}$ do dataset $\mathcal{D}$, formulamos o modelo de Regressão Logística com função de perda de Entropia Cruzada Binária regularizada por norma $\ell_2$:
+$$\mathcal{L}(\mathbf{w}) = -\frac{1}{N}\sum_{n=1}^{N}\left[ y_n \ln \hat{y}_n + (1 - y_n)\ln(1 - \hat{y}_n) \right] + \lambda \|\mathbf{w}\|_2^2$$
+onde $\hat{y}_n = \sigma(\mathbf{w}^T \mathbf{x}_n)$, com função sigmoide $\sigma(z) = \frac{1}{1 + e^{-z}}$, adotando $\lambda = 0{,}1$ e $\mathbf{x}_n$ representando as amostras de $\mathcal{D}$ devidamente **padronizadas via $z$-score** (com a primeira coluna de *bias* mantida unitária).
+
+1. Aplicando a regra da cadeia vetorial multivariada e utilizando a propriedade da derivada da sigmoide ($\sigma'(z) = \sigma(z)(1 - \sigma(z))$), deduza passo a passo o vetor gradiente:
+   $$\nabla_{\mathbf{w}} \mathcal{L}(\mathbf{w}) = \frac{1}{N} \mathbf{X}^T (\hat{\mathbf{y}} - \mathbf{y}) + 2\lambda \mathbf{w}$$
+2. Explique formalmente por que a condição de otimalidade de primeira ordem $\nabla_{\mathbf{w}} \mathcal{L}(\mathbf{w}) = \mathbf{0}$ constitui um sistema de equações algébricas não-lineares transcendentais que não admite solução exata em forma fechada matricial, justificando a necessidade incontornável de algoritmos iterativos de otimização.
+3. Diferencie o vetor gradiente para obter a matriz Hessiana:
+   $$\nabla^2_{\mathbf{w}} \mathcal{L}(\mathbf{w}) = \frac{1}{N} \mathbf{X}^T \mathbf{S} \mathbf{X} + 2\lambda \mathbf{I}$$
+   onde $\mathbf{S} = \operatorname{diag}\left(\hat{y}_1(1-\hat{y}_1), \dots, \hat{y}_N(1-\hat{y}_N)\right)$.
+   * Prove que $\mathbf{S} \succeq 0$ e, em consequência, $\nabla^2_{\mathbf{w}} \mathcal{L}(\mathbf{w}) \succeq 2\lambda \mathbf{I} > 0$ para todo $\mathbf{w} \in \mathbb{R}^3$.
+   * Explique como essa condição assegura a estrita convexidade global da função de perda, a existência de um minimizador global único e a convergência garantida do algoritmo de Descida do Gradiente.
+   * Por que a presença do termo regularizador $\lambda \|\mathbf{w}\|_2^2 > 0$ é estritamente necessária caso as duas classes do dataset sejam linearmente separáveis?
+4. Implemente o treinamento do modelo de Regressão Logística via Descida do Gradiente em Python (`numpy` puro), informando os pesos ótimos finais $\hat{\mathbf{w}}$, as probabilidades estimadas para as 6 amostras e a acurácia de classificação no treino.
+
+::: {.callout-tip}
+### Validação em Python (`numpy`)
+Implemente e compare a trajetória e o valor da função de perda do Gradiente Descendente executado sobre os dados brutos versus dados padronizados após 2000 iterações; reporte os números de condição calculados e exiba os parâmetros e métricas da regressão logística.
+:::
+
+---
+
+## Questão 6: Otimização Estocástica, Aceleração por Momento e Métodos Adaptativos
+
+Considere a perda empírica decomposta em instâncias individuais $\mathcal{L}(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^{N} \ell_i(\mathbf{w})$ sobre o dataset $\mathcal{D}$ padronizado e a forma quadrática bidimensional severamente mal condicionada:
+$$f(w_1, w_2) = \frac{1}{2}\left( 100\, w_1^2 + w_2^2 \right) \qquad (\kappa = 100)$$
+
+### Parte A: O Estimador de Mini-Batch
+
+Seja $g_B(\mathbf{w}) = \frac{1}{|B|}\sum_{i \in B} \nabla \ell_i(\mathbf{w})$ o gradiente estocástico avaliado sobre um subconjunto aleatório de índices $B \subset \{1, \dots, N\}$ com tamanho $|B| = B \ll N$.
+
+1. Sob o protocolo de amostragem uniforme simples (com reposição), prove rigorosamente que $g_B(\mathbf{w})$ é um estimador não-viesado do gradiente completo:
+   $$\mathbb{E}_B[g_B(\mathbf{w})] = \nabla \mathcal{L}(\mathbf{w})$$
+2. Assumindo que a variância amostral de cada gradiente individual seja limitada por $\operatorname{Var}(\nabla \ell_i(\mathbf{w})) = \sigma^2$, demonstre que:
+   $$\operatorname{Var}(g_B(\mathbf{w})) = \frac{\sigma^2}{B}$$
+   Discuta o compromisso (*trade-off*) prático entre a redução da variância estocástica e a velocidade de iteração / vazão computacional (*computational throughput*) ao variar o tamanho de lote $B$.
+
+### Parte B: Aproximação Estocástica e Condições de Robbins--Monro
+
+1. Enuncie as **Condições de Robbins--Monro** para a convergência assintótica quase certa da sequência de passos $\alpha_t$:
+   $$\sum_{t=1}^{\infty} \alpha_t = \infty \qquad \text{e} \qquad \sum_{t=1}^{\infty} \alpha_t^2 < \infty$$
+2. Justifique a interpretação analítica e física de cada uma das duas condições:
+   * Por que a primeira soma deve obrigatoriamente **divergir**?
+   * Por que a segunda soma deve obrigatoriamente **convergir** para que o algoritmo não oscile infinitamente em torno do minimizador devido ao ruído estocástico persistente?
+3. Para o cronograma de decaimento em lei de potência $\alpha_t = \frac{\alpha_0}{t^\gamma}$, determine o intervalo completo de expoentes $\gamma > 0$ que satisfazem simultaneamente ambas as condições de Robbins--Monro.
+
+### Parte C: Momento de Polyak e Momento Acelerado de Nesterov
+
+Para contornar o mau condicionamento em vales estreitos e ravinas ($\kappa \gg 1$), considere os métodos acelerados de primeira ordem:
+
+* **Momento de Polyak (Heavy-Ball):**
+  $$\mathbf{v}_{t+1} = \beta \mathbf{v}_t + \alpha \nabla f(\mathbf{w}_t), \qquad \mathbf{w}_{t+1} = \mathbf{w}_t - \mathbf{v}_{t+1}$$
+* **Momento Acelerado de Nesterov (NAG):**
+  $$\mathbf{v}_{t+1} = \beta \mathbf{v}_t + \alpha \nabla f(\mathbf{w}_t - \beta \mathbf{v}_t), \qquad \mathbf{w}_{t+1} = \mathbf{w}_t - \mathbf{v}_{t+1}$$
+
+1. Interprete mecanicamente o algoritmo de Polyak sob a analogia física clássica de uma esfera com massa rolando ao longo da superfície de energia potencial $f(\mathbf{w})$ sujeita a forças de atrito viscoso ($\beta$ associado à inércia/fricção e $\mathbf{v}$ à velocidade vetorial acumulada).
+2. Mostre algebricamente como a média móvel exponencial dos gradientes amortiza e cancela componentes ortogonais de alta frequência cujos gradientes alternam de sinal a cada iteração (paredes da ravina), enquanto acumula e acelera o avanço na direção longitudinal de curvatura suave (fundo do vale).
+3. Explique a distinção teórica fundamental de avaliar o gradiente no ponto antecipado $(\mathbf{w}_t - \beta \mathbf{v}_t)$ adotada no NAG. Ilustre geometricamente como esse mecanismo de antecipação funciona como um freio adaptativo prevenindo o espalhamento excessivo (*overshooting*) ao aproximar-se do fundo da curvatura.
+
+### Parte D: RMSProp e Adam
+
+1. Apresente as equações constitutivas do **RMSProp**:
+   $$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t \odot \mathbf{g}_t, \qquad \mathbf{w}_{t+1} = \mathbf{w}_t - \frac{\alpha}{\sqrt{\mathbf{v}_t} + \epsilon} \odot \mathbf{g}_t$$
+   onde $\odot$ denota o produto de Hadamard (elemento a elemento). Explique detalhadamente como o fator de escala $\frac{1}{\sqrt{\mathbf{v}_t} + \epsilon}$ atua como um **pré-condicionador diagonal empírico**, normalizando as magnitudes dos gradientes coordenada a coordenada e reescalando direções com curvaturas díspares.
+2. Para o algoritmo **Adam**:
+   * Escreva as equações de recorrência do 1º momento (média móvel com momento) e do 2º momento não-centrado:
+     $$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t, \qquad \mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t \odot \mathbf{g}_t$$
+   * Expanda analiticamente a relação recursiva de $\mathbf{m}_t$ a partir de $\mathbf{m}_0 = \mathbf{0}$ para provar que:
+     $$\mathbf{m}_t = (1 - \beta_1) \sum_{i=1}^{t} \beta_1^{t-i} \mathbf{g}_i$$
+   * Assumindo que os gradientes passados provenham de uma distribuição estacionária tal que $\mathbb{E}[\mathbf{g}_i] \approx \mathbb{E}[\mathbf{g}_t]$, prove que:
+     $$\mathbb{E}[\mathbf{m}_t] = \mathbb{E}[\mathbf{g}_t](1 - \beta_1^t)$$
+   * Justifique a necessidade dos fatores de correção de viés $\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}$ e $\hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1 - \beta_2^t}$ nas primeiras iterações do treinamento e escreva a regra final de atualização dos pesos.
+
+### Parte E: Validação Numérica
+
+Desenvolva um script em Python (exclusivamente com `numpy`) que realize as seguintes simulações:
+
+1. **SGD com Mini-Batching no Dataset $\mathcal{D}$:** Execute o treinamento estocástico para a perda quadrática do dataset padronizado empregando o cronograma de decaimento de Robbins--Monro $\alpha_t = \frac{\alpha_0}{1 + \gamma t}$. Compare a variabilidade e a trajetória de convergência ao longo de 200 épocas variando o tamanho do lote $B \in \{1, 2, 6\}$, contrastando o resultado final obtido com a solução analítica exata das Equações Normais.
+2. **Comparativo de Métodos na Quadrática Mal Condicionada:** Na função $f(w_1, w_2) = \frac{1}{2}(100 w_1^2 + w_2^2)$ ($\kappa = 100$), partindo do ponto inicial $\mathbf{w}_0 = \begin{bmatrix} 10 & 10 \end{bmatrix}^T$, implemente e registre a trajetória e o número exato de iterações necessárias para atingir a tolerância de parada $\|\mathbf{w}_t\|_2 < 10^{-6}$ para:
+   * **Gradiente Descendente Padrão** (com passo ótimo de Chebyshev $\alpha^*$);
+   * **Momento de Polyak** ($\alpha = 0{,}01$, $\beta = 0{,}9$);
+   * **Momento de Nesterov (NAG)** ($\alpha = 0{,}01$, $\beta = 0{,}9$);
+   * **Adam** ($\alpha = 0{,}1$, $\beta_1 = 0{,}9$, $\beta_2 = 0{,}999$, $\epsilon = 10^{-8}$).
+   
+   Comente o padrão de oscilação e ziguezague de cada método em seu relatório técnico.
+3. **Adam vs. Método de Newton Exato:** Na mesma quadrática $f(w_1, w_2)$, compare a velocidade de convergência do algoritmo Adam com o **Método de Newton Clássico**:
+   $$\mathbf{w}_{t+1} = \mathbf{w}_t - \left[\nabla^2 f(\mathbf{w}_t)\right]^{-1} \nabla f(\mathbf{w}_t)$$
+   Explique analiticamente por que o Método de Newton atinge o minimizador global exato em **uma única iteração**, independentemente da taxa de condicionamento $\kappa$ da função quadrática.
+
+---
+
+## Questão Bônus: Otimização Não-Suave, Operadores Proximais e o Algoritmo ISTA/FISTA
+
+Considere o problema de otimização de objetivo composto:
+$$\min_{\mathbf{w} \in \mathbb{R}^d} F(\mathbf{w}) := f(\mathbf{w}) + g(\mathbf{w})$$
+onde $f(\mathbf{w}) = \frac{1}{2}\|\mathbf{X}\mathbf{w} - \mathbf{y}\|_2^2$ é uma função diferenciável e $L_f$-suave, e $g(\mathbf{w}) = \lambda \|\mathbf{w}\|_1 = \lambda \sum_{i=1}^d |w_i|$ ($\lambda > 0$) é a penalização Lasso (convexa, porém não-diferenciável na origem).
+
+1. **Subgradientes e Condições de Otimalidade:**
+   * Defina formalmente os conceitos de **subgradiente** e **subdiferencial** $\partial g(\mathbf{w})$ para uma função convexa;
+   * Derive explicitamente o subdiferencial da função valor absoluto unidimensional $\partial |x|$ nos três regimes: $x > 0$, $x = 0$ e $x < 0$;
+   * Enuncie a condição necessária e suficiente de otimalidade de primeira ordem para o problema composto:
+     $$\mathbf{0} \in \nabla f(\mathbf{w}^*) + \partial g(\mathbf{w}^*)$$
+2. **Operador Proximal e Soft-Thresholding:**
+   * Defina o **operador proximal** associado a uma função convexa com passo $\gamma > 0$:
+     $$\operatorname{prox}_{\gamma g}(\mathbf{v}) = \arg\min_{\mathbf{w} \in \mathbb{R}^d} \left\{ g(\mathbf{w}) + \frac{1}{2\gamma}\|\mathbf{w} - \mathbf{v}\|_2^2 \right\}$$
+   * Demonstre que, para a penalidade $\ell_1$ $g(\mathbf{w}) = \lambda \|\mathbf{w}\|_1$, o problema de minimização proximal se desacopla completamente em $d$ problemas unidimensionais independentes cuja solução analítica fechada é o operador de encolhimento suave (**soft-thresholding**):
+     $$\mathcal{S}_{\gamma\lambda}(v_i) = \operatorname{sign}(v_i) \max(|v_i| - \gamma\lambda, \; 0)$$
+   * Prove que $\mathcal{S}_{\gamma\lambda}(v_i) = 0$ sempre que $|v_i| \le \gamma\lambda$, justificando matematicamente por que a regularização $\ell_1$ induz esparsidade estrita (seleção automática de atributos), contrastando com a regularização quadrática $\ell_2$.
+3. **O Algoritmo ISTA e Aceleração FISTA:**
+   * A partir da minimização do majorante quadrático de $f$ construído com a constante de Lipschitz do gradiente $L_f = \lambda_{\max}(\mathbf{X}^T\mathbf{X})$, deduza a regra de iteração do algoritmo **ISTA** (*Iterative Shrinkage-Thresholding Algorithm*):
+     $$\mathbf{w}_{t+1} = \mathcal{S}_{\frac{\lambda}{L_f}}\left( \mathbf{w}_t - \frac{1}{L_f} \mathbf{X}^T(\mathbf{X}\mathbf{w}_t - \mathbf{y}) \right)$$
+   * Descreva resumidamente como o algoritmo **FISTA** (*Fast ISTA*) incorpora uma sequência de momento acelerado do tipo Nesterov sobre os passos proximais para acelerar a taxa de convergência teórica de $\mathcal{O}(1/t)$ para $\mathcal{O}(1/t^2)$.
+4. **Validação em Python (`numpy`):**
+   * Gere um problema sintético esparso de alta dimensão com $N = 50$ observações e $d = 10$ atributos, no qual apenas 3 coeficientes verdadeiros são não-nulos ($\mathbf{w}_{\text{true}} = [3{,}0, -2{,}0, 1{,}5, 0, 0, 0, 0, 0, 0, 0]^T$);
+   * Execute o algoritmo ISTA implementado do zero e verifique se o operador de soft-thresholding recupera com exatidão o suporte esparso das variáveis relevantes, zerando rigorosamente os atributos ruidosos.
+
+---
+
+## Entregáveis do Projeto
+
+Ao término do semestre, cada equipe deverá submeter:
+
+### 1. Relatório Técnico Completo (PDF)
+
+* Documento formal em formato PDF estruturado com clareza, contendo a resolução detalhada de cada uma das questões (1 a 6 e eventual bônus).
+* Todas as deduções, desenvolvimentos algébricos, matrizes intermediárias e demonstrações matemáticas devem estar integralmente descritas no corpo do texto.
+* Inclusão dos gráficos gerados pelas rotinas de validação numérica (trajetórias dos otimizadores, comparação de autovalores, curvas de perda) acompanhados de discussões e conclusões técnicas fundamentadas.
+* O documento deve ser redigido preferencialmente em LaTeX ou Quarto, prezando pelo rigor e elegância tipográfica.
+
+### 2. Repositório de Código Reprodutível com `uv`
+
+Todo o código de implementação e validação numérica das questões deve estar organizado de forma modular, limpa e autossuficiente.
+
+O gerenciamento do ambiente virtual e das dependências do projeto **deve obrigatoriamente utilizar a ferramenta [`uv`](https://docs.astral.sh/uv/)**, composto pelos arquivos:
+
+* **`pyproject.toml`:** especificação padrão (PEP 621) declarando os metadados do projeto e as dependências estritas:
+  * Exclusivamente `numpy` para a computação analítica, matricial e algorítmica;
+  * `matplotlib` para a plotagem dos gráficos de convergência;
+  * Ferramentas auxiliares opcionais em grupos de desenvolvimento (`[dependency-groups]`, ex.: `jupyter`).
+* **`projeto_guia_algebra_otimizacao.ipynb`:** notebook interativo de apoio contendo todos os templates de código estruturados em NumPy puro, datasets pré-carregados e rotinas de plotagem para cada questão.
+* **`uv.lock`:** arquivo de trava determinístico gerado pelo `uv`, assegurando que qualquer membro da equipe ou docente execute exatamente as mesmas versões de bibliotecas.
+* **`.python-version`:** fixação explícita do interpretador Python (ex.: `3.12` ou `3.13`).
+* **`README.md`:** manual conciso de reprodução contendo os comandos de execução:
+  ```bash
+  # 1. Sincronizar o ambiente com o lockfile determinístico
+  uv sync
+
+  # 2. Executar a validação completa de todas as questões
+  uv run python src/main.py
+
+  # 3. (Opcional) Executar módulos individuais por questão
+  uv run python src/questao1.py
+  uv run python src/questao2.py
+  uv run python src/questao3.py
+  uv run python src/questao4.py
+  uv run python src/questao5.py
+  uv run python src/questao6.py
+  ```
+* **Scripts Determinísticos:** fixação explícita de sementes aleatórias (`np.random.seed(...)`) em todos os experimentos estocásticos, assegurando reprodutibilidade absoluta dos números e gráficos apresentados no relatório.
+
+---
+
+## Critérios de Avaliação
+
+Conforme estabelecido no [Plano de Desenvolvimento da Disciplina (PDD)](./pdd.qmd), o Trabalho Final ($TF$) compõe **40% da nota final do semestre**:
+
+$$NF = 0{,}20\,T_1 + 0{,}20\,T_2 + 0{,}20\,T_3 + 0{,}40\,TF$$
+
+A avaliação considerará o rigor matemático analítico, a fidelidade conceitual e a correção computacional segundo a seguinte rubrica:
+
+| Dimensão | Peso | Critérios Avaliados |
+|:---|:---:|:---|
+| **Geometria dos Dados, Normas e Sistemas Lineares (Q1 e Q2)** | 20% | Cálculo correto das normas e métricas, contraexemplo formal do cosseno, interpretação de escala, Teorema de Rouché-Capelli, ortogonalidade do resíduo e contraste entre $k$-NN e Mínimos Quadrados. |
+| **Projeção, Teorema Espectral e Decomposição SVD (Q3)** | 20% | Dedução passo a passo da projeção ortogonal, autovalores/autovetores da matriz de Gram, prova de $\kappa(\mathbf{S})=\kappa(\mathcal{A})^2$, construção manual da SVD, aproximação de baixo posto e decomposição polar. |
+| **Cálculo Diferenciável, Hessiana e Regularização Ridge (Q4)** | 20% | Derivação manual termo a termo e matricial do gradiente, prova da convexidade e autovalores da Hessiana, caracterização geométrica do vale plano, e fechamento estrito via Ridge. |
+| **Convergência de Primeira Ordem e Regressão Logística (Q5)** | 20% | Demonstração do majorante quadrático e Lema da Descida, taxa de contração de Chebyshev, pré-condicionamento de Jacobi via $z$-score, prova de estrita convexidade da entropia cruzada regularizada e implementação vetorizada. |
+| **Otimização Estocástica, Aceleração e Código com `uv` (Q6 e Reprodutibilidade)** | 20% | Demonstração das propriedades do mini-batch e Robbins-Monro, análise mecanística do Momento e Adam, validação numérica do método de Newton, conformidade de ambiente com `uv` e uso estrito de `numpy` puro. |
+| **Questão Bônus (Otimização Proximal / ISTA)** | *(+10% Bônus)* | Demonstração correta do operador proximal para norma $\ell_1$, dedução do soft-thresholding, formulação do ISTA e recuperação prática de suporte esparso em dados sintéticos. |
+
+: Rubrica de Avaliação do Projeto Final {#tbl-rubrica}
+
+---
+
+::: {.callout-important}
+### Integridade Acadêmica e Plágio
+Todas as demonstrações analíticas, textos explicativos e rotinas em código Python submetidas devem ser de autoria estrita dos membros da equipe. A reprodução não autorizada de soluções de outros estudantes, cópias literais de repositórios externos ou plágio de relatórios acarretará nota zero imediata no trabalho final ($TF = 0$) e comunicação formal aos órgãos competentes da Unicamp, em estrita conformidade com o regimento disciplinar e o PDD da disciplina.
+:::
+

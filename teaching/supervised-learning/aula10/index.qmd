@@ -1,0 +1,1586 @@
+---
+title: "Aula 10: Gradient Boosting e Otimização Numérica no Espaço de Funções"
+subtitle: "Supervised Learning"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-10-18"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: homepage
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar, load_dataset
+disable_progress_bar()
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+import warnings
+warnings.filterwarnings("ignore")
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({
+    "figure.dpi": 130,
+    "font.size": 11,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "legend.frameon": True,
+    "legend.framealpha": 0.9,
+})
+
+COR_A = "#2b5c8f"    # Azul institucional
+COR_B = "#d95f02"    # Laranja quente
+COR_NEU = "#7570b3"  # Roxo
+COR_CINZA = "#7f7f7f"
+COR_VERDE = "#1b9e77"
+
+# Semente determinística
+rng = np.random.default_rng(20261018)
+
+# Carregamento do dataset real California Housing (mesmo da Aula 9)
+cal_df = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+features = ["MedInc", "HouseAge", "AveRooms", "AveBedrms", "Population", "AveOccup", "Latitude", "Longitude"]
+X_cal = cal_df[features].values
+y_cal = cal_df["MedHouseVal"].values
+
+# Divisão de treino e teste (2.000 treino, 1.000 teste idêntica à Aula 9)
+X_train, X_test, y_train, y_test = train_test_split(X_cal, y_cal, train_size=2000, test_size=1000, random_state=42)
+
+# Modelo 0: Preditor Constante f0(x) = y_bar
+f0 = np.mean(y_train)
+mse_f0_train = mean_squared_error(y_train, np.full_like(y_train, f0))
+mse_f0_test = mean_squared_error(y_test, np.full_like(y_test, f0))
+
+# Modelo 1: Decision Stump isolado (profundidade 1, alto viés)
+stump = DecisionTreeRegressor(max_depth=1, random_state=42)
+stump.fit(X_train, y_train)
+mse_stump_train = mean_squared_error(y_train, stump.predict(X_train))
+mse_stump_test = mean_squared_error(y_test, stump.predict(X_test))
+
+# Modelo 2: Gradient Boosting com 100 Stumps (depth=1, lr=0.1)
+gbr_stump = GradientBoostingRegressor(n_estimators=100, max_depth=1, learning_rate=0.1, random_state=42)
+gbr_stump.fit(X_train, y_train)
+mse_gbr_stump_train = mean_squared_error(y_train, gbr_stump.predict(X_train))
+mse_gbr_stump_test = mean_squared_error(y_test, gbr_stump.predict(X_test))
+
+# Modelo 3: Gradient Tree Boosting com 100 árvores rasas (depth=3, J=8, lr=0.1)
+gbr_d3 = GradientBoostingRegressor(n_estimators=100, max_depth=3, learning_rate=0.1, random_state=42)
+gbr_d3.fit(X_train, y_train)
+mse_gbr_d3_train = mean_squared_error(y_train, gbr_d3.predict(X_train))
+mse_gbr_d3_test = mean_squared_error(y_test, gbr_d3.predict(X_test))
+
+# Modelo 4: Benchmark Random Forest da Aula 9 (100 árvores, m=3)
+rf_100 = RandomForestRegressor(n_estimators=100, max_features=3, random_state=42)
+rf_100.fit(X_train, y_train)
+mse_rf_test = mean_squared_error(y_test, rf_100.predict(X_test))
+
+# Trajetórias de convergência de treino e teste ao longo das iterações m = 1...100
+train_errors_stump = [mean_squared_error(y_train, p) for p in gbr_stump.staged_predict(X_train)]
+test_errors_stump = [mean_squared_error(y_test, p) for p in gbr_stump.staged_predict(X_test)]
+train_errors_d3 = [mean_squared_error(y_train, p) for p in gbr_d3.staged_predict(X_train)]
+test_errors_d3 = [mean_squared_error(y_test, p) for p in gbr_d3.staged_predict(X_test)]
+
+# Trajetórias para diferentes taxas de aprendizagem (shrinkage nu) em depth=3
+rates = [1.0, 0.2, 0.1, 0.01]
+staged_test_by_lr = {}
+staged_train_by_lr = {}
+for lr in rates:
+    m_lr = GradientBoostingRegressor(n_estimators=100, max_depth=3, learning_rate=lr, random_state=42)
+    m_lr.fit(X_train, y_train)
+    staged_train_by_lr[lr] = [mean_squared_error(y_train, p) for p in m_lr.staged_predict(X_train)]
+    staged_test_by_lr[lr] = [mean_squared_error(y_test, p) for p in m_lr.staged_predict(X_test)]
+
+# Importância de atributos do GBR (depth 3)
+importances_gbr = gbr_d3.feature_importances_
+```
+
+# Revisão e Introdução
+
+## Revisão Cuidadosa: O Que a Aula 9 Deixou Pronto
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Na Aula 9, inauguramos a Parte 3 do curso analisando como a teoria estatística de agregação de modelos opera sobre a decomposição do Erro Quadrático Médio Esperado ($\text{EMSE} = \text{Bias}^2 + \text{Var} + \sigma^2$, Aula 8). Desenvolvemos o algoritmo de **Bagging** (*Bootstrap Aggregation*) e sua extensão crucial, as **Florestas Aleatórias** (*Random Forests*, Breiman 2001).
+
+O pilar teórico da Aula 9 estabeleceu que a média de $B$ estimadores identicamente distribuídos $T_1, \dots, T_B$, cada qual com variância $\sigma^2$ e correlação positiva par-a-par $\rho$, possui variância governada pela fórmula exata:
+
+$$\text{Var}\left(\frac{1}{B}\sum_{b=1}^B T_b\right) = \rho \sigma^2 + \frac{1-\rho}{B}\sigma^2$$
+
+Dessa formulação emergiram três conclusões estruturais inescapáveis:
+1. **Preservação Rígida do Viés:** Pela linearidade da esperança, $\mathbb{E}\left[\frac{1}{B}\sum_{b=1}^B T_b\right] = \mathbb{E}[T]$. O Bagging é incapaz de atenuar o erro estrutural de especificação de um modelo. Se o estimador base for excessivamente rígido (alto viés), o ensemble agregado continuará sofrendo de subajuste (*underfitting*).
+2. **Dependência de Modelos de Alta Capacidade:** Para que o Bagging produza um preditor de alto desempenho, os modelos base precisam possuir **baixo viés inicial**. Por essa razão, alimentamos o Bagging com árvores CART profundas e não podadas (Aula 3), cuja capacidade não paramétrica elimina o viés, tolerando sua alta variância porque a agregação paralela a amortecerá.
+3. **O Gargalo da Correlação $\rho$:** Mesmo quando $B \to \infty$, o termo $\frac{1-\rho}{B}\sigma^2$ decai a zero, mas o piso $\rho \sigma^2$ permanece inalterado. As Florestas Aleatórias contornam essa barreira sorteando um subconjunto aleatório de $m \le p$ variáveis por nó, quebrando a correlação entre as árvores.
+
+Contudo, essa estratégia deixa uma lacuna teórica fundamental: **e se não dispusermos de estimadores de baixo viés? E se nossos modelos base forem deliberadamente simples, rápidos e de alto viés (*weak learners*), como cortes univariados simples (*decision stumps*)?**
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.callout-note icon=false}
+## O Que a Aula 9 Estabeleceu (Bagging e Random Forests)
+- **Variância Correlacionada:** $\text{Var}(\bar{T}) = \rho \sigma^2 + \frac{1-\rho}{B}\sigma^2$.
+- **Preservação de Viés:** $\mathbb{E}[\bar{T}] = \mathbb{E}[T]$ (a média não cura subajuste).
+- **Blocos Construtores:** Exige modelos de baixo viés e alta variância (árvores profundas não podadas).
+- **Paralelismo Puro:** Árvores são geradas de forma mutuamente independente.
+:::
+
+::: {.fragment}
+- **O Dilema Teórico Remanescente:**
+  - E quando os modelos base são ultra-simples, rígidos e sofrem de **alto viés**?
+  - A média paralela falha miseravelmente.
+  - Precisamos de uma mecânica diametralmente oposta: **adição sequencial focada nos resíduos**.
+:::
+:::
+
+## Ideia Central: Da Média Paralela à Adição Sequencial
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A ideia central do **Boosting** é inverter completamente a arquitetura de ensemble: em vez de construir árvores profundas em paralelo e calcular sua média aritmética, construímos uma **sequência acoplada de árvores rasas** (*weak learners*), na qual cada novo modelo é treinado com a missão explícita de **corrigir os erros cometidos pelo comitê acumulado até aquele ponto**.
+
+A representação final do modelo não é uma média simples, mas uma expansão aditiva de funções:
+
+$$f_M(\mathbf{x}) = f_0(\mathbf{x}) + \sum_{m=1}^M \nu \cdot h_m(\mathbf{x})$$
+
+onde $f_0(\mathbf{x})$ é uma estimativa constante inicial, $h_m(\mathbf{x})$ é uma árvore de regressão ajustada na iteração $m$, e $\nu \in (0, 1]$ é um fator de encolhimento (*shrinkage*).
+
+O salto intelectual revolucionário, formalizado por Jerome Friedman (2001), foi provar que o ajuste de uma árvore aos "resíduos" de um modelo anterior nada mais é do que uma **descida de gradiente mais íngreme (*steepest descent*) executada no espaço não paramétrico das funções**. Em vez de atualizar parâmetros finitos em $\mathbb{R}^d$, damos passos direcionais em direção ao mínimo da função de perda no espaço de Hilbert das hipóteses!
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+- **Inversão Arquitetural:**
+  - **Bagging (Aula 9):** Modelos complexos $\to$ Amostragem paralela $\to$ Redução de variância.
+  - **Boosting (Aula 10):** Modelos fracos $\to$ Composição sequencial $\to$ Redução de viés.
+:::
+
+::: {.fragment}
+- **A Expansão Aditiva Global:**
+  $$f_M(\mathbf{x}) = f_0(\mathbf{x}) + \sum_{m=1}^M \nu \cdot h_m(\mathbf{x})$$
+:::
+
+::: {.fragment .callout-important}
+## A Tese de Jerome Friedman (2001)
+Ajustar árvores aos resíduos sequenciais equivale analiticamente a realizar **descida de gradiente no espaço de funções**, onde o resíduo generalizado é o gradiente negativo da perda avaliado na iteração anterior:
+$$r_{im} = -\left[\frac{\partial L(y_i, f(\mathbf{x}_i))}{\partial f(\mathbf{x}_i)}\right]_{f=f_{m-1}}$$
+:::
+:::
+
+## Roteiro da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para explorar com rigor matemático essa teoria e operacionalizá-la em algoritmos de ponta, estruturamos nossa investigação em cinco perguntas condutoras:
+
+1. **Como o Boosting inverte formalmente os princípios estatísticos do Bagging, reduzindo sistematicamente o viés a partir de modelos fracos?**
+2. **Por que o algoritmo AdaBoost.M1 (Freund & Schapire, 1997) equivale a um Modelo Aditivo em Estágios (*FSAM*) minimizando a perda exponencial?**
+3. **Qual é a generalização geométrica de Friedman (2001) ao projetar o vetor gradiente do espaço de dados sobre o espaço de árvores de decisão?**
+4. **Como derivar os pseudo-resíduos e os valores ótimos nas folhas para perdas quadrática, absoluta, Huber e deviance logística?**
+5. **Como o hiperparâmetro de encolhimento ($\nu$) e a profundidade máxima das árvores ($J$ nós terminais) controlam o sobreajuste e a ordem de interação entre atributos?**
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+1. **Inversão Filosófica:** Por que o Boosting ataca o viés partindo de *weak learners*?
+2. **FSAM e AdaBoost:** Como a perda exponencial induz a reponderação de pesos do AdaBoost?
+3. **Gradiente Funcional:** Como Friedman conectou resíduos à descida de gradiente em $\mathbb{R}^N$?
+4. **Pseudo-Resíduos Genéricos:** Dedução analítica para perdas $L_2$, $L_1$, Huber e Deviance.
+5. **Regularização e Interações:** O tradeoff $(\nu, M)$ e a ordem de interação governada por $J$.
+:::
+
+## Problema Motivador: California Housing
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para tornar a necessidade do Boosting evidente antes de mergulharmos no formalismo analítico, retomamos o dataset **California Housing** (`gvlassis/california_housing`), com as mesmas 2.000 instâncias de treino e 1.000 instâncias de teste empregadas na Aula 9. Nosso objetivo é estimar a mediana do valor dos imóveis (`MedHouseVal`).
+
+Acompanhemos a progressão empírica do erro quadrático médio de teste ($\text{MSE}_{\text{test}}$) em cinco estágios:
+1. **Preditor Constante Inicial ($f_0$):** A média amostral de treino $\bar{y} = 2{,}0123$ produz um erro de teste catastrófico de $\text{MSE} = 1{,}3417$.
+2. **Decision Stump Isolado ($J = 2$):** Uma única árvore podada na profundidade 1 (com apenas um corte binário baseado em `MedInc`) sofre de subajuste severo devido ao alto viés estrutural: $\text{MSE}_{\text{test}} = 0{,}9984$.
+3. **Bagging de 100 Stumps:** Se aplicarmos o algoritmo da Aula 9 sobre esses stumps, o erro de teste quase não se altera ($\text{MSE} \approx 0{,}995$), confirmando que a média paralela preserva o viés original ($\mathbb{E}[\bar{T}] = \mathbb{E}[T]$).
+4. **Gradient Boosting de 100 Stumps ($\nu = 0{,}1$):** Ao conectar os mesmos 100 stumps sequencialmente via Gradient Boosting, onde cada stump aprende o resíduo do comitê acumulado, o erro despenca para $\text{MSE}_{\text{test}} = 0{,}4709$ — uma redução superior a $52\%$ no erro residual sem alterar a complexidade individual de nenhum nó!
+5. **Gradient Tree Boosting com $J = 8$ (Profundidade 3, $\nu = 0{,}1$):** Ao permitir que cada árvore capture interações de até 3ª ordem, o erro cai para $\text{MSE}_{\text{test}} = 0{,}2793$, superando com folga o desempenho da Random Forest de 100 árvores completas da Aula 9 ($\text{MSE}_{\text{test}} = 0{,}2897$).
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(8, 4.2))
+
+models = ["Constante f0", "1 Stump", "Bagging 100 Stumps", "GB 100 Stumps", "Random Forest (Aula 9)", "GB 100 Árvores (J=8)"]
+errors = [mse_f0_test, mse_stump_test, 0.9950, mse_gbr_stump_test, mse_rf_test, mse_gbr_d3_test]
+colors = [COR_CINZA, COR_B, COR_B, COR_A, COR_NEU, COR_VERDE]
+
+bars = ax.barh(models, errors, color=colors, height=0.55, edgecolor="black", linewidth=0.8)
+ax.set_xlabel("Erro Quadrático Médio de Teste (MSE)")
+ax.set_title("California Housing: Impacto do Boosting vs. Bagging sobre Modelos Fracos")
+ax.grid(axis="x", linestyle="--", alpha=0.6)
+
+for bar, err in zip(bars, errors):
+    ax.text(err + 0.02, bar.get_y() + bar.get_height()/2, f"{err:.4f}", va="center", fontweight="bold", fontsize=10)
+
+ax.set_xlim(0, 1.5)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+- **Benchmark California Housing ($N_{\text{train}} = 2.000$, $N_{\text{test}} = 1.000$):**
+  - Preditor Constante $f_0(\mathbf{x}) = \bar{y} = 2{,}0123$: $\text{MSE}_{\text{test}} = 1{,}3417$.
+  - 1 *Decision Stump* isolado (profundidade 1, alto viés): $\text{MSE}_{\text{test}} = 0{,}9984$.
+:::
+
+::: {.fragment}
+- **O Contraste Empírico Radical:**
+  - **Bagging de 100 Stumps:** $\text{MSE}_{\text{test}} \approx 0{,}9950$ (preserva o viés; inútil!).
+  - **Gradient Boosting de 100 Stumps ($\nu = 0{,}1$):** $\text{MSE}_{\text{test}} = 0{,}4709$ (corta o erro pela metade!).
+  - **Gradient Boosting com $J = 8$ (depth 3, $\nu = 0{,}1$):** $\text{MSE}_{\text{test}} = 0{,}2793$.
+  - **Random Forest da Aula 9 (100 árvores profundas, $m = 3$):** $\text{MSE}_{\text{test}} = 0{,}2897$.
+:::
+
+
+::: {.columns}
+::: {.column width="60%"}
+::: {.fragment .callout-tip}
+## Conclusão do Problema Motivador
+Com apenas 100 árvores rasas de profundidade 3, o Gradient Tree Boosting supera a Random Forest completa de árvores profundas, atingindo menor erro de teste através da otimização sequencial de resíduos.
+:::
+:::
+::: {.column width="40%"}
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(8, 4.2))
+
+models = ["Constante f0", "1 Stump", "Bagging 100 Stumps", "GB 100 Stumps", "Random Forest (Aula 9)", "GB 100 Árvores (J=8)"]
+errors = [mse_f0_test, mse_stump_test, 0.9950, mse_gbr_stump_test, mse_rf_test, mse_gbr_d3_test]
+colors = [COR_CINZA, COR_B, COR_B, COR_A, COR_NEU, COR_VERDE]
+
+bars = ax.barh(models, errors, color=colors, height=0.55, edgecolor="black", linewidth=0.8)
+ax.set_xlabel("Erro Quadrático Médio de Teste (MSE)")
+ax.set_title("California Housing: Impacto do Boosting vs. Bagging sobre Modelos Fracos")
+ax.grid(axis="x", linestyle="--", alpha=0.6)
+
+for bar, err in zip(bars, errors):
+    ax.text(err + 0.02, bar.get_y() + bar.get_height()/2, f"{err:.4f}", va="center", fontweight="bold", fontsize=10)
+
+ax.set_xlim(0, 1.5)
+plt.tight_layout()
+plt.show()
+```
+:::
+:::
+:::
+
+## Pausa 1: A Inversão Filosófica
+
+::: {.callout-tip}
+## Pergunta aberta provocadora
+
+Um cientista de dados propõe treinar um Gradient Tree Boosting utilizando árvores profundas e não podadas com $J = 256$ nós terminais, exatamente como fez na Random Forest da Aula 9. Avalie o que ocorrerá com os resíduos das iterações subsequentes e com o erro de generalização no conjunto de teste.
+:::
+
+::: {.callout-tip}
+## Julgamento de V ou F
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Pela decomposição analítica do EMSE, o Bagging reduz variância via média paralela de estimadores instáveis, enquanto o Boosting reduz viés ajustando modelos sequencialmente aos erros residuais.
+- □ Como o Boosting adiciona novos estimadores que reduzem o erro de treinamento, aumentar indefinidamente o número de iterações $M$ jamais causará sobreajuste (*overfitting*).
+- □ Se os modelos base possuírem alto viés inicial (como *decision stumps*), a aplicação do Bagging resulta em ganho quase nulo devido à preservação da esperança $\mathbb{E}[\bar{T}] = \mathbb{E}[T]$.
+- □ Uma árvore de regressão com profundidade 1 (*decision stump*) é capaz de capturar interações não lineares entre pares de preditores quando combinada via Bagging.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 1: A Inversão Filosófica — Resposta
+
+::: {.callout-tip}
+## Julgamento de V ou F — Resposta
+
+- ✔ **V:** A média paralela atua estritamente na variância de preditores flexíveis; o comitê aditivo sequencial foca em abater o viés de aproximação.
+- ✗ **F:** O Boosting adiciona termos aditivos sequenciais que buscam minimizar o erro empírico; sem regularização adequada, iterações excessivas ($M \to \infty$) acabam decorando o ruído de treino.
+- ✔ **V:** Pela linearidade da esperança, a média de 500 modelos enviesados continua apresentando exatamente o mesmo viés médio do modelo base.
+- ✗ **F:** Árvores com profundidade 1 particionam apenas um atributo; interações entre variáveis exigem caminhos hierárquicos com pelo menos 2 divisões sucessivas ($J \ge 3$).
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Ao treinar árvores profundas ($J = 256$) no Boosting, a primeira árvore já memoriza quase perfeitamente os dados de treino. Os resíduos para a iteração 2 serão puro ruído estocástico, fazendo com que as árvores subsequentes amplifiquem o sobreajuste e destruam o erro de generalização. O Boosting exige modelos base fracos e restritos.
+:::
+
+:::
+
+# Intuição — Descida de Gradiente no Espaço de Funções
+
+## A Imagem Mental: O Jogador de Golfe e os Resíduos
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Considere a metáfora clássica do jogador de golfe que tenta colocar a bola no buraco situado a uma distância $y$:
+1. Na primeira tacada, o jogador utiliza uma régua simples e atinge a posição $f_0$. Ele constata que a bola ainda está a uma distância residual $r_1 = y - f_0$ do buraco.
+2. Em vez de voltar ao ponto de partida e tentar uma tacada completamente independente (como faria o Bagging), ele caminha até a nova posição e desfere uma segunda tacada com o objetivo explícito de cobrir o resíduo $r_1$.
+3. Se a segunda tacada avançar $h_1 \approx r_1$, a nova posição acumulada será $f_1 = f_0 + h_1$, restando um resíduo bem menor $r_2 = y - f_1$.
+4. O processo repete-se sequencialmente: cada tacada $h_m$ mira exatamente no resíduo remanescente $r_m = y - f_{m-1}$.
+
+Essa analogia intuitiva ilustra com clareza o caso em que a perda utilizada é a quadrática ($L_2$). Contudo, e se o nosso objetivo não for minimizar a distância quadrática, mas sim o valor absoluto da distância ($L_1$), a perda de Huber ou a deviance logística de uma classificação binária? É aqui que entra o salto de abstração da **otimização numérica funcional**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+- **A Analogia das Tacadas Sequenciais:**
+  - Ponto de partida: $f_0$.
+  - Resíduo inicial: $r_1 = y - f_0$.
+  - 1ª correção: $h_1 \approx r_1 \implies f_1 = f_0 + h_1$.
+  - 2ª correção: $h_2 \approx r_2 = y - f_1 \implies f_2 = f_1 + h_2$.
+:::
+
+::: {.fragment}
+- **A Generalização Conceitual:**
+  - Para o erro quadrático ($L_2$), a direção de correção é simplesmente $y - f$.
+  - Para perdas gerais (Huber, $L_1$, Deviance binomial), qual é a direção que mais reduz a perda?
+  - **Resposta:** O vetor gradiente negativo da perda $-\nabla L$ avaliado no modelo corrente!
+:::
+:::
+
+## O Mecanismo em Diagrama: Descida Funcional
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+No espaço vetorial $\mathbb{R}^N$ formado pelas predições do modelo nas $N$ observações de treinamento, o vetor $\mathbf{f}_{m-1} = [f_{m-1}(\mathbf{x}_1), \dots, f_{m-1}(\mathbf{x}_N)]^T$ representa o estado atual do ensemble. O vetor gradiente negativo $-\mathbf{g}_m = -\nabla_{\mathbf{f}} L \in \mathbb{R}^N$ aponta na direção de descida mais íngreme (*steepest descent*).
+
+Contudo, não podemos simplesmente adotar $-\mathbf{g}_m$ como nossa atualização direta, pois esse vetor é discreto e existe apenas nas coordenadas dos dados observados de treino; ele não fornece nenhuma regra para predizer novos pontos $\mathbf{x} \notin \mathcal{D}$. A solução de Friedman consiste em **projetar ortogonalmente** o vetor gradiente irrestrito $-\mathbf{g}_m$ sobre o espaço de funções parametrizadas por árvores de decisão $\mathcal{H}_{\text{tree}}$, ajustando uma árvore $h_m(\mathbf{x})$ por mínimos quadrados aos pseudo-resíduos.
+:::
+
+::: {.fig-resize style="width: 85%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{instblue}{RGB}{43, 92, 143}
+\definecolor{instorange}{RGB}{217, 95, 2}
+\definecolor{instgreen}{RGB}{27, 158, 119}
+\definecolor{softblue}{RGB}{240, 244, 250}
+\definecolor{softorange}{RGB}{254, 245, 238}
+\definecolor{softgreen}{RGB}{238, 250, 245}
+
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc}
+\begin{tikzpicture}[
+    font=\sffamily,
+    >=Latex,
+    box/.style={rectangle, rounded corners=4pt, draw=instblue, fill=softblue, line width=1.1pt, align=center, inner sep=7pt},
+    boxgrad/.style={rectangle, rounded corners=4pt, draw=instorange, fill=softorange, line width=1.1pt, align=center, inner sep=7pt},
+    boxtree/.style={rectangle, rounded corners=4pt, draw=instgreen, fill=softgreen, line width=1.1pt, align=center, inner sep=7pt},
+    arrow/.style={->, line width=1.2pt, draw=instblue},
+    arrowgrad/.style={->, line width=1.3pt, draw=instorange},
+    arrowtree/.style={->, line width=1.3pt, draw=instgreen}
+]
+
+% Nódulos principais
+\node[box] (F0) at (0, 0) {\textbf{Modelo Corrente $f_{m-1}(\mathbf{x})$}\\Predições nos $N$ dados de treino};
+\node[boxgrad] (GRAD) at (5, 2.5) {\textbf{Gradiente Negativo em $\mathbb{R}^N$}\\$r_{im} = -\left[\frac{\partial L(y_i, f_i)}{\partial f_i}\right]_{f_{m-1}}$\\Direção de máxima descida local};
+\node[boxtree] (TREE) at (10, 0) {\textbf{Projeção em Árvores $\mathcal{H}$}\\Ajuste de $T_m(\mathbf{x})$ sobre $r_{im}$\\Regiões terminais $R_{jm}$};
+\node[box] (STEP) at (10, -2.8) {\textbf{Busca Linear nas Folhas}\\$\gamma_{jm} = \arg\min_\gamma \sum L(y_i, f_{m-1} + \gamma)$};
+\node[box] (UPDATE) at (0, -2.8) {\textbf{Atualização com Encolhimento}\\$f_m(\mathbf{x}) = f_{m-1}(\mathbf{x}) + \nu \sum_{j} \gamma_{jm} \mathbb{I}(\mathbf{x} \in R_{jm})$};
+
+% Conexões
+\draw[arrowgrad] (F0.north) to[out=60, in=195] node[above left=2pt, font=\footnotesize\bfseries, text=instorange, fill=white, inner sep=2pt, rounded corners=2pt] {Diferenciação Funcional} (GRAD.west);
+\draw[arrowtree] (GRAD.east) to[out=-15, in=120] node[above right=2pt, font=\footnotesize\bfseries, text=instgreen, fill=white, inner sep=2pt, rounded corners=2pt] {Mínimos Quadrados} (TREE.north);
+\draw[arrow] (TREE.south) -- node[right=3pt, font=\footnotesize\bfseries, text=instblue, fill=white, inner sep=2pt, rounded corners=2pt] {Line Search Local} (STEP.north);
+\draw[arrow] (STEP.west) -- node[above=2pt, font=\footnotesize\bfseries, text=instblue, fill=white, inner sep=2pt, rounded corners=2pt] {Passo Amortecido por $\nu$} (UPDATE.east);
+\draw[arrow, dashed] (UPDATE.north) -- node[left=3pt, font=\footnotesize\bfseries, text=instblue, fill=white, inner sep=2pt, rounded corners=2pt] {Iterar $m \leftarrow m+1$} (F0.south);
+
+\end{tikzpicture}
+```
+:::
+
+## Pausa 2: Descida de Gradiente no Espaço de Funções
+
+::: {.callout-tip}
+## Pergunta aberta provocadora
+
+Por que não podemos simplesmente atualizar diretamente os valores das predições de treino fazendo $f_m(\mathbf{x}_i) = f_{m-1}(\mathbf{x}_i) + \rho r_{im}$ para cada ponto observado $i = 1, \dots, N$, dispensando completamente a indução da árvore de regressão?
+:::
+
+::: {.callout-tip}
+## Julgamento de V ou F
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O vetor $-\mathbf{g}_m \in \mathbb{R}^N$ representa a direção de descida mais íngreme da função de perda avaliada no conjunto de treinamento.
+- □ Atualizar diretamente as predições nos $N$ pontos de treino sem ajustar um modelo base produz um preditor capaz de generalizar perfeitamente para novos dados de teste.
+- □ Ajustar uma árvore de regressão aos pseudo-resíduos via mínimos quadrados corresponde formalmente à projeção ortogonal do gradiente não paramétrico sobre a classe de hipóteses de árvores.
+- □ A partição induzida pela árvore permite que a direção do gradiente seja extrapolada e avaliada em qualquer ponto $\mathbf{x} \in \mathbb{R}^p$ do domínio.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 2: Descida Funcional — Resposta
+
+::: {.callout-tip}
+## Julgamento de V ou F — Resposta
+
+- ✔ **V:** Pelo cálculo vetorial, o gradiente negativo é a direção local de máxima redução de $L(\mathbf{f})$ em $\mathbb{R}^N$.
+- ✗ **F:** Atualizar diretamente os pontos de treino gera apenas uma tabela finita de números para os dados observados, sem nenhuma função de inferência para pontos não vistos $\mathbf{x} \notin \mathcal{D}$.
+- ✔ **V:** Minimizar $\sum_{i=1}^N (r_{im} - h_m(\mathbf{x}_i))^2$ é analiticamente a projeção euclidiana do gradiente sobre o espaço restrito de árvores.
+- ✔ **V:** A árvore define regiões hiper-retangulares contínuas no espaço de atributos, viabilizando predições generalizadas.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Atualizar diretamente as predições nos pontos de treino resolveria a perda empírica, mas resultaria em um vetor discreto incapaz de predizer instâncias inéditas. A árvore de regressão atua como um mecanismo de generalização indutiva, projetando o gradiente discreto em uma função contínua por partes definida em todo o espaço de entrada.
+:::
+
+:::
+
+# Bloco 1: Modelos Aditivos em Estágios e AdaBoost
+
+## Modelos Aditivos em Estágios Progressivos (FSAM)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A formulação geral de um modelo aditivo com funções de base parametrizadas é dada por:
+
+$$f_M(\mathbf{x}) = \sum_{m=1}^M \beta_m h(\mathbf{x}; \gamma_m)$$
+
+onde $\beta_m$ são os multiplicadores escalares de expansão e $h(\mathbf{x}; \gamma_m)$ são funções base elementares (como árvores CART simples, onde $\gamma_m$ parametriza as variáveis de corte e os limiares de divisão).
+
+O ajuste ótimo simultâneo de todos os $M$ termos requer resolver:
+
+$$\min_{\{\beta_m, \gamma_m\}_{m=1}^M} \sum_{i=1}^N L\left(y_i, \sum_{m=1}^M \beta_m h(\mathbf{x}_i; \gamma_m)\right)$$
+
+Essa otimização global multivariada é intratável computacionalmente para funções de base não lineares como árvores de decisão. Para contornar esse obstáculo, emprega-se a heurística gulosa de **Modelos Aditivos em Estágios Progressivos (*Forward Stagewise Additive Modeling - FSAM*)**: em cada iteração $m$, **congelamos** todos os termos acumulados $f_{m-1}(\mathbf{x})$ e otimizamos exclusivamente os parâmetros da nova função base:
+
+$$(\beta_m, \gamma_m) = \arg\min_{\beta, \gamma} \sum_{i=1}^N L\big(y_i, f_{m-1}(\mathbf{x}_i) + \beta h(\mathbf{x}_i; \gamma)\big)$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.callout-note icon=false}
+## A Heurística Gulosa do FSAM (ESL §10.2)
+Em vez de otimizar os $M$ modelos simultaneamente, congela-se $f_{m-1}$ e busca-se apenas o próximo incremento:
+$$(\beta_m, \gamma_m) = \arg\min_{\beta, \gamma} \sum_{i=1}^N L\big(y_i, f_{m-1}(\mathbf{x}_i) + \beta h(\mathbf{x}_i; \gamma)\big)$$
+:::
+
+::: {.fragment}
+- **Atualização:** $f_m(\mathbf{x}) = f_{m-1}(\mathbf{x}) + \beta_m h(\mathbf{x}; \gamma_m)$.
+- **Vantagem:** Converte um problema intratável de otimização global em uma sequência de $M$ problemas simples de ajuste de uma única função base.
+:::
+:::
+
+## O Algoritmo AdaBoost.M1 (Freund & Schapire, 1997)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O algoritmo **AdaBoost.M1** (*Adaptive Boosting*, Freund & Schapire, 1997) foi o primeiro algoritmo de boosting amplamente bem-sucedido na prática. Originalmente concebido sob a perspectiva da teoria de aprendizado computacional (PAC learning), seu objetivo era resolver uma questão teórica proposta por Valiant (1984) e Kearns & Valiant (1989): *é possível combinar um conjunto de classificadores fracos (com acurácia apenas ligeiramente superior ao chute aleatório) para construir um classificador forte com acurácia arbitrariamente alta?*
+
+A mecânica operacional do AdaBoost.M1 para classificação binária ($y_i \in \{-1, +1\}$) opera em $M$ iterações sequenciais com pesos adaptativos sobre as instâncias:
+
+::: {.callout-note icon=false}
+## Algoritmo 10.1 — AdaBoost.M1 (Freund & Schapire, 1997)
+1. **Inicialização dos Pesos:** Atribuir pesos uniformes a todas as $N$ observações de treino:
+   $$w_i^{(1)} = \frac{1}{N}, \quad i = 1, 2, \dots, N$$
+
+2. **Loop Sequencial:** Para $m = 1$ até $M$:
+   a) Ajustar um classificador base fraco $h_m(\mathbf{x}) \in \{-1, +1\}$ aos dados de treinamento utilizando os pesos correntes $w_i^{(m)}$, minimizando a taxa de erro ponderada:
+      $$\text{err}_m = \frac{\sum_{i=1}^N w_i^{(m)} \mathbb{I}(y_i \neq h_m(\mathbf{x}_i))}{\sum_{i=1}^N w_i^{(m)}}$$
+   b) Calcular a confiança / importância do classificador $h_m$ no comitê final:
+      $$\alpha_m = \frac{1}{2} \ln \left( \frac{1 - \text{err}_m}{\text{err}_m} \right)$$
+   c) Atualizar os pesos de cada observação para a próxima iteração:
+      $$w_i^{(m+1)} = w_i^{(m)} \cdot \exp\big(-\alpha_m y_i h_m(\mathbf{x}_i)\big), \quad i = 1, \dots, N$$
+   d) *(Opcional)* Renormalizar os pesos para que $\sum_{i=1}^N w_i^{(m+1)} = 1$.
+
+3. **Predição Final por Voto Ponderado da Maioria:**
+   $$H(\mathbf{x}) = \text{sign}\left( \sum_{m=1}^M \alpha_m h_m(\mathbf{x}) \right)$$
+:::
+
+A intuição prática é imediata: se uma instância $i$ for classificada **corretamente** por $h_m$ ($y_i h_m(\mathbf{x}_i) = +1$), seu peso é multiplicado pelo fator atenuador $e^{-\alpha_m} < 1$. Se for classificada **incorretamente** ($y_i h_m(\mathbf{x}_i) = -1$), seu peso é multiplicado pelo fator amplificador $e^{+\alpha_m} > 1$. Assim, a cada rodada, o conjunto de dados é "deformado", concentrando a probabilidade de amostragem nos exemplos mais difíceis e forçando o próximo classificador $h_{m+1}$ a se especializar nas falhas do comitê.
+:::
+
+::: {.content-visible when-format="revealjs" style="font-size: 0.5em;"}
+
+::: {.callout-note icon=false}
+## O Algoritmo AdaBoost.M1 (Freund & Schapire, 1997)
+- **Entrada:** Dados $\{(\mathbf{x}_i, y_i)\}_{i=1}^N$ com $y_i \in \{-1, +1\}$; pesos iniciais $w_i^{(1)} = \frac{1}{N}$.
+- **Para $m = 1$ até $M$:**
+  1. **Ajustar Classificador Fraco:** $h_m(\mathbf{x}) \in \{-1, +1\}$ minimizando o erro ponderado:
+     $$\text{err}_m = \frac{\sum_{i=1}^N w_i^{(m)} \mathbb{I}(y_i \neq h_m(\mathbf{x}_i))}{\sum_{i=1}^N w_i^{(m)}}$$
+  2. **Calcular Importância $\alpha_m$:** $\alpha_m = \frac{1}{2} \ln \left( \frac{1 - \text{err}_m}{\text{err}_m} \right)$.
+  3. **Atualizar Pesos:** $w_i^{(m+1)} = w_i^{(m)} \exp\big(-\alpha_m y_i h_m(\mathbf{x}_i)\big)$.
+- **Comitê Final:** $H(\mathbf{x}) = \text{sign}\left( \sum_{m=1}^M \alpha_m h_m(\mathbf{x}) \right)$.
+:::
+:::
+
+## Exemplo Ilustrativo: AdaBoost em Ação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para consolidar a intuição de como os pesos adaptativos deformam o espaço amostral e forçam o algoritmo a corrigir seus próprios erros, analisamos o exemplo clássico de Freund & Schapire (1997) e Bishop (2006, PRML Fig. 14.1) com 10 observações bidimensionais pertencentes a duas classes ($+1$ círculos azuis e $-1$ quadrados laranjas).
+
+Utilizamos como aprendizes fracos *decision stumps* (árvores de decisão com profundidade 1, capazes de traçar apenas uma reta horizontal ou vertical paralela aos eixos):
+
+1. **Iteração 1 ($m=1$):**  
+   Todos os 10 pontos iniciam com pesos idênticos $w_i^{(1)} = 0{,}10$. O primeiro stump $h_1$ traça uma linha vertical em $x_1 \approx 0{,}33$. Ele acerta os 3 pontos azuis da esquerda e os 4 pontos laranjas do centro, mas **erra os 3 pontos azuis da direita** (destacados em vermelho pontilhado). Com taxa de erro ponderada $\text{err}_1 = 0{,}30$, seu voto no comitê é $\alpha_1 = \frac{1}{2}\ln(0{,}70 / 0{,}30) \approx 0{,}42$.
+
+2. **Iteração 2 ($m=2$):**  
+   Os pesos são atualizados: os 3 pontos azuis errados têm seus pesos multiplicados por $e^{+\alpha_1}$, tornando-se **muito maiores** visualmente no gráfico ($w_i \approx 0{,}167$). O segundo stump $h_2$ é forçado a priorizar esses pontos de alto peso e traça uma linha vertical em $x_1 \approx 0{,}68$, classificando corretamente os 3 pontos da direita, mas errando os 3 pontos da esquerda. Seu peso no comitê é $\alpha_2 \approx 0{,}65$.
+
+3. **Iteração 3 ($m=3$):**  
+   Agora os pontos azuis da esquerda acumulam maior peso e forçam o terceiro stump $h_3$ a focar na separação remanescente, com $\alpha_3 \approx 0{,}75$.
+
+4. **Comitê Final $H(\mathbf{x}) = \text{sign}\left(\sum_{m=1}^3 \alpha_m h_m(\mathbf{x})\right)$:**  
+   Ao combinar os votos ponderados dos 3 stumps unidimensionais simples, o comitê final forma uma fronteira composta não linear que isola perfeitamente os pontos laranjas centrais dos pontos azuis laterais, atingindo **acurácia de 100% (zero erro de treinamento)**!
+
+```{python}
+#| echo: false
+#| fig-align: center
+#| label: fig-adaboost-toy
+#| fig-cap: "Ilustração do AdaBoost com 10 pontos e 3 Decision Stumps. Os tamanhos dos marcadores são proporcionais aos pesos $w_i^{(m)}$ de cada iteração. Círculos pontilhados em vermelho indicam erros do classificador corrente. O comitê final atinge 100% de acurácia combinando os 3 stumps."
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.tree import DecisionTreeClassifier
+
+COR_AZUL = "#2B5C8F"
+COR_VERM = "#D95F02"
+
+X_toy = np.array([
+    [0.15, 0.75], [0.10, 0.40], [0.25, 0.20],
+    [0.40, 0.70], [0.45, 0.45], [0.55, 0.30], [0.60, 0.80],
+    [0.75, 0.65], [0.85, 0.35], [0.80, 0.15]
+])
+y_toy = np.array([+1, +1, +1, -1, -1, -1, -1, +1, +1, +1])
+
+N_toy = len(y_toy)
+w_toy = np.ones(N_toy) / N_toy
+
+stumps_toy = []
+alphas_toy = []
+weights_hist = [w_toy.copy()]
+
+for m in range(3):
+    dt = DecisionTreeClassifier(max_depth=1, random_state=42)
+    dt.fit(X_toy, y_toy, sample_weight=w_toy)
+    pred = dt.predict(X_toy)
+    err = np.sum(w_toy * (pred != y_toy)) / np.sum(w_toy)
+    alpha = 0.5 * np.log((1 - err) / err)
+    w_toy = w_toy * np.exp(-alpha * y_toy * pred)
+    w_toy = w_toy / np.sum(w_toy)
+    stumps_toy.append(dt)
+    alphas_toy.append(alpha)
+    weights_hist.append(w_toy.copy())
+
+xx, yy = np.meshgrid(np.linspace(0, 1, 300), np.linspace(0, 1, 300))
+grid_pts = np.c_[xx.ravel(), yy.ravel()]
+
+fig, axes = plt.subplots(1, 4, figsize=(14, 3.6), sharex=True, sharey=True)
+
+titles = [
+    f"Iteração 1 ($h_1$, $\\alpha_1 = {alphas_toy[0]:.2f}$)",
+    f"Iteração 2 ($h_2$, $\\alpha_2 = {alphas_toy[1]:.2f}$)",
+    f"Iteração 3 ($h_3$, $\\alpha_3 = {alphas_toy[2]:.2f}$)",
+    "Comitê Final $H(\\mathbf{x}) = \\text{sign}(\\sum \\alpha_m h_m)$"
+]
+
+for m in range(3):
+    ax = axes[m]
+    curr_w = weights_hist[m]
+    stump = stumps_toy[m]
+    pred = stump.predict(X_toy)
+    
+    Z = stump.predict(grid_pts).reshape(xx.shape)
+    ax.contourf(xx, yy, Z, levels=[-2, 0, 2], colors=[COR_VERM, COR_AZUL], alpha=0.18)
+    ax.contour(xx, yy, Z, levels=[0], colors="black", linewidths=1.5, linestyles="--")
+    
+    sizes = curr_w * 2500
+    for i in range(N_toy):
+        marker = 'o' if y_toy[i] == +1 else 's'
+        color = COR_AZUL if y_toy[i] == +1 else COR_VERM
+        edge = "red" if pred[i] != y_toy[i] else "black"
+        lw = 2.0 if pred[i] != y_toy[i] else 0.8
+        ax.scatter(X_toy[i, 0], X_toy[i, 1], s=sizes[i], marker=marker, facecolor=color, edgecolor=edge, linewidth=lw, zorder=3)
+        if pred[i] != y_toy[i]:
+            ax.scatter(X_toy[i, 0], X_toy[i, 1], s=sizes[i] + 120, marker=marker, facecolor='none', edgecolor='red', linewidth=1.8, linestyle=':', zorder=4)
+
+    ax.set_title(titles[m], fontsize=11, fontweight="bold")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.grid(True, linestyle=":", alpha=0.5)
+
+ax = axes[3]
+final_Z = np.sign(sum(a * s.predict(grid_pts) for a, s in zip(alphas_toy, stumps_toy))).reshape(xx.shape)
+ax.contourf(xx, yy, final_Z, levels=[-2, 0, 2], colors=[COR_VERM, COR_AZUL], alpha=0.25)
+ax.contour(xx, yy, final_Z, levels=[0], colors="black", linewidths=2.0)
+
+for i in range(N_toy):
+    marker = 'o' if y_toy[i] == +1 else 's'
+    color = COR_AZUL if y_toy[i] == +1 else COR_VERM
+    ax.scatter(X_toy[i, 0], X_toy[i, 1], s=90, marker=marker, facecolor=color, edgecolor="black", linewidth=1.0, zorder=3)
+
+ax.set_title(titles[3], fontsize=11, fontweight="bold")
+ax.grid(True, linestyle=":", alpha=0.5)
+
+plt.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.tree import DecisionTreeClassifier
+
+COR_AZUL = "#2B5C8F"
+COR_VERM = "#D95F02"
+
+X_toy = np.array([
+    [0.15, 0.75], [0.10, 0.40], [0.25, 0.20],
+    [0.40, 0.70], [0.45, 0.45], [0.55, 0.30], [0.60, 0.80],
+    [0.75, 0.65], [0.85, 0.35], [0.80, 0.15]
+])
+y_toy = np.array([+1, +1, +1, -1, -1, -1, -1, +1, +1, +1])
+
+N_toy = len(y_toy)
+w_toy = np.ones(N_toy) / N_toy
+
+stumps_toy = []
+alphas_toy = []
+weights_hist = [w_toy.copy()]
+
+for m in range(3):
+    dt = DecisionTreeClassifier(max_depth=1, random_state=42)
+    dt.fit(X_toy, y_toy, sample_weight=w_toy)
+    pred = dt.predict(X_toy)
+    err = np.sum(w_toy * (pred != y_toy)) / np.sum(w_toy)
+    alpha = 0.5 * np.log((1 - err) / err)
+    w_toy = w_toy * np.exp(-alpha * y_toy * pred)
+    w_toy = w_toy / np.sum(w_toy)
+    stumps_toy.append(dt)
+    alphas_toy.append(alpha)
+    weights_hist.append(w_toy.copy())
+
+xx, yy = np.meshgrid(np.linspace(0, 1, 300), np.linspace(0, 1, 300))
+grid_pts = np.c_[xx.ravel(), yy.ravel()]
+
+fig, axes = plt.subplots(1, 4, figsize=(14, 3.4), sharex=True, sharey=True)
+
+titles = [
+    f"Iteração 1 ($h_1$, $\\alpha_1 = {alphas_toy[0]:.2f}$)",
+    f"Iteração 2 ($h_2$, $\\alpha_2 = {alphas_toy[1]:.2f}$)",
+    f"Iteração 3 ($h_3$, $\\alpha_3 = {alphas_toy[2]:.2f}$)",
+    "Comitê Final $H(\\mathbf{x})$"
+]
+
+for m in range(3):
+    ax = axes[m]
+    curr_w = weights_hist[m]
+    stump = stumps_toy[m]
+    pred = stump.predict(X_toy)
+    
+    Z = stump.predict(grid_pts).reshape(xx.shape)
+    ax.contourf(xx, yy, Z, levels=[-2, 0, 2], colors=[COR_VERM, COR_AZUL], alpha=0.18)
+    ax.contour(xx, yy, Z, levels=[0], colors="black", linewidths=1.5, linestyles="--")
+    
+    sizes = curr_w * 2500
+    for i in range(N_toy):
+        marker = 'o' if y_toy[i] == +1 else 's'
+        color = COR_AZUL if y_toy[i] == +1 else COR_VERM
+        edge = "red" if pred[i] != y_toy[i] else "black"
+        lw = 2.0 if pred[i] != y_toy[i] else 0.8
+        ax.scatter(X_toy[i, 0], X_toy[i, 1], s=sizes[i], marker=marker, facecolor=color, edgecolor=edge, linewidth=lw, zorder=3)
+        if pred[i] != y_toy[i]:
+            ax.scatter(X_toy[i, 0], X_toy[i, 1], s=sizes[i] + 120, marker=marker, facecolor='none', edgecolor='red', linewidth=1.8, linestyle=':', zorder=4)
+
+    ax.set_title(titles[m], fontsize=11, fontweight="bold")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.grid(True, linestyle=":", alpha=0.5)
+
+ax = axes[3]
+final_Z = np.sign(sum(a * s.predict(grid_pts) for a, s in zip(alphas_toy, stumps_toy))).reshape(xx.shape)
+ax.contourf(xx, yy, final_Z, levels=[-2, 0, 2], colors=[COR_VERM, COR_AZUL], alpha=0.25)
+ax.contour(xx, yy, final_Z, levels=[0], colors="black", linewidths=2.0)
+
+for i in range(N_toy):
+    marker = 'o' if y_toy[i] == +1 else 's'
+    color = COR_AZUL if y_toy[i] == +1 else COR_VERM
+    ax.scatter(X_toy[i, 0], X_toy[i, 1], s=90, marker=marker, facecolor=color, edgecolor="black", linewidth=1.0, zorder=3)
+
+ax.set_title(titles[3], fontsize=11, fontweight="bold")
+ax.grid(True, linestyle=":", alpha=0.5)
+
+plt.tight_layout()
+plt.show()
+```
+
+::: {.fragment}
+- **A Dinâmica Visual em 3 Passos:**
+  1. **Iteração 1 ($w_i = 0{,}10$):** O stump vertical erra 3 pontos à direita ($\text{err}_1 = 0{,}30 \implies \alpha_1 = 0{,}42$).
+  2. **Iteração 2:** Os 3 erros sofrem amplificação de peso ($e^{+\alpha_1}$) e ficam maiores $\to h_2$ ajusta-se para acertá-los!
+  3. **Comitê Final:** O voto ponderado por $\alpha_m$ atinge **100% de acurácia**, separando as classes com 3 stumps de profundidade 1!
+:::
+:::
+
+## AdaBoost como Otimização Gulosa sob Perda Exponencial
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Durante anos após sua criação, o AdaBoost era visto pela comunidade como um algoritmo misterioso e quase heurístico. Esse cenário mudou com o trabalho seminal de Friedman, Hastie e Tibshirani (2000, ESL §10.2–10.4), que revelaram sua base estatística: **o AdaBoost.M1 é analiticamente equivalente ao Forward Stagewise Additive Modeling (FSAM) sob a função de perda exponencial**:
+
+$$L(y, f(\mathbf{x})) = \exp\big(-y f(\mathbf{x})\big), \quad y \in \{-1, +1\}$$
+
+No passo $m$, já possuímos o comitê acumulado $f_{m-1}(\mathbf{x})$ e queremos adicionar um novo termo $\alpha h(\mathbf{x})$, com $h(\mathbf{x}) \in \{-1, +1\}$ e $\alpha > 0$:
+
+$$\min_{\alpha, h} \sum_{i=1}^N \exp\Big( -y_i \big(f_{m-1}(\mathbf{x}_i) + \alpha h(\mathbf{x}_i)\big) \Big) = \sum_{i=1}^N \underbrace{\exp\big(-y_i f_{m-1}(\mathbf{x}_i)\big)}_{w_i^{(m)}} \exp\big(-\alpha y_i h(\mathbf{x}_i)\big)$$
+
+O termo $w_i^{(m)} \equiv \exp(-y_i f_{m-1}(\mathbf{x}_i))$ não depende do novo modelo: **ele é simplesmente o peso acumulado da observação $i$ até a iteração $m$**. Se o modelo atual acerta o exemplo com folga ($y_i f_{m-1} > 0$), seu peso decai para quase zero; se o modelo erra ($y_i f_{m-1} < 0$), seu peso cresce exponencialmente.
+
+### A Decomposição em Acertos e Erros
+
+Como $y_i, h(\mathbf{x}_i) \in \{-1, +1\}$, o produto $y_i h(\mathbf{x}_i)$ só pode assumir dois valores:
+- **Acerto** ($y_i = h(\mathbf{x}_i)$): $y_i h(\mathbf{x}_i) = +1 \implies \text{fator } e^{-\alpha}$.
+- **Erro** ($y_i \neq h(\mathbf{x}_i)$): $y_i h(\mathbf{x}_i) = -1 \implies \text{fator } e^{+\alpha}$.
+
+Podemos particionar a perda total diretamente entre os exemplos que o modelo acerta e os que ele erra:
+
+$$\text{Perda}(\alpha, h) = e^{-\alpha} \sum_{y_i = h(\mathbf{x}_i)} w_i^{(m)} + e^{+\alpha} \sum_{y_i \neq h(\mathbf{x}_i)} w_i^{(m)}$$
+
+Dividindo pela soma total dos pesos $w_m = \sum_{i=1}^N w_i^{(m)}$ e definindo a taxa de erro ponderada $\text{err}_m \equiv \frac{\sum_{\text{erros}} w_i^{(m)}}{w_m}$, a fração de acertos é naturalmente $(1 - \text{err}_m)$. A perda média resume-se à elegante combinação convexa:
+
+$$\frac{\text{Perda}}{w_m} = (1 - \text{err}_m) e^{-\alpha} + \text{err}_m e^{+\alpha}$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.callout-note icon=false}
+## AdaBoost Desmistificado: FSAM com Perda Exponencial
+O AdaBoost.M1 é analiticamente um FSAM minimizando $L(y, f) = e^{-yf}$ ($y \in \{-1, +1\}$):
+$$\min_{\alpha, h} \sum_{i=1}^N \underbrace{e^{-y_i f_{m-1}(\mathbf{x}_i)}}_{w_i^{(m)} \text{ (peso histórico)}} e^{-\alpha y_i h(\mathbf{x}_i)}$$
+:::
+
+::: {.fragment}
+- **Decomposição em Acertos ($y_i h = +1$) e Erros ($y_i h = -1$):**
+  $$\frac{\text{Perda}}{w_m} = (1 - \text{err}_m) \underbrace{e^{-\alpha}}_{\text{acertos}} + \text{err}_m \underbrace{e^{+\alpha}}_{\text{erros}}$$
+  onde $w_m = \sum_{i=1}^N w_i^{(m)}$ e $\text{err}_m = \frac{\sum_{y_i \neq h} w_i^{(m)}}{w_m}$ é a taxa de erro ponderada.
+:::
+
+::: {.fragment}
+- **A Intuição Central:**
+  - Acertos pagam uma penalidade amortecida $e^{-\alpha} < 1$.
+  - Erros pagam uma penalidade amplificada $e^{+\alpha} > 1$.
+:::
+:::
+
+## As Duas Decisões do AdaBoost em Forma Direta
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A partir da perda média ponderada por $w_m$, decorrem imediatamente as duas regras fundamentais do AdaBoost:
+
+1. **Quem deve ser o classificador base $h_m$?**  
+   Para qualquer $\alpha > 0$, o custo unitário do erro ($e^\alpha$) é estritamente superior ao custo do acerto ($e^{-\alpha}$). Para minimizar a perda, o classificador $h$ deve concentrar o máximo de peso possível nos acertos e o mínimo nos erros. Logo, **$h_m$ é o classificador que minimiza a taxa de erro ponderada**:
+   $$h_m(\mathbf{x}) = \arg\min_h \sum_{i=1}^N w_i^{(m)} \mathbb{I}(y_i \neq h(\mathbf{x}_i))$$
+
+2. **Quanto deve valer o passo / voto $\alpha_m$?**  
+   Com $h_m$ fixado, derivamos a perda em relação a $\alpha$ para encontrar o ponto de mínimo (o equilíbrio ótimo entre o benefício dos acertos e o custo dos erros):
+   $$\frac{\partial}{\partial \alpha} \Big[ (1 - \text{err}_m) e^{-\alpha} + \text{err}_m e^{+\alpha} \Big] = -(1 - \text{err}_m) e^{-\alpha} + \text{err}_m e^{+\alpha} = 0$$
+   $$\implies \text{err}_m e^{+\alpha} = (1 - \text{err}_m) e^{-\alpha} \implies e^{2\alpha} = \frac{1 - \text{err}_m}{\text{err}_m}$$
+   Aplicando o logaritmo natural em ambos os lados, surge a célebre fórmula do AdaBoost:
+   $$\alpha_m = \frac{1}{2} \ln \left( \frac{1 - \text{err}_m}{\text{err}_m} \right)$$
+
+**Intuição dos Três Regimes de $\alpha_m$:**
+- **Classificador excelente ($\text{err}_m \to 0$):** $\frac{1 - \text{err}}{\text{err}} \to \infty \implies \alpha_m \to +\infty$ (ganha peso altíssimo no comitê).
+- **Classificador cara-ou-coroa ($\text{err}_m = 0{,}5$):** $\frac{0{,}5}{0{,}5} = 1 \implies \alpha_m = \frac{1}{2}\ln(1) = 0$ (não tem poder preditivo e é sumariamente ignorado).
+- **Classificador pior que o acaso ($\text{err}_m > 0{,}5$):** $\alpha_m < 0$ (o comitê inverte automaticamente suas predições, transformando seus erros em acertos!).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.callout-tip icon=false}
+## As Duas Decisões do AdaBoost em Forma Direta
+1. **Escolha de $h_m$:** Como $e^\alpha > e^{-\alpha}$, minimizar a perda equivale a minimizar a fração de erros $\implies h_m$ minimiza o erro ponderado $\text{err}_m$:
+   $$h_m = \arg\min_h \sum_{i=1}^N w_i^{(m)} \mathbb{I}(y_i \neq h(\mathbf{x}_i))$$
+2. **Escolha de $\alpha_m$:** Igualando as forças dos acertos e erros ($\frac{\partial}{\partial \alpha} = 0$):
+   $$\text{err}_m e^{+\alpha} = (1 - \text{err}_m) e^{-\alpha} \implies e^{2\alpha} = \frac{1 - \text{err}_m}{\text{err}_m} \implies \alpha_m = \frac{1}{2} \ln \left( \frac{1 - \text{err}_m}{\text{err}_m} \right)$$
+:::
+
+::: {.fragment}
+- **Os Três Regimes de $\alpha_m$:**
+  - $\text{err}_m \to 0 \implies \alpha_m \to +\infty$ (confiança alta no voto do modelo).
+  - $\text{err}_m = 0{,}5 \implies \alpha_m = 0$ (cara-ou-coroa é descartado).
+  - $\text{err}_m > 0{,}5 \implies \alpha_m < 0$ (inversão automática da polaridade).
+:::
+:::
+
+## Atualização de Pesos: A Mecânica Iterativa
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Com o classificador base $h_m(\mathbf{x})$ e seu respectivo coeficiente $\alpha_m$ determinados, o comitê acumulado é atualizado adicionando a nova regra:
+
+$$f_m(\mathbf{x}) = f_{m-1}(\mathbf{x}) + \alpha_m h_m(\mathbf{x})$$
+
+Ao avaliar a definição analítica do peso da próxima iteração, $w_i^{(m+1)} \equiv \exp(-y_i f_m(\mathbf{x}_i))$, obtemos diretamente a regra de recorrência do AdaBoost.M1:
+
+$$w_i^{(m+1)} = \exp\Big(-y_i \big(f_{m-1}(\mathbf{x}_i) + \alpha_m h_m(\mathbf{x}_i)\big)\Big) = w_i^{(m)} \exp\big(-\alpha_m y_i h_m(\mathbf{x}_i)\big)$$
+
+Essa atualização atua de forma assimétrica e adaptativa sobre cada instância individual:
+- **Se a observação foi classificada corretamente** ($y_i h_m(\mathbf{x}_i) = +1$):  
+  O peso é multiplicado pelo fator atenuador $e^{-\alpha_m} < 1$, aliviando a importância daquela amostra nas próximas rodadas.
+- **Se a observação foi classificada incorretamente** ($y_i h_m(\mathbf{x}_i) = -1$):  
+  O peso é multiplicado pelo fator amplificador $e^{+\alpha_m} > 1$, aumentando a pressão sobre os classificadores seguintes para corrigir esse erro.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.callout-note icon=false}
+## Atualização Recurrente dos Pesos
+Como $f_m(\mathbf{x}) = f_{m-1}(\mathbf{x}) + \alpha_m h_m(\mathbf{x})$:
+$$w_i^{(m+1)} = \underbrace{\exp\big(-y_i f_{m-1}(\mathbf{x}_i)\big)}_{w_i^{(m)}} \cdot \exp\big(-\alpha_m y_i h_m(\mathbf{x}_i)\big) = w_i^{(m)} \exp\big(-\alpha_m y_i h_m(\mathbf{x}_i)\big)$$
+:::
+
+::: {.fragment}
+- **A Dinâmica Individual:**
+  - **Acerto ($y_i h_m = +1$):** $w_i^{(m+1)} = w_i^{(m)} \cdot e^{-\alpha_m}$ (o comitê já aprendeu este ponto $\implies$ peso diminui).
+  - **Erro ($y_i h_m = -1$):** $w_i^{(m+1)} = w_i^{(m)} \cdot e^{+\alpha_m}$ (o comitê falhou neste ponto $\implies$ peso aumenta).
+:::
+
+::: {.fragment}
+- O próximo classificador fraco $h_{m+1}$ é forçado a se concentrar quase que exclusivamente nas regiões do espaço onde o comitê acumulado $f_m$ cometeu erros!
+:::
+:::
+
+## Razão Erro/Acerto e a Conexão com Bayes e Logística
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A agressividade dessa reponderação fica evidente quando comparamos a evolução relativa entre uma instância errada e uma instância correta:
+
+$$\frac{w_{\text{erro}}^{(m+1)}}{w_{\text{acerto}}^{(m+1)}} = \frac{w_{\text{erro}}^{(m)} e^{+\alpha_m}}{w_{\text{acerto}}^{(m)} e^{-\alpha_m}} = \frac{w_{\text{erro}}^{(m)}}{w_{\text{acerto}}^{(m)}} \cdot e^{2\alpha_m}$$
+
+Lembrando que $e^{2\alpha_m} = \frac{1 - \text{err}_m}{\text{err}_m}$, obtemos a identidade fundamental:
+
+$$\frac{w_{\text{erro}}^{(m+1)}}{w_{\text{acerto}}^{(m+1)}} = \frac{w_{\text{erro}}^{(m)}}{w_{\text{acerto}}^{(m)}} \cdot \left( \frac{1 - \text{err}_m}{\text{err}_m} \right)$$
+
+Isso significa que, a cada iteração, as instâncias incorretas ganham uma vantagem multiplicativa exatamente igual à **razão de chances (*odds*) do acerto sobre o erro** $\frac{1 - \text{err}_m}{\text{err}_m}$. Por exemplo:
+- Com taxa de erro $\text{err}_m = 0{,}20$ ($80\%$ de acerto), a razão salta por um fator de $\frac{0{,}80}{0{,}20} = 4$. Cada erro passa a valer **4 vezes mais** que cada acerto imediatamente na rodada seguinte!
+- Com taxa de erro $\text{err}_m = 0{,}10$ ($90\%$ de acerto), o salto multiplicativo relativo é de $\frac{0{,}90}{0{,}10} = 9\times$!
+
+### Conexão Teórica: Minimizador Populacional e Log-Odds
+
+Por que a perda exponencial $L(y, f) = e^{-yf}$ funciona como critério de classificação? Hastie, Tibshirani e Friedman (ESL §10.4) investigaram o comportamento do modelo no limite populacional. Buscamos a função $f^*(\mathbf{x})$ que minimiza o risco esperado condicionado a $\mathbf{X} = \mathbf{x}$:
+
+$$f^*(\mathbf{x}) = \arg\min_{f(\mathbf{x})} \mathbb{E}_{Y \mid \mathbf{x}}\big[e^{-Y f(\mathbf{x})}\big] = \arg\min_{f(\mathbf{x})} \Big[ P(Y=1 \mid \mathbf{x}) e^{-f(\mathbf{x})} + P(Y=-1 \mid \mathbf{x}) e^{+f(\mathbf{x})} \Big]$$
+
+Diferenciando em relação a $f(\mathbf{x})$ e igualando a zero:
+
+$$-P(Y=1 \mid \mathbf{x}) e^{-f(\mathbf{x})} + P(Y=-1 \mid \mathbf{x}) e^{+f(\mathbf{x})} = 0 \implies e^{2f(\mathbf{x})} = \frac{P(Y=1 \mid \mathbf{x})}{P(Y=-1 \mid \mathbf{x})}$$
+
+Aplicando o logaritmo natural em ambos os lados:
+
+$$f^*(\mathbf{x}) = \frac{1}{2} \ln \left( \frac{P(Y=1 \mid \mathbf{x})}{P(Y=-1 \mid \mathbf{x})} \right) = \frac{1}{2} \text{logit}\big(P(Y=1 \mid \mathbf{x})\big)$$
+
+O resultado é extraordinário e unifica a teoria:
+1. O AdaBoost está estimando nada menos que a **metade da razão de chances logarítmica (*log-odds*) populacional**, coincidindo perfeitamente com a quantidade modelada pela Regressão Logística (Aula 6)!
+2. A regra de decisão final $\text{sign}(f^*(\mathbf{x}))$ reproduz com exatidão a **regra de decisão ótima de Bayes** (Aula 2), atribuindo $+1$ sempre que $P(Y=1 \mid \mathbf{x}) > 0{,}5$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+- **A Razão Relativa de Reponderação:**
+  $$\frac{w_{\text{erro}}^{(m+1)}}{w_{\text{acerto}}^{(m+1)}} = \frac{w_{\text{erro}}^{(m)}}{w_{\text{acerto}}^{(m)}} \cdot e^{2\alpha_m} = \frac{w_{\text{erro}}^{(m)}}{w_{\text{acerto}}^{(m)}} \cdot \left( \frac{1 - \text{err}_m}{\text{err}_m} \right)$$
+  - $\text{err}_m = 0{,}20 \implies$ erros ficam **$4\times$ mais pesados** que acertos!
+  - $\text{err}_m = 0{,}10 \implies$ erros ficam **$9\times$ mais pesados** em uma única iteração!
+:::
+
+::: {.fragment .callout-note icon=false}
+## Minimizador Populacional e Log-Odds de Bayes (ESL §10.4)
+Minimizando a perda exponencial esperada $\mathbb{E}_{Y\mid\mathbf{x}}[e^{-Yf}]$:
+$$\frac{\partial}{\partial f}\big[ P(Y=1\mid\mathbf{x})e^{-f} + P(Y=-1\mid\mathbf{x})e^{+f} \big] = 0 \implies e^{2f} = \frac{P(Y=1\mid\mathbf{x})}{P(Y=-1\mid\mathbf{x})}$$
+$$f^*(\mathbf{x}) = \frac{1}{2} \ln \left( \frac{P(Y=1\mid\mathbf{x})}{P(Y=-1\mid\mathbf{x})} \right) = \frac{1}{2}\text{logit}\big(P(Y=1\mid\mathbf{x})\big)$$
+:::
+
+::: {.fragment}
+- **Implicações Teóricas:**
+  - O AdaBoost estima a **metade do log-odds** (o mesmo alvo da Regressão Logística da Aula 6!).
+  - O sinal $\text{sign}(f^*(\mathbf{x}))$ implementa a **fronteira ótima de Bayes** ($P > 0{,}5$).
+:::
+:::
+
+## O Calcanhar de Aquiles: Outliers e Rótulos Ruidosos
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Apesar de sua elegância teórica e do vínculo com a fronteira de Bayes, a perda exponencial possui uma fraqueza severa na prática: **sua extrema vulnerabilidade a dados ruidosos e *outliers***.
+
+Considere uma observação com rótulo ruidoso ou com atributos atípicos que o modelo classifica com alta confiança errônea (margem negativa $y_i f(\mathbf{x}_i) \ll 0$):
+- Na **Regressão Logística (perda deviance)**:  
+  $L_{\text{dev}}(y, f) = \ln(1 + e^{-yf}) \approx |yf|$. A penalidade cresce de forma estritamente **linear** quando o erro aumenta.
+- No **AdaBoost (perda exponencial)**:  
+  $L_{\text{exp}}(y, f) = e^{-yf} = e^{|yf|}$. A penalidade cresce de forma **puramente exponencial**!
+
+Se um único exemplo tiver margem $y_i f(\mathbf{x}_i) = -10$ (por exemplo, um registro rotulado incorretamente ou ruído severo de sensor), seu peso acumulado salta para $e^{10} \approx 22.026$. Como consequência direta:
+1. O peso dessa anomalia domina a soma total dos pesos $w_m$.
+2. Os classificadores fracos subsequentes monopolizam toda a sua capacidade de particionamento tentando memorizar e acomodar esse ponto isolado.
+3. A fronteira de decisão deforma-se dramaticamente com ilhas e reentrâncias espúrias, destruindo a acurácia de teste nos dados normais.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.callout-warning}
+## A Patologia Grave: Sensibilidade Extrema a Outliers
+- **Regressão Logística:** Para erros graves ($yf \ll 0$), a perda cresce linearmente: $L \approx |yf|$.
+- **AdaBoost (Exponencial):** A penalidade cresce exponencialmente: $L = e^{|yf|}$.
+- Um erro com margem $yf = -10$ recebe peso $e^{10} \approx 22.026$!
+- Exemplos com ruído de medição ou rótulos trocados monopolizam os pesos.
+:::
+
+::: {.fragment}
+- **O Colapso do Modelo:**
+  - As árvores seguintes gastam divisões tentando memorizar ruídos insolúveis.
+  - A fronteira de decisão sofre deformação severa e a variância dispara.
+  - O erro de generalização no conjunto de teste entra em colapso.
+:::
+:::
+
+## A Motivação do Gradient Tree Boosting (Friedman, 2001)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A patologia dos outliers no AdaBoost impôs uma pergunta fundamental à comunidade estatística na virada do milênio: *como manter o princípio dos comitês aditivos sequenciais sem ficar prisioneiro da perda exponencial?*
+
+No AdaBoost, a escolha da perda exponencial não decorreu de uma necessidade empírica, mas sim de conveniência algébrica: sob $e^{-yf}$, o subproblema de otimização em estágios (FSAM) admite soluções analíticas fechadas para o passo $\alpha_m$ e para a regra de pesos recursiva. 
+
+Se tentássemos substituir a perda exponencial por funções de perda robustas a outliers — como a **perda absoluta ($L_1$)**, a **perda de Huber** ou a **deviance logística binomial** —, o subproblema em estágios deixa de ter solução analítica fechada em relação aos parâmetros de uma árvore de decisão!
+
+A resposta revolucionária foi apresentada por Jerome Friedman (2001) com a formulação do **Gradient Tree Boosting**:
+1. Tratar o ajuste do modelo aditivo como um processo de **otimização numérica no espaço de funções** (o espaço $\mathbb{R}^N$ das predições amostrais).
+2. Em vez de deduzir regras analíticas de reponderação para cada perda, calcular diretamente o **gradiente negativo da função de perda** (os **pseudo-resíduos**).
+3. Projetar esse vetor gradiente na classe de árvores de regressão via mínimos quadrados simples.
+
+Esse salto conceitual liberta o boosting da perda exponencial e abre caminho para otimizar comitês sob qualquer critério diferenciável.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.callout-note icon=false}
+## O Dilema do AdaBoost e a Perda Exponencial
+- O AdaBoost usou a perda exponencial por conveniência matemática: ela permitia deduzir $\alpha_m$ analiticamente.
+- Para perdas robustas ($L_1$, Huber, deviance), **não existe solução analítica fechada** para os parâmetros da árvore!
+:::
+
+::: {.fragment}
+- **A Ideia Revolucionária de Jerome Friedman (2001):**
+  - Tratar as predições nas $N$ instâncias como um ponto no espaço $\mathbb{R}^N$.
+  - Descer na direção do **gradiente negativo da perda** ($-\nabla_{\mathbf{f}} L$).
+  - Ajustar uma árvore de regressão simples para interpolar e generalizar essa direção de descida (os **pseudo-resíduos**)!
+:::
+
+::: {.fragment .callout-tip}
+## Conexão com o Próximo Bloco
+O Gradient Tree Boosting permite otimizar **qualquer função de perda diferenciável** com aprendizes fracos $\to$ **Bloco 2!**
+:::
+:::
+
+## Pausa 3: FSAM e AdaBoost
+
+::: {.callout-tip}
+## Pergunta aberta provocadora
+
+Em uma aplicação de detecção de fraudes com dados bancários altamente contaminados por registros fraudulentos atípicos, um cientista observa que o AdaBoost entra em sobreajuste severo após 25 iterações. Por que a formulação matemática da função de perda exponencial explica essa falha catastrófica perante outliers?
+:::
+
+::: {.callout-tip}
+## Julgamento de V ou F
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O algoritmo AdaBoost.M1 é analiticamente equivalente ao FSAM minimizando a função de perda exponencial $L(y, f) = e^{-yf}$.
+- □ Se um classificador base atingir exatamente $50\%$ de taxa de erro ponderada ($\text{err}_m = 0{,}50$), seu multiplicador no ensemble será $\alpha_m = 0$.
+- □ Sob a perda exponencial, a penalidade atribuída a uma observação incorreta com margem negativa $-yf = 5$ cresce de forma assintoticamente linear.
+- □ A função que minimiza a esperança condicional da perda exponencial é a metade da razão de chances logarítmica (*log-odds*) populacional.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 3: FSAM e AdaBoost — Resposta
+
+::: {.callout-tip}
+## Julgamento de V ou F — Resposta
+
+- ✔ **V:** Demonstração clássica de Friedman, Hastie e Tibshirani (2000).
+- ✔ **V:** Substituindo na fórmula, $\ln((1-0{,}5)/0{,}5) = \ln(1) = 0$.
+- ✗ **F:** A perda exponencial cresce a uma taxa puramente exponencial ($e^5 \approx 148{,}4$), e não linear.
+- ✔ **V:** $f^*(\mathbf{x}) = \frac{1}{2} \ln (P(Y=1\mid\mathbf{x}) / P(Y=-1\mid\mathbf{x}))$, coincidindo com a fronteira de Bayes.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** A perda exponencial $e^{-yf}$ impõe uma punição exponencialmente desproporcional a erros graves. Em dados com ruído, outliers acumulam pesos astronômicos, forçando as árvores seguintes a distorcerem suas fronteiras de decisão exclusivamente para acomodar anomalias, destruindo a acurácia de teste nos dados normais.
+:::
+
+:::
+
+# Bloco 2: Gradient Boosting e Pseudo-Resíduos Genéricos
+
+## A Formulação Geral de Jerome Friedman (2001)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Em seu artigo seminal *"Greedy Function Approximation: A Gradient Boosting Machine"* (2001), Jerome Friedman estabeleceu a estrutura matemática para treinar comitês aditivos sob **qualquer função de perda diferenciável** $L(y, f(\mathbf{x}))$.
+
+Considere a perda empírica acumulada no conjunto de treino:
+
+$$L(\mathbf{f}) = \sum_{i=1}^N L(y_i, f(\mathbf{x}_i))$$
+
+Se interpretarmos o vetor de predições $\mathbf{f} = [f(\mathbf{x}_1), \dots, f(\mathbf{x}_N)]^T \in \mathbb{R}^N$ como um parâmetro em um espaço de $N$ dimensões, o método da descida de gradiente mais íngreme prescreve a atualização:
+
+$$\mathbf{f}_m = \mathbf{f}_{m-1} - \rho_m \mathbf{g}_m$$
+
+onde $\mathbf{g}_m \in \mathbb{R}^N$ é o vetor gradiente avaliado no modelo anterior $\mathbf{f}_{m-1}$, cujos componentes são:
+
+$$g_{im} = \left[\frac{\partial L(y_i, f(\mathbf{x}_i))}{\partial f(\mathbf{x}_i)}\right]_{f(\mathbf{x}) = f_{m-1}(\mathbf{x})}$$
+
+Definimos o **pseudo-resíduo** $r_{im}$ como o oposto do gradiente:
+
+$$r_{im} \equiv -g_{im} = -\left[\frac{\partial L(y_i, f(\mathbf{x}_i))}{\partial f(\mathbf{x}_i)}\right]_{f(\mathbf{x}) = f_{m-1}(\mathbf{x})}$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.callout-note icon=false}
+## Definição Formal de Pseudo-Resíduo (Friedman, 2001)
+$$r_{im} = -\left[\frac{\partial L(y_i, f(\mathbf{x}_i))}{\partial f(\mathbf{x}_i)}\right]_{f(\mathbf{x}) = f_{m-1}(\mathbf{x})}, \quad i = 1, \dots, N$$
+:::
+
+::: {.fragment}
+- **O Significado Geométrico:**
+  - $r_{im}$ indica a direção e magnitude em que a predição $f(\mathbf{x}_i)$ deve se mover para diminuir localmente a perda daquela observação.
+  - Para a perda quadrática tradicional, $r_{im} = y_i - f_{m-1}(\mathbf{x}_i)$ (o resíduo comum).
+  - Para qualquer outra perda, $r_{im}$ é o gradiente negativo generalizado.
+:::
+:::
+
+## Dedução de Pseudo-Resíduos para Perdas Clássicas
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A beleza do arcabouço de Friedman reside em sua universalidade. Vejamos a dedução dos pseudo-resíduos para as quatro principais perdas estatísticas:
+
+### 1. Perda Quadrática ($L_2$ — Regressão Gaussiana)
+$$L(y, f) = \frac{1}{2}(y - f)^2 \implies r_{im} = -\left[-(y_i - f)\right] = y_i - f_{m-1}(\mathbf{x}_i)$$
+O pseudo-resíduo é rigorosamente o resíduo algébrico tradicional.
+
+### 2. Perda Absoluta ($L_1$ / Laplace — Regressão Robusta à Mediana)
+$$L(y, f) = |y - f| \implies r_{im} = -\left[-\text{sign}(y_i - f)\right] = \text{sign}\big(y_i - f_{m-1}(\mathbf{x}_i)\big)$$
+O pseudo-resíduo fornece apenas a **direção do desvio** ($\pm 1$), eliminando completamente o impacto da magnitude do erro. Um ponto com erro $+10^6$ atrai o modelo com a mesma intensidade que um ponto com erro $+0{,}01$.
+
+### 3. Perda de Huber (Regressão Suave e Robusta)
+Combina a suavidade analítica de $L_2$ para pequenos erros com a robustez de $L_1$ nas caudas, mediada por um limiar $\delta$:
+$$L_\delta(y, f) = \begin{cases} \frac{1}{2}(y - f)^2, & \text{se } |y - f| \le \delta \\ \delta |y - f| - \frac{1}{2}\delta^2, & \text{se } |y - f| > \delta \end{cases}$$
+$$r_{im} = \begin{cases} y_i - f_{m-1}(\mathbf{x}_i), & \text{se } |y_i - f_{m-1}(\mathbf{x}_i)| \le \delta \\ \delta \cdot \text{sign}\big(y_i - f_{m-1}(\mathbf{x}_i)\big), & \text{se } |y_i - f_{m-1}(\mathbf{x}_i)| > \delta \end{cases}$$
+
+### 4. Deviance Binomial (Regressão Logística — Classificação $y \in \{0, 1\}$)
+Com $p(\mathbf{x}) = \sigma(f(\mathbf{x})) = \frac{1}{1 + e^{-f(\mathbf{x})}}$ e perda de entropia cruzada binária (Aula 6):
+$$L(y, f) = - \big[ y \ln p + (1 - y) \ln (1 - p) \big]$$
+$$r_{im} = -\left[ \frac{\partial L}{\partial f} \right] = y_i - p_{m-1}(\mathbf{x}_i)$$
+O pseudo-resíduo da classificação binária é a diferença entre o rótulo real binário ($0$ ou $1$) e a probabilidade estimada corrente!
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+| Função de Perda | Expressão $L(y, f)$ | Pseudo-Resíduo $r_{im} = -\frac{\partial L}{\partial f}$ |
+|---|---|---|
+| **Mínimos Quadrados ($L_2$)** | $\frac{1}{2}(y - f)^2$ | $y_i - f_{m-1}(\mathbf{x}_i)$ |
+| **Mínimos Absolutos ($L_1$)** | $\|y - f\|$ | $\text{sign}(y_i - f_{m-1}(\mathbf{x}_i))$ |
+| **Perda de Huber** | Quadrática em $\le \delta$, linear em $> \delta$ | $y_i - f_{m-1}$ se $\|e\| \le \delta$; $\delta\,\text{sign}(e)$ se $\|e\| > \delta$ |
+| **Deviance Binomial** | $-[y \ln p + (1-y)\ln(1-p)]$ | $y_i - p_{m-1}(\mathbf{x}_i)$ |
+:::
+
+::: {.fragment .callout-tip}
+## A Unificação Elegante
+Seja em regressão clássica, regressão robusta ou probabilidade logística, o Gradient Boosting sempre ajusta árvores sobre resíduos bem definidos derivados do gradiente negativo.
+:::
+:::
+
+## O Algoritmo Gradient Tree Boosting (Alg. 10.3 do ESL)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Apresentamos formalmente o algoritmo canônico de **Gradient Tree Boosting para Regressão** (Friedman, 2001; Hastie et al., ESL Algoritmo 10.3):
+
+::: {.callout-note icon=false}
+## Algoritmo 10.3 — Gradient Tree Boosting
+1. **Inicialização:** Determinar o preditor constante ótimo:
+   $$f_0(\mathbf{x}) = \arg\min_\gamma \sum_{i=1}^N L(y_i, \gamma)$$
+   *(Para $L_2$, $f_0(\mathbf{x}) = \bar{y}$; para $L_1$, $f_0(\mathbf{x}) = \text{mediana}(y)$).*
+
+2. **Iterações:** Para $m = 1$ até $M$:
+   a) Para cada $i = 1, \dots, N$, computar os pseudo-resíduos:
+      $$r_{im} = -\left[\frac{\partial L(y_i, f(\mathbf{x}_i))}{\partial f(\mathbf{x}_i)}\right]_{f = f_{m-1}}$$
+   b) Ajustar uma árvore de regressão aos alvos $r_{im}$, particionando o espaço em $J_m$ regiões terminais disjuntas $R_{jm}$ ($j = 1, \dots, J_m$).
+   c) Para cada região terminal $j = 1, \dots, J_m$, calcular o valor ótimo via busca linear (*line search*):
+      $$\gamma_{jm} = \arg\min_\gamma \sum_{\mathbf{x}_i \in R_{jm}} L\big(y_i, f_{m-1}(\mathbf{x}_i) + \gamma\big)$$
+   d) Atualizar o modelo acumulado com fator de encolhimento $\nu \in (0, 1]$:
+      $$f_m(\mathbf{x}) = f_{m-1}(\mathbf{x}) + \nu \sum_{j=1}^{J_m} \gamma_{jm} \mathbb{I}(\mathbf{x} \in R_{jm})$$
+
+3. **Saída Final:** $\hat{f}(\mathbf{x}) = f_M(\mathbf{x})$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.callout-note icon=false}
+## Algoritmo 10.3 (ESL / Friedman 2001)
+1. **Inicialização:** $f_0(\mathbf{x}) = \arg\min_\gamma \sum_{i=1}^N L(y_i, \gamma)$.
+2. **Loop $m = 1 \dots M$:**
+   - (a) Pseudo-resíduos: $r_{im} = -\left[\frac{\partial L(y_i, f(\mathbf{x}_i))}{\partial f(\mathbf{x}_i)}\right]_{f=f_{m-1}}$.
+   - (b) Árvore sobre $r_{im} \to$ Regiões terminais $R_{1m}, \dots, R_{Jm}$.
+   - (c) Busca linear nas folhas:
+     $$\gamma_{jm} = \arg\min_\gamma \sum_{\mathbf{x}_i \in R_{jm}} L(y_i, f_{m-1}(\mathbf{x}_i) + \gamma)$$
+   - (d) Atualização: $f_m(\mathbf{x}) = f_{m-1}(\mathbf{x}) + \nu \sum_{j=1}^J \gamma_{jm} \mathbb{I}(\mathbf{x} \in R_{jm})$.
+3. **Retornar:** $f_M(\mathbf{x})$.
+:::
+
+## Exemplo Visual: Comparando Perdas e Pseudo-Resíduos
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
+
+# Subplot 1: Funções de perda em função do erro (y - f)
+e_vals = np.linspace(-3, 3, 300)
+loss_l2 = 0.5 * e_vals**2
+loss_l1 = np.abs(e_vals)
+delta = 1.0
+loss_huber = np.where(np.abs(e_vals) <= delta, 0.5 * e_vals**2, delta * np.abs(e_vals) - 0.5 * delta**2)
+
+axes[0].plot(e_vals, loss_l2, label="Quadrática L2", color=COR_A, lw=2.2)
+axes[0].plot(e_vals, loss_l1, label="Absoluta L1", color=COR_B, lw=2.2, linestyle="--")
+axes[0].plot(e_vals, loss_huber, label="Huber (delta=1.0)", color=COR_VERDE, lw=2.2, linestyle="-.")
+axes[0].set_xlabel("Erro Residual e = y - f(x)")
+axes[0].set_ylabel("Valor da Perda L(y, f)")
+axes[0].set_title("Comparação das Funções de Perda")
+axes[0].legend(loc="upper center")
+axes[0].grid(True, linestyle="--", alpha=0.6)
+
+# Subplot 2: Gradientes negativos (pseudo-resíduos)
+grad_l2 = e_vals
+grad_l1 = np.sign(e_vals)
+grad_huber = np.where(np.abs(e_vals) <= delta, e_vals, delta * np.sign(e_vals))
+
+axes[1].plot(e_vals, grad_l2, label="Gradiente L2: e", color=COR_A, lw=2.2)
+axes[1].plot(e_vals, grad_l1, label="Gradiente L1: sign(e)", color=COR_B, lw=2.2, linestyle="--")
+axes[1].plot(e_vals, grad_huber, label="Gradiente Huber", color=COR_VERDE, lw=2.2, linestyle="-.")
+axes[1].set_xlabel("Erro Residual e = y - f(x)")
+axes[1].set_ylabel("Pseudo-Resíduo r = -dL/df")
+axes[1].set_title("Pseudo-Resíduos Gerados pelas Perdas")
+axes[1].legend(loc="upper left")
+axes[1].grid(True, linestyle="--", alpha=0.6)
+
+plt.tight_layout()
+plt.show()
+```
+
+## Pausa 4: Pseudo-Resíduos e Busca Linear nas Folhas
+
+::: {.callout-tip}
+## Pergunta aberta provocadora
+
+Ao modelar uma variável financeira com caudas pesadíssimas e valores atípicos de milhões de dólares, um engenheiro substitui a perda quadrática $L_2$ pela perda absoluta $L_1$. Como essa mudança altera o pseudo-resíduo de treinamento e o cálculo do valor constante ótimo $\gamma_{jm}$ que atualiza cada folha da árvore?
+:::
+
+::: {.callout-tip}
+## Julgamento de V ou F
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Para a função de perda quadrática clássica $L_2$, o pseudo-resíduo é analiticamente idêntico ao resíduo comum $r_{im} = y_i - f_{m-1}(\mathbf{x}_i)$.
+- □ Sob a perda de valor absoluto $L_1$, o pseudo-resíduo independe da magnitude escalar do erro, fornecendo unicamente a direção $\text{sign}(y_i - f_{m-1}(\mathbf{x}_i))$.
+- □ O valor ótimo $\gamma_{jm}$ que atualiza cada folha terminal sob a perda absoluta $L_1$ é dado pela média aritmética dos resíduos das instâncias alocadas àquela folha.
+- □ A perda de Huber realiza uma transição suave entre o comportamento quadrático para erros pequenos ($|e| \le \delta$) e o comportamento linear para erros atípicos ($|e| > \delta$).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 4: Pseudo-Resíduos — Resposta
+
+::: {.callout-tip}
+## Julgamento de V ou F — Resposta
+
+- ✔ **V:** A derivada negativa de $\frac{1}{2}(y - f)^2$ em relação a $f$ resulta exatamente em $y - f$.
+- ✔ **V:** A derivada do módulo é a função sinal, imune à amplitude de desvios gigantescos.
+- ✗ **F:** Sob $L_1$, o minimizador em cada folha é a **mediana** dos resíduos, e não a média.
+- ✔ **V:** Pela definição de Huber, garantindo derivadas contínuas no limiar $\delta$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Ao trocar $L_2$ por $L_1$, o pseudo-resíduo passa de $(y - f)$ para $\text{sign}(y - f)$, tornando a direção de descida cega a discrepâncias extremas. Na folha terminal, a busca linear troca a média amostral pela **mediana** dos resíduos, conferindo ao Gradient Boosting robustez extrema contra caudas pesadas.
+:::
+
+:::
+
+# Bloco 3: Regularização, Arquitetura de Árvores e Interpretação
+
+## Regularização por Encolhimento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+No Algoritmo 10.3, a etapa de atualização do comitê incorpora um parâmetro escalar $\nu \in (0, 1]$ conhecido como **taxa de aprendizado** ou **fator de encolhimento (*shrinkage*)**:
+
+$$f_m(\mathbf{x}) = f_{m-1}(\mathbf{x}) + \nu \sum_{j=1}^{J_m} \gamma_{jm} \mathbb{I}(\mathbf{x} \in R_{jm})$$
+
+Quando $\nu = 1{,}0$, o algoritmo realiza passos completos no espaço de funções. Friedman (2001) demonstrou teoricamente e empiricamente que dar passos completos quase sempre conduz a um sobreajuste rápido, especialmente em problemas com ruído amostral.
+
+A introdução de $\nu < 0{,}1$ atua como uma **regularização implícita por penalidade $L_2$**. Ao atenuar o passo de cada árvore individual:
+1. Impede-se que as primeiras árvores dominem toda a representação da função alvo.
+2. Forçam-se as árvores subsequentes a buscarem correções residuais em direções ortogonais e variáveis secundárias.
+3. Cria-se um tradeoff fundamental entre $\nu$ e $M$: reduzir $\nu$ por um fator 10 exige multiplicar o número de árvores $M$ por aproximadamente 10 vezes. Contudo, o mínimo do erro de teste obtido com $\nu$ pequeno é sistematicamente **inferior** ao obtido com $\nu = 1{,}0$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+- **A Regra de Atualização Amortecida:**
+  $$f_m(\mathbf{x}) = f_{m-1}(\mathbf{x}) + \nu \cdot h_m(\mathbf{x}), \quad 0 < \nu \le 1$$
+:::
+
+::: {.fragment}
+- **O Princípio do Encolhimento (Friedman, 2001):**
+  - $\nu = 1{,}0$ (passos plenos): convergência rápida, mas sobreajuste precoce no conjunto de teste.
+  - $\nu \le 0{,}1$ (passos curtos): exige mais árvores ($M$ maior), mas encontra soluções de generalização comprovadamente superiores.
+  - **A Regra Prática:** Ajuste $\nu$ para um valor pequeno ($\nu \in [0{,}05, 0{,}1]$) e determine o número ótimo de árvores $M$ via validação cruzada / *early stopping*.
+:::
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
+
+# Subplot 1: Erro de teste em função de M para diferentes taxas de aprendizagem
+iter_range = np.arange(1, 101)
+color_map = {1.0: COR_B, 0.2: COR_NEU, 0.1: COR_A, 0.01: COR_CINZA}
+
+for lr in rates:
+    axes[0].plot(iter_range, staged_test_by_lr[lr], label=f"nu = {lr}", color=color_map[lr], lw=2.0)
+
+axes[0].axhline(mse_rf_test, color=COR_VERDE, linestyle=":", lw=2.0, label="Random Forest (Aula 9)")
+axes[0].set_xlabel("Número de Iterações (Árvores M)")
+axes[0].set_ylabel("Erro Quadrático Médio de Teste (MSE)")
+axes[0].set_title("California Housing: Trajetória de Teste sob Shrinkage")
+axes[0].set_ylim(0.2, 0.8)
+axes[0].legend(loc="upper right")
+axes[0].grid(True, linestyle="--", alpha=0.6)
+
+# Subplot 2: Comparação Treino vs Teste para nu=1.0 (overfitting) vs nu=0.1
+axes[1].plot(iter_range, staged_train_by_lr[1.0], label="Treino (nu=1.0)", color=COR_B, linestyle="--")
+axes[1].plot(iter_range, staged_test_by_lr[1.0], label="Teste (nu=1.0) -> Overfit", color=COR_B, lw=2.2)
+axes[1].plot(iter_range, staged_train_by_lr[0.1], label="Treino (nu=0.1)", color=COR_A, linestyle="--")
+axes[1].plot(iter_range, staged_test_by_lr[0.1], label="Teste (nu=0.1) -> Ótimo", color=COR_A, lw=2.2)
+axes[1].set_xlabel("Número de Iterações (Árvores M)")
+axes[1].set_ylabel("MSE")
+axes[1].set_title("Diagnóstico: Sobreajuste em nu=1.0 vs. Regularização em nu=0.1")
+axes[1].set_ylim(0.0, 0.6)
+axes[1].legend(loc="upper right")
+axes[1].grid(True, linestyle="--", alpha=0.6)
+
+plt.tight_layout()
+plt.show()
+```
+
+## Arquitetura de Árvores e Controle da Ordem de Interação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Um dos aspectos teóricos mais elegantes do Gradient Tree Boosting diz respeito à parametrização do tamanho de cada árvore constituinte, determinado pelo número de nós terminais $J$.
+
+Hastie, Tibshirani e Friedman (ESL §10.11) demonstraram um teorema estrutural fundamental:
+
+::: {.callout-note icon=false}
+## Teorema da Ordem Máxima de Interação (Friedman, 2001)
+Uma árvore de decisão com $J$ nós terminais (folhas) possui exatamente $J - 1$ divisões internas. Consequentemente, o modelo aditivo gerado por árvores com $J$ folhas é capaz de representar efeitos e interações entre no máximo $J - 1$ variáveis preditoras simultâneas.
+:::
+
+As implicações práticas dessa propriedade são diretas:
+1. **$J = 2$ (*Decision Stumps* / Profundidade 1):** Cada árvore divide exatamente uma variável $x_k$. A expansão aditiva resultante tem a forma:
+   $$f(\mathbf{x}) = \sum_{k=1}^p f_k(x_k)$$
+   Trata-se de um **Modelo Aditivo Generalizado (GAM)** puro! Não há nenhum termo cruzado $x_j x_k$. Os efeitos marginais de cada variável operam de forma puramente aditiva e são completamente interpretáveis.
+2. **$J = 3$ (Profundidade 2):** Permite interações bivariadas de 2ª ordem ($f_{jk}(x_j, x_k)$).
+3. **$J = 4$ a $8$ (Profundidade 2 a 3):** Permite interações de 3ª a 7ª ordem. Na esmagadora maioria dos problemas empíricos tabulares, a natureza dos dados é dominada por efeitos principais e interações de baixa ordem. Árvores com $4 \le J \le 8$ são suficientes para capturar praticamente todo o sinal relevante sem abrir as portas para variância desnecessária.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.callout-note icon=false}
+## Teorema de Ordem de Interação (ESL §10.11)
+Uma árvore com $J$ folhas modela no máximo interações de ordem $J - 1$.
+:::
+
+::: {.fragment}
+- **Casos Especiais de Arquitetura:**
+  - **$J = 2$ (*Decision Stumps*):** Modelo aditivo puro sem interações ($f(\mathbf{x}) = \sum_k f_k(x_k)$). Máxima interpretabilidade.
+  - **$J = 3$ (Profundidade 2):** Interações bivariadas ($x_j \times x_k$).
+  - **$4 \le J \le 8$ (Profundidade 2 a 3):** O ponto ótimo prático de quase todas as aplicações de Machine Learning moderno.
+:::
+
+::: {.fragment}
+- **Contraste com Random Forests (Aula 9):**
+  - Random Forests precisam de $J > 100$ (árvores profundas sem poda) para eliminar o viés.
+  - Gradient Boosting atinge seu ápice com árvores rasas de $J \in [4, 8]$.
+:::
+:::
+
+## Interpretabilidade: Importância de Atributos e PDP
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Apesar de ser um comitê complexo de centenas de árvores, o Gradient Tree Boosting preserva ferramentas sólidas de interpretabilidade estatística propostas por Friedman (2001):
+
+### 1. Importância Relativa de Variáveis
+Para uma única árvore $T$, a importância de uma variável $x_k$ é a soma da melhoria na impureza quadrática em todos os nós internos $t$ onde $x_k$ foi selecionada para a divisão:
+
+$$I_k^2(T) = \sum_{t=1}^{J-1} \hat{i}_t^2 \cdot \mathbb{I}(v(t) = k)$$
+
+onde $v(t)$ é a variável de corte no nó $t$ e $\hat{i}_t^2$ é o ganho quadrático. No Gradient Boosting com $M$ árvores, a métrica é calculada pela média sobre todo o comitê:
+
+$$I_k^2 = \frac{1}{M} \sum_{m=1}^M I_k^2(T_m)$$
+
+### 2. Gráficos de Dependência Parcial (*Partial Dependence Plots - PDP*)
+O PDP permite isolar visualmente o efeito marginal de um subconjunto restrito de variáveis preditoras $X_S$ (por exemplo, 1 ou 2 variáveis) sobre a função estimada $f(\mathbf{x})$, integrando numericamente sobre a distribuição empírica das demais variáveis complementares $X_C$:
+
+$$\bar{f}_S(\mathbf{x}_S) = \frac{1}{N} \sum_{i=1}^N f(\mathbf{x}_S, \mathbf{x}_{i, C})$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+- **Importância Relativa de Friedman:**
+  $$I_k^2 = \frac{1}{M} \sum_{m=1}^M \sum_{t=1}^{J-1} \hat{i}_t^2 \mathbb{I}(v(t) = k)$$
+  Mede o ganho empírico médio acumulado por divisões baseadas no preditor $x_k$.
+:::
+
+::: {.fragment}
+- **Dependência Parcial (PDP):**
+  $$\bar{f}_S(\mathbf{x}_S) = \frac{1}{N} \sum_{i=1}^N f(\mathbf{x}_S, \mathbf{x}_{i, C})$$
+  Permite visualizar curvas contínuas do impacto marginal de uma variável isolada sobre o alvo predito.
+:::
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
+
+# Subplot 1: Importância de variáveis no California Housing
+sorted_idx = np.argsort(importances_gbr)
+pos = np.arange(sorted_idx.shape[0]) + 0.5
+axes[0].barh(pos, importances_gbr[sorted_idx], align="center", color=COR_A, edgecolor="black", linewidth=0.7)
+axes[0].set_yticks(pos)
+axes[0].set_yticklabels(np.array(features)[sorted_idx])
+axes[0].set_xlabel("Importância Relativa de Friedman")
+axes[0].set_title("California Housing: Importância de Variáveis (GBR)")
+axes[0].grid(axis="x", linestyle="--", alpha=0.6)
+
+# Subplot 2: Gráfico de Dependência Parcial para MedInc
+medinc_vals = np.linspace(X_train[:, 0].min(), 10.0, 50)
+pdp_preds = []
+X_temp = X_test.copy()
+for val in medinc_vals:
+    X_temp[:, 0] = val
+    pdp_preds.append(np.mean(gbr_d3.predict(X_temp)))
+
+axes[1].plot(medinc_vals, pdp_preds, color=COR_B, lw=2.5)
+axes[1].set_xlabel("Renda Mediana (MedInc)")
+axes[1].set_ylabel("Valor Previsto Médio (MedHouseVal)")
+axes[1].set_title("Gráfico de Dependência Parcial (PDP): MedInc")
+axes[1].grid(True, linestyle="--", alpha=0.6)
+
+plt.tight_layout()
+plt.show()
+```
+
+## Pausa 5: Regularização, Arquitetura e Interpretação
+
+::: {.callout-tip}
+## Pergunta aberta provocadora
+
+Um analista ajusta um modelo Gradient Tree Boosting com $\nu = 1{,}0$ e descobre que $M = 30$ árvores atingem o menor erro de validação. Ele então decide reduzir $\nu$ para $\nu = 0{,}02$, mantendo fixas exatamente as mesmas 30 árvores. O que acontecerá com o desempenho do modelo e como ele deve reconfigurar $M$ para usufruir dos benefícios do encolhimento?
+:::
+
+::: {.callout-tip}
+## Julgamento de V ou F
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O hiperparâmetro de encolhimento $\nu \in (0, 1]$ amortece o passo de cada árvore, funcionando como um análogo funcional da regularização $L_2$.
+- □ Reduzir $\nu$ para valores próximos a zero permite que o ensemble atinja o mesmo erro de treino com um número $M$ significativamente menor de árvores.
+- □ Uma árvore com $J = 2$ nós terminais (*decision stump*) restringe o ensemble final a um Modelo Aditivo Generalizado sem qualquer interação entre variáveis.
+- □ Os Gráficos de Dependência Parcial (PDP) isolam o efeito marginal de uma variável fixando todas as outras variáveis exatamente em suas médias amostrais.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 5: Regularização e Arquitetura — Resposta
+
+::: {.callout-tip}
+## Julgamento de V ou F — Resposta
+
+- ✔ **V:** O shrinkage restringe o avanço de cada passo, forçando termos subsequentes a explorarem novas dimensões de melhoria.
+- ✗ **F:** Reduzir $\nu$ diminui a velocidade de ajuste, exigindo um número $M$ **muito maior** de iterações para atingir o mesmo risco empírico.
+- ✔ **V:** Com apenas uma divisão por árvore, nenhuma interação bivariada é possível ($f(\mathbf{x}) = \sum_k f_k(x_k)$).
+- ✗ **F:** O PDP calcula a média empírica integrando sobre a distribuição conjunta das variáveis complementares, e não avaliando na média.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Reduzir $\nu$ para $0{,}02$ mantendo apenas 30 árvores causará subajuste severo (*underfitting*), pois o comitê terá percorrido uma fração ínfima do caminho até o ótimo funcional. O analista deve multiplicar $M$ por um fator de 20 a 50 (expandindo para $M \in [600, 1500]$) com parada antecipada para colher a redução de erro de generalização.
+:::
+
+:::
+
+# Fechamento
+
+## Retomando as 5 Perguntas da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+1. **Como o Boosting inverte formalmente os princípios estatísticos do Bagging?**  
+   O Bagging reduz a variância de modelos complexos e instáveis (árvores profundas de baixo viés) através de média aritmética paralela. O Boosting reduz o viés de modelos simples e rígidos (*decision stumps* de alto viés) através de adições sequenciais onde cada nova árvore mira nos resíduos remanescentes.
+
+2. **Por que o AdaBoost equivale a um modelo aditivo com perda exponencial?**  
+   Demonstramos algebricamente que no Forward Stagewise Additive Modeling com $L(y, f) = e^{-yf}$, a ponderação das instâncias emerge da fatoração $w_i = e^{-y_i f_{m-1}}$, o classificador base minimiza o erro de classificação ponderado, e a derivada em relação a $\beta$ conduz diretamente à constante analítica $\alpha_m = \frac{1}{2}\ln((1-\text{err}_m)/\text{err}_m)$.
+
+3. **Qual é o salto de generalização de Friedman (2001) no espaço de funções?**  
+   Friedman provou que ajustar árvores sobre resíduos equivale a realizar descida de gradiente mais íngreme (*steepest descent*) no espaço vetorial $\mathbb{R}^N$, onde o pseudo-resíduo é o gradiente negativo $-\frac{\partial L}{\partial f_i}$, e a indução da árvore de regressão por mínimos quadrados atua como uma projeção ortogonal desse gradiente sobre a classe de hipóteses.
+
+4. **Como derivar os pseudo-resíduos para perdas gerais?**  
+   Para $L_2$, o pseudo-resíduo é o resíduo comum $y_i - f_{m-1}$. Para $L_1$, é a direção $\text{sign}(y_i - f_{m-1})$ com atualização de folha pela mediana. Para Huber, combina ambos com truncamento em $\delta$. Para a deviance binomial, é a diferença entre rótulo e probabilidade $y_i - p_{m-1}$.
+
+5. **Como o encolhimento $\nu$ e a profundidade $J$ governam o modelo?**  
+   O encolhimento $\nu \le 0{,}1$ atua como regularização $L_2$ implícita, prevenindo sobreajuste ao custo de exigir maiores $M$. O número de folhas $J$ controla estritamente a ordem máxima de interação ($K \le J - 1$), com $J=2$ produzindo modelos aditivos puros e $J \in [4, 8]$ capturando interações ricas com baixo risco de sobreajuste.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+1. **Inversão de Paradigma:** Bagging reduz variância via paralelismo; Boosting reduz viés via sequencialidade.
+2. **FSAM e AdaBoost:** Perda exponencial induz exatamente a reponderação multiplicativa de pesos e $\alpha_m$.
+3. **Descida Funcional:** Resíduos são gradientes negativos no espaço de funções projetados sobre árvores.
+4. **Pseudo-Resíduos Robustos:** $L_2$ (média de resíduos), $L_1$ (direção e mediana), Huber (truncamento) e Deviance ($y - p$).
+5. **Regularização:** $\nu \le 0{,}1$ amortece passos prevenindo sobreajuste; $J$ limita a ordem de interação a $J-1$.
+:::
+:::
+
+## Tabela Comparativa Completa: Bagging vs. Boosting
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A tabela abaixo sintetiza formalmente os contrastes operacionais e estatísticos entre os dois grandes paradigmas de ensembles da Parte 3 do curso:
+
+| Dimensão Teórica / Prática | Bagging e Random Forests (Aula 9) | Gradient Tree Boosting (Aula 10) |
+|---|---|---|
+| **Alvo Primário do Erro** | Redução de **Variância** ($\text{Var}$) | Redução de **Viés** ($\text{Bias}^2$) |
+| **Complexidade dos Learners Base** | Alta (árvores profundas, não podadas) | Baixa a moderada ($J \in [4, 8]$ nós terminais) |
+| **Mecanismo de Agregação** | Média aritmética paralela independente | Expansão aditiva sequencial acoplada |
+| **Comportamento quando $B, M \to \infty$** | Estabiliza no patamar $\rho \sigma^2$ (não sobreajusta) | Risco de **sobreajuste** (exige *early stopping*) |
+| **Paralelização Computacional** | Trivial e perfeita em todas as árvores | Inerentemente sequencial entre iterações |
+| **Sensibilidade a Outliers e Ruído** | Muito robusto (amortece ruído pela média) | Sensível sob $L_2$ e AdaBoost; robusto sob Huber/$L_1$ |
+| **Papel do Aprendizado Estocástico** | Subamostragem de atributos ($m \le p$) por nó | Subamostragem de dados ($\eta$) e *shrinkage* ($\nu$) |
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.callout-note icon=false}
+## Síntese: Bagging vs. Boosting
+- **Bagging:** Árvores profundas $\to$ Média paralela $\to$ Combate variância $\to$ Imune a $B \to \infty$.
+- **Boosting:** Árvores rasas $\to$ Adição sequencial $\to$ Combate viés $\to$ Exige encolhimento $\nu$ e *early stopping*.
+:::
+:::
+
+## O Que Fica em Aberto e Próximos Passos
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Embora o Gradient Tree Boosting de Friedman tenha revolucionado a modelagem preditiva em dados tabulares, a computação dos cortes de árvores via aproximação de primeira ordem (gradiente puro) apresenta limitações computacionais e analíticas quando lidamos com perdas complexas e bases massivas.
+
+Esse desafio deu origem aos frameworks modernos que dominam competições de Machine Learning:
+- **XGBoost (Chen & Guestrin, 2016):** Incorpora uma **aproximação de Taylor de 2ª ordem** (usando gradiente e Hessiana da perda simultaneamente), adiciona regularização explícita nos pesos das folhas ($L_1$ e $L_2$) e paraleliza a busca por histogramas de corte.
+- **LightGBM (Ke et al., 2017):** Introduz amostragem unilateral baseada em gradiente (GOSS) e crescimento folha por folha (*leaf-wise*).
+- **CatBoost (Prokhorenkova et al., 2018):** Resolve vazamentos de dados com *ordered boosting* para tratamento nativo de variáveis categóricas.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment}
+- **O Que Fica em Aberto:**
+  - O Gradient Tree Boosting clássico utiliza aproximação de Taylor de 1ª ordem.
+  - Como incorporar curvatura de 2ª ordem (Hessiana) diretamente na divisão dos nós?
+  - $\to$ **XGBoost, LightGBM e CatBoost**.
+:::
+:::
+
+## Ponte para a Aula 11: Máquinas de Vetores de Suporte (SVM)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Nas Aulas 9 e 10, atacamos a não linearidade e a complexidade por meio de comitês massivos: ou combinamos centenas de hiperplanos ortogonais em paralelo para amortecer a variância (Bagging), ou alinhamos dezenas de árvores no espaço de funções para perseguir o gradiente da perda (Boosting).
+
+Na **Aula 11**, mudaremos radicalmente de perspectiva matemática. Em vez de construir comitês com milhares de regras por partes, investigaremos as **Máquinas de Vetores de Suporte (*Support Vector Machines - SVM*)**. Retornaremos à geometria pura da teoria de separação ótimo de Vapnik (1995):
+1. Como encontrar o hiperplano único que maximiza a margem geométrica de separação entre classes?
+2. Como a dualidade de Lagrange e as condições KKT provam que a decisão depende unicamente de um subconjunto parcimonioso de dados: os **vetores de suporte**?
+3. Como o **truque do kernel (*kernel trick*)** viabiliza o mapeamento implícito para espaços de Hilbert de dimensão infinita sem nenhum custo de maldição da dimensionalidade?
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+::: {.fragment .callout-note}
+## Próxima Parada: Aula 11 — Máquinas de Vetores de Suporte (SVM)
+- **Do comitê ao hiperplano ótimo:** Em vez de milhares de cortes ortogonais, um único separador de margem máxima.
+- **Dualidade de Lagrange e KKT:** A dependência exclusiva dos **vetores de suporte**.
+- **O Truque do Kernel:** Separação não linear em dimensões infinitas sem calcular coordenadas explícitas.
+:::
+:::
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+

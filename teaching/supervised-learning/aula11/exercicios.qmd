@@ -1,0 +1,140 @@
+---
+title: "Exercícios — Aula 11: Máquinas de Vetores de Suporte (SVM)"
+subtitle: "Supervised Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado das questões de Verdadeiro/Falso e das questões discursivas está em
+[`soluções.qmd`](soluções.qmd). Encontrou um erro numa questão? Corrija
+diretamente neste arquivo e abra um *pull request*.
+:::
+
+## Contexto e notação
+
+Nesta lista de exercícios, consideramos o problema de aprendizado supervisionado sob o paradigma de separação geométrica por margem máxima e métodos de kernel (Cortes & Vapnik, 1995; Bishop, PRML Cap. 7; Hastie et al., ESL Cap. 12; Platt, 1999).
+
+Seja $D = \{(\mathbf{x}_1, y_1), \dots, (\mathbf{x}_N, y_N)\}$ um conjunto de dados de treinamento com $N$ amostras observadas, onde $\mathbf{x}_i \in \mathbb{R}^d$ são os atributos de entrada e $y_i \in \{-1, +1\}$ são os rótulos de classe em classificação binária (ou $y_i \in \mathbb{R}$ em regressão).
+
+1. **Hiperplano Afim e Margem Canônica:** Um hiperplano de decisão é parametrizado pelo vetor normal $\mathbf{w} \in \mathbb{R}^d$ e pelo bias $b \in \mathbb{R}$, satisfazendo $\mathbf{w}^T \mathbf{x} + b = 0$. Sob a escala canônica $\min_i y_i(\mathbf{w}^T \mathbf{x}_i + b) = 1$, a distância ortogonal mínima de qualquer amostra ao hiperplano é $\frac{1}{\|\mathbf{w}\|}$, resultando na margem geométrica total $\gamma = \frac{2}{\|\mathbf{w}\|}$.
+
+2. **Problema Primal de Margem Rígida (*Hard Margin*):**
+   $$\min_{\mathbf{w}, b} \frac{1}{2}\|\mathbf{w}\|^2 \quad \text{sujeito a } y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1, \quad \forall i=1, \dots, N$$
+
+3. **Problema Dual de Wolfe e Condições KKT:**
+   $$\max_{\boldsymbol{\alpha}} \sum_{i=1}^N \alpha_i - \frac{1}{2}\sum_{i=1}^N \sum_{j=1}^N \alpha_i \alpha_j y_i y_j \langle \mathbf{x}_i, \mathbf{x}_j \rangle \quad \text{s.a. } \alpha_i \ge 0, \, \sum_{i=1}^N \alpha_i y_i = 0$$
+   A condição de folga complementar KKT impõe $\alpha_i [y_i(\mathbf{w}^T \mathbf{x}_i + b) - 1] = 0$. Pontos com $\alpha_i > 0$ são os **Vetores de Suporte**.
+
+4. **Margem Suave (*Soft Margin*) e Restrições em Caixa:**
+   Com a introdução de variáveis de folga $\xi_i \ge 0$, o primal minimiza $\frac{1}{2}\|\mathbf{w}\|^2 + C \sum_{i=1}^N \xi_i$ sob $y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1 - \xi_i$. O dual resultante introduz restrições em caixa:
+   $$0 \le \alpha_i \le C, \quad \forall i=1, \dots, N \quad \text{e} \quad \sum_{i=1}^N \alpha_i y_i = 0$$
+   Essa formulação equivale analiticamente a minimizar a **perda Hinge regularizada**: $\sum_{i=1}^N \max(0, 1 - y_i f(\mathbf{x}_i)) + \frac{1}{2C}\|\mathbf{w}\|^2$.
+
+5. **Truque do Kernel (*Kernel Trick*):**
+   Pelo Teorema de Mercer, o produto interno em um espaço de Hilbert transformado $\langle \phi(\mathbf{x}), \phi(\mathbf{z}) \rangle_{\mathcal{H}}$ é avaliado por uma função kernel $k(\mathbf{x}, \mathbf{z})$. O kernel RBF Gaussiano é definido por:
+   $$k(\mathbf{x}, \mathbf{z}) = \exp(-\gamma \|\mathbf{x} - \mathbf{z}\|^2), \quad \gamma = \frac{1}{2\sigma^2} > 0$$
+
+6. **Calibração de Platt e SVR:**
+   - *Platt Scaling (1999):* Modela $P(Y = +1 \mid \mathbf{x}) = \frac{1}{1 + \exp(A f(\mathbf{x}) + B)}$ ajustando $A, B$ via validação cruzada out-of-fold.
+   - *$\varepsilon$-SVR:* Utiliza a perda insensível $L_\varepsilon(y, f(\mathbf{x})) = \max(0, |y - f(\mathbf{x})| - \varepsilon)$, gerando soluções esparsas na regressão.
+
+---
+
+## Questões discursivas
+
+1. **Dedução do Problema Dual de Wolfe e Caracterização das Condições KKT.**  
+   Considere o problema primal da SVM linear de margem rígida:
+   $$\min_{\mathbf{w}, b} \frac{1}{2}\|\mathbf{w}\|^2 \quad \text{sujeito a } y_i(\mathbf{w}^T \mathbf{x}_i + b) - 1 \ge 0, \quad \forall i=1, \dots, N$$
+   a) Formule a função Lagrangeana primal $\mathcal{L}(\mathbf{w}, b, \boldsymbol{\alpha})$ introduzindo os multiplicadores de Lagrange $\alpha_i \ge 0$.  
+   b) Calcule o gradiente de $\mathcal{L}$ em relação ao vetor de pesos $\mathbf{w}$ e a derivada parcial em relação ao termo independente $b$, obtendo as condições de estacionariedade que expressam $\mathbf{w}$ em função de $\boldsymbol{\alpha}$ e impõem a restrição de equilíbrio sobre $\boldsymbol{\alpha}$.  
+   c) Substitua as relações obtidas no item (b) de volta na função Lagrangeana para derivar o Problema Dual de Wolfe $\mathcal{Q}(\boldsymbol{\alpha})$.  
+   d) Analise a condição de folga complementar KKT $\alpha_i [y_i(\mathbf{w}^T \mathbf{x}_i + b) - 1] = 0$. Explique por que ela induz esparsidade matemática e como o parâmetro $b$ é determinado a partir de qualquer vetor de suporte.
+
+2. **Equivalência Formal entre Margem Suave com Variáveis de Folga e a Perda Hinge Regularizada.**  
+   A formulação de Cortes e Vapnik (1995) para dados não linearmente separáveis introduz variáveis de folga $\xi_i \ge 0$:
+   $$\min_{\mathbf{w}, b, \boldsymbol{\xi}} \frac{1}{2}\|\mathbf{w}\|^2 + C \sum_{i=1}^N \xi_i \quad \text{sujeito a } y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1 - \xi_i, \quad \xi_i \ge 0, \quad \forall i=1, \dots, N$$
+   a) Para valores fixados de $\mathbf{w}$ e $b$, prove que a escolha ótima que minimiza cada variável $\xi_i$ satisfaz $\xi_i^* = \max(0, 1 - y_i(\mathbf{w}^T \mathbf{x}_i + b))$.  
+   b) Substitua $\xi_i^*$ na função objetivo primal e mostre que o problema equivale à minimização do risco empírico sob a função de perda Hinge somada a uma penalização Ridge ($L_2$) com coeficiente de regularização $\lambda = \frac{1}{2C}$.  
+   c) Compare a perda Hinge $L_{\text{hinge}}(z) = \max(0, 1 - z)$ com a perda logística reescalada $L_{\text{log}}(z) = \log_2(1 + e^{-z})$ em termos de convexidade, diferenciabilidade e capacidade de induzir esparsidade no vetor de multiplicadores duais $\boldsymbol{\alpha}$.
+
+3. **O Kernel RBF Gaussiano como Produto Interno em Espaço de Hilbert de Dimensão Infinita.**  
+   Considere o kernel Radial Basis Function (RBF) unidimensional com parâmetro $\gamma = \frac{1}{2}$:
+   $$k(x, z) = \exp\left(-\frac{1}{2}(x - z)^2\right), \quad x, z \in \mathbb{R}$$
+   a) Desenvolva o termo quadrático $(x - z)^2$ e reescreva $k(x, z)$ como o produto de três fatores exponenciais.  
+   b) Utilizando a expansão em série de Taylor de $\exp(u) = \sum_{m=0}^\infty \frac{u^m}{m!}$, demonstre passo a passo que:
+   $$k(x, z) = \sum_{m=0}^\infty \phi_m(x) \phi_m(z)$$
+   explicitando a fórmula analítica de cada componente $\phi_m(x)$ do vetor de projeção não linear.  
+   c) Conclua por que o espaço de atributos $\mathcal{H}$ associado ao kernel Gaussiano possui dimensão infinita ($\ell^2$) e explique por que avaliar $k(x, z)$ diretamente no espaço original contorna a maldição da dimensionalidade.
+
+4. **Calibração de Probabilidades de Platt e o Tubo de Insensibilidade da SVR.**  
+   A SVM padrão produz escores contínuos $f(\mathbf{x}) \in \mathbb{R}$ que não representam probabilidades calibradas.  
+   a) Explique a formulação da sigmoide paramétrica de Platt (1999) $P(Y = +1 \mid \mathbf{x}) = \frac{1}{1 + \exp(A f(\mathbf{x}) + B)}$ e detalhe por que estimar $A$ e $B$ diretamente sobre os escores do conjunto de treino gera probabilidades severamente distorcidas (vazamento de dados).  
+   b) Descreva o protocolo de validação cruzada out-of-fold utilizado pelo método de Platt para contornar esse problema.  
+   c) Na Support Vector Regression ($\varepsilon$-SVR), a perda insensível é definida por $L_\varepsilon(y, f(\mathbf{x})) = \max(0, |y - f(\mathbf{x})| - \varepsilon)$. Desenhe mentalmente ou descreva geometricamente o tubo de raio $\varepsilon$ ao redor da predição e deduza o que ocorre com o número de vetores de suporte quando $\varepsilon \to 0$ e quando $\varepsilon \to \infty$.
+
+---
+
+## Testes conceituais (Verdadeiro ou Falso)
+
+Julgue os itens a seguir como Verdadeiro (**V**) ou Falso (**F**).
+
+### Teste 1: A Geometria da Margem Máxima e Escala Canônica
+- □ A distância euclidiana ortogonal de qualquer ponto $\mathbf{x}_i$ ao hiperplano $\mathbf{w}^T \mathbf{x} + b = 0$ dobra se multiplicarmos simultaneamente os parâmetros $\mathbf{w}$ e $b$ por uma constante positiva $\kappa = 2$.
+- □ Sob a escala canônica $\min_i y_i(\mathbf{w}^T \mathbf{x}_i + b) = 1$, a largura total da margem geométrica de separação entre as classes positiva e negativa é expressa analiticamente por $\frac{2}{\|\mathbf{w}\|}$.
+- □ Maximizar a margem geométrica $\frac{2}{\|\mathbf{w}\|}$ equivale matematicamente a minimizar $\frac{1}{2}\|\mathbf{w}\|^2$, o que resulta em um problema de programação quadrática estritamente convexo dotado de mínimo global único.
+- □ Na formulação de margem rígida (*Hard Margin*), a existência de uma solução viável e finita é matematicamente garantida para qualquer conjunto arbitrário de dados de treinamento.
+
+### Teste 2: Dualidade de Lagrange e Condições KKT
+- □ O Teorema de Dualidade Forte garante que, sob a condição de qualificação de Slater para problemas convexos viáveis, o valor ótimo da função objetivo primal coincide exatamente com o valor ótimo do problema dual de Wolfe.
+- □ A condição de estacionariedade $\nabla_{\mathbf{w}} \mathcal{L} = \mathbf{0}$ prova que o vetor normal ótimo $\mathbf{w}$ reside no subespaço gerado pelos dados de treinamento $\mathbf{x}_1, \dots, \mathbf{x}_N$.
+- □ Pela condição de folga complementar KKT, qualquer ponto de treinamento cujo escore de margem satisfaça $y_i(\mathbf{w}^T \mathbf{x}_i + b) > 1$ possui necessariamente multiplicador de Lagrange nulo ($\alpha_i = 0$).
+- □ Se um conjunto de dados linearmente separável for enriquecido com $1.000$ novas observações posicionadas a grande distância da fronteira e bem no interior de sua respectiva classe, os parâmetros $(\mathbf{w}^*, b^*)$ do hiperplano ótimo sofrerão alterações substanciais.
+
+### Teste 3: Margem Suave e o Hiperparâmetro $C$
+- □ A introdução de variáveis de folga $\xi_i \ge 0$ no classificador de margem suave permite encontrar uma fronteira separadora ótima mesmo quando as classes apresentam sobreposição estocástica em seus atributos.
+- □ Uma observação que possui variável de folga $\xi_i = 0{,}8$ na solução da SVM de margem suave foi classificada incorretamente pelo hiperplano separador.
+- □ No problema dual da margem suave, as restrições em caixa impõem que os multiplicadores de Lagrange satisfaçam $0 \le \alpha_i \le C$ para cada observação $i = 1, \dots, N$.
+- □ Reduzir o hiperparâmetro de regularização para um valor muito próximo de zero ($C \to 0$) força as margens a se tornarem extremamente estreitas e eleva a variância do classificador.
+
+### Teste 4: A Conexão com a Perda Hinge
+- □ O classificador de margem suave com regularizador $C$ minimiza formalmente a perda Hinge empírica $\sum \max(0, 1 - y_i f(\mathbf{x}_i))$ regularizada pela norma $L_2$ do vetor de pesos $\mathbf{w}$.
+- □ Ao contrário da perda de entropia cruzada da Regressão Logística, a perda Hinge possui derivada nula para todos os pontos com margem funcional $y_i f(\mathbf{x}_i) \ge 1$, o que confere à SVM sua propriedade de esparsidade matemática.
+- □ A perda Hinge é estritamente côncava em relação a $f(\mathbf{x})$, o que inviabiliza o uso de algoritmos convexos para sua minimização global.
+- □ Para pontos classificados incorretamente com margem funcional negativa $y_i f(\mathbf{x}_i) = -3$, a perda Hinge penaliza linearmente o erro, impondo custo igual a 4.
+
+### Teste 5: O Truque do Kernel e o Teorema de Mercer
+- □ Pelo Teorema de Mercer, qualquer função arbitrária $k(\mathbf{x}, \mathbf{z}): \mathbb{R}^d \times \mathbb{R}^d \to \mathbb{R}$ define um kernel válido, mesmo que sua matriz de Gram correspondente apresente autovalores negativos.
+- □ O Truque do Kernel permite calcular o hiperplano de separação em um espaço de Hilbert $\mathcal{H}$ avaliando exclusivamente a função kernel no espaço de entrada original, sem requerer o cálculo explícito das coordenadas $\phi(\mathbf{x})$.
+- □ Um kernel polinomial da forma $k(\mathbf{x}, \mathbf{z}) = (\mathbf{x}^T \mathbf{z} + 1)^2$ em $\mathbb{R}^2$ projeta implicitamente os dados em um espaço com termos constantes, lineares, quadráticos e interações cruzadas de 2ª ordem.
+- □ A complexidade computacional para classificar uma nova instância de teste com a SVM com kernel é proporcional à dimensionalidade do espaço transformado $\mathcal{H}$, e não ao número de vetores de suporte retidos.
+
+### Teste 6: O Kernel RBF Gaussiano e Hiperparâmetros
+- □ O Kernel RBF Gaussiano $k(\mathbf{x}, \mathbf{z}) = \exp(-\gamma \|\mathbf{x} - \mathbf{z}\|^2)$ corresponde a um produto interno em um espaço de Hilbert de dimensionalidade infinita.
+- □ Fixar uma largura de banda minúscula (hiperparâmetro $\gamma \to \infty$) força a SVM RBF a suavizar a fronteira de decisão, aproximando o classificador de um hiperplano linear de alto viés.
+- □ A matriz de Gram gerada pelo kernel RBF Gaussiano sobre um conjunto de amostras distintas em $\mathbb{R}^d$ é sempre estritamente simétrica e semidefinida positiva.
+- □ Para duas instâncias de dados muito distantes entre si no espaço de atributos original ($\|\mathbf{x}_i - \mathbf{x}_j\| \to \infty$), o valor do kernel Gaussiano decai exponencialmente para zero.
+
+### Teste 7: Calibração Probabilística via Platt Scaling
+- □ O escore bruto de margem da SVM $f(\mathbf{x}) = \sum \alpha_i y_i k(\mathbf{x}_i, \mathbf{x}) + b$ pode ser interpretado diretamente como uma probabilidade bem calibrada sem necessidade de transformação pós-processamento.
+- □ O método de Platt Scaling modela a probabilidade a posteriori ajustando uma regressão logística univariada sobre os escores contínuos produzidos pela SVM.
+- □ Ajustar os parâmetros da sigmoide de Platt diretamente sobre as predições de margem calculadas na própria base de treinamento gera estimativas de probabilidade perfeitamente calibradas e sem viés de otimismo.
+- □ O uso de validação cruzada out-of-fold na calibração de Platt garante que os escores avaliados na sigmoide correspondam a amostras não vistas no treinamento dos vetores de suporte daquele fold.
+
+### Teste 8: Support Vector Regression ($\varepsilon$-SVR) e Boas Práticas
+- □ Na Support Vector Regression ($\varepsilon$-SVR), qualquer amostra cujo erro de predição satisfaça $|y_i - f(\mathbf{x}_i)| \le \varepsilon$ sofre custo de perda estritamente nulo e não se torna vetor de suporte.
+- □ A perda $\varepsilon$-insensível induz soluções de regressão esparsas, nas quais apenas as instâncias que repousam na fronteira do tubo ou fora dele determinam os coeficientes do modelo.
+- □ Como a formulação da SVM baseia-se na distância geométrica euclidiana $\|\mathbf{x}_i - \mathbf{x}_j\|$, a padronização prévia de escala das variáveis (Z-score) é desnecessária e irrelevante para a posição do hiperplano final.
+- □ Na $\varepsilon$-SVR, aumentar indefinidamente o hiperparâmetro $\varepsilon$ até que todo o conjunto de dados esteja contido no interior do tubo resulta em um modelo sem vetores de suporte ativos ($N_{\text{SV}} = 0$) e função puramente constante.
+

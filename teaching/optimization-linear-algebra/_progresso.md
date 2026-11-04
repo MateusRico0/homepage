@@ -20,7 +20,8 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 | `aula07` | 7 — Convexidade e a Hessiana | B | publicada |
 | `aula08` | 8 — Otimização irrestrita e descida do gradiente | B | publicada |
 | `aula09` | 9 — Funções compostas, redes neurais e diferenciação automática | B | desenvolvimento |
-| — | 10+ — Gradiente Descendente Estocástico (SGD), ... | — | não iniciadas |
+| `aula10` | 10 — Gradiente Descendente Estocástico (SGD) e Mini-Batching | B | desenvolvimento |
+| — | 11+ — Momento, Curvatura e Métodos Acelerados, ... | — | não iniciadas |
 
 ## Fio condutor (o que cada aula deixa para a seguinte)
 
@@ -33,6 +34,7 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 - **7:** conjuntos e funções convexas, epígrafe, condição de 1ª ordem ($\nabla f(\mathbf{x})=\mathbf{0} \implies$ mínimo global), condição de 2ª ordem ($\nabla^2 f \succeq 0$), Hessiana da perda quadrática $2X^TX$, regularização Ridge $2(X^TX+\lambda I)$ para unicidade estrita. **Ponte:** quando $N, d$ são gigantescos ou não há solução analítica (ex: regressão logística), como encontrar o mínimo numericamente? → descida do gradiente.
 - **8:** otimização irrestrita e descida do gradiente; taxa de aprendizado $\alpha$; Lema da Descida ($L$-suavidade, $\alpha < 2/L$); dinâmica espectral de erro $\mathbf{e}_{k+1} = (I - \alpha A)\mathbf{e}_k$; taxa ótima de contração de Chebyshev $\rho^\star = \frac{\kappa-1}{\kappa+1}$; diagnóstico do mau condicionamento do California Housing ($\kappa \approx 23.460{,}5 \to \rho^\star \approx 0{,}99991$); aceleração dramática por padronização $Z$-score ($\kappa \approx 12{,}9 \to \rho^\star \approx 0{,}856$); regressão logística e entropia cruzada binária (perda sem solução fechada com gradiente $\frac{1}{N}X^T(\hat{\mathbf{y}}-\mathbf{y})$ e Hessiana $\frac{1}{N}X^TSX \succ 0$). **Ponte:** modelos compostos e não-lineares (redes neurais) exigem diferenciação em cadeia e motores de execução em grafos $\to$ Funções Compostas, Redes Neurais e Diferenciação Automática.
 - **9:** regra da cadeia multivariada com Jacobianos em *denominator layout*; Perceptrons Multicamadas (MLP); retropropagação analítica com vetor de sensibilidade $\boldsymbol{\delta}^{(l)} = ((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)})\odot \sigma'(\mathbf{z}^{(l)})$ e gradiente de pesos $\nabla_{W^{(l)}}\mathcal{L} = \boldsymbol{\delta}^{(l)}(\mathbf{a}^{(l-1)})^T$; colapso da diferenciação manual e simbólica; DAGs de computação; modos forward ($\dot{v}_i$) e reverse ($\bar{v}_i$); Teorema de Baur-Strassen ($C_{\text{grad}} \le 5C$); mini-autodiff orientado a objetos em Python com ordenação topológica (DFS); fita de execução (*tape*) e *activation checkpointing* ($O(L) \to O(\sqrt{L})$); fecha o Bloco 2. **Ponte:** como calcular gradientes quando $N$ é gigantesco e avaliar o grafo completo a cada iteração torna-se inviável? $\to$ Bloco 3: Gradiente Descendente Estocástico (SGD) e Mini-Batching (Aula 10). E mais adiante: séries de Taylor e modelos quadráticos de curvatura para Métodos Acelerados (Momento) e Métodos de Newton.
+- **10:** formulação de somas finitas $F(\mathbf{w}) = \frac{1}{N}\sum f_i(\mathbf{w})$; gargalo do BGD ($\mathcal{O}(Nd)$ por passo); algoritmo SGD puro ($B = 1$); estimador estatístico não-enviesado ($\mathbb{E}[\mathbf{g}_k] = \nabla F(\mathbf{w})$); decomposição sinal/ruído ($\mathbf{g}_k = \nabla F + \boldsymbol{\xi}_k$ com $\mathbb{E}[\boldsymbol{\xi}_k] = \mathbf{0}$); matriz de covariância do ruído $\Sigma(\mathbf{w})$ e variância escalar $\sigma^2(\mathbf{w})$; patologia central no ótimo ($\Sigma(\mathbf{w}^\star) \succ 0$ e persistência do ruído, sem ponto fixo sob taxa constante); mini-batching e redução de variância ($\sigma^2/B$ com reposição, $\frac{N-B}{N-1}\frac{\sigma^2}{B}$ sem reposição); física do hardware moderno: operações BLAS-1 vs BLAS-3, pipelines SIMD/Tensor Cores e curva de throughput; dinâmica da bola de ruído estacionária ($\lim \mathbb{E}[\|\mathbf{w}_k - \mathbf{w}^\star\|^2] \le \frac{\alpha \sigma^2}{2\mu}$); condições de convergência de Robbins-Monro (1951) ($\sum \alpha_k = \infty, \sum \alpha_k^2 < \infty$); cronogramas práticos (*step decay*, polinomial $1/\sqrt{k}$, *cosine annealing*); o ruído como regularizador implícito (escape de pontos de sela e seleção de *flat minima* vs *sharp minima*); abre o Bloco 3. **Ponte:** em vales estreitos e mal-condicionados ($\kappa \gg 1$), o gradiente aponta quase transversalmente às curvas de nível, gerando oscilações severas e avanço lento; como adicionar inércia física e acelerar a convergência usando aproximações quadráticas locais de Taylor? $\to$ Momento, Curvatura e Métodos Acelerados (Aula 11).
 
 ## Dicionário de notações
 
@@ -93,6 +95,15 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 | $\bar{v}_i = \partial \mathcal{L} / \partial v_i$ | variável adjunta no modo reverse de diferenciação automática | 9 (Bloco 2) |
 | $C_{\text{grad}} \le 5 \cdot C_{\text{eval}}$ | Teorema de Baur-Strassen / Speelpenning de complexidade temporal | 9 (Bloco 2) |
 | $\mathcal{O}(\sqrt{L})$ | footprint de memória via recomputação com *activation checkpointing* | 9 (Bloco 3) |
+| $\mathbf{g}_k(\mathbf{w})$ | estimador estocástico do gradiente ($\mathbb{E}[\mathbf{g}_k] = \nabla F(\mathbf{w})$) | 10 (Bloco 1-2) |
+| $\boldsymbol{\xi}_k = \mathbf{g}_k - \nabla F$ | vetor de ruído estocástico de amostragem ($\mathbb{E}[\boldsymbol{\xi}_k] = \mathbf{0}$) | 10 (Bloco 2) |
+| $\Sigma(\mathbf{w}) = \mathbb{E}[\boldsymbol{\xi}_k \boldsymbol{\xi}_k^T]$ | matriz de covariância do ruído estocástico ($\Sigma(\mathbf{w}^\star) \succ 0$) | 10 (Bloco 2) |
+| $\sigma^2(\mathbf{w}) = \operatorname{tr}(\Sigma(\mathbf{w}))$ | variância escalar total do gradiente estocástico | 10 (Bloco 2) |
+| $B$ | tamanho do mini-batch ($|\mathcal{B}| = B$) | 10 (Bloco 3) |
+| $\sigma^2 / B$ | redução de variância sob amostragem com reposição | 10 (Bloco 3) |
+| $\frac{N-B}{N-1}$ | fator de correção para população finita (amostragem sem reposição) | 10 (Bloco 3) |
+| $\lim \mathbb{E}[\|\mathbf{w}_k - \mathbf{w}^\star\|^2] \le \frac{\alpha \sigma^2}{2\mu}$ | raio da bola de ruído estacionária sob taxa de aprendizado constante $\alpha$ | 10 (Bloco 4) |
+| Condições de Robbins-Monro | $\sum \alpha_k = \infty$ (exploração) e $\sum \alpha_k^2 < \infty$ (supressão do ruído) | 10 (Bloco 4) |
 
 ## Pendências
 

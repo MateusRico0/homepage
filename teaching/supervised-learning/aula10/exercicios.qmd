@@ -1,0 +1,148 @@
+---
+title: "Exercícios — Aula 10: Gradient Boosting e Otimização Numérica no Espaço de Funções"
+subtitle: "Supervised Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado das questões de Verdadeiro/Falso e das questões discursivas está em
+[`soluções.qmd`](soluções.qmd). Encontrou um erro numa questão? Corrija
+diretamente neste arquivo e abra um *pull request*.
+:::
+
+## Contexto e notação
+
+Nesta lista de exercícios, consideramos o problema de aprendizado supervisionado sob o paradigma de comitês aditivos sequenciais (*Boosting*) e otimização numérica no espaço de funções (ESL Cap. 10; Freund & Schapire, 1997; Friedman, 2001).
+
+Seja $Z = \{(\mathbf{x}_1, y_1), \dots, (\mathbf{x}_N, y_N)\}$ uma amostra de treinamento com $N$ pares observados i.i.d., onde $\mathbf{x}_i \in \mathbb{R}^p$ e $y_i \in \mathcal{Y}$. Em classificação binária, convenciona-se $y_i \in \{-1, +1\}$ (ou $y_i \in \{0, 1\}$ sob perda logística); em regressão, $y_i \in \mathbb{R}$.
+
+1. **Modelos Aditivos em Estágios (*Forward Stagewise Additive Modeling - FSAM*):** Um modelo aditivo de $M$ termos tem a forma:
+   $$f_M(\mathbf{x}) = \sum_{m=1}^M \beta_m b(\mathbf{x}; \gamma_m)$$
+   Em cada iteração $m$, mantendo fixo o ensemble acumulado $f_{m-1}(\mathbf{x})$, resolve-se o subproblema guloso:
+   $$(\beta_m, \gamma_m) = \arg\min_{\beta, \gamma} \sum_{i=1}^N L(y_i, f_{m-1}(\mathbf{x}_i) + \beta b(\mathbf{x}_i; \gamma))$$
+
+2. **AdaBoost.M1 (Freund & Schapire, 1997):** Para classificação binária com perda exponencial $L(y, f) = e^{-yf}$, o FSAM coincide analiticamente com o AdaBoost. O classificador fraco $h_m(\mathbf{x}) \in \{-1, +1\}$ minimiza a taxa de erro ponderada $\text{err}_m = \frac{\sum_{i=1}^N w_i^{(m)} \mathbb{I}(y_i \neq h_m(\mathbf{x}_i))}{\sum_{i=1}^N w_i^{(m)}}$, o multiplicador da iteração é:
+   $$\alpha_m = \frac{1}{2} \ln \left(\frac{1 - \text{err}_m}{\text{err}_m}\right)$$
+   e os pesos das instâncias são atualizados recursivamente por $w_i^{(m+1)} = w_i^{(m)} \exp(-\alpha_m y_i h_m(\mathbf{x}_i))$.
+
+3. **Gradient Tree Boosting (Friedman, 2001):** Para uma função de perda diferenciável arbitrária $L(y, f(\mathbf{x}))$, a descida de gradiente mais íngreme no espaço não paramétrico $\mathbb{R}^N$ define os **pseudo-resíduos** para cada observação $i = 1, \dots, N$:
+   $$r_{im} = -\left[\frac{\partial L(y_i, f(\mathbf{x}_i))}{\partial f(\mathbf{x}_i)}\right]_{f(\mathbf{x}) = f_{m-1}(\mathbf{x})}$$
+   Uma árvore de regressão $T_m(\mathbf{x}) = \sum_{j=1}^{J_m} \beta_{jm} \mathbb{I}(\mathbf{x} \in R_{jm})$ com $J_m$ nós terminais é ajustada aos pseudo-resíduos $r_{im}$ por mínimos quadrados. Em seguida, para cada folha $R_{jm}$, determina-se o valor ótimo via busca linear (*line search*):
+   $$\gamma_{jm} = \arg\min_\gamma \sum_{\mathbf{x}_i \in R_{jm}} L(y_i, f_{m-1}(\mathbf{x}_i) + \gamma)$$
+
+4. **Regularização e Arquitetura:**
+   - *Encolhimento (Shrinkage / Learning Rate $\nu$):* $f_m(\mathbf{x}) = f_{m-1}(\mathbf{x}) + \nu \sum_{j=1}^{J_m} \gamma_{jm} \mathbb{I}(\mathbf{x} \in R_{jm})$, com $0 < \nu \le 1$.
+   - *Tamanho das Árvores ($J$):* Uma árvore com $J$ folhas modela interações entre no máximo $J-1$ variáveis simultâneas. $J=2$ (*decision stumps*) restringe o ensemble a um Modelo Aditivo Generalizado (GAM) sem interações cruzadas.
+
+---
+
+## Questões discursivas
+
+1. **Equivalência Formal entre AdaBoost.M1 e o Modelo Aditivo em Estágios com Perda Exponencial.**  
+   Considere o critério de perda exponencial $L(y, f) = e^{-yf}$ para $y \in \{-1, +1\}$.  
+   a) Mostre que o subproblema do FSAM na iteração $m$, dado por $\min_{\beta, h} \sum_{i=1}^N e^{-y_i(f_{m-1}(\mathbf{x}_i) + \beta h(\mathbf{x}_i))}$, pode ser reescrito na forma $\min_{\beta, h} \sum_{i=1}^N w_i^{(m)} e^{-\beta y_i h(\mathbf{x}_i)}$, explicitando a expressão de $w_i^{(m)}$.  
+   b) Decompondo a soma em observações com $y_i = h(\mathbf{x}_i)$ e observações com $y_i \neq h(\mathbf{x}_i)$, deduza a expressão do erro ponderado $\text{err}_m$ e prove que o classificador base ótimo $h_m(\mathbf{x})$ independe do valor positivo de $\beta$.  
+   c) Derive analiticamente a função objetivo em relação a $\beta > 0$, iguale a zero e obtenha o passo ótimo $\alpha_m = 2\beta_m = \frac{1}{2} \ln \left(\frac{1 - \text{err}_m}{\text{err}_m}\right)$.
+
+2. **Dedução Analítica de Pseudo-Resíduos e Busca Linear para Perdas Robustas.**  
+   Em problemas práticos de regressão com dados ruidosos e caudas pesadas, a escolha da função de perda é determinante para a estabilidade do modelo.  
+   a) Deduza a expressão analítica do pseudo-resíduo $r_{im}$ e o valor ótimo da folha $\gamma_{jm}$ para a perda quadrática $L(y, f) = \frac{1}{2}(y - f)^2$.  
+   b) Repita a dedução para a perda absoluta ($L_1$) $L(y, f) = |y - f|$, demonstrando por que o pseudo-resíduo é igual a $\text{sign}(y_i - f_{m-1}(\mathbf{x}_i))$ e por que o passo ótimo da folha $\gamma_{jm}$ é a mediana dos resíduos brutos $y_i - f_{m-1}(\mathbf{x}_i)$ contidos na região $R_{jm}$.  
+   c) A perda de Huber com limiar $\delta > 0$ é definida por:
+      $$L_\delta(y, f) = \begin{cases} \frac{1}{2}(y - f)^2, & \text{se } |y - f| \le \delta \\ \delta |y - f| - \frac{1}{2}\delta^2, & \text{se } |y - f| > \delta \end{cases}$$
+      Deduza o pseudo-resíduo de Huber e explique detalhadamente por que essa formulação previne o mascaramento de gradientes provocado por *outliers* extremos.
+
+3. **Dinâmica do Tradeoff $(\nu, M)$, Subamostragem e Controle de Interações.**  
+   Considere o ajuste de um Gradient Boosting para um problema complexo com $p = 50$ atributos contínuos.  
+   a) Explique a relação matemática entre a taxa de encolhimento $\nu \in (0, 1]$ e o número total de iterações $M$. Por que a literatura estatística (Friedman, 2001; ESL) recomenda enfaticamente adotar $\nu \le 0{,}1$ acompanhado de *early stopping* em vez de $\nu = 1{,}0$?  
+   b) Demonstre por que uma árvore com $J$ folhas induz partições ortogonais capazes de representar interações de ordem no máximo $J-1$. Se o verdadeiro processo gerador contiver um termo não linear da forma $g(x_1, x_2, x_3) = x_1 \cdot \sin(x_2) \cdot \exp(x_3)$, qual é o menor valor de $J$ estritamente necessário para que o ensemble consiga aproximar essa interação?  
+   c) Discuta como a subamostragem estocástica de instâncias (*Stochastic Gradient Boosting* com fração $\eta \approx 0{,}5$) introduz propriedades estatísticas análogas às do Bagging da Aula 9, indicando o que ocorre com o viés, com a variância e com o tempo de computação por iteração.
+
+---
+
+## Questões de Verdadeiro/Falso
+
+::: {.callout-note icon=false}
+## Teste 1 — Fundamentos do Boosting e Contraste com Bagging
+
+- □ Enquanto o Bagging opera reduzindo a variância de modelos com alto viés através de agregação paralela, o Boosting foca em reduzir o viés combinando sequencialmente modelos de alta capacidade.
+- □ No algoritmo de Boosting, cada novo modelo base é treinado para corrigir os erros residuais cometidos pelo comitê acumulado nas iterações anteriores.
+- □ Árvores de decisão não podadas e muito profundas ($J \ge 128$) são os estimadores base ideais para o Gradient Boosting, pois garantem que o viés convirja a zero na primeira iteração.
+- □ O Bagging é computacionalmente paralelizável de forma trivial entre as árvores, ao passo que o Boosting tradicional é inerentemente sequencial devido à dependência estrita de cada iteração $m$ em relação a $f_{m-1}$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — Forward Stagewise Additive Modeling (FSAM) e AdaBoost
+
+- □ No algoritmo FSAM, a cada iteração $m$, os parâmetros de todos os modelos base anteriores $\beta_1, \dots, \beta_{m-1}$ e $\gamma_1, \dots, \gamma_{m-1}$ são reotimizados conjuntamente com o novo termo.
+- □ O classificador fraco $h_m(\mathbf{x})$ selecionado na iteração $m$ do AdaBoost minimiza a taxa de erro de classificação ponderada pelos pesos correntes das observações.
+- □ Se um classificador base atingir uma taxa de erro ponderada exatamente igual a $50\%$ ($\text{err}_m = 0{,}50$) em um problema binário, seu coeficiente no comitê final será $\alpha_m = 0$.
+- □ Caso um classificador base produza um erro ponderado superior a $50\%$ ($\text{err}_m > 0{,}50$), o coeficiente $\alpha_m$ torna-se estritamente negativo, invertendo automaticamente a polaridade das predições daquele comitê.
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — Propriedades da Perda Exponencial e Riscos de Robustez
+
+- □ O minimizador populacional da perda exponencial $\arg\min_f \mathbb{E}[e^{-Yf}\mid\mathbf{X}=\mathbf{x}]$ converge exatamente para a metade da razão de chances logarítmica (*log-odds*) $\frac{1}{2}\ln \frac{P(Y=1\mid\mathbf{x})}{P(Y=-1\mid\mathbf{x})}$.
+- □ A penalidade imposta pela perda exponencial a um ponto classificado incorretamente cresce a uma taxa assintoticamente linear em relação à margem negativa $-yf(\mathbf{x})$.
+- □ A extrema suscetibilidade do AdaBoost a ruído de rótulo e valores discrepantes decorre do fato de que observações com grande margem negativa acumulam pesos gigantescos que monopolizam os classificadores subsequentes.
+- □ A perda deviance da regressão logística binomial é significativamente mais robusta a *outliers* que a perda exponencial porque sua penalidade para erros severos cresce linearmente em vez de exponencialmente.
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — Otimização Numérica no Espaço de Funções e Pseudo-Resíduos
+
+- □ O vetor de gradientes negativos $-\mathbf{g}_m \in \mathbb{R}^N$ avaliado na amostra de treino aponta a direção local de máximo decréscimo da função de perda no espaço euclidiano das predições observadas.
+- □ O ajuste de uma árvore de regressão aos pseudo-resíduos via mínimos quadrados corresponde formalmente à projeção ortogonal do gradiente não paramétrico sobre a classe de funções de árvores de decisão.
+- □ Se uma função de perda arbitrária $L(y, f)$ for não diferenciável em determinados pontos (como $L_1$ na origem), o conceito de pseudo-resíduo não pode ser operacionalizado via subgradientes.
+- □ Sob a função de perda quadrática clássica $L(y, f) = \frac{1}{2}(y - f)^2$, o pseudo-resíduo $r_{im}$ coincide algebricamente com o resíduo comum $y_i - f_{m-1}(\mathbf{x}_i)$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 5 — Funções de Perda Robustas e Busca Linear nas Folhas
+
+- □ Na perda absoluta $L_1$ ($L(y, f) = |y - f|$), o pseudo-resíduo fornece unicamente o sinal do erro $\text{sign}(y_i - f_{m-1}(\mathbf{x}_i))$, desconsiderando por completo a magnitude escalar do desvio.
+- □ Ao utilizar a perda $L_1$, o valor ótimo $\gamma_{jm}$ que atualiza cada folha da árvore após a busca linear é dado pela média aritmética dos resíduos das observações alocadas àquela folha.
+- □ A função de perda de Huber é contínua e possui primeira derivada contínua em todo o domínio real, realizando uma transição suave entre o comportamento quadrático e o comportamento linear no limiar $\delta$.
+- □ Para a perda deviance binomial em classificação, a busca linear exata em cada folha requer uma aproximação de Newton-Raphson de passo único dada por $\gamma_{jm} = \frac{\sum_{i \in R_{jm}} (y_i - p_i)}{\sum_{i \in R_{jm}} p_i(1 - p_i)}$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 6 — Regularização por Encolhimento (Shrinkage) e Convergência
+
+- □ O parâmetro de encolhimento $\nu \in (0, 1]$ multiplica as predições de cada nova árvore adicionada ao ensemble, atuando como um análogo da taxa de aprendizado na descida de gradiente.
+- □ A redução do hiperparâmetro $\nu$ para valores próximos a zero permite atingir o mesmo risco no conjunto de treino com um número $M$ significativamente menor de iterações.
+- □ Na prática empírica estabelecida por Friedman (2001), adotar uma taxa de aprendizado pequena ($\nu \le 0{,}1$) melhora substancialmente a capacidade de generalização e previne sobreajuste prematuro quando comparado a $\nu = 1{,}0$.
+- □ Ao contrário das Florestas Aleatórias, nas quais o erro de teste estabiliza assintoticamente com o aumento de $B$, no Gradient Boosting o número de iterações $M$ atua diretamente como hiperparâmetro de capacidade, podendo levar a *overfitting* se for excessivamente elevado.
+:::
+
+::: {.callout-note icon=false}
+## Teste 7 — Arquitetura de Árvores, Nós Terminais e Ordem de Interação
+
+- □ Uma árvore de regressão com $J$ folhas terminais particiona o espaço de atributos em exatamente $J$ regiões hiper-retangulares ortogonais disjuntas.
+- □ Um conjunto de árvores com profundidade máxima igual a 1 (*decision stumps*, $J = 2$) é capaz de modelar interações não lineares complexas de segunda ordem entre pares de variáveis.
+- □ A utilização de *decision stumps* no Gradient Boosting restringe o modelo global a um Modelo Aditivo Generalizado (GAM) da forma $f(\mathbf{x}) = \sum_{j=1}^p f_j(x_j)$.
+- □ Para que um ensemble de árvores aditivas capture com precisão efeitos de interação de ordem $K$ (envolvendo $K$ atributos distintos simultaneamente), cada árvore individual deve conter no mínimo $J = K + 1$ folhas terminais.
+:::
+
+::: {.callout-note icon=false}
+## Teste 8 — Interpretabilidade, EBM e Gráficos de Dependência Parcial (PDP)
+
+- □ A métrica de Importância Relativa de Variáveis de Friedman quantifica a contribuição de cada atributo acumulando a redução quadrática da perda obtida em todas as divisões internas em que o atributo foi selecionado.
+- □ Nos Explainable Boosting Machines (EBM), as funções univariadas $f_j(x_j)$ são estimadas por boosting cíclico (*round-robin*) sobre uma única variável por vez, tornando o modelo intrinsecamente interpretável sem requerer aproximações *post-hoc*.
+- □ Um Gráfico de Dependência Parcial (PDP) para uma única variável $X_j$ ilustra a função de predição fixando todas as outras variáveis em suas médias amostrais correspondentes.
+- □ A interpretação de gráficos PDP unidimensionais pode produzir conclusões enganosas quando existem correlações estocásticas severas entre a variável de interesse $X_j$ e os atributos complementares omitidos.
+:::
+

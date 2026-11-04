@@ -1,0 +1,1674 @@
+---
+title: "Aula 10: Gradiente Descendente Estocástico (SGD) e Mini-Batching"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-10-22"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: python3
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all .slides-link aria-label="Ver slides da aula" title="Ver slides da aula"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Voltar à lista de aulas" title="Voltar à lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar, load_dataset
+disable_progress_bar()
+
+import numpy as np
+import matplotlib.pyplot as plt
+from IPython.display import Markdown
+import warnings
+warnings.filterwarnings("ignore")
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({"figure.dpi": 120, "font.size": 11})
+
+COR_A     = "#0085CA"   # azul institucional — elemento principal
+COR_B     = "#FF5E00"   # laranja — contraste / ênfase
+COR_C     = "#E03C31"   # vermelho — alerta / erro / ruído
+COR_NEU   = "#5D6D7E"   # neutro escuro
+COR_VERDE = "#1B9E77"   # verde — confirmação / ótimo
+
+def brl(x, nd=2):
+    """Número com vírgula decimal e espaço fino de milhar."""
+    s = f"{x:,.{nd}f}"
+    return Markdown(s.replace(",", "\\,").replace(".", "{,}"))
+
+def sci(x, nd=1):
+    """Notação científica em LaTeX, com vírgula decimal."""
+    m, e = f"{x:.{nd}e}".split("e")
+    return Markdown(f"{m.replace('.', '{,}')}\\cdot 10^{{{int(e)}}}")
+
+# --- Dataset-fio: California Housing -----------------------------------
+_housing = load_dataset("gvlassis/california_housing")["train"].to_pandas()
+COLS = ["MedInc", "HouseAge", "AveRooms", "AveBedrms"]
+X_raw = _housing[COLS].to_numpy()
+y_raw = _housing["MedHouseVal"].to_numpy()
+N_total, d_in = X_raw.shape
+
+# Padronização Z-score (essencial da Aula 8)
+mu_X = np.mean(X_raw, axis=0)
+std_X = np.std(X_raw, axis=0)
+X_pad = (X_raw - mu_X) / std_X
+
+# Matriz de design com termo de intercepto (coluna de 1s)
+X_b = np.c_[np.ones(N_total), X_pad]
+d_total = d_in + 1
+
+# Solução exata analítica de mínimos quadrados (ponto ótimo de referência)
+w_star = np.linalg.lstsq(X_b, y_raw, rcond=None)[0]
+f_star = 0.5 * np.mean((X_b @ w_star - y_raw)**2)
+
+# Hessiana empírica do problema de mínimos quadrados
+H_emp = (1.0 / N_total) * (X_b.T @ X_b)
+eigvals = np.linalg.eigvalsh(H_emp)
+L_emp = float(eigvals[-1])
+mu_emp = float(eigvals[0])
+kappa_emp = L_emp / mu_emp
+
+# Variância do ruído no ponto ótimo:
+res_star = X_b @ w_star - y_raw
+sigma2_star = np.mean(np.sum((res_star[:, None] * X_b)**2, axis=1))
+
+# Execução prévia dos algoritmos para trajetórias e figuras
+np.random.seed(42)
+w_init = np.zeros(d_total)
+
+# 1. Batch Gradient Descent (BGD)
+w_bgd = w_init.copy()
+alpha_bgd = 0.15
+losses_bgd = []
+grad_evals_bgd = []
+w_hist_bgd = [w_bgd.copy()]
+n_epochs_bgd = 30
+
+for ep in range(n_epochs_bgd):
+    grad = (1.0 / N_total) * (X_b.T @ (X_b @ w_bgd - y_raw))
+    w_bgd -= alpha_bgd * grad
+    losses_bgd.append(0.5 * np.mean((X_b @ w_bgd - y_raw)**2))
+    grad_evals_bgd.append((ep + 1) * N_total)
+    w_hist_bgd.append(w_bgd.copy())
+
+# 2. Stochastic Gradient Descent puro (SGD, B = 1)
+w_sgd = w_init.copy()
+alpha_sgd = 0.01
+losses_sgd = []
+grad_evals_sgd = []
+w_hist_sgd = [w_sgd.copy()]
+n_epochs_sgd = 4
+total_steps_sgd = 0
+
+for ep in range(n_epochs_sgd):
+    perm = np.random.permutation(N_total)
+    for idx in perm:
+        xi = X_b[idx]
+        yi = y_raw[idx]
+        grad_i = (np.dot(xi, w_sgd) - yi) * xi
+        w_sgd -= alpha_sgd * grad_i
+        total_steps_sgd += 1
+        if total_steps_sgd % 200 == 0:
+            w_hist_sgd.append(w_sgd.copy())
+    losses_sgd.append(0.5 * np.mean((X_b @ w_sgd - y_raw)**2))
+    grad_evals_sgd.append((ep + 1) * N_total)
+
+# 3. Mini-Batch SGD (B = 32)
+w_mb = w_init.copy()
+alpha_mb = 0.05
+losses_mb = []
+grad_evals_mb = []
+w_hist_mb = [w_mb.copy()]
+B_size = 32
+n_epochs_mb = 4
+
+for ep in range(n_epochs_mb):
+    perm = np.random.permutation(N_total)
+    for s in range(0, N_total, B_size):
+        b_idx = perm[s:s+B_size]
+        X_batch = X_b[b_idx]
+        y_batch = y_raw[b_idx]
+        grad_b = (1.0 / len(b_idx)) * (X_batch.T @ (X_batch @ w_mb - y_batch))
+        w_mb -= alpha_mb * grad_b
+        w_hist_mb.append(w_mb.copy())
+    losses_mb.append(0.5 * np.mean((X_b @ w_mb - y_raw)**2))
+    grad_evals_mb.append((ep + 1) * N_total)
+
+# Grid de contorno para o custo nos parâmetros w_1 (MedInc) e w_2 (HouseAge)
+idx_w1 = 1
+idx_w2 = 2
+w1_vals = np.linspace(-0.2, 1.2, 80)
+w2_vals = np.linspace(-0.2, 0.6, 80)
+W1_g, W2_g = np.meshgrid(w1_vals, w2_vals)
+Z_cost = np.zeros_like(W1_g)
+
+w_tmp = w_star.copy()
+for i in range(len(w1_vals)):
+    for j in range(len(w2_vals)):
+        w_tmp[idx_w1] = W1_g[j, i]
+        w_tmp[idx_w2] = W2_g[j, i]
+        Z_cost[j, i] = 0.5 * np.mean((X_b @ w_tmp - y_raw)**2)
+
+# Experimento de Variância vs Tamanho de Mini-Batch
+batch_sizes_exp = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
+emp_variances = []
+n_trials = 400
+w_0 = np.zeros(d_total)
+grad_true_0 = (1.0 / N_total) * (X_b.T @ (X_b @ w_0 - y_raw))
+
+np.random.seed(42)
+for B_val in batch_sizes_exp:
+    trial_grads = []
+    for _ in range(n_trials):
+        idx_samp = np.random.choice(N_total, size=B_val, replace=True)
+        g_samp = (1.0 / B_val) * (X_b[idx_samp].T @ (X_b[idx_samp] @ w_0 - y_raw[idx_samp]))
+        trial_grads.append(g_samp)
+    trial_grads = np.array(trial_grads)
+    var_val = np.mean(np.sum((trial_grads - grad_true_0)**2, axis=1))
+    emp_variances.append(var_val)
+
+sigma2_base = emp_variances[0]
+theoretical_vars = [sigma2_base / b for b in batch_sizes_exp]
+
+# Experimento de Comparação de Cronogramas de Taxa de Aprendizado (Learning Rate Schedules)
+np.random.seed(42)
+w_sched_const = w_init.copy()
+w_sched_step = w_init.copy()
+w_sched_cos = w_init.copy()
+
+alpha_base = 0.02
+n_steps_sched = 8000
+steps_sched_axis = np.arange(1, n_steps_sched + 1)
+
+err_sched_const = []
+err_sched_step = []
+err_sched_cos = []
+
+for step_k in range(n_steps_sched):
+    i_k = np.random.randint(N_total)
+    xi = X_b[i_k]
+    yi = y_raw[i_k]
+    
+    # 1. Taxa constante
+    g_c = (np.dot(xi, w_sched_const) - yi) * xi
+    w_sched_const -= alpha_base * g_c
+    err_sched_const.append(np.sum((w_sched_const - w_star)**2))
+    
+    # 2. Step decay: divide por 2 a cada 2500 passos
+    a_step = alpha_base * (0.35 ** (step_k // 2500))
+    g_s = (np.dot(xi, w_sched_step) - yi) * xi
+    w_sched_step -= a_step * g_s
+    err_sched_step.append(np.sum((w_sched_step - w_star)**2))
+    
+    # 3. Cosine annealing
+    a_cos = 1e-4 + 0.5 * (alpha_base - 1e-4) * (1.0 + np.cos(step_k * np.pi / n_steps_sched))
+    g_cos = (np.dot(xi, w_sched_cos) - yi) * xi
+    w_sched_cos -= a_cos * g_cos
+    err_sched_cos.append(np.sum((w_sched_cos - w_star)**2))
+```
+
+# Revisão e Introdução
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Revisão Cuidadosa: O Que a Aula 9 Deixou Pronto
+
+Na **Aula 9**, formalizamos a Diferenciação Automática e o Teorema de Baur-Strassen / Speelpenning (1983), demonstrando que o gradiente analítico completo de qualquer perda escalar $\mathcal{L}(\mathbf{w})$ pode ser avaliado com custo temporal garantido de no máximo 5 vezes o custo de uma única passagem direta:
+
+$$C_{\text{grad}} \le 5 \cdot C_{\text{eval}}$$
+
+Esse resultado revolucionário resolveu de maneira definitiva o custo da diferenciação para **um único exemplo** (ou para um lote estático em memória). No entanto, todos os algoritmos de otimização apresentados até agora — desde a formulação analítica de Mínimos Quadrados (Aulas 2 e 3) até a Descida do Gradiente em Lote (*Batch Gradient Descent* - BGD, Aula 8) — operam sob a hipótese de que a função objetivo a minimizar é a média aritmética calculada sobre a **totalidade absoluta do conjunto de dados**:
+
+$$F(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N f_i(\mathbf{w})$$
+
+Para dar um único passo de atualização nos parâmetros, o BGD avalia e acumula o gradiente de **cada uma das $N$ amostras**:
+
+$$\nabla F(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N \nabla f_i(\mathbf{w})$$
+
+No California Housing ($N = 16.640$ amostras e $d = 4$ atributos preditores), avaliar $\nabla F(\mathbf{w})$ consome apenas alguns milissegundos. Mas o que ocorre quando adentramos a escala real do Aprendizado de Máquina moderno?
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Da Aula 9: O Que Já Temos
+
+- **O Legado da Diferenciação Automática:** O Teorema de Baur-Strassen garante que computar o gradiente $\nabla f_i(\mathbf{w})$ de um exemplo custa no máximo $5 C_{\text{eval}}$.
+- **O Objetivo de Soma Finita:** Em Machine Learning supervisionado, minimizamos a perda média sobre $N$ exemplos:
+  $$F(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N f_i(\mathbf{w})$$
+- **A Operação do Batch Gradient Descent (BGD):**
+  $$\mathbf{w}_{k+1} = \mathbf{w}_k - \frac{\alpha}{N}\sum_{i=1}^N \nabla f_i(\mathbf{w}_k)$$
+- **A Limitação Oculta:** Para dar **um único passo de atualização**, o BGD precisa passar por todos os $N$ exemplos do dataset!
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Paradoxo da Escala: Quando o BGD se Torna Inviável
+
+Considere a ordem de grandeza dos problemas reais de Machine Learning contemporâneo:
+*   **Visão Computacional Clássica:** O ImageNet possui $N \approx 1{,}28 \times 10^6$ imagens de treino de alta resolução.
+*   **Recomendação e Anúncios:** Datasets industriais de clique (como Criteo) possuem $N \approx 4 \times 10^9$ exemplos tabulares.
+*   **Grandes Modelos de Linguagem (LLMs):** O pré-treinamento de modelos como Llama 3 ou GPT-4 processa $N \approx 15 \times 10^{12}$ tokens.
+
+Suponha que um cluster de GPUs de última geração consiga calcular $10^6$ gradientes de amostras por segundo:
+1. No ImageNet, **uma única iteração do BGD** consome mais de 1 segundo de relógio. Para executar $500.000$ iterações, seriam necessários quase 6 dias inteiros.
+2. Em um LLM com $15 \times 10^{12}$ tokens, **uma única iteração do BGD** exigiria $\frac{15 \times 10^{12}}{10^6} = 15.000.000\text{ segundos} \approx 173\text{ dias}$ ininterruptos apenas para dar **um único passo de descida** nos pesos!
+3. Além disso, reter o grafo de computação de $N$ ativações para acumular o gradiente excede a capacidade de memória VRAM disponível.
+
+Diante desse impasse, surge a pergunta essencial: **precisamos realmente examinar todas as $N$ amostras antes de dar um passo de melhoria nos parâmetros?** Se o conjunto de dados possui milhões de imagens semelhantes de gatos ou bilhões de frases estruturadas na mesma gramática, calcular a média exata de todos os gradientes antes de mover os pesos é um desperdício computacional colossal.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Paradoxo da Escala
+
+Considere o tempo para dar **um único passo** de descida em diferentes escalas (assumindo hardware que processa $10^6$ gradientes/s):
+
+| Dataset | Tamanho $N$ | Tempo por Passo no BGD | Atualizações em 1 Hora |
+| :--- | :---: | :---: | :---: |
+| **California Housing** | $16.640$ | $\approx 16\text{ ms}$ | $216.000$ |
+| **ImageNet** | $1{,}28 \times 10^6$ | $\approx 1{,}3\text{ s}$ | $2.800$ |
+| **Criteo Click Log** | $4 \times 10^9$ | $\approx 67\text{ min}$ | **Menos de 1** |
+| **Llama 3 (Tokens)** | $15 \times 10^{12}$ | $\approx 173\text{ dias}$ | **0 (Inviável)** |
+
+::: {.fragment .callout-warning title="A Conclusão Inescapável" icon=false}
+Em Big Data, o gargalo não é a precisão com que conhecemos o gradiente, mas a **frequência com que atualizamos os parâmetros**!
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Ideia Central
+
+A ideia central do **Gradiente Descendente Estocástico (SGD)** e do **Mini-Batching** é substituir a média determinística sobre todos os $N$ dados por uma estimativa amostral de Monte Carlo de tamanho reduzido $B \ll N$.
+
+O gradiente resultante torna-se uma **bússola ruidosa**: cada passo individual sofre flutuações estocásticas em torno da rota perfeita. Contudo, como provaremos formalmente, o estimador é **estatisticamente não-enviesado** ($\mathbb{E}[\mathbf{g}_k] = \nabla F(\mathbf{w})$). O otimizador caminha de forma ágil, executando milhares de passos de atualização no tempo em que o BGD não completaria uma única iteração, enquanto o ruído inerente à amostragem atua beneficamente na generalização e no escape de vales estreitos.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Ideia Central: Da Certeza Lenta à Agilidade Ruidosa
+
+::: {.columns}
+::: {.column width="50%"}
+**Certeza Lenta (BGD):**
+
+- Avalia **todos os $N$ exemplos** antes de atualizar.
+- Direção analítica perfeita, sem ruído.
+- Custo por passo: $\mathcal{O}(Nd)$.
+- Em datasets colossais, fica paralisado calculando.
+:::
+
+::: {.column width="50%"}
+**Agilidade Ruidosa (SGD):**
+
+- Avalia um lote aleatório **$B \ll N$**.
+- Direção ruidosa, mas correta **em esperança**.
+- Custo por passo: $\mathcal{O}(Bd)$ — independente de $N$!
+- Dá milhares de passos úteis no mesmo tempo.
+:::
+:::
+
+::: {.fragment .callout-note title="O Paradigma Estocástico" icon=false}
+Não precisamos de certeza absoluta para aprender. Uma estimativa barata e ruidosa, repetida milhares de vezes por segundo, converge ordens de grandeza mais rápido do que um cálculo exato demorado.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Roteiro da Aula
+
+Estruturamos esta aula em quatro blocos pedagógicos, respondendo às seguintes perguntas centrais:
+
+1. **O Gargalo do Lote Completo e o SGD Puro:** Por que o BGD se torna inviável em larga escala e como o SGD puro ($B = 1$) executa $N$ passos de atualização no tempo em que o BGD executa apenas 1?
+2. **Propriedades Estatísticas do Gradiente Estocástico:** Por que uma amostra aleatória fornece uma direção estatisticamente válida ($\mathbb{E}[\mathbf{g}_k] = \nabla F(\mathbf{w})$) e por que a covariância do ruído $\Sigma(\mathbf{w}^\star)$ **não desaparece** no minimizador ótimo?
+3. **Mini-Batching e a Física do Hardware:** Como o tamanho do lote $B$ reduz a variância do estimador por $\sigma^2/B$ e como ele satura os núcleos paralelos e caches das GPUs modernas (operações BLAS-3)?
+4. **Teoria de Convergência e Taxas de Aprendizado:** Por que uma taxa constante estaciona em uma "bola de ruído", quais são as históricas Condições de Robbins-Monro (1951) para convergência exata e por que o ruído estocástico atua como um regularizador implícito que favorece mínimos planos (*flat minima*)?
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Roteiro: 4 Perguntas Centrais
+
+1. **Fundamentação:** Por que uma amostra aleatória nos conduz confiavelmente ao mínimo global de uma soma finita de $N$ termos?
+2. **Patologia do Ruído:** Por que o ruído estocástico $\Sigma(\mathbf{w})$ não se anula no minimizador ótimo $\mathbf{w}^\star$?
+3. **Mini-Batching e Hardware:** Como o lote $B$ concilia a redução teórica de variância ($\sigma^2/B$) com a saturação física de GPUs (BLAS-3)?
+4. **Convergência e Generalização:** Como as condições de Robbins-Monro asseguram convergência e por que o ruído expulsa o modelo de vales estreitos rumo a mínimos planos?
+:::
+
+## Pausa 1 — O Gargalo do Lote e a Filosofia Estocástica
+
+::: {.callout-tip}
+## Pergunta Aberta
+Considere um problema de aprendizado com $N = 2 \times 10^7$ exemplos e dimensão $d = 100$. Suponha que seu hardware processa $10^6$ gradientes por segundo. Se o BGD requer 500 iterações para convergir e o SGD puro atinge a mesma qualidade preditiva após processar 2 épocas completas, qual é o tempo total de computação de cada método? O que esse resultado revela sobre a métrica de "número de iterações" versus "número de épocas"?
+:::
+
+::: {.callout-tip}
+## Batch vs. Estocástico
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O custo computacional de uma única iteração do SGD puro ($B = 1$) independe do número total de amostras $N$ no conjunto de treinamento.
+- □ Uma época de treinamento no BGD e no SGD puro requer exatamente a mesma quantidade de avaliações de gradientes individuais de amostras ($N$ avaliações).
+- □ Como o SGD puro avalia apenas uma amostra por vez, sua trajetória garante descida estritamente monotônica do custo global $F(\mathbf{w}_{k+1}) \le F(\mathbf{w}_k)$ a cada passo.
+- □ Se duas amostras de treino forem exatamente idênticas, seus gradientes individuais calculados no mesmo ponto $\mathbf{w}$ serão rigorosamente iguais.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 1 — Resposta
+
+::: {.callout-tip}
+## Batch vs. Estocástico — Resposta
+- ✔ **Verdadeiro:** O SGD puro sorteia um único índice $i_k$; calcular $\nabla f_{i_k}(\mathbf{w})$ tem custo $\mathcal{O}(d)$, sem qualquer dependência de $N$.
+- ✔ **Verdadeiro:** Uma época corresponde por definição a processar o equivalente a $N$ amostras: 1 passo de tamanho $N$ no BGD ou $N$ passos de tamanho 1 no SGD.
+- ✗ **Falso:** Amostras individuais podem apontar em direções conflitantes com a média global; a descida monotônica é propriedade exclusiva do BGD sob passo adequado.
+- ✔ **Verdadeiro:** Se $(\mathbf{x}_a, y_a) = (\mathbf{x}_b, y_b)$, a função de perda local é a mesma e suas derivadas no mesmo ponto $\mathbf{w}$ coincidem exatamente.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** O BGD leva $500 \times (2\cdot 10^7 / 10^6) = 10.000\text{ s} \approx 2\text{h } 46\text{min}$. O SGD consome 2 épocas ($4\cdot 10^7$ gradientes), levando apenas $40\text{ s}$ — uma aceleração de 250 vezes! A contagem de iterações é enganosa: 500 passos de BGD fizeram 500 atualizações; 2 épocas de SGD fizeram 40 milhões de atualizações consecutivas.
+:::
+:::
+
+# Intuição — O Alpinista no Nevoeiro e a Dinâmica de Langevin
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Duas Metáforas para Dois Algoritmos
+
+Imagine um alpinista em uma vasta cadeia montanhosa com a missão de encontrar o ponto mais baixo de um vale profundo:
+
+*   **O Alpinista com Telescópio (Batch Gradient Descent):** Ele sobe em uma torre de observação, mede minuciosamente com teodolitos de alta precisão cada desnível, rocha e declive de toda a cordilheira geográfica, calcula com tolerância milimétrica a linha exata de maior declive médio e dá um passo firme de 50 centímetros nessa direção. O cálculo é perfeito e o passo é seguro, mas o alpinista levou quatro horas para calcular para onde dar um único passo!
+*   **O Alpinista no Nevoeiro com Bússola Ruidosa (Stochastic Gradient Descent):** O alpinista está cercado por um nevoeiro impenetrável que restringe sua visão ao chão sob seus sapatos. Em suas mãos há uma bússola ruidosa que vibra aleatoriamente por interferências magnéticas locais. A cada fração de segundo, ele olha para onde a agulha aponta no instante e dá um passo ágil. Cada passo individual pode desviar alguns graus da rota perfeita — às vezes pisando numa poça ou contornando uma pedra —, mas, como a agulha oscila centrada na direção da gravidade, em poucos minutos ele desceu centenas de metros, atingindo o fundo do vale muito antes de o primeiro alpinista terminar sua primeira triangulação telescópica!
+
+## A Física da Estocasticidade: Dinâmica de Langevin e Difusão Browniana
+
+Em termos de física teórica, o comportamento do SGD aproxima a **Equação Diferencial Estocástica de Langevin**:
+
+$$\mathrm{d}\mathbf{w}_t = -\nabla F(\mathbf{w}_t)\,\mathrm{d}t + \sqrt{2 D}\,\mathrm{d}\mathbf{W}_t$$
+
+onde:
+*   $-\nabla F(\mathbf{w}_t)\,\mathrm{d}t$ é a **força macroscópica de arraste** determinística que atrai o sistema em direção ao mínimo do potencial;
+*   $\mathrm{d}\mathbf{W}_t$ é o processo padrão de Wiener (movimento browniano contínuo);
+*   $D$ representa o coeficiente de difusão térmica proporcional à temperatura do sistema.
+
+A discretização temporal pelo método de Euler-Maruyama dessa equação contínua corresponde com rigor formal à regra de atualização discreta do SGD:
+
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha_k \nabla F(\mathbf{w}_k) - \alpha_k \boldsymbol{\xi}_k$$
+
+onde $\boldsymbol{\xi}_k$ atua como o **bombardeamento browniano discreto**. Longe de ser apenas um erro numérico, essa energia térmica browniana impede que o modelo fique aprisionado em mínimos locais medíocres e pontos de sela!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Intuição: Duas Metáforas para Dois Algoritmos
+
+::: {.columns}
+::: {.column width="50%"}
+**BGD (Visão Telescópica):**
+
+- Mede o terreno completo a cada iteração.
+- Trajetória perfeitamente suave e determinística.
+- Custo por passo: colossal ($\mathcal{O}(Nd)$).
+- Fica imobilizado calculando a média exata.
+:::
+
+::: {.column width="50%"}
+**SGD (Bússola no Nevoeiro):**
+
+- Olha apenas para o terreno imediato de 1 amostra.
+- Trajetória oscilatória, caótica e estocástica.
+- Custo por passo: instantâneo ($\mathcal{O}(d)$).
+- Move-se continuamente em direção à bacia.
+:::
+:::
+
+::: {.fragment}
+$$
+\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha_k \underbrace{\nabla F(\mathbf{w}_k)}_{\text{Força Direcional Determinística}} - \alpha_k \underbrace{\boldsymbol{\xi}_k}_{\text{Flutuação Térmica Browniana}}
+$$
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Amostragem na Matriz de Dados: Os 3 Paradigmas
+
+- **Batch GD ($B = N$):** Lê a matriz inteira $X \in \mathbb{R}^{N \times d}$. 1 passo determinístico por época.
+- **Mini-Batch ($1 < B < N$):** Lê fatias em blocos. Explora paralelismo BLAS-3 em GPU.
+- **SGD Puro ($B = 1$):** Linha isolada $i_k$. Máxima agilidade ($N$ passos por época), mas subutiliza hardware.
+:::
+
+::: {.fig-resize style="width: 85%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\definecolor{icgreen}{HTML}{1B9E77}
+\definecolor{icgray}{HTML}{5D6D7E}
+\begin{tikzpicture}[
+  box/.style={rectangle, draw=black!70, thick, rounded corners=3pt, align=center, minimum height=3.2cm},
+  lbl/.style={font=\small\bfseries, align=center},
+  desc/.style={font=\scriptsize, align=center, text=black!80}
+]
+  % BGD
+  \node[box, fill=icblue!15, minimum width=2.4cm] (bgd) at (0, 0) {};
+  \node[lbl, text=icblue] at (0, 2.0) {Batch GD\\($B = N$)};
+  \draw[fill=icblue!40, draw=icblue, thick] (-1.1, -1.5) rectangle (1.1, 1.5);
+  \node[font=\scriptsize\bfseries, text=black] at (0, 0) {Todas as $N$\\Amostras};
+  \node[desc] at (0, -2.1) {$\nabla F = \frac{1}{N}\sum_{i=1}^N \nabla f_i$\\[2pt]\textbf{1 passo lento}};
+
+  % Mini-Batch
+  \node[box, fill=icgreen!15, minimum width=2.4cm] (mb) at (4.5, 0) {};
+  \node[lbl, text=icgreen] at (4.5, 2.0) {Mini-Batch\\($1 < B < N$)};
+  \draw[fill=black!5, draw=black!30] (3.4, -1.5) rectangle (5.6, 1.5);
+  \draw[fill=icgreen!50, draw=icgreen, thick] (3.4, 0.2) rectangle (5.6, 0.8);
+  \node[font=\scriptsize\bfseries, text=black] at (4.5, 0.5) {Lote $B$};
+  \node[desc] at (4.5, -2.1) {$\mathbf{g}_{\mathcal{B}} = \frac{1}{B}\sum_{i \in \mathcal{B}} \nabla f_i$\\[2pt]\textbf{BLAS-3 / GPU}};
+
+  % SGD Puro
+  \node[box, fill=icred!15, minimum width=2.4cm] (sgd) at (9.0, 0) {};
+  \node[lbl, text=icred] at (9.0, 2.0) {SGD Puro\\($B = 1$)};
+  \draw[fill=black!5, draw=black!30] (7.9, -1.5) rectangle (10.1, 1.5);
+  \draw[fill=icred!60, draw=icred, thick] (7.9, 0.1) rectangle (10.1, 0.25);
+  \node[font=\tiny\bfseries, text=black] at (9.0, 0.6) {Amostra $i_k$};
+  \node[desc] at (9.0, -2.1) {$\mathbf{g}_k = \nabla f_{i_k}$\\[2pt]\textbf{$N$ passos rápidos}};
+\end{tikzpicture}
+```
+:::
+
+# Bloco 1: O Gargalo do Lote Completo e o SGD Puro
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Recordando: Fundamentos de Probabilidade e Vetores Aleatórios
+
+Antes de analisarmos a mecânica do SGD, convém formalizar as três grandezas estatísticas fundamentais de vetores aleatórios em $\mathbb{R}^d$:
+
+1. **Vetor Esperança:**
+   Se $\mathbf{X} = [X_1, X_2, \dots, X_d]^T \in \mathbb{R}^d$ é um vetor aleatório, sua esperança matemática é o vetor das esperanças de cada componente:
+   $$\mathbb{E}[\mathbf{X}] := \big[ \mathbb{E}[X_1], \mathbb{E}[X_2], \dots, \mathbb{E}[X_d] \big]^T \in \mathbb{R}^d$$
+   Por linearidade, para qualquer matriz estática $A \in \mathbb{R}^{m \times d}$ e vetor constante $\mathbf{b} \in \mathbb{R}^m$:
+   $$\mathbb{E}[A\mathbf{X} + \mathbf{b}] = A\mathbb{E}[\mathbf{X}] + \mathbf{b}$$
+
+2. **Matriz de Covariância:**
+   Seja $\boldsymbol{\mu} = \mathbb{E}[\mathbf{X}]$. A dispersão multidimensional de $\mathbf{X}$ em torno da média é medida pela matriz simétrica semidefinida positiva $\operatorname{Cov}(\mathbf{X}) \in \mathbb{R}^{d \times d}$:
+   $$\operatorname{Cov}(\mathbf{X}) := \mathbb{E}\big[(\mathbf{X} - \boldsymbol{\mu})(\mathbf{X} - \boldsymbol{\mu})^T\big] = \mathbb{E}[\mathbf{X}\mathbf{X}^T] - \boldsymbol{\mu}\boldsymbol{\mu}^T \succeq 0$$
+
+3. **Variância Escalar Total e a Norma Euclidiana:**
+   A incerteza escalar média de $\mathbf{X}$ em torno de $\boldsymbol{\mu}$ coincide estritamente com o **traço da matriz de covariância**:
+   $$\operatorname{Var}(\mathbf{X}) := \mathbb{E}[\|\mathbf{X} - \boldsymbol{\mu}\|^2] = \sum_{j=1}^d \mathbb{E}[(X_j - \mu_j)^2] = \operatorname{tr}(\operatorname{Cov}(\mathbf{X}))$$
+
+## O Problema de Otimização em Somas Finitas
+
+Na esmagadora maioria dos problemas de aprendizado supervisionado, dispomos de um conjunto de treinamento com $N$ pares ordenados $\{(\mathbf{x}_i, y_i)\}_{i=1}^N$. O objetivo consiste em determinar o vetor de parâmetros $\mathbf{w} \in \mathbb{R}^d$ que minimiza o risco empírico médio:
+
+$$F(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N f_i(\mathbf{w}), \quad \text{onde } f_i(\mathbf{w}) := \ell(h(\mathbf{x}_i; \mathbf{w}), y_i)$$
+
+Pela linearidade do operador diferencial, o gradiente exato da função de custo total é a média aritmética dos gradientes individuais de cada amostra:
+
+$$\nabla F(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N \nabla f_i(\mathbf{w})$$
+
+## Complexidade de Amostragem do Batch Gradient Descent (BGD)
+
+Recorde da Aula 8 que para uma função $L$-suave e $\mu$-fortemente convexa, o BGD sob taxa ótima contrai a distância euclidiana ao minimizador $\mathbf{w}^\star$ a uma taxa geométrica linear:
+
+$$\|\mathbf{w}_k - \mathbf{w}^\star\| \le \left(\frac{\kappa - 1}{\kappa + 1}\right)^k \|\mathbf{w}_0 - \mathbf{w}^\star\|$$
+
+onde $\kappa = L/\mu$ é o número de condicionamento. Para atingir uma tolerância de erro $\epsilon$ tal que $F(\mathbf{w}_k) - F(\mathbf{w}^\star) \le \epsilon$, o número de iterações requeridas é $\mathcal{O}(\log(1/\epsilon))$. No entanto, como cada iteração exige calcular o gradiente de **todas as $N$ amostras**, a **complexidade computacional total** do BGD é:
+
+$$\text{Custo Total (BGD)} = \mathcal{O}\left(d \cdot N \log\left(\frac{1}{\epsilon}\right)\right)$$
+
+A dependência multiplicativa em $N$ é fatal: se o conjunto de dados for multiplicado por 10 ($10N$), o tempo de relógio para qualquer nível de precisão cresce dez vezes!
+
+## O Algoritmo Stochastic Gradient Descent (SGD Puro, $B = 1$)
+
+O algoritmo **Stochastic Gradient Descent (SGD)**, proposto pioneiramente por Herbert Robbins e Sutton Monro em 1951, propõe uma ruptura metodológica:
+
+::: {.callout-note icon=false}
+## Regra de Atualização do SGD Puro ($B = 1$)
+A cada iteração $k$, sorteie uniformemente ao acaso um único índice $i_k \in \{1, 2, \dots, N\}$ com probabilidade $\mathbb{P}(i_k = i) = \frac{1}{N}$ e atualize os parâmetros utilizando **exclusivamente** o gradiente daquela amostra sorteada:
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha_k \nabla f_{i_k}(\mathbf{w}_k)$$
+:::
+
+## Comparação Fundamental: O Significado de Uma Época
+
+Definimos uma **época** (*epoch*) como o volume de computação correspondente a avaliar $N$ gradientes de amostras individuais:
+
+| Algoritmo | Custo por Passo | Atualizações por Época | Progresso na Primeira Época |
+| :--- | :---: | :---: | :--- |
+| **Batch GD (BGD)** | $\mathcal{O}(Nd)$ | **1 atualização** | Mínimo (apenas 1 passo na direção média) |
+| **SGD Puro ($B = 1$)** | $\mathcal{O}(d)$ | **$N$ atualizações** | Enorme (ajusta pesos $N$ vezes consecutivas) |
+
+Ao final da primeira época, o BGD deu apenas um único passo modesto. O SGD puro já executou **$N$ refinamentos sucessivos**, aprendendo de forma adaptativa com a estrutura informacional de cada exemplo!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Recordando: Vetores Aleatórios e Covariância
+
+- **Vetor Esperança:**
+  $$\mathbb{E}[\mathbf{X}] = \big[ \mathbb{E}[X_1], \dots, \mathbb{E}[X_d] \big]^T \in \mathbb{R}^d$$
+- **Matriz de Covariância:**
+  $$\operatorname{Cov}(\mathbf{X}) = \mathbb{E}\big[(\mathbf{X} - \boldsymbol{\mu})(\mathbf{X} - \boldsymbol{\mu})^T\big] \succeq 0$$
+- **Variância Total Escalar:**
+  $$\operatorname{Var}(\mathbf{X}) = \mathbb{E}[\|\mathbf{X} - \boldsymbol{\mu}\|^2] = \operatorname{tr}(\operatorname{Cov}(\mathbf{X}))$$
+
+::: {.fragment .callout-note title="Conexão com o Gradiente" icon=false}
+Trataremos o gradiente de uma amostra aleatória $\nabla f_{i_k}(\mathbf{w})$ como um **vetor aleatório** em $\mathbb{R}^d$, cuja média deve ser o gradiente verdadeiro e cuja covariância governa a intensidade do ruído.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Problema de Otimização em Somas Finitas
+
+- **A Perda Média Empírica:**
+  $$F(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N f_i(\mathbf{w})$$
+- **O Gradiente Médio Determinístico:**
+  $$\nabla F(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N \nabla f_i(\mathbf{w})$$
+- **O Passo do BGD:**
+  $$\mathbf{w}_{k+1} = \mathbf{w}_k - \frac{\alpha}{N}\sum_{i=1}^N \nabla f_i(\mathbf{w}_k)$$
+- **Complexidade Total sob Convexidade Forte:** *(escala linearmente com $N$; impraticável para $N \ge 10^6$)*
+  $$\text{Custo BGD} = \mathcal{O}\left(d \cdot N \log(1/\epsilon)\right)$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Algoritmo SGD Puro ($B = 1$)
+
+::: {.callout-important title="Regra de Atualização do SGD Puro" icon=false}
+A cada iteração $k$, sorteie $i_k \sim \text{Uniforme}\{1, \dots, N\}$ e atualize:
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha_k \nabla f_{i_k}(\mathbf{w}_k)$$
+:::
+
+::: {.fragment}
+**O Significado de 1 Época ($N$ gradientes avaliados):**
+
+- **BGD:** Avalia $N$ amostras $\implies$ **1 único passo** de atualização.
+- **SGD:** Avalia $N$ amostras $\implies$ **$N$ atualizações sucessivas**!
+:::
+
+::: {.fragment}
+Na primeira época, o SGD ajusta os parâmetros $N$ vezes, entrando rapidamente na bacia ótima muito antes de o BGD concluir suas primeiras iterações.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Dinâmica Comparada no California Housing
+
+Avaliamos a comparação prática entre BGD, SGD puro ($B = 1$) e Mini-batch SGD ($B = 32$) treinados na regressão linear com as variáveis padronizadas do California Housing ($N = 16.640$ amostras no split de treino):
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Dinâmica Comparada no California Housing
+
+Trajetórias no espaço de parâmetros $(w_{\text{MedInc}}, w_{\text{HouseAge}})$ e evolução da perda por época:
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.3))
+
+w_bgd_arr = np.array(w_hist_bgd)
+w_mb_arr = np.array(w_hist_mb)
+w_sgd_arr = np.array(w_hist_sgd)
+
+# Painel 1: Trajetória no espaço de parâmetros
+cs = axes[0].contour(W1_g, W2_g, Z_cost, levels=14, cmap="Blues_r", alpha=0.45)
+axes[0].clabel(cs, inline=True, fontsize=8, fmt="%.2f")
+
+axes[0].plot(w_bgd_arr[:, idx_w1], w_bgd_arr[:, idx_w2], 'o-', color=COR_A, lw=2.2, ms=4, label="BGD (Lote Completo)")
+axes[0].plot(w_mb_arr[::10, idx_w1], w_mb_arr[::10, idx_w2], 's-', color=COR_VERDE, lw=1.5, ms=3, alpha=0.8, label="Mini-Batch (B = 32)")
+axes[0].plot(w_sgd_arr[::4, idx_w1], w_sgd_arr[::4, idx_w2], '.-', color=COR_C, lw=0.9, ms=2, alpha=0.5, label="SGD Puro (B = 1)")
+axes[0].plot(w_star[idx_w1], w_star[idx_w2], '*', color=COR_B, ms=14, zorder=5, label=r"Ótimo Global $\mathbf{w}^\star$")
+
+axes[0].set_xlabel(r"$w_1$ (MedInc — Renda Média)")
+axes[0].set_ylabel(r"$w_2$ (HouseAge — Idade)")
+axes[0].set_title("Trajetória no Espaço de Parâmetros")
+axes[0].legend(frameon=True, fontsize=9, loc="lower right")
+
+# Painel 2: Perda vs Épocas
+epochs_bgd_axis = np.arange(1, n_epochs_bgd + 1)
+epochs_mb_axis = np.arange(1, n_epochs_mb + 1)
+epochs_sgd_axis = np.arange(1, n_epochs_sgd + 1)
+
+axes[1].plot(epochs_bgd_axis[:15], losses_bgd[:15], 'o-', color=COR_A, lw=2, label="BGD")
+axes[1].plot(epochs_mb_axis, losses_mb, 's-', color=COR_VERDE, lw=2, label="Mini-Batch (B = 32)")
+axes[1].plot(epochs_sgd_axis, losses_sgd, '^-', color=COR_C, lw=1.8, label="SGD Puro (B = 1)")
+axes[1].axhline(f_star, color=COR_B, ls="--", lw=1.5, label=r"Perda Ótima $f(\mathbf{w}^\star)$")
+
+axes[1].set_xlabel("Épocas de Treinamento ($N$ avaliações de gradiente)")
+axes[1].set_ylabel(r"Perda Quadrática Média $F(\mathbf{w})$")
+axes[1].set_title("Evolução da Perda por Época")
+axes[1].set_xlim(0.8, 12)
+axes[1].legend(frameon=True, fontsize=9)
+
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+No gráfico acima, observamos nitidamente as propriedades operacionais de cada método:
+
+*   O **BGD (azul)** descreve uma trajetória limpa e ortogonal às curvas de nível, sem qualquer desvio estocástico. Contudo, ao custo de processar $16.640$ exemplos por iteração, ele avança lentamente e requer dezenas de épocas para atingir a bacia ótima.
+*   O **Mini-Batch SGD (verde, $B = 32$)** atinge a vizinhança imediata do ótimo $\mathbf{w}^\star$ já na **primeira época**! Ele aproveita a agilidade de $520$ atualizações por época com variância moderada.
+*   O **SGD Puro (vermelho, $B = 1$)** também alcança a bacia ótima quase instantaneamente na primeira época, mas sua trajetória apresenta oscilações visíveis em torno do ponto ótimo devido ao ruído inerente a amostras individuais.
+:::
+
+## Pausa 2 — O Dilema do Lote Completo
+
+::: {.callout-tip}
+## Pergunta Aberta
+Se o SGD puro ($B = 1$) executa $N$ atualizações por época e atinge a bacia ótima muito mais rápido do que o BGD, por que não descartamos o BGD em definitivo na totalidade dos problemas práticos de otimização? Em quais cenários matemáticos ou de engenharia o BGD ainda é preferível ao SGD?
+:::
+
+::: {.callout-tip}
+## Custo e Dinâmica do SGD
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Em uma função quadrática estritamente convexa, a trajetória do BGD com taxa de aprendizado adequada nunca aumenta o valor da função de perda entre duas iterações sucessivas.
+- □ Como o SGD puro avalia apenas uma amostra por iteração, a memória de trabalho necessária para armazenar as ativações do grafo é estritamente proporcional a $\mathcal{O}(1)$ na dimensão da amostra.
+- □ Para qualquer problema de otimização, o SGD puro converge mais rápido do que o BGD tanto na fase inicial de exploração quanto na fase final de aproximação de alta precisão ($\epsilon = 10^{-12}$).
+- □ A variabilidade da trajetória do SGD decorre exclusivamente de erros numéricos de arredondamento de ponto flutuante na biblioteca de diferenciação automática.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 2 — Resposta
+
+::: {.callout-tip}
+## Custo e Dinâmica do SGD — Resposta
+- ✔ **Verdadeiro:** Sob passo $\alpha < 2/L$, o Lema da Descida garante que o BGD decresce monotonicamente: $F(\mathbf{w}_{k+1}) < F(\mathbf{w}_k)$.
+- ✔ **Verdadeiro:** Com $B = 1$, processa-se um único vetor $\mathbf{x}_i \in \mathbb{R}^d$, minimizando o footprint de ativações em memória.
+- ✗ **Falso:** Na fase de altíssima precisão ($\epsilon \to 0$), o ruído do SGD exige passos cada vez menores, tornando a taxa sublinear $\mathcal{O}(1/k)$, enquanto o BGD mantém convergência linear geométrica $\mathcal{O}(\rho^k)$.
+- ✗ **Falso:** A variabilidade decorre da discrepância estatística entre o gradiente da amostra sorteada $\nabla f_{i_k}$ e o gradiente global $\nabla F$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** O BGD é preferível quando $N$ cabe confortavelmente na memória e exigimos altíssima precisão analítica ($\epsilon < 10^{-8}$), em otimização de segunda ordem (métodos de Newton e quasi-Newton BFGS), ou quando a função de perda não possui estrutura de soma finita de dados i.i.d.
+:::
+:::
+
+# Bloco 2: Propriedades Estatísticas do Gradiente Estocástico
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Gradiente Estocástico como Estimador Não-Enviesado
+
+Por que confiar na direção indicada por uma única amostra aleatória? A fundamentação matemática reside no fato de que o gradiente estocástico é um **estimador não-enviesado** do gradiente determinístico global.
+
+Seja $i_k$ uma variável aleatória discreta com distribuição uniforme sobre $\{1, 2, \dots, N\}$, tal que:
+
+$$\mathbb{P}(i_k = i) = \frac{1}{N}, \quad \forall i \in \{1, \dots, N\}$$
+
+Definimos o estimador do gradiente estocástico por $\mathbf{g}_k(\mathbf{w}) := \nabla f_{i_k}(\mathbf{w})$.
+
+::: {.callout-note icon=false}
+## Teorema (Não-Enviesamento do Gradiente Estocástico)
+Condicionado ao vetor de parâmetros atual $\mathbf{w}$, a esperança matemática do gradiente estocástico $\mathbf{g}_k(\mathbf{w})$ é exatamente igual ao gradiente da perda empírica global $\nabla F(\mathbf{w})$:
+$$\mathbb{E}_{i_k}[\mathbf{g}_k(\mathbf{w}) \mid \mathbf{w}] = \nabla F(\mathbf{w})$$
+:::
+
+**Demonstração:**
+Pela definição formal de esperança matemática para uma variável aleatória discreta:
+
+$$\mathbb{E}_{i_k}[\nabla f_{i_k}(\mathbf{w})] = \sum_{i=1}^N \mathbb{P}(i_k = i) \cdot \nabla f_i(\mathbf{w}) = \sum_{i=1}^N \frac{1}{N} \nabla f_i(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N \nabla f_i(\mathbf{w}) = \nabla F(\mathbf{w})$$
+
+Essa propriedade fundamental assegura que o algoritmo não possui viés angular sistemático: embora passos individuais sofram oscilações estocásticas, a direção esperada aponta exatamente na rota de maior descida da função global!
+
+## Decomposição Canônica: Sinal vs. Ruído de Amostragem
+
+Podemos decompor o vetor de gradiente estocástico em duas componentes: o **sinal verdadeiro** e o **ruído estocástico de amostragem**:
+
+$$\mathbf{g}_k(\mathbf{w}_k) = \nabla F(\mathbf{w}_k) + \boldsymbol{\xi}_k$$
+
+onde o vetor de ruído estocástico é definido por:
+
+$$\boldsymbol{\xi}_k := \nabla f_{i_k}(\mathbf{w}_k) - \nabla F(\mathbf{w}_k)$$
+
+Por construção direta do Teorema do Não-Enviesamento, o ruído tem média condicional nula:
+
+$$\mathbb{E}[\boldsymbol{\xi}_k \mid \mathbf{w}_k] = \mathbb{E}[\nabla f_{i_k}(\mathbf{w}_k) \mid \mathbf{w}_k] - \nabla F(\mathbf{w}_k) = \nabla F(\mathbf{w}_k) - \nabla F(\mathbf{w}_k) = \mathbf{0}$$
+
+## O Tensor de Covariância do Ruído $\Sigma(\mathbf{w})$ e a Variância Total
+
+A intensidade e a anisotropia das flutuações em torno do gradiente verdadeiro são governadas pela **matriz de covariância do ruído** $\Sigma(\mathbf{w}) \in \mathbb{R}^{d \times d}$:
+
+$$\Sigma(\mathbf{w}) := \operatorname{Cov}(\boldsymbol{\xi}_k \mid \mathbf{w}) = \mathbb{E}[\boldsymbol{\xi}_k \boldsymbol{\xi}_k^T \mid \mathbf{w}] = \frac{1}{N}\sum_{i=1}^N \nabla f_i(\mathbf{w})\nabla f_i(\mathbf{w})^T - \nabla F(\mathbf{w})\nabla F(\mathbf{w})^T$$
+
+A magnitude escalar total do ruído estocástico é dada pelo traço dessa matriz de covariância:
+
+$$\sigma^2(\mathbf{w}) := \mathbb{E}[\|\boldsymbol{\xi}_k\|^2 \mid \mathbf{w}] = \operatorname{tr}(\Sigma(\mathbf{w})) = \frac{1}{N}\sum_{i=1}^N \|\nabla f_i(\mathbf{w}) - \nabla F(\mathbf{w})\|^2$$
+
+## A Patologia Central no Ponto de Mínimo Ótimo $\mathbf{w}^\star$
+
+Aqui reside a diferença mais profunda entre a otimização determinística e a estocástica: **o comportamento no ponto de mínimo global $\mathbf{w}^\star$**.
+
+### 1. O que acontece no BGD no ponto ótimo?
+No minimizador $\mathbf{w}^\star$, a condição necessária de primeira ordem para convexidade impõe:
+
+$$\nabla F(\mathbf{w}^\star) = \mathbf{0}$$
+
+Portanto, o passo de atualização do BGD zera-se identicamente:
+
+$$\mathbf{w}_{k+1} = \mathbf{w}^\star - \alpha \nabla F(\mathbf{w}^\star) = \mathbf{w}^\star - \mathbf{0} = \mathbf{w}^\star$$
+
+O BGD atinge um **ponto fixo exato** e permanece em repouso no mínimo para qualquer taxa de aprendizado admissível $\alpha < 2/L$.
+
+### 2. O que acontece no SGD no ponto ótimo?
+Embora o gradiente médio seja nulo no ótimo ($\frac{1}{N}\sum_{i=1}^N \nabla f_i(\mathbf{w}^\star) = \mathbf{0}$), os gradientes de **amostras individuais isoladas NÃO se anulam**:
+
+$$\nabla f_i(\mathbf{w}^\star) \neq \mathbf{0} \quad \text{para a grande maioria dos exemplos } i$$
+
+A menos que o modelo seja capaz de ajustar com perfeição absoluta todas as $N$ amostras com resíduo zero simultaneamente (a chamada *condição de interpolação perfeita*, irrealista em dados ruidosos), cada exemplo individual "puxa" os pesos em sua direção particular!
+
+Consequentemente, no ponto ótimo $\mathbf{w}^\star$:
+
+$$\Sigma(\mathbf{w}^\star) = \frac{1}{N}\sum_{i=1}^N \nabla f_i(\mathbf{w}^\star)\nabla f_i(\mathbf{w}^\star)^T \succ 0 \implies \sigma^2(\mathbf{w}^\star) > 0$$
+
+::: {.callout-important}
+## Conclusão Crítica: O Ruído Não Desliga Nunca
+No ponto de mínimo global $\mathbf{w}^\star$, **o ruído estocástico permanece ativo**. Se o SGD atingir exatamente o ponto ótimo $\mathbf{w}^\star$ com taxa de aprendizado constante $\alpha$, o passo seguinte será:
+$$\mathbf{w}_{k+1} = \mathbf{w}^\star - \alpha \nabla f_{i_k}(\mathbf{w}^\star) \neq \mathbf{w}^\star$$
+O algoritmo é imediatamente ejetado do mínimo pela flutuação estocástica da amostra sorteada!
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Gradiente Estocástico é Não-Enviesado
+
+- Sorteio uniforme: $\mathbb{P}(i_k = i) = \frac{1}{N}$.
+- Estimador estocástico: $\mathbf{g}_k(\mathbf{w}) = \nabla f_{i_k}(\mathbf{w})$.
+
+::: {.fragment}
+**Demonstração do Não-Enviesamento:**
+$$\mathbb{E}[\mathbf{g}_k(\mathbf{w}) \mid \mathbf{w}] = \sum_{i=1}^N \mathbb{P}(i_k = i) \nabla f_i(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N \nabla f_i(\mathbf{w}) = \nabla F(\mathbf{w})$$
+:::
+
+::: {.fragment .callout-tip title="Significado Estatístico" icon=false}
+O gradiente estocástico não tem desvio angular sistemático: em média, aponta com perfeita exatidão na direção do gradiente verdadeiro $\nabla F(\mathbf{w})$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Decomposição Canônica: Sinal vs. Ruído
+
+$$\mathbf{g}_k(\mathbf{w}_k) = \underbrace{\nabla F(\mathbf{w}_k)}_{\text{Sinal Verdadeiro}} + \underbrace{\boldsymbol{\xi}_k}_{\text{Ruído de Amostragem}}$$
+
+com média condicional nula: $\mathbb{E}[\boldsymbol{\xi}_k \mid \mathbf{w}_k] = \mathbf{0}$.
+
+::: {.fragment}
+**Matriz de Covariância do Ruído $\Sigma(\mathbf{w})$:**
+$$\Sigma(\mathbf{w}) = \mathbb{E}[\boldsymbol{\xi}_k \boldsymbol{\xi}_k^T] = \frac{1}{N}\sum_{i=1}^N \nabla f_i(\mathbf{w})\nabla f_i(\mathbf{w})^T - \nabla F(\mathbf{w})\nabla F(\mathbf{w})^T$$
+:::
+
+::: {.fragment}
+**Variância Escalar Total:**
+$$\sigma^2(\mathbf{w}) = \mathbb{E}[\|\boldsymbol{\xi}_k\|^2] = \operatorname{tr}(\Sigma(\mathbf{w})) = \frac{1}{N}\sum_{i=1}^N \|\nabla f_i(\mathbf{w}) - \nabla F(\mathbf{w})\|^2$$
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Patologia no Mínimo: Por Que o Ruído Não Desliga?
+
+::: {.columns}
+::: {.column width="50%"}
+**Batch GD no Ótimo $\mathbf{w}^\star$:**
+
+- $\nabla F(\mathbf{w}^\star) = \mathbf{0}$.
+- Passo de atualização:
+  $$\mathbf{w}_{k+1} = \mathbf{w}^\star - \alpha \mathbf{0} = \mathbf{w}^\star$$
+- **Ponto fixo exato:** O BGD para e descansa no mínimo com qualquer $\alpha < 2/L$.
+:::
+
+::: {.column width="50%"}
+**SGD no Ótimo $\mathbf{w}^\star$:**
+
+- Média se anula: $\nabla F(\mathbf{w}^\star) = \mathbf{0}$.
+- Mas as amostras **não se anulam**:
+  $$\nabla f_i(\mathbf{w}^\star) \neq \mathbf{0}$$
+- Covariância no ótimo é positiva:
+  $$\Sigma(\mathbf{w}^\star) \succ 0$$
+- **O ruído nunca é desligado!**
+:::
+:::
+
+::: {.fragment .callout-warning title="Consequência Inevitável"}
+Com taxa de aprendizado constante $\alpha$, o SGD **nunca atinge um ponto fixo**. Ele flutua permanentemente ao redor de $\mathbf{w}^\star$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Geometria Vetorial do Passo Estocástico
+
+- **Sinal Determinístico ($-\alpha \nabla F$):** Tração macroscópica em direção ao mínimo ótimo $\mathbf{w}^\star$.
+- **Ruído Browniano ($-\alpha \boldsymbol{\xi}_k$):** Flutuação com dispersão governada pela elipse de covariância $\Sigma(\mathbf{w}_k)$.
+- **Passo SGD ($-\alpha \mathbf{g}_k$):** Avanço estocástico oscilatório; estatisticamente não-enviesado ($\mathbb{E}[\mathbf{g}_k] = \nabla F$).
+:::
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\definecolor{icgreen}{HTML}{1B9E77}
+\definecolor{icgray}{HTML}{5D6D7E}
+\begin{tikzpicture}[>=latex, thick]
+  % Coordenadas fundamentais do triângulo vetorial
+  \coordinate (W) at (0, 0);
+  \coordinate (Sinal) at (5.2, -0.6);
+  \coordinate (Next) at (6.4, 1.5);
+
+  % 1. Camada de Fundo: Elipse de dispersão centrada no ponto esperado (Sinal)
+  \draw[rotate around={35:(Sinal)}, fill=icorange!12, draw=icorange, dashed, line width=1.2pt] 
+    (Sinal) ellipse (2.5cm and 1.3cm);
+  \node[font=\scriptsize\bfseries, text=icorange, align=center] at (5.2, 2.1) 
+    {Dispers\~ao do Ru\'ido $\alpha^2 \Sigma(\mathbf{w}_k)$};
+
+  % 2. Ponto de partida w_k
+  \filldraw[black] (W) circle (2.8pt);
+  \node[left=3pt, font=\small\bfseries] at (W) {$\mathbf{w}_k$};
+
+  % 3. Sinal determinístico (azul): w_k -> Sinal
+  \draw[->, line width=2.0pt, icblue] (W) -- (Sinal) 
+    node[midway, below=6pt, font=\small\bfseries, text=icblue] 
+    {Sinal: $-\alpha \nabla F(\mathbf{w}_k)$};
+  \filldraw[icblue] (Sinal) circle (2.4pt);
+  \node[below=4pt, font=\scriptsize\bfseries, text=icblue, align=center] at (Sinal) 
+    {Ponto Esperado\\$\mathbf{w}_k - \alpha \nabla F$};
+
+  % 4. Ruído estocástico (vermelho): Sinal -> Next
+  \draw[->, line width=1.8pt, icred] (Sinal) -- (Next) 
+    node[midway, right=4pt, font=\small\bfseries, text=icred] 
+    {Ru\'ido: $-\alpha \xi_k$};
+
+  % 5. Passo estocástico resultante (verde): w_k -> Next
+  \draw[->, line width=2.2pt, icgreen] (W) -- (Next) 
+    node[midway, above=6pt, font=\small\bfseries, text=icgreen] 
+    {Passo SGD: $-\alpha \mathbf{g}_k$};
+  \filldraw[icgreen] (Next) circle (2.8pt);
+  \node[above right=2pt, font=\small\bfseries, text=icgreen] at (Next) 
+    {$\mathbf{w}_{k+1}$};
+\end{tikzpicture}
+```
+:::
+
+## Pausa 3 — Estatística do Ruído Estocástico
+
+::: {.callout-tip}
+## Propriedades do Ruído
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ A propriedade de não-enviesamento ($\mathbb{E}[\mathbf{g}_k] = \nabla F(\mathbf{w})$) é válida exclusivamente para funções de perda estritamente convexas.
+- □ Se um modelo atinge perda zero em todo o conjunto de treino ($f_i(\mathbf{w}^\star) = 0, \forall i$), a variância do gradiente estocástico anula-se no minimizador: $\sigma^2(\mathbf{w}^\star) = 0$.
+- □ No ponto de mínimo global de uma função estritamente convexa com dados ruidosos, o vetor de ruído estocástico $\boldsymbol{\xi}_k$ é necessariamente nulo para qualquer amostra sorteada.
+- □ Se multiplicarmos todas as funções de perda individuais por uma constante escalar $c > 0$, a matriz de covariância do ruído $\Sigma(\mathbf{w})$ é multiplicada por $c^2$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 3 — Resposta
+
+::: {.callout-tip}
+## Propriedades do Ruído — Resposta
+- ✗ **Falso:** O não-enviesamento decorre apenas da linearidade da esperança e da amostragem uniforme; independe de convexidade.
+- ✔ **Verdadeiro:** Sob interpolação perfeita de perda suave não-negativa, cada amostra atinge seu mínimo individual em $\mathbf{w}^\star$, logo $\nabla f_i(\mathbf{w}^\star) = \mathbf{0}$ para todo $i$.
+- ✗ **Falso:** Conforme provado na aberta, $f_1'(3) = 1$ e $f_2'(3) = -1$; as amostras puxam em direções opostas, logo $\boldsymbol{\xi}_k \neq \mathbf{0}$.
+- ✔ **Verdadeiro:** $\operatorname{Cov}(c \boldsymbol{\xi}) = \mathbb{E}[(c\boldsymbol{\xi})(c\boldsymbol{\xi})^T] = c^2 \mathbb{E}[\boldsymbol{\xi}\boldsymbol{\xi}^T] = c^2 \Sigma$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** $F(w) = \frac{1}{2}w^2 - 3w + 5 \implies w^\star = 3$. No ótimo: $f_1'(3) = 1$ e $f_2'(3) = -1$. O gradiente médio é $\frac{1}{2}(1 - 1) = 0$, mas a variância é $\sigma^2(w^\star) = \frac{1}{2}(1^2 + (-1)^2) = 1 > 0$! Se $(x_2, y_2) = (1, 2)$, teríamos $w^\star = 2$, com $f_1'(2) = 0$ e $f_2'(2) = 0$, zerando a variância no ótimo.
+:::
+:::
+
+# Bloco 3: Mini-Batching e a Física do Hardware
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Estimador por Mini-Batch
+
+Vimos que o BGD ($B = N$) possui variância nula, mas custo computacional proibitivo, enquanto o SGD puro ($B = 1$) possui custo mínimo por iteração, mas variância de ruído máxima. O **Mini-Batch SGD** é o compromisso fundamental que viabiliza todo o ecossistema moderno de Aprendizado Profundo.
+
+A cada iteração $k$, em vez de sortear apenas uma amostra, selecionamos um subconjunto de índices $\mathcal{B}_k \subset \{1, 2, \dots, N\}$ com cardinalidade $|\mathcal{B}_k| = B$ (denominado *tamanho do lote* ou *batch size*):
+
+$$\mathbf{g}_{\mathcal{B}}(\mathbf{w}) := \frac{1}{B}\sum_{i \in \mathcal{B}_k} \nabla f_i(\mathbf{w})$$
+
+A regra de atualização dos parâmetros torna-se:
+
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha_k \mathbf{g}_{\mathcal{B}}(\mathbf{w}_k)$$
+
+## Teorema da Redução de Variância sob Amostragem com Reposição
+
+::: {.callout-note icon=false}
+## Teorema (Redução de Variância com Reposição)
+Se o mini-batch $\mathcal{B}_k = \{i_1, i_2, \dots, i_B\}$ for sorteado por amostragem aleatória uniforme com reposição de tamanho $B$, então $\mathbf{g}_{\mathcal{B}}(\mathbf{w})$ é um estimador não-enviesado de $\nabla F(\mathbf{w})$ e sua variância total é reduzida exatamente por um fator de $1/B$:
+$$\mathbb{E}[\mathbf{g}_{\mathcal{B}}(\mathbf{w})] = \nabla F(\mathbf{w}) \quad \text{e} \quad \operatorname{Var}(\mathbf{g}_{\mathcal{B}}(\mathbf{w})) = \frac{\sigma^2(\mathbf{w})}{B}$$
+:::
+
+**Demonstração:**
+Como os elementos $i_b \in \mathcal{B}_k$ são selecionados de forma independente e identicamente distribuída (i.i.d.):
+
+1. Pela linearidade da esperança:
+   $$\mathbb{E}\left[\frac{1}{B}\sum_{b=1}^B \nabla f_{i_b}(\mathbf{w})\right] = \frac{1}{B}\sum_{b=1}^B \mathbb{E}[\nabla f_{i_b}(\mathbf{w})] = \frac{1}{B} \cdot B \cdot \nabla F(\mathbf{w}) = \nabla F(\mathbf{w})$$
+2. Pela independência amostral, a covariância entre amostras distintas anula-se ($\operatorname{Cov}(\nabla f_{i_b}, \nabla f_{i_l}) = 0$ para $b \neq l$). Portanto:
+   $$\operatorname{Var}\left(\frac{1}{B}\sum_{b=1}^B \nabla f_{i_b}(\mathbf{w})\right) = \frac{1}{B^2} \sum_{b=1}^B \operatorname{Var}(\nabla f_{i_b}(\mathbf{w})) = \frac{1}{B^2} \cdot B \cdot \sigma^2(\mathbf{w}) = \frac{\sigma^2(\mathbf{w})}{B}$$
+
+## Teorema da Redução de Variância sob Amostragem Sem Reposição (População Finita)
+
+Na prática do treinamento em redes neurais, o conjunto de dados é **permutado aleatoriamente** (*shuffled*) e particionado em $N/B$ mini-batches disjuntos a cada época. Como os dados não se repetem no mesmo lote, a amostragem é **sem reposição**.
+
+::: {.callout-note icon=false}
+## Teorema (Fator de Correção de População Finita)
+Se o mini-batch $\mathcal{B}$ for sorteado uniformemente **sem reposição** de tamanho $B$ a partir de uma população finita de tamanho $N$:
+$$\operatorname{Var}(\mathbf{g}_{\mathcal{B}}(\mathbf{w})) = \left(\frac{N - B}{N - 1}\right) \frac{\sigma^2(\mathbf{w})}{B}$$
+:::
+
+**Dedução Combinatória Completa:**
+Defina os vetores de desvio centralizados em relação à média populacional por $\mathbf{u}_i := \nabla f_i(\mathbf{w}) - \nabla F(\mathbf{w})$. Por construção da média empírica:
+
+$$\sum_{i=1}^N \mathbf{u}_i = \mathbf{0} \quad \text{e} \quad \sum_{i=1}^N \|\mathbf{u}_i\|^2 = N \sigma^2(\mathbf{w})$$
+
+Expandindo o quadrado da soma total nula:
+
+$$0 = \left\|\sum_{i=1}^N \mathbf{u}_i\right\|^2 = \sum_{i=1}^N \|\mathbf{u}_i\|^2 + \sum_{i \neq j} \langle \mathbf{u}_i, \mathbf{u}_j \rangle = N \sigma^2(\mathbf{w}) + \sum_{i \neq j} \langle \mathbf{u}_i, \mathbf{u}_j \rangle$$
+
+Portanto, a soma de todos os $N(N-1)$ produtos cruzados com $i \neq j$ é estritamente negativa:
+
+$$\sum_{i \neq j} \langle \mathbf{u}_i, \mathbf{u}_j \rangle = -N \sigma^2(\mathbf{w}) \implies \mathbb{E}_{i \neq j}[\langle \mathbf{u}_i, \mathbf{u}_j \rangle] = \frac{-N \sigma^2(\mathbf{w})}{N(N-1)} = -\frac{\sigma^2(\mathbf{w})}{N - 1}$$
+
+Agora, avaliamos a variância do estimador por mini-batch $\mathbf{g}_{\mathcal{B}} - \nabla F = \frac{1}{B}\sum_{b=1}^B \mathbf{u}_{i_b}$:
+
+$$\mathbb{E}\left[\|\mathbf{g}_{\mathcal{B}} - \nabla F\|^2\right] = \frac{1}{B^2} \mathbb{E}\left[ \sum_{b=1}^B \|\mathbf{u}_{i_b}\|^2 + \sum_{b \neq l} \langle \mathbf{u}_{i_b}, \mathbf{u}_{i_l} \rangle \right]$$
+
+Substituindo a média dos $B$ termos quadráticos e dos $B(B-1)$ termos cruzados:
+
+$$\mathbb{E}\left[\|\mathbf{g}_{\mathcal{B}} - \nabla F\|^2\right] = \frac{1}{B^2} \left[ B \sigma^2(\mathbf{w}) + B(B-1)\left( -\frac{\sigma^2(\mathbf{w})}{N-1} \right) \right] = \frac{\sigma^2(\mathbf{w})}{B} \left[ 1 - \frac{B-1}{N-1} \right]$$
+
+Agrupando a fração entre colchetes:
+
+$$1 - \frac{B-1}{N-1} = \frac{(N-1) - (B-1)}{N-1} = \frac{N - B}{N - 1}$$
+
+Resultando rigorosamente em:
+
+$$\operatorname{Var}(\mathbf{g}_{\mathcal{B}}(\mathbf{w})) = \left(\frac{N - B}{N - 1}\right) \frac{\sigma^2(\mathbf{w})}{B}$$
+
+Observe o comportamento elegante dessa fórmula nos casos limites:
+*   Se $B = 1 \implies \frac{N-1}{N-1} \cdot \frac{\sigma^2}{1} = \sigma^2$ (recupera a variância total do SGD puro).
+*   Se $B = N \implies \frac{N-N}{N-1} = 0$ (a variância se anula identicamente, recuperando o determinismo perfeito do BGD!).
+
+## A Física da Computação: Hierarquia de Hardware e a Lei do Throughput
+
+A decisão do tamanho do lote $B$ não é puramente estatística; ela é moldada pela **arquitetura de memória e paralelismo de hardware (CPUs e GPUs)**:
+
+1. **A Ineficiência Catastrófica de $B = 1$:**
+   Executar multiplicações vetor-vetor ($B = 1$) pertence ao nível **BLAS-1**. O hardware gasta mais tempo carregando instruções da memória RAM para os registradores e despachando chamadas de kernel (*kernel launch latency*) do que de fato efetuando operações aritméticas de ponto flutuante. Quase $95\%$ dos núcleos de processamento paralelo da GPU permanecem ociosos!
+2. **A Eficiência das Operações Matriciais ($B \in [32, 256]$):**
+   Ao empilhar $B$ exemplos em uma matriz de lote $X_{\mathcal{B}} \in \mathbb{R}^{B \times d}$, a operação de previsão e gradiente transforma-se em uma multiplicação matriz-matriz de nível **BLAS-3** ($X_{\mathcal{B}}^T \mathbf{r}$). As bibliotecas especializadas (cuBLAS, MKL) carregam blocos de matriz na cache ultrarrápida L1/L2 e nos *Tensor Cores*, reutilizando os mesmos registradores para múltiplos cálculos simultâneos. **Processar $B = 64$ consome praticamente o mesmo tempo de relógio que processar $B = 1$!**
+3. **A Saturação e os Retornos Decrescentes ($B > B_{\text{crit}}$):**
+   Assim que a GPU satura sua capacidade de processamento paralelo e largura de banda de memória (em geral entre $B = 128$ e $B = 512$), dobrar o tamanho do lote para $2B$ **dobra o tempo de relógio por passo**. Pelo Teorema da Redução de Variância, dobrar $B$ divide a variância por 2, o que reduz o desvio-padrão do ruído apenas por $\sqrt{2} \approx 1{,}41$. Paga-se $100\%$ a mais em computação para obter apenas $29\%$ de redução na amplitude do ruído!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Estimador por Mini-Batch
+
+:::: {.columns}
+::::: {.column}
+- Sorteamos um subconjunto $\mathcal{B} \subset \{1, \dots, N\}$ de tamanho $B$:
+  $$\mathbf{g}_{\mathcal{B}}(\mathbf{w}) = \frac{1}{B}\sum_{i \in \mathcal{B}} \nabla f_i(\mathbf{w})$$
+- Regra de atualização: $\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha_k \mathbf{g}_{\mathcal{B}}(\mathbf{w}_k)$.
+
+:::::: {.fragment}
+**Redução da Variância (Com Reposição):**
+$$\operatorname{Var}(\mathbf{g}_{\mathcal{B}}(\mathbf{w})) = \frac{\sigma^2(\mathbf{w})}{B}$$
+::::::
+:::::
+::::: {.column}
+::: {.fragment}
+**Amostragem Sem Reposição (Particionamento em Épocas):**
+$$\operatorname{Var}(\mathbf{g}_{\mathcal{B}}(\mathbf{w})) = \underbrace{\left(\frac{N - B}{N - 1}\right)}_{\text{Fator de População Finita}} \frac{\sigma^2(\mathbf{w})}{B}$$
+
+- Se $B = 1 \implies \operatorname{Var} = \sigma^2$ (SGD puro).
+- Se $B = N \implies \operatorname{Var} = 0$ (recupera o BGD!).
+:::
+:::::
+
+::::
+
+
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Dedução: O Fator de População Finita
+
+Se $\mathbf{u}_i = \nabla f_i - \nabla F$, então $\sum_{i=1}^N \mathbf{u}_i = \mathbf{0}$.
+
+::: {.fragment}
+**1. Produtos Cruzados Negativos:**
+$$0 = \left\|\sum_{i=1}^N \mathbf{u}_i\right\|^2 = \sum_{i=1}^N \|\mathbf{u}_i\|^2 + \sum_{i \neq j}\langle \mathbf{u}_i, \mathbf{u}_j \rangle \implies \mathbb{E}_{i \neq j}[\langle \mathbf{u}_i, \mathbf{u}_j \rangle] = -\frac{\sigma^2}{N-1}$$
+:::
+
+::: {.fragment}
+**2. Variância da Média Amostral sem Reposição:**
+$$\operatorname{Var}(\mathbf{g}_{\mathcal{B}}) = \frac{1}{B^2} \left[ B \sigma^2 + B(B-1)\left(-\frac{\sigma^2}{N-1}\right) \right] = \frac{\sigma^2}{B} \left(1 - \frac{B-1}{N-1}\right) = \left(\frac{N-B}{N-1}\right) \frac{\sigma^2}{B}$$
+:::
+
+::: {.fragment .callout-note title="Intuição da Anti-Correlação" icon=false}
+Em amostragem sem reposição, sortear um exemplo com desvio positivo aumenta a probabilidade de os próximos exemplos terem desvios negativos, cancelando parte do ruído!
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Física do Hardware: BLAS-1 vs. BLAS-3
+
+::: {.columns}
+::: {.column width="50%"}
+**Caso $B = 1$ (SGD Puro):**
+
+- Operações vetor-vetor (BLAS-1).
+- Dominado por latência de kernel e barramento de memória (*memory-bound*).
+- $90\%$ a $95\%$ da GPU fica ociosa.
+- Throughput baixíssimo em amostras/s.
+:::
+
+::: {.column width="50%"}
+**Caso $B \in [32, 256]$ (Mini-Batch):**
+
+- Multiplicações matriz-matriz (BLAS-3).
+- Caches L1/L2 e Tensor Cores saturados com paralelismo SIMD.
+- Executar $B = 64$ leva quase o mesmo tempo de relógio que $B = 1$!
+- Throughput máximo por segundo.
+:::
+:::
+
+::: {.fragment .callout-tip title="O Ponto Doce (Sweet Spot)" icon=false}
+O mini-batch ($B \in [32, 256]$) extrai $100\%$ do paralelismo físico da GPU sem sacrificar a frequência de atualizações de pesos.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Hierarquia de Memória e Throughput de GPU
+
+- **Latência de Transferência:** $B = 1$ satura o barramento PCIe/VRAM sem ocupar os núcleos de cálculo.
+- **Reuso em Caches L1/L2:** Mini-batching ($B \in [32, 256]$) mantém os tensores na memória ultrarrápida.
+- **Saturação de FLOPS:** Operações matriciais BLAS-3 operam no limite de vazão dos *Tensor Cores*.
+:::
+
+::: {.fig-resize style="width: 95%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\definecolor{icgreen}{HTML}{1B9E77}
+\definecolor{icgray}{HTML}{5D6D7E}
+\begin{tikzpicture}[
+  stage/.style={rectangle, draw=black!60, fill=#1, thick, rounded corners=4pt, align=center, text width=2.4cm, minimum height=1.3cm, font=\scriptsize},
+  card/.style={rectangle, draw=#1!80, fill=#1!8, thick, rounded corners=5pt, align=left, text width=5.6cm, font=\scriptsize, inner sep=6pt},
+  flow/.style={->, >=latex, line width=1.6pt},
+  link/.style={->, >=latex, dashed, line width=1.3pt}
+]
+  % --- Linha Superior: Pipeline de Memória (Esquerda para Direita) ---
+  \node[stage=black!8] (host) at (0, 3.4) {
+    \textbf{CPU RAM}\\[2pt]
+    \textcolor{black!70}{Capacidade: GBs\\[-1pt]Latência: ~100ns}
+  };
+
+  \node[stage=icblue!20] (vram) at (4.0, 3.4) {
+    \textbf{GPU VRAM}\\[2pt]
+    \textcolor{black!70}{Banda: 2--3 TB/s\\[-1pt]HBM3 / GDDR6}
+  };
+
+  \node[stage=icgreen!25] (l2) at (8.0, 3.4) {
+    \textbf{Cache L2}\\[2pt]
+    \textcolor{black!70}{Latência ultrabaixa\\[-1pt](~30 ciclos)}
+  };
+
+  \node[stage=icorange!35] (cores) at (12.0, 3.4) {
+    \textbf{Tensor Cores}\\[2pt]
+    \textcolor{black!70}{Pico de cálculo:\\[-1pt]centenas de TFLOPS}
+  };
+
+  % Setas do fluxo de memória (labels abaixo para não espremer)
+  \draw[flow, black!70] (host) -- (vram) 
+    node[midway, above=3pt, font=\tiny\bfseries] {PCIe};
+  \draw[flow, icblue] (vram) -- (l2) 
+    node[midway, above=3pt, font=\tiny\bfseries] {On-Chip};
+  \draw[flow, icgreen] (l2) -- (cores) 
+    node[midway, above=3pt, font=\tiny\bfseries] {SM Bus};
+
+  % --- Linha Inferior: Comparação dos Dois Regimes ---
+  \node[card=icred] (reg_sgd) at (2.6, 0.6) {
+    \textcolor{icred}{\textbf{Regime $B = 1$ (SGD Puro — BLAS-1)}}\\[3pt]
+    $\bullet$ Multiplicações vetor-vetor isoladas\\
+    $\bullet$ \textbf{Gargalo de Memória (Memory-bound)}\\
+    $\bullet$ Transferência PCIe/VRAM domina o tempo\\
+    $\bullet$ $>90\%$ dos Tensor Cores ficam ociosos
+  };
+
+  \node[card=icgreen] (reg_mb) at (9.4, 0.6) {
+    \textcolor{icgreen}{\textbf{Regime $B \in [32, 256]$ (Mini-Batch — BLAS-3)}}\\[3pt]
+    $\bullet$ Multiplicações matriz-matriz empilhadas\\
+    $\bullet$ \textbf{Reuso massivo de dados em Cache L1/L2}\\
+    $\bullet$ \textbf{Saturação Computacional (Compute-bound)}\\
+    $\bullet$ 100\% de aproveitamento dos Tensor Cores
+  };
+
+  % Setas indicativas conectando os regimes aos respectivos pontos de saturação/gargalo
+  \draw[link, icred] (reg_sgd.north) to[out=90, in=-90] (vram.south);
+  \draw[link, icgreen] (reg_mb.north) to[out=90, in=-90] (cores.south);
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Validação Empírica da Redução de Variância no California Housing
+
+Avaliamos a variância empírica do gradiente amostral $\|\mathbf{g}_{\mathcal{B}} - \nabla F\|^2$ no California Housing sobre 400 sorteios independentes para diferentes tamanhos de lote $B \in \{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024\}$ no ponto $\mathbf{w}_0 = \mathbf{0}$:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Validação: A Variância Decai Exatamente como $1/B$
+
+Validação empírica no California Housing comparada à curva teórica $\sigma^2/B$:
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+plt.figure(figsize=(7.5, 4.0))
+plt.loglog(batch_sizes_exp, emp_variances, 'o-', color=COR_A, lw=2.2, ms=6, label=r"Variância Empírica $\|\mathbf{g}_{\mathcal{B}} - \nabla F\|^2$")
+plt.loglog(batch_sizes_exp, theoretical_vars, '--', color=COR_B, lw=1.8, label=r"Escala Teórica $\sigma^2 / B$")
+
+plt.xlabel("Tamanho do Mini-Batch ($B$) — escala logarítmica")
+plt.ylabel(r"Variância do Gradiente $\mathbb{E}[\|\mathbf{g}_{\mathcal{B}} - \nabla F\|^2]$")
+plt.title(r"Redução de Variância no California Housing: Teoria vs. Empírico")
+plt.grid(True, which="both", ls=":", alpha=0.6)
+plt.legend(frameon=True, fontsize=10)
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A curva empírica coincide rigorosamente com a reta teórica de inclinação $-1$ na escala log-log, validando que a variância decai estritamente com o inverso de $B$.
+:::
+
+## Pausa 4 — Mini-Batching e Eficiência de Hardware
+
+::: {.callout-tip}
+## Variância e Hardware
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Se aumentarmos o tamanho do mini-batch de $B = 16$ para $B = 64$, a variância do estimador do gradiente sob amostragem com reposição é reduzida exatamente por um fator de 4.
+- □ Na amostragem sem reposição, quando o tamanho do mini-batch se iguala ao número total de amostras ($B = N$), a variância do gradiente anula-se identicamente devido ao fator $(N-B)/(N-1)$.
+- □ O SGD puro ($B = 1$) sempre treina mais rápido na prática em uma GPU moderna do que o Mini-batch com $B = 64$, pois requer menos operações aritméticas por iteração.
+- □ Se um problema possuir ruído intrínseco nulo ($\nabla f_i(\mathbf{w}) = \nabla F(\mathbf{w})$ para todo $i$), então o SGD puro com $B = 1$ comporta-se de maneira identicamente equivalente ao BGD com lote completo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 4 — Resposta
+
+::: {.callout-tip}
+## Variância e Hardware — Resposta
+- ✔ **Verdadeiro:** $\operatorname{Var} = \sigma^2/B$; passando de $16$ para $64$, a variância é dividida por $64/16 = 4$.
+- ✔ **Verdadeiro:** Com $B = N$, o fator de população finita torna-se $(N-N)/(N-1) = 0$, eliminando toda a variância amostral.
+- ✗ **Falso:** Em GPUs, $B = 1$ sofre de latência de lançamento de kernel e subutilização massiva de hardware (*memory-bound*), tendo throughput drasticamente inferior.
+- ✔ **Verdadeiro:** Sem discrepância amostral, o gradiente de qualquer exemplo isolado coincide com o gradiente global, tornando os passos do SGD idênticos aos do BGD.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Para $B=1$, throughput $= 1 / 0{,}0005\text{ s} = 2.000\text{ amostras/s}$. Para $B=64$, throughput $= 64 / 0{,}0008\text{ s} = 80.000\text{ amostras/s}$ ($40\times$ maior!). Para $B=512$, throughput $= 512 / 0{,}004\text{ s} = 128.000\text{ amostras/s}$ ($1{,}6\times$ maior). Com $B=1$, a GPU ficava ociosa; com $B=64$, os núcleos foram ocupados; com $B=512$, o hardware já estava saturado.
+:::
+:::
+
+# Bloco 4: Teoria de Convergência e Taxas de Aprendizado
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Paradoxo da Taxa de Aprendizado Constante: A Bola de Ruído
+
+Por que o SGD não converge para o ponto ótimo exato sob taxa de aprendizado constante $\alpha$?
+
+Analisemos formalmente a dinâmica estocástica em uma função quadrática $\mu$-fortemente convexa e $L$-suave:
+
+$$F(\mathbf{w}) = \frac{1}{2}(\mathbf{w} - \mathbf{w}^\star)^T A (\mathbf{w} - \mathbf{w}^\star)$$
+
+onde $\mu I \preceq A \preceq L I$. O passo de atualização do SGD puro é:
+
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha (\nabla F(\mathbf{w}_k) + \boldsymbol{\xi}_k)$$
+
+Definindo o vetor de erro em relação ao minimizador por $\mathbf{e}_k := \mathbf{w}_k - \mathbf{w}^\star$, e lembrando que $\nabla F(\mathbf{w}_k) = A\mathbf{e}_k$, temos:
+
+$$\mathbf{e}_{k+1} = (I - \alpha A)\mathbf{e}_k - \alpha \boldsymbol{\xi}_k$$
+
+Calculando a norma euclidiana quadrática do erro:
+
+$$\|\mathbf{e}_{k+1}\|^2 = \|(I - \alpha A)\mathbf{e}_k\|^2 - 2\alpha \langle (I - \alpha A)\mathbf{e}_k, \boldsymbol{\xi}_k \rangle + \alpha^2 \|\boldsymbol{\xi}_k\|^2$$
+
+Tomando a esperança condicional em relação a $i_k$, dado $\mathbf{w}_k$:
+1. O termo cruzado anula-se, pois $\mathbb{E}[\boldsymbol{\xi}_k \mid \mathbf{w}_k] = \mathbf{0}$.
+2. Pela contração espectral da matriz simétrica $I - \alpha A$ sob $\alpha \le 1/L$:
+   $$\|I - \alpha A\|_2 \le 1 - \alpha \mu \implies \|(I - \alpha A)\mathbf{e}_k\|^2 \le (1 - \alpha \mu)^2 \|\mathbf{e}_k\|^2 \le (1 - 2\alpha \mu + \alpha^2 L^2)\|\mathbf{e}_k\|^2 \le (1 - \alpha \mu)\|\mathbf{e}_k\|^2$$
+3. O termo quadrático do ruído contribui com a variância: $\mathbb{E}[\|\boldsymbol{\xi}_k\|^2 \mid \mathbf{w}_k] \le \sigma^2$.
+
+Reunindo os termos, obtemos a relação recursiva fundamental de contração de erro:
+
+$$\mathbb{E}[\|\mathbf{e}_{k+1}\|^2 \mid \mathbf{w}_k] \le (1 - 2\alpha \mu)\|\mathbf{e}_k\|^2 + \alpha^2 \sigma^2$$
+
+## Dedução Formal da Bola de Ruído Estacionária
+
+Aplicando recursivamente essa desigualdade para $k$ iterações sucessivas a partir de $\mathbf{w}_0$:
+
+$$\mathbb{E}[\|\mathbf{w}_k - \mathbf{w}^\star\|^2] \le (1 - 2\alpha \mu)^k \|\mathbf{w}_0 - \mathbf{w}^\star\|^2 + \alpha^2 \sigma^2 \sum_{j=0}^{k-1}(1 - 2\alpha \mu)^j$$
+
+Como $\alpha \le 1/L \le 1/\mu$, temos $0 < 1 - 2\alpha \mu < 1$. A série geométrica finita converge no limite para $\frac{1}{1 - (1 - 2\alpha \mu)} = \frac{1}{2\alpha \mu}$. Fazendo $k \to \infty$:
+
+$$\lim_{k \to \infty} \mathbb{E}[\|\mathbf{w}_k - \mathbf{w}^\star\|^2] \le \frac{\alpha^2 \sigma^2}{2\alpha \mu} = \frac{\alpha \sigma^2}{2\mu}$$
+
+::: {.callout-note icon=false}
+## Teorema da Bola de Ruído (Noise Ball)
+Sob taxa de aprendizado constante $\alpha$, o SGD **não converge para $\mathbf{w}^\star$**! O erro esperado aproxima-se rapidamente de uma região esférica de raio proporcional a $\sqrt{\frac{\alpha \sigma^2}{\mu}}$ em torno de $\mathbf{w}^\star$, onde os parâmetros flutuam indefinidamente em equilíbrio dinâmico entre a força determinística de contração e a agitação browniana do ruído!
+:::
+
+## Verificação Numérica no California Housing
+
+No California Housing, nossa matriz Hessiana empírica possui $\mu_{\text{emp}} \approx 0{,}0615$ e a variância empírica no minimizador é $\sigma^2(\mathbf{w}^\star) \approx 48{,}85$.
+*   Se escolhermos $\alpha = 0{,}001$, o limitante teórico para a distância quadrática média é:
+    $$\lim \mathbb{E}[\|\mathbf{w}_k - \mathbf{w}^\star\|^2] \le \frac{0{,}001 \times 48{,}85}{2 \times 0{,}0615} \approx 0{,}397 \implies R_{\text{teor}} \le \sqrt{0{,}397} \approx 0{,}630$$
+*   Na simulação numérica executada no setup da aula, o desvio quadrático médio empírico observado nas últimas $10.000$ iterações de SGD puro atinge $R_{\text{emp}} \approx 0{,}304$, confirmando que a trajetória flutua estritamente confinada dentro do raio teórico da bola de confusão!
+
+## As Históricas Condições de Robbins-Monro (1951)
+
+Para forçar a bola de ruído a colapsar a um único ponto pontual ($\lim \frac{\alpha_k \sigma^2}{2\mu} = 0$), a taxa de aprendizado deve decair ao longo do tempo: $\alpha_k \to 0$. Mas quão rápido ela pode decair?
+
+Se $\alpha_k$ decair rápido demais (por exemplo, $\alpha_k = \frac{1}{2^k}$), os passos encolhem tão velozmente que a soma total de distâncias percorríveis $\sum_{k=1}^\infty \alpha_k < \infty$ é finita. Se a inicialização $\mathbf{w}_0$ estiver distante de $\mathbf{w}^\star$, o algoritmo congela prematuramente no caminho!
+
+Em 1951, Herbert Robbins e Sutton Monro estabeleceram o teorema fundamental que fundou a área de aproximação estocástica:
+
+::: {.callout-note icon=false}
+## Teorema (Condições de Convergência de Robbins-Monro, 1951)
+Para garantir convergência com probabilidade 1 (quase certa) do SGD para o minimizador exato ($\mathbf{w}_k \xrightarrow{\text{q.c.}} \mathbf{w}^\star$), a sequência de passos $\{\alpha_k\}$ deve satisfazer simultaneamente:
+1. $\sum_{k=1}^\infty \alpha_k = \infty \quad \text{\textbf{[Capacidade de Exploração Infinita]}}$
+2. $\sum_{k=1}^\infty \alpha_k^2 < \infty \quad \text{\textbf{[Supressão Assintótica do Ruído]}}$
+:::
+
+### O Significado Físico das Condições:
+1. **$\sum \alpha_k = \infty$:** Garante que a partícula tem energia cinética cumulativa ilimitada para percorrer qualquer distância no espaço de busca, assegurando que o algoritmo nunca fique preso por passos prematuramente microscópicos.
+2. **$\sum \alpha_k^2 < \infty$:** Garante que a variância total acumulada pelo ruído $\sum \alpha_k^2 \sigma^2 < \infty$ é finita, assegurando que as flutuações térmicas brownianas se extinguem assintoticamente, permitindo que a partícula assente suavemente no fundo do poço de potencial.
+
+O exemplo clássico que satisfaz perfeitamente as duas condições de Robbins-Monro é a taxa inversamente proporcional ao tempo:
+
+$$\alpha_k = \frac{\alpha_0}{k}$$
+
+pois a série harmônica diverge ($\sum \frac{1}{k} = \infty$), enquanto a série dos quadrados converge ($\sum \frac{1}{k^2} = \frac{\pi^2}{6} < \infty$).
+
+## Cronogramas Práticos de Decaimento (*Learning Rate Schedules*)
+
+Na engenharia moderna de aprendizado de máquina, empregam-se três cronogramas principais de decaimento:
+
+1. **Decaimento em Degraus (*Step Decay*):**
+   Mantém a taxa constante por $E$ épocas e então multiplica por um fator $\gamma \in (0, 1)$ (em geral $\gamma = 0{,}1$ ou $0{,}35$):
+   $$\alpha_e = \alpha_0 \cdot \gamma^{\lfloor e / E \rfloor}$$
+   Permite rápida exploração inicial e, a cada degrau, encolhe bruscamente o raio da bola de ruído para refinar a aproximação.
+2. **Decaimento Polinomial:**
+   $$\alpha_k = \frac{\alpha_0}{(1 + \gamma k)^p}, \quad \text{com } p \in [0.5, 1.0]$$
+   Para $p = 0.5$ ($\alpha_k \sim 1/\sqrt{k}$), o decaimento é mais suave e muito comum em otimizadores adaptativos.
+3. **Decaimento Cosseno (*Cosine Annealing*):**
+   Suaviza a taxa de aprendizado seguindo meio período de um cosseno até atingir um valor residual $\alpha_{\min}$:
+   $$\alpha_t = \alpha_{\min} + \frac{1}{2}(\alpha_{\max} - \alpha_{\min})\left(1 + \cos\left(\frac{t}{T}\pi\right)\right)$$
+   Amplamente adotado no treinamento moderno de redes neurais profundas e Grandes Modelos de Linguagem (LLMs).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Paradoxo do Passo Constante: A Bola de Ruído
+
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha (\nabla F(\mathbf{w}_k) + \boldsymbol{\xi}_k)$$
+
+Tomando a esperança do erro quadrático em relação a $\mathbf{w}^\star$:
+$$\mathbb{E}[\|\mathbf{w}_{k+1} - \mathbf{w}^\star\|^2] \le (1 - 2\alpha \mu)\mathbb{E}[\|\mathbf{w}_k - \mathbf{w}^\star\|^2] + \alpha^2 \sigma^2$$
+
+::: {.fragment}
+**No Limite Assintótico ($k \to \infty$):**
+$$\lim_{k \to \infty} \mathbb{E}[\|\mathbf{w}_k - \mathbf{w}^\star\|^2] \le \frac{\alpha \sigma^2}{2\mu}$$
+:::
+
+::: {.fragment .callout-warning title="A Bola de Ruído (Noise Ball)" icon=false}
+- Sob taxa de aprendizado constante $\alpha$, o erro **estaciona** num patamar mínimo.
+- O raio da bola de flutuação é proporcional a $\sqrt{\alpha \sigma^2 / \mu}$.
+- Para aproximar-se arbitrariamente do mínimo ótimo, **a taxa $\alpha$ precisa decair**!
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## As Condições de Robbins-Monro (1951)
+
+Para garantir convergência com probabilidade 1 ($\mathbf{w}_k \xrightarrow{\text{q.c.}} \mathbf{w}^\star$), a sequência $\{\alpha_k\}$ deve satisfazer:
+
+::: {.fragment}
+**1. Capacidade de Exploração Infinita:**
+$$\sum_{k=1}^\infty \alpha_k = \infty$$
+Garante que a distância percorrível é ilimitada; o algoritmo nunca congela prematuramente no caminho.
+:::
+
+::: {.fragment}
+**2. Supressão do Ruído Estocástico:**
+$$\sum_{k=1}^\infty \alpha_k^2 < \infty$$
+Garante que a variância acumulada pelo ruído é estritamente finita, drenando a agitação browniana.
+:::
+
+::: {.fragment}
+Exemplo canônico: $\alpha_k = \frac{\alpha_0}{k}$ satisfaz ambas as condições ($\sum \frac{1}{k} = \infty$ e $\sum \frac{1}{k^2} = \frac{\pi^2}{6} < \infty$).
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Cronogramas Práticos de Decaimento
+
+::: {.columns}
+::: {.column width="33%"}
+**Step Decay:**
+$$\alpha_e = \alpha_0 \gamma^{\lfloor e/E \rfloor}$$
+- Degraus clássicos (ex: divide por 3 a cada $2.500$ passos).
+- Encolhe a bola de ruído bruscamente em cada patamar.
+:::
+
+::: {.column width="33%"}
+**Polinomial:**
+$$\alpha_k = \frac{\alpha_0}{(1 + \gamma k)^p}$$
+- Decaimento suave e contínuo (em geral $p = 0{,}5$).
+- Muito comum em otimizadores adaptativos.
+:::
+
+::: {.column width="33%"}
+**Cosine Annealing:**
+$$\alpha_t \propto 1 + \cos\left(\frac{t}{T}\pi\right)$$
+- Curva sinusoidal suave até $\alpha_{\min}$.
+- Padrão em Visão Computacional e LLMs.
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Dinâmica de Decaimento: Colapsando a Bola de Ruído
+
+Abaixo, comparamos a distância quadrática ao ótimo $\|\mathbf{w}_k - \mathbf{w}^\star\|^2$ no California Housing sob taxa constante versus *Step Decay* e *Cosine Annealing*:
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Dinâmica de Decaimento: Colapsando a Bola de Ruído
+
+Evolução do erro $\|\mathbf{w}_k - \mathbf{w}^\star\|^2$ sob diferentes cronogramas de aprendizado:
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+plt.figure(figsize=(9, 4.0))
+plt.plot(steps_sched_axis, err_sched_const, color=COR_C, lw=1.0, alpha=0.5, label=r"Taxa Constante ($\alpha = 0{,}02$) — Flutuação na Bola de Ruído")
+plt.plot(steps_sched_axis, err_sched_step, color=COR_A, lw=2.0, label="Step Decay — Colapso Bruscamente Escalonado")
+plt.plot(steps_sched_axis, err_sched_cos, color=COR_VERDE, lw=2.0, label="Cosine Annealing — Convergência Suave ao Centro")
+
+plt.xlabel("Iterações de Treinamento")
+plt.ylabel(r"Distância Quadrática ao Ótimo $\|\mathbf{w}_k - \mathbf{w}^\star\|^2$")
+plt.title("Efeito dos Cronogramas de Taxa de Aprendizado no Raio do Erro")
+plt.yscale("log")
+plt.grid(True, which="both", ls=":", alpha=0.6)
+plt.legend(frameon=True, fontsize=9)
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Observe como a curva vermelha (passo fixo) estaciona permanentemente oscilando em torno de $10^0$, enquanto o *Step Decay* (azul) e o *Cosine Annealing* (verde) colapsam a distância ao centro da bacia por mais de duas ordens de grandeza!
+
+## A Bênção Oculta do Ruído na Otimização Não-Convexa
+
+Até aqui tratamos o ruído estocástico como uma perturbação a controlar. Em redes neurais profundas, contudo, o ruído estocástico atua como um **regularizador implícito** essencial:
+
+1. **Escape de Pontos de Sela:** Em paisagens não-convexas, pontos de sela ($\nabla F = \mathbf{0}$ com Hessiana contendo autovalores negativos) podem paralisar o BGD. No SGD, o ruído amostral $\boldsymbol{\xi}_k$ atua como uma perturbação transversal aleatória que quebra a simetria imediatamente, empurrando os parâmetros na direção descendente.
+2. **Seleção de Mínimos Planos (*Flat Minima*):**
+   - Em vales estreitos e pontiagudos (*sharp minima*), a curvatura da perda é alta, gerando gradientes de altíssima amplitude. O ruído térmico $\boldsymbol{\xi}_k$ arremessa os parâmetros para fora desse vale estreito com facilidade!
+   - Em vales amplos e suaves (*flat minima*), o gradiente local é pequeno, permitindo que o algoritmo acomode-se estavelmente na bacia.
+   - **Generalização Superior:** Mínimos planos são robustos a pequenas discrepâncias estatísticas entre o conjunto de treinamento e os dados de teste no mundo real.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Bênção Oculta: Mínimos Planos vs. Mínimos Estreitos
+
+::: {.columns}
+::: {.column width="50%"}
+**Mínimos Estreitos (Sharp):**
+
+- Alta curvatura local (Hessiana com autovalores gigantes).
+- O ruído térmico $\boldsymbol{\xi}_k$ ejeta os parâmetros do poço.
+- Sensível a desvios: **péssima generalização no teste!**
+:::
+
+::: {.column width="50%"}
+**Mínimos Planos (Flat):**
+
+- Baixa curvatura local (Hessiana com autovalores moderados).
+- O SGD acomoda-se estavelmente na bacia larga.
+- Robusto a desvios: **excelente generalização no teste!**
+:::
+:::
+
+::: {.fragment .callout-tip title="O Ruído como Regularizador Implícito" icon=false}
+O ruído do SGD atua como um processo de recozimento estocástico (*simulated annealing*), empurrando os parâmetros para regiões amplas que generalizam muito melhor!
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Geometria da Paisagem: Mínimos Planos vs. Estreitos
+
+- **Mínimo Estreito (Sharp):** Curvatura extrema. O ruído $\boldsymbol{\xi}_k$ ejeta os parâmetros; alta sensibilidade a desvios no teste.
+- **Mínimo Plano (Flat):** Bacia larga e suave. O modelo tolera variações entre treino e teste mantendo perda baixa.
+- **Efeito Annealing:** O ruído do SGD atua como regularizador implícito, selecionando soluções de alta generalização.
+:::
+
+::: {.fig-resize style="width: 85%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{icblue}{HTML}{0085CA}
+\definecolor{icorange}{HTML}{FF5E00}
+\definecolor{icred}{HTML}{E03C31}
+\definecolor{icgreen}{HTML}{1B9E77}
+\definecolor{icgray}{HTML}{5D6D7E}
+\begin{tikzpicture}[xscale=1.15, yscale=1.0]
+  % Eixos cartesianos
+  \draw[->, thick, black!60] (-0.3, 0) -- (10.8, 0) node[right, font=\small] {Parâmetros $\mathbf{w}$};
+  \draw[->, thick, black!60] (0, -0.4) -- (0, 4.4) node[above, font=\small] {Perda $\mathcal{L}(\mathbf{w})$};
+
+  % Legenda em caixa destacada no topo (área livre)
+  \node[draw=black!30, fill=white, rounded corners=3pt, inner sep=4pt] at (5.2, 4.2) {
+    \textcolor{icblue}{\rule{14pt}{2.2pt}} \scriptsize\textbf{Treino $\mathcal{L}_{\text{treino}}$}\qquad
+    \textcolor{icorange}{\textbf{-\,-\,-}} \scriptsize\textbf{Teste $\mathcal{L}_{\text{teste}}$ (com shift $\Delta \mathbf{w}$)}
+  };
+
+  % Curva de Treino (Azul sólida)
+  \draw[line width=2.0pt, icblue] plot [smooth, tension=0.65] coordinates {
+    (0.6, 3.8) (1.8, 0.4) (2.8, 3.2) (5.0, 2.5) (7.0, 0.5) (8.6, 0.5) (10.2, 3.6)
+  };
+
+  % Curva de Teste com Shift (Laranja tracejada)
+  \draw[line width=1.6pt, icorange, dashed] plot [smooth, tension=0.65] coordinates {
+    (1.0, 3.8) (2.2, 2.5) (3.2, 3.5) (5.4, 2.7) (7.4, 0.7) (9.0, 0.7) (10.6, 3.8)
+  };
+
+  % --- Mínimo Estreito (Sharp Minimum em x = 1.8) ---
+  \filldraw[icred] (1.8, 0.4) circle (2.8pt);
+  \node[font=\scriptsize\bfseries, text=icred, align=center] at (1.8, -0.6) 
+    {M\'inimo Estreito\\(Sharp Minimum)};
+
+  % Erro de Teste Alto (barra vertical entre treino e teste no mínimo estreito)
+  \draw[<->, >=latex, line width=1.3pt, icred] (1.8, 0.4) -- (1.8, 2.5) 
+    node[midway, left=3pt, font=\scriptsize\bfseries, text=icred, align=right] {Erro de\\Teste Alto!};
+
+  % Seta de ejeção do ruído (curva para a direita saindo do poço)
+  \draw[->, >=latex, line width=1.5pt, icorange] (1.8, 0.4) to[out=40, in=-120] (2.5, 1.8) 
+    node[right=2pt, font=\scriptsize\bfseries, text=icorange] {Ru\'ido ejeta!};
+
+  % --- Mínimo Plano (Flat Minimum em x = 7.8) ---
+  \filldraw[icgreen] (7.8, 0.5) circle (2.8pt);
+  \node[font=\scriptsize\bfseries, text=icgreen, align=center] at (7.8, -0.6) 
+    {M\'inimo Plano\\(Flat Minimum)};
+
+  % Erro de Teste Baixo (barra vertical suave em x = 7.8)
+  \draw[<->, >=latex, line width=1.3pt, icgreen] (7.8, 0.5) -- (7.8, 0.75);
+  \node[font=\scriptsize\bfseries, text=icgreen, align=center] at (7.8, 1.2) 
+    {Erro de Teste Baixo\\$\Delta \mathcal{L} \approx 0$};
+
+  % Região de estabilidade (seta horizontal de largura da bacia)
+  \draw[<->, >=latex, thick, icgreen!80!black] (6.6, 0.15) -- (9.0, 0.15)
+    node[midway, below=1pt, font=\tiny\bfseries] {Bacia Larga e Est\'avel};
+\end{tikzpicture}
+```
+:::
+
+## Pausa 5 — Robbins-Monro e Dinâmica Estocástica
+
+::: {.callout-tip}
+## Pergunta Aberta
+Analise o comportamento do SGD em uma paisagem de perda fortemente anisotrópica (como um desfiladeiro elíptico alongado com $\kappa = \lambda_{\max}/\lambda_{\min} \gg 1$, típico do California Housing antes do escalonamento). Se a Hessiana possui autovalores muito discrepantes, o que ocorre com a trajetória do SGD? Como as flutuações estocásticas do ruído interagem com o mau condicionamento do terreno?
+:::
+
+::: {.callout-tip}
+## Convergência e Paisagem
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ A sequência de passos $\alpha_k = 1/\sqrt{k}$ satisfaz a condição de exploração infinita ($\sum \alpha_k = \infty$), mas viola a condição de supressão do ruído de Robbins-Monro ($\sum \alpha_k^2 < \infty$).
+- □ A sequência de passos $\alpha_k = 1/k^2$ garante variância acumulada finita, mas pode falhar em atingir o mínimo caso a inicialização $\mathbf{w}_0$ esteja muito afastada da solução.
+- □ Sob taxa constante $\alpha$ em quadráticas fortemente convexas, o diâmetro da bola de ruído estacionária é inversamente proporcional ao parâmetro de forte convexidade $\mu$.
+- □ Em torno de um ponto de sela com $\nabla F(\mathbf{w}) = \mathbf{0}$ e autovalores mistos na Hessiana, a perturbação estocástica do ruído facilita a quebra de simetria e o escape pelo vale descendente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 5 — Resposta
+
+::: {.callout-tip}
+## Convergência e Paisagem — Resposta
+- ✔ **Verdadeiro:** $\sum k^{-1/2} = \infty$, mas a soma dos quadrados é a série harmônica $\sum 1/k = \infty$, violando a segunda condição de Robbins-Monro.
+- ✔ **Verdadeiro:** Como $\sum 1/k^2 = \pi^2/6 < \infty$, a distância total percorrível é limitada; se $\mathbf{w}^\star$ estiver além desse alcance, o algoritmo congela prematuramente.
+- ✔ **Verdadeiro:** Pela fórmula da bola de ruído, $\lim \mathbb{E}[\|\mathbf{w}_k - \mathbf{w}^\star\|^2] \le \frac{\alpha \sigma^2}{2\mu}$; maior curvatura $\mu$ confina o ruído.
+- ✔ **Verdadeiro:** No ponto de sela $\nabla F = \mathbf{0}$, o BGD fica paralisado; o ruído do SGD fornece a perturbação transversal que quebra a simetria e precipita o avanço.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Em vales mal-condicionados ($\kappa \gg 1$), o gradiente aponta quase transversalmente às curvas de nível. O SGD sofre duplamente: o passo precisa ser minúsculo na direção íngreme para evitar explosão, mas o ruído estocástico induz ziguezagues frenéticos na direção suave, tornando o avanço lento e motivando métodos com inércia física (Momento da Aula 11).
+:::
+:::
+
+# Fechamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Retomando as 4 Perguntas Centrais
+
+Chegamos ao fechamento da Aula 10 com as quatro perguntas fundamentais plenamente respondidas:
+
+1. **Fundamentação Estatística:** O gradiente estocástico avaliado em uma amostra aleatória é um estimador não-enviesado da perda empírica global: $\mathbb{E}[\nabla f_{i_k}(\mathbf{w})] = \nabla F(\mathbf{w})$. O algoritmo não possui desvio angular sistemático e aponta, em esperança, na direção correta.
+2. **Propriedades do Ruído:** O ruído $\boldsymbol{\xi}_k$ possui média zero e covariância $\Sigma(\mathbf{w})$. No minimizador ótimo $\mathbf{w}^\star$, a menos que haja interpolação perfeita com resíduo nulo em todas as amostras, $\Sigma(\mathbf{w}^\star) \succ 0$. Sob taxa de aprendizado constante, o algoritmo nunca atinge um ponto fixo, estagnando em uma bola de ruído de raio $\mathcal{O}(\alpha \sigma^2 / \mu)$.
+3. **Mini-Batching e Hardware:** Um mini-batch de tamanho $B$ reduz a variância do gradiente por $\sigma^2/B$ (com reposição) ou $\frac{N-B}{N-1}\frac{\sigma^2}{B}$ (sem reposição). Em hardware real, $B \in [32, 256]$ atinge máxima taxa de transferência (*throughput*) explorando operações matriciais BLAS-3 e paralelismo SIMD/GPU.
+4. **Convergência de Robbins-Monro e Generalização:** Para que a bola de ruído colapse no ponto ótimo exato, a sequência de passos deve satisfazer $\sum \alpha_k = \infty$ (exploração irrestrita) e $\sum \alpha_k^2 < \infty$ (supressão do ruído). Longe de ser um defeito numérico, o ruído estocástico atua como um regularizador implícito que expulsa os parâmetros de pontos de sela e vales estreitos, selecionando mínimos planos (*flat minima*) com superior capacidade de generalização.
+
+## Quadro Comparativo Geral: BGD vs. SGD vs. Mini-Batch
+
+| Dimensão de Análise | Batch GD (BGD) | SGD Puro ($B = 1$) | Mini-Batch SGD ($B = 32$) |
+| :--- | :---: | :---: | :---: |
+| **Custo por Iteração** | $\mathcal{O}(Nd)$ | $\mathcal{O}(d)$ | $\mathcal{O}(Bd)$ |
+| **Passos por Época** | 1 | $N$ | $N/B$ |
+| **Variância do Gradiente** | $0$ (Determinístico) | $\sigma^2(\mathbf{w})$ (Máxima) | $\sigma^2(\mathbf{w})/B$ (Controlada) |
+| **Aproveitamento de GPU** | Alto, mas com latência total | Péssimo (Memory-bound) | Excelente (Compute-bound) |
+| **Com $\alpha$ Constante** | Converge exatamente para $\mathbf{w}^\star$ | Flutua na bola de ruído | Flutua em bola menor |
+| **Escape de Selas** | Lento / Pode travar | Muito rápido | Rápido e estável |
+| **Seleção de Mínimos** | Neutro | Favorece mínimos planos | Favorece mínimos planos |
+
+## O Que Fica em Aberto
+
+*   **Vales Anisotrópicos e Ziguezague:** Mesmo com a redução de variância propiciada pelo mini-batching, o gradiente estocástico sofre violentamente em vales estreitos mal-condicionados ($\kappa \gg 1$), onde as oscilações transversais retardam o avanço ao longo do vale.
+*   **Taxa de Aprendizado Escalar Única:** Uma única taxa de aprendizado global $\alpha$ trata todos os parâmetros de maneira homogênea, ignorando que alguns atributos podem ser esparsos ou possuir curvaturas drasticamente distintas.
+
+## Ponte para a Aula 11: O Limite dos Métodos Puros e a Necessidade de Inércia
+
+Como podemos amortecer as oscilações transversais em desfiladeiros mal-condicionados e acelerar o avanço na direção correta do vale?
+
+Na física clássica, uma esfera pesada rolando morro abaixo não muda de direção instantaneamente a cada pequeno solavanco do terreno: sua **inércia mecânica** acumula velocidade na direção persistente da gravidade e amortece flutuações laterais.
+
+Na **Aula 11: Momento, Curvatura e Métodos Acelerados**, investigaremos a dinâmica espectral do **Momento de Polyak (*Heavy-Ball*)**, o **Gradiente Acelerado de Nesterov (NAG)** e a conexão profunda entre aproximações quadráticas locais de Taylor e aceleração assintótica de convergência.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as 4 Perguntas
+
+1. **Fundamentação:** O gradiente estocástico é não-enviesado ($\mathbb{E}[\mathbf{g}_k] = \nabla F(\mathbf{w})$). O centro de massa aponta na direção correta.
+2. **Patologia do Ruído:** No minimizador $\mathbf{w}^\star$, $\Sigma(\mathbf{w}^\star) \succ 0$. Sob passo fixo $\alpha$, o SGD flutua em uma bola de ruído de raio $\mathcal{O}(\alpha \sigma^2 / \mu)$.
+3. **Mini-Batching e Hardware:** O lote $B$ reduz a variância por $\sigma^2/B$ e satura núcleos e caches de GPUs via operações BLAS-3 ($B \in [32, 256]$).
+4. **Convergência e Generalização:** As condições de Robbins-Monro ($\sum \alpha_k = \infty, \sum \alpha_k^2 < \infty$) garantem convergência exata, e o ruído atua como regularizador que seleciona mínimos planos.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Síntese Comparativa: BGD vs. SGD vs. Mini-Batch
+
+| Característica | BGD | SGD Puro ($B = 1$) | Mini-Batch ($B = 32$) |
+| :--- | :---: | :---: | :---: |
+| **Custo por Iteração** | $\mathcal{O}(Nd)$ | $\mathcal{O}(d)$ | $\mathcal{O}(Bd)$ |
+| **Atualizações por Época** | 1 | $N$ | $N/B$ |
+| **Variância do Gradiente** | $0$ | $\sigma^2$ | $\sigma^2 / B$ |
+| **Aproveitamento de GPU** | Latência de Lote | Péssimo | Ótimo (BLAS-3) |
+| **Com $\alpha$ Constante** | Para em $\mathbf{w}^\star$ | Bola de Ruído | Bola Reduzida |
+| **Escape de Selas** | Ruim | Excelente | Excelente |
+| **Generalização no Teste** | Padrão | Mínimos Planos | Mínimos Planos |
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Ponte para a Aula 11: Inércia e Aceleração
+
+::: {.columns}
+::: {.column width="50%"}
+**O Que Vimos Hoje (Aula 10):**
+
+- O SGD e o Mini-Batching resolvem o gargalo temporal e de memória em Big Data.
+- O ruído atua beneficamente na generalização.
+- Mas em vales estreitos ($\kappa \gg 1$), o SGD ziguezagueia freneticamente!
+:::
+
+::: {.column width="50%"}
+**O Próximo Passo (Aula 11):**
+
+- Como amortecer oscilações e acelerar na direção do vale?
+- Adicionar **inércia física**: o **Momento de Polyak** (*Heavy-Ball*).
+- Antecipar a curvatura: o **Gradiente Acelerado de Nesterov (NAG)**.
+:::
+:::
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::

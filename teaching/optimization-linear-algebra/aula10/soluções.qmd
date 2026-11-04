@@ -1,0 +1,218 @@
+---
+title: "Soluções — Aula 10: Gradiente Descendente Estocástico (SGD) e Mini-Batching"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+
+::: {.callout-note icon=false}
+Este documento apresenta as resoluções completas e detalhadas das questões analíticas e o gabarito comentado item a item dos testes conceituais de Verdadeiro/Falso da **Aula 10: Gradiente Descendente Estocástico (SGD) e Mini-Batching**.
+:::
+
+---
+
+## Questões Discursivas
+
+### Questão 1: Dedução da Redução de Variância no Mini-Batching com e sem Reposição
+
+#### (a) Amostragem com Reposição
+Seja $\mathcal{B} = \{i_1, i_2, \dots, i_B\}$ um conjunto de $B$ índices sorteados de forma independente e identicamente distribuída (i.i.d.) com probabilidade uniforme $\mathbb{P}(i_b = i) = \frac{1}{N}$ sobre $\{1, \dots, N\}$. O estimador de mini-batch é definido por:
+$$\mathbf{g}_{\mathcal{B}}(\mathbf{w}) = \frac{1}{B}\sum_{b=1}^B \nabla f_{i_b}(\mathbf{w})$$
+
+1. **Esperança Matemática:**
+   Pela linearidade do operador esperança:
+   $$\mathbb{E}[\mathbf{g}_{\mathcal{B}}(\mathbf{w})] = \frac{1}{B}\sum_{b=1}^B \mathbb{E}[\nabla f_{i_b}(\mathbf{w})]$$
+   Como cada índice $i_b$ segue distribuição uniforme sobre os $N$ dados:
+   $$\mathbb{E}[\nabla f_{i_b}(\mathbf{w})] = \sum_{i=1}^N \frac{1}{N} \nabla f_i(\mathbf{w}) = \nabla F(\mathbf{w})$$
+   Substituindo de volta:
+   $$\mathbb{E}[\mathbf{g}_{\mathcal{B}}(\mathbf{w})] = \frac{1}{B}\sum_{b=1}^B \nabla F(\mathbf{w}) = \frac{1}{B} \cdot B \cdot \nabla F(\mathbf{w}) = \nabla F(\mathbf{w})$$
+   Logo, o estimador de mini-batch é **não-enviesado**.
+
+2. **Variância Total:**
+   O erro do estimador é:
+   $$\mathbf{g}_{\mathcal{B}}(\mathbf{w}) - \nabla F(\mathbf{w}) = \frac{1}{B}\sum_{b=1}^B (\nabla f_{i_b}(\mathbf{w}) - \nabla F(\mathbf{w})) = \frac{1}{B}\sum_{b=1}^B \boldsymbol{\xi}_{i_b}$$
+   Calculando a norma euclidiana quadrática esperada:
+   $$\mathbb{E}[\|\mathbf{g}_{\mathcal{B}}(\mathbf{w}) - \nabla F(\mathbf{w})\|^2] = \mathbb{E}\left[ \left\langle \frac{1}{B}\sum_{a=1}^B \boldsymbol{\xi}_{i_a}, \frac{1}{B}\sum_{b=1}^B \boldsymbol{\xi}_{i_b} \right\rangle \right] = \frac{1}{B^2} \sum_{a=1}^B \sum_{b=1}^B \mathbb{E}[\langle \boldsymbol{\xi}_{i_a}, \boldsymbol{\xi}_{i_b} \rangle]$$
+   Como os sorteios são independentes para $a \neq b$, temos $\mathbb{E}[\langle \boldsymbol{\xi}_{i_a}, \boldsymbol{\xi}_{i_b} \rangle] = \langle \mathbb{E}[\boldsymbol{\xi}_{i_a}], \mathbb{E}[\boldsymbol{\xi}_{i_b}] \rangle = \langle \mathbf{0}, \mathbf{0} \rangle = 0$.
+   Restam apenas os $B$ termos diagonais com $a = b$:
+   $$\mathbb{E}[\|\mathbf{g}_{\mathcal{B}}(\mathbf{w}) - \nabla F(\mathbf{w})\|^2] = \frac{1}{B^2} \sum_{b=1}^B \mathbb{E}[\|\boldsymbol{\xi}_{i_b}\|^2] = \frac{1}{B^2} \cdot B \cdot \sigma^2(\mathbf{w}) = \frac{\sigma^2(\mathbf{w})}{B}$$
+   o que conclui a demonstração para amostragem com reposição.
+
+#### (b) Amostragem sem Reposição (População Finita)
+Considere agora que $\mathcal{B} \subset \{1, \dots, N\}$ seja um subconjunto de tamanho fixo $|\mathcal{B}| = B$ escolhido uniformemente entre todos os $\binom{N}{B}$ subconjuntos possíveis. Definimos as variáveis binárias indicadoras:
+$$I_i = \mathbb{I}(i \in \mathcal{B}) = \begin{cases} 1, & \text{se a amostra } i \in \mathcal{B} \\ 0, & \text{caso contrário} \end{cases}$$
+
+O estimador pode ser reescrito como a soma sobre todas as $N$ amostras:
+$$\mathbf{g}_{\mathcal{B}}(\mathbf{w}) = \frac{1}{B}\sum_{i=1}^N I_i \nabla f_i(\mathbf{w})$$
+
+1. **Propriedades Estatísticas das Indicadoras:**
+   * Probabilidade de uma amostra específica pertencer a $\mathcal{B}$:
+     $$\mathbb{E}[I_i] = \mathbb{P}(I_i = 1) = \frac{\binom{N-1}{B-1}}{\binom{N}{B}} = \frac{B}{N}$$
+   * Como $I_i^2 = I_i$, a variância de $I_i$ é:
+     $$\operatorname{Var}(I_i) = \mathbb{E}[I_i^2] - (\mathbb{E}[I_i])^2 = \frac{B}{N} - \left(\frac{B}{N}\right)^2 = \frac{B(N - B)}{N^2}$$
+   * Para dois índices distintos $i \neq j$, a probabilidade de ambos pertencerem a $\mathcal{B}$ é:
+     $$\mathbb{E}[I_i I_j] = \mathbb{P}(I_i = 1 \text{ e } I_j = 1) = \frac{\binom{N-2}{B-2}}{\binom{N}{B}} = \frac{B(B - 1)}{N(N - 1)}$$
+   * A covariância entre $I_i$ e $I_j$ para $i \neq j$ é:
+     $$\operatorname{Cov}(I_i, I_j) = \mathbb{E}[I_i I_j] - \mathbb{E}[I_i]\mathbb{E}[I_j] = \frac{B(B-1)}{N(N-1)} - \frac{B^2}{N^2} = \frac{B}{N}\left(\frac{B-1}{N-1} - \frac{B}{N}\right) = -\frac{B(N - B)}{N^2(N - 1)}$$
+     Note que a covariância é estritamente negativa: se a amostra $i$ entra no lote, há uma vaga a menos disponível para a amostra $j$.
+
+2. **Dedução da Variância do Estimador:**
+   Seja $\mathbf{u}_i = \nabla f_i(\mathbf{w}) - \nabla F(\mathbf{w})$. Note que, por definição de média populacional, $\sum_{i=1}^N \mathbf{u}_i = \mathbf{0}$, o que implica:
+   $$\left\|\sum_{i=1}^N \mathbf{u}_i\right\|^2 = \sum_{i=1}^N \|\mathbf{u}_i\|^2 + \sum_{i \neq j} \langle \mathbf{u}_i, \mathbf{u}_j \rangle = 0 \implies \sum_{i \neq j} \langle \mathbf{u}_i, \mathbf{u}_j \rangle = -\sum_{i=1}^N \|\mathbf{u}_i\|^2 = -N \sigma^2(\mathbf{w})$$
+   
+   Calculando a variância do estimador:
+   $$\mathbf{g}_{\mathcal{B}}(\mathbf{w}) - \nabla F(\mathbf{w}) = \frac{1}{B}\sum_{i=1}^N I_i \nabla f_i(\mathbf{w}) - \nabla F(\mathbf{w}) = \frac{1}{B}\sum_{i=1}^N \left(I_i - \frac{B}{N}\right)\mathbf{u}_i$$
+   Tomando a norma quadrática esperada:
+   $$\mathbb{E}[\|\mathbf{g}_{\mathcal{B}} - \nabla F\|^2] = \frac{1}{B^2} \sum_{i=1}^N \sum_{j=1}^N \operatorname{Cov}(I_i, I_j) \langle \mathbf{u}_i, \mathbf{u}_j \rangle$$
+   Separando em termos diagonais ($i = j$) e termos cruzados ($i \neq j$):
+   $$\mathbb{E}[\|\mathbf{g}_{\mathcal{B}} - \nabla F\|^2] = \frac{1}{B^2} \left[ \sum_{i=1}^N \operatorname{Var}(I_i) \|\mathbf{u}_i\|^2 + \sum_{i \neq j} \operatorname{Cov}(I_i, I_j) \langle \mathbf{u}_i, \mathbf{u}_j \rangle \right]$$
+   Substituindo $\operatorname{Var}(I_i) = \frac{B(N-B)}{N^2}$ e $\operatorname{Cov}(I_i, I_j) = -\frac{B(N-B)}{N^2(N-1)}$:
+   $$\mathbb{E}[\|\mathbf{g}_{\mathcal{B}} - \nabla F\|^2] = \frac{1}{B^2} \left[ \frac{B(N-B)}{N^2} (N \sigma^2) - \frac{B(N-B)}{N^2(N-1)} (-N \sigma^2) \right]$$
+   Colocando os termos comuns em evidência:
+   $$\mathbb{E}[\|\mathbf{g}_{\mathcal{B}} - \nabla F\|^2] = \frac{B(N-B) N \sigma^2}{B^2 N^2} \left[ 1 + \frac{1}{N-1} \right] = \frac{(N-B)\sigma^2}{B N} \left[ \frac{N}{N-1} \right] = \left(\frac{N - B}{N - 1}\right) \frac{\sigma^2(\mathbf{w})}{B}$$
+   o que demonstra rigorosamente o fator de correção para população finita.
+
+#### (c) Análise dos Casos Extremos
+- **Caso $B = 1$:** Substituindo na fórmula sem reposição:
+  $$\left(\frac{N - 1}{N - 1}\right) \frac{\sigma^2}{1} = 1 \cdot \sigma^2 = \sigma^2(\mathbf{w})$$
+  A variância atinge seu valor máximo, igual à variância do SGD puro.
+- **Caso $B = N$:** Substituindo na fórmula sem reposição:
+  $$\left(\frac{N - N}{N - 1}\right) \frac{\sigma^2}{N} = \frac{0}{N-1} \cdot \frac{\sigma^2}{N} = 0$$
+  A variância é identicamente nula. Isso ocorre porque o subconjunto $\mathcal{B}$ coincide exatamente com o dataset completo, recuperando o cálculo exato do BGD determinístico.
+
+---
+
+### Questão 2: A Dinâmica da Bola de Ruído e o Equilíbrio Estacionário sob Passo Constante
+
+#### (a) Relação de Recorrência do Erro
+A função quadrática é $F(\mathbf{w}) = \frac{1}{2}(\mathbf{w} - \mathbf{w}^\star)^T A (\mathbf{w} - \mathbf{w}^\star)$, cujo gradiente é exatamente $\nabla F(\mathbf{w}) = A(\mathbf{w} - \mathbf{w}^\star) = A\mathbf{e}_k$.
+A regra de atualização do SGD é:
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha (\nabla F(\mathbf{w}_k) + \boldsymbol{\xi}_k)$$
+Subtraindo $\mathbf{w}^\star$ de ambos os lados:
+$$\mathbf{e}_{k+1} = \mathbf{e}_k - \alpha (A\mathbf{e}_k + \boldsymbol{\xi}_k) = (I - \alpha A)\mathbf{e}_k - \alpha \boldsymbol{\xi}_k$$
+Calculando a norma euclidiana quadrática:
+$$\|\mathbf{e}_{k+1}\|^2 = \|(I - \alpha A)\mathbf{e}_k - \alpha \boldsymbol{\xi}_k\|^2 = \|(I - \alpha A)\mathbf{e}_k\|^2 - 2\alpha \langle (I - \alpha A)\mathbf{e}_k, \boldsymbol{\xi}_k \rangle + \alpha^2 \|\boldsymbol{\xi}_k\|^2$$
+o que demonstra a relação solicitada.
+
+#### (b) Demonstração da Cota Superior por Indução
+Tomando a esperança condicional em relação a $\boldsymbol{\xi}_k$, dado $\mathbf{e}_k$:
+1. O termo cruzado linear em $\boldsymbol{\xi}_k$ anula-se: $\mathbb{E}[\langle (I - \alpha A)\mathbf{e}_k, \boldsymbol{\xi}_k \rangle \mid \mathbf{e}_k] = \langle (I - \alpha A)\mathbf{e}_k, \mathbb{E}[\boldsymbol{\xi}_k \mid \mathbf{e}_k] \rangle = 0$.
+2. Como $A$ é simétrica com autovalores no intervalo $[\mu, L]$ e $0 < \alpha < 1/L$, a matriz $(I - \alpha A)$ tem autovalores em $[1 - \alpha L, 1 - \alpha \mu] \subset (0, 1)$. Logo, a norma espectral ao quadrado satisfaz:
+   $$\|(I - \alpha A)\mathbf{e}_k\|^2 \le (1 - \alpha \mu)^2 \|\mathbf{e}_k\|^2 \le (1 - 2\alpha \mu + \alpha^2 \mu^2) \|\mathbf{e}_k\|^2 \le (1 - 2\alpha \mu) \|\mathbf{e}_k\|^2$$
+3. O termo quadrático do ruído é limitado por $\mathbb{E}[\|\boldsymbol{\xi}_k\|^2] \le \sigma^2$.
+
+Unindo essas desigualdades e tomando a esperança total:
+$$\mathbb{E}[\|\mathbf{e}_{k+1}\|^2] \le (1 - 2\alpha \mu) \mathbb{E}[\|\mathbf{e}_k\|^2] + \alpha^2 \sigma^2$$
+Definindo $\rho := 1 - 2\alpha \mu \in (0, 1)$ e aplicando a relação recursivamente para $k$ iterações:
+- Para $k = 1$: $\mathbb{E}[\|\mathbf{e}_1\|^2] \le \rho \|\mathbf{e}_0\|^2 + \alpha^2 \sigma^2$.
+- Para $k = 2$: $\mathbb{E}[\|\mathbf{e}_2\|^2] \le \rho (\rho \|\mathbf{e}_0\|^2 + \alpha^2 \sigma^2) + \alpha^2 \sigma^2 = \rho^2 \|\mathbf{e}_0\|^2 + \alpha^2 \sigma^2 (1 + \rho)$.
+- Por indução finita para qualquer $k \ge 1$:
+  $$\mathbb{E}[\|\mathbf{e}_k\|^2] \le \rho^k \|\mathbf{e}_0\|^2 + \alpha^2 \sigma^2 \sum_{j=0}^{k-1} \rho^j = (1 - 2\alpha \mu)^k \|\mathbf{e}_0\|^2 + \alpha^2 \sigma^2 \sum_{j=0}^{k-1} (1 - 2\alpha \mu)^j$$
+
+#### (c) Limite Assintótico e Geometria da Bola de Confusão
+Como $0 < 1 - 2\alpha \mu < 1$, o primeiro termo decai exponencialmente para zero: $\lim_{k \to \infty} (1 - 2\alpha \mu)^k \|\mathbf{e}_0\|^2 = 0$.
+A soma finita da progressão geométrica converge para:
+$$\sum_{j=0}^{\infty} (1 - 2\alpha \mu)^j = \frac{1}{1 - (1 - 2\alpha \mu)} = \frac{1}{2\alpha \mu}$$
+Multiplicando por $\alpha^2 \sigma^2$:
+$$\lim_{k \to \infty} \mathbb{E}[\|\mathbf{e}_k\|^2] \le \alpha^2 \sigma^2 \left(\frac{1}{2\alpha \mu}\right) = \frac{\alpha \sigma^2}{2\mu}$$
+
+*Interpretação Geométrica:*
+A distância assintótica esperada entre os pesos e o minimizador ótimo é $\mathcal{O}(\sqrt{\alpha \sigma^2 / \mu})$.
+- **Dependência em $\alpha$:** O passo governa a energia de cada perturbação estocástica; passos menores produzem saltos menores, encolhendo a bola.
+- **Dependência em $\sigma^2$:** A variância do ruído dita a intensidade do bombardeamento browniano.
+- **Dependência em $\mu$:** O parâmetro $\mu$ mede a curvatura mínima do poço quadrático. Se $\mu$ for grande (poço muito íngreme), a força de atração direcional $-\nabla F = -A\mathbf{e}$ é intensa mesmo para pequenos afastamentos do centro, confinando o algoritmo firmemente. Se $\mu$ for próximo de zero (desfiladeiro quase plano), o poço não exerce força restauradora suficiente, permitindo que o ruído difunda os parâmetros para longe do centro.
+
+---
+
+### Questão 3: Análise de Convergência sob as Condições de Robbins-Monro
+
+#### (a) Intervalo de $p$ para as Condições de Robbins-Monro
+Consideramos a sequência de passos $\alpha_k = \frac{\alpha_0}{k^p}$ com $p > 0$.
+1. **Primeira Condição (Exploração Infinita):** $\sum_{k=1}^\infty \alpha_k = \alpha_0 \sum_{k=1}^\infty \frac{1}{k^p} = \infty$.
+   Pelo teste da integral para séries $p$ de Riemann, a série $\sum \frac{1}{k^p}$ diverge se e somente se:
+   $$p \le 1$$
+2. **Segunda Condição (Supressão do Ruído):** $\sum_{k=1}^\infty \alpha_k^2 = \alpha_0^2 \sum_{k=1}^\infty \frac{1}{k^{2p}} < \infty$.
+   A série dos quadrados $\sum \frac{1}{k^{2p}}$ converge se e somente se o expoente for estritamente maior que 1:
+   $$2p > 1 \iff p > \frac{1}{2}$$
+
+Intersecionando ambas as condições:
+$$\frac{1}{2} < p \le 1$$
+Logo, o intervalo exato é $p \in (0{,}5; 1{,}0]$.
+
+#### (b) Patologia do Caso $p = 1{,}5$
+Para $p = 1{,}5$, a soma dos passos satisfaz:
+$$\sum_{k=1}^\infty \alpha_k = \alpha_0 \sum_{k=1}^\infty \frac{1}{k^{1{,}5}} = \alpha_0 \zeta(1{,}5) \approx 2{,}612 \cdot \alpha_0 < \infty$$
+Como a soma é convergente, o comprimento máximo do caminho que o otimizador é capaz de percorrer no espaço euclidiano $\mathbb{R}^d$ é estritamente limitado por uma distância finita $D_{\max} \le \sum_{k=1}^\infty \alpha_k \|\mathbf{g}_k\| \le G \sum \alpha_k < \infty$.
+Se a distância euclidiana da inicialização até o minimizador ótimo exceder essa cota ($\|\mathbf{w}_0 - \mathbf{w}^\star\| > D_{\max}$), os passos $\alpha_k$ encolherão a magnitudes infinitesimais antes de o modelo chegar perto do vale. O algoritmo **estaciona e congela prematuramente** no meio do caminho, falhando em convergir para $\mathbf{w}^\star$.
+
+#### (c) Patologia do Caso $p = 0{,}5$ ($\alpha_k = \alpha_0 / \sqrt{k}$)
+Para $p = 0{,}5$:
+1. A soma dos passos diverge: $\sum_{k=1}^\infty \frac{1}{\sqrt{k}} = \infty$ (atende à exploração).
+2. Contudo, ao elevar ao quadrado:
+   $$\sum_{k=1}^\infty \alpha_k^2 = \alpha_0^2 \sum_{k=1}^\infty \frac{1}{k} = \infty$$
+   A série harmônica diverge para o infinito!
+*Consequência:* A variância acumulada pelo ruído estocástico ao longo do tempo é $\sum_{k=1}^\infty \alpha_k^2 \sigma^2 = \infty$. Isso significa que a flutuação térmica browniana não se dissipa assintoticamente. Embora os passos encolham, a soma dos desvios quadráticos aleatórios não é finita, impedindo que o algoritmo assente pontualmente no mínimo global com probabilidade 1.
+
+---
+
+## Testes Conceituais
+
+### Teste 1: A Formulação de Somas Finitas e o Batch Gradient Descent
+*   **(A) Verdadeiro.** Cada passo do BGD requer avaliar os gradientes individuais de todas as $N$ amostras. Como cada amostra em $\mathbb{R}^d$ exige $\mathcal{O}(d)$ operações, o custo temporal total por passo é $\mathcal{O}(Nd)$.
+*   **(B) Verdadeiro.** Por definição matemática de gradiente em lote completo, $\nabla F(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N \nabla f_i(\mathbf{w})$. Para calcular essa soma sem aproximações, todas as $10^7$ funções $f_i$ devem ser diferenciadas no ponto atual.
+*   **(C) Falso.** O gradiente total é a **média aritmética** (soma ponderada por $1/N$) dos gradientes individuais, decorrente da linearidade da derivada: $\nabla \left(\frac{1}{N}\sum f_i\right) = \frac{1}{N}\sum \nabla f_i$. A média geométrica não preserva as propriedades do cálculo diferencial nem define direção de descida.
+*   **(D) Verdadeiro.** Se o dataset original tinha $N$ amostras e passa a ter $2N$ pela duplicação de cada amostra, a nova perda é $F_{\text{novo}}(\mathbf{w}) = \frac{1}{2N}\sum_{i=1}^N 2 f_i(\mathbf{w}) = \frac{1}{N}\sum_{i=1}^N f_i(\mathbf{w}) = F(\mathbf{w})$. O gradiente avaliado em qualquer $\mathbf{w}$ permanece exatamente idêntico.
+
+### Teste 2: O Gradiente Estocástico e o Teorema do Estimador Não-Enviesado
+*   **(A) Falso.** A prova de não-enviesamento $\mathbb{E}[\nabla f_{i_k}] = \sum \frac{1}{N}\nabla f_i = \nabla F$ depende única e exclusivamente da linearidade da esperança matemática e do sorteio uniforme dos índices. Ela é válida para quaisquer funções diferenciáveis, mesmo não-convexas ou não-suaves por partes.
+*   **(B) Verdadeiro.** O fator $1/N$ que assegura a igualdade exata com a média amostral provém de $\mathbb{P}(i_k = i) = 1/N$. Caso o sorteio seguisse uma distribuição não-uniforme sem compensação por ponderação de importância, o estimador seria enviesado.
+*   **(C) Falso.** O SGD não é um método de descida monotônica. Em passos intermediários, a amostra sorteada pode ter gradiente com componente oposta ao gradiente global, provocando aumento temporário na perda total $F(\mathbf{w}_{k+1}) > F(\mathbf{w}_k)$.
+*   **(D) Verdadeiro.** Como o SGD puro avalia apenas uma amostra sorteada $i_k$, o custo por iteração é unicamente o de calcular $\nabla f_{i_k}(\mathbf{w})$, que tem complexidade $\mathcal{O}(d)$, independentemente de o dataset conter mil ou um bilhão de amostras.
+
+### Teste 3: A Estrutura do Ruído Estocástico e a Condição de Interpolação
+*   **(A) Verdadeiro.** Por definição, $\boldsymbol{\xi}_k = \nabla f_{i_k} - \nabla F$. Como $\mathbb{E}[\nabla f_{i_k}] = \nabla F$, temos $\mathbb{E}[\boldsymbol{\xi}_k] = \nabla F - \nabla F = \mathbf{0}$.
+*   **(B) Verdadeiro.** Em problemas reais onde as amostras contêm resíduos ou ruído, cada exemplo tem seu próprio minimizador individual. No ponto ótimo médio $\mathbf{w}^\star$, os gradientes individuais satisfazem $\sum \nabla f_i(\mathbf{w}^\star) = \mathbf{0}$, mas quase todos $\nabla f_i(\mathbf{w}^\star) \neq \mathbf{0}$, gerando matriz de covariância $\Sigma(\mathbf{w}^\star) = \frac{1}{N}\sum \nabla f_i(\mathbf{w}^\star)\nabla f_i(\mathbf{w}^\star)^T \succ 0$.
+*   **(C) Verdadeiro.** Se o modelo tem capacidade suficiente para atingir perda zero em todas as amostras ($f_i(\mathbf{w}^\star) = 0, \forall i$), e a perda é não-negativa e suave, então cada $f_i$ atinge seu mínimo absoluto em $\mathbf{w}^\star$. Logo, $\nabla f_i(\mathbf{w}^\star) = \mathbf{0}$ para todas as amostras simultaneamente, e a variância do gradiente estocástico anula-se no ótimo.
+*   **(D) Verdadeiro.** Se $f_i(\mathbf{w}) = f(\mathbf{w})$ para todo $i$, então $\nabla F(\mathbf{w}) = \frac{1}{N}\sum \nabla f(\mathbf{w}) = \nabla f(\mathbf{w})$. O ruído $\boldsymbol{\xi}_k = \nabla f_{i_k} - \nabla F = \nabla f - \nabla f = \mathbf{0}$ em todo o espaço de parâmetros.
+
+### Teste 4: A Álgebra e a Estatística do Mini-Batching
+*   **(A) Verdadeiro.** Pelo Teorema do Limite Central para médias de variáveis i.i.d., a variância da soma de $B$ variáveis independentes com variância $\sigma^2$ é $B \sigma^2$, e ao dividir por $B$, a variância da média fica $\frac{B \sigma^2}{B^2} = \frac{\sigma^2}{B}$.
+*   **(B) Verdadeiro.** Na amostragem sem reposição, a variância é multiplicada pelo fator de população finita $\frac{N-B}{N-1}$. Fazendo $B = N$, o numerador torna-se zero, eliminando o erro de amostragem.
+*   **(C) Falso.** A variância decai por um fator de 64, mas o desvio-padrão (amplitude do ruído) é a raiz quadrada da variância, decaindo por um fator de $\sqrt{64} = 8$, e não 64.
+*   **(D) Verdadeiro.** A prática comum de particionar o dataset embaralhado em blocos disjuntos garante que todas as $N$ amostras sejam apresentadas ao modelo exatamente uma vez em cada época.
+
+### Teste 5: A Física do Hardware, Vetorização e Throughput
+*   **(A) Verdadeiro.** Processar uma amostra isolada em hardware massivamente paralelo (como GPUs com milhares de núcleos) despacha operações vetor-vetor com baixa intensidade aritmética, gastando a maior parte do tempo em latências de chamada de kernel e transferência de dados da memória.
+*   **(B) Verdadeiro.** Empilhar $B$ amostras em uma matriz permite utilizar rotinas BLAS-3 otimizadas para reuso de dados em caches L1/L2 e execução paralela vetorial em Tensor Cores.
+*   **(C) Falso.** Em uma GPU já saturada em termos de núcleos e largura de banda, o tempo por passo cresce linearmente com $B$. Quadruplicar o lote quadruplica o tempo de execução por iteração, mantendo o throughput (amostras por segundo) essencialmente constante (retornos decrescentes).
+*   **(D) Verdadeiro.** Conforme demonstrado nas análises de throughput, os maiores ganhos ocorrem ao sair de $B=1$ para $B \approx 64$ (quando o hardware sai da ociosidade). Além do ponto de saturação (*sweet spot*), o ganho por amostra estabiliza.
+
+### Teste 6: O Paradoxo da Taxa Constante e a Bola de Ruído
+*   **(A) Falso.** Sob taxa de aprendizado estritamente constante, o SGD não converge para um ponto fixo, mas sim para uma distribuição estacionária de probabilidade centrada em $\mathbf{w}^\star$, flutuando indefinidamente em uma "bola de ruído" cujo raio depende de $\alpha$.
+*   **(B) Verdadeiro.** A cota teórica da bola de ruído é $\lim_{k \to \infty} \mathbb{E}[\|\mathbf{w}_k - \mathbf{w}^\star\|^2] \le \frac{\alpha \sigma^2}{2\mu}$, sendo linearmente proporcional a $\alpha$ e à variância $\sigma^2$.
+*   **(C) Verdadeiro.** O termo $\mu$ aparece no denominador da cota assintótica ($\frac{\alpha \sigma^2}{2\mu}$). Forte convexidade elevada implica poço profundo e íngreme, concentrando a dispersão das flutuações estocásticas.
+*   **(D) Falso.** Mesmo que $\nabla F(\mathbf{w}^\star) = \mathbf{0}$, a amostra sorteada $i$ terá em geral $\nabla f_i(\mathbf{w}^\star) \neq \mathbf{0}$. O passo $\mathbf{w}_{k+1} = \mathbf{w}^\star - \alpha \nabla f_i(\mathbf{w}^\star)$ arremessará os parâmetros para fora de $\mathbf{w}^\star$.
+
+### Teste 7: As Condições de Convergência de Robbins-Monro
+*   **(A) Verdadeiro.** Se a soma dos passos fosse finita ($\sum \alpha_k < \infty$), a distância euclidiana máxima que o algoritmo poderia percorrer seria finita, podendo travar antes de alcançar o minimizador.
+*   **(B) Verdadeiro.** A condição $\sum \alpha_k^2 < \infty$ assegura que a soma da variância acumulada pelas perturbações brownianas $\sum \alpha_k^2 \sigma^2$ convirja, drenando a energia térmica do ruído e permitindo a estabilização assintótica no mínimo.
+*   **(C) Verdadeiro.** Para $\alpha_k = \alpha_0/k$, a série $\sum 1/k = \infty$ (diverge) e a série dos quadrados $\sum 1/k^2 = \pi^2/6 < \infty$ (converge), satisfazendo ambas as condições.
+*   **(D) Falso.** A progressão geométrica $\sum \alpha_0 \gamma^k = \frac{\alpha_0 \gamma}{1 - \gamma} < \infty$ é finita para qualquer $\gamma \in (0, 1)$. Logo, o decaimento puramente geométrico viola a primeira condição de Robbins-Monro, arriscando congelamento prematuro.
+
+### Teste 8: Paisagens Não-Convexas, Escape de Selas e Mínimos Planos
+*   **(A) Verdadeiro.** Em pontos de sela estritos, onde o gradiente verdadeiro se anula mas existem direções com curvatura negativa, o ruído estocástico $\boldsymbol{\xi}_k$ atua como uma força de perturbação aleatória que quebra a simetria e conduz o otimizador pelo caminho de descida.
+*   **(B) Verdadeiro.** Em bacias pontiagudas (*sharp minima*), a curvatura elevada gera gradientes de altíssima magnitude que, combinados com o ruído amostral, desestabilizam o SGD e ejetam os pesos para fora da depressão.
+*   **(C) Verdadeiro.** Lotes excessivamente grandes aproximam o comportamento do BGD determinístico, que tende a convergir para os mínimos mais próximos da inicialização (frequentemente pontiagudos), apresentando pior generalização fora da amostra do que modelos treinados com ruído moderado em lotes menores.
+*   **(D) Verdadeiro.** O *Cosine Annealing* modela a redução da taxa de aprendizado através de uma transição suave e contínua baseada no cosseno, evitando quebras abruptas e propiciando refinamento assintótico eficiente da bola de ruído.
+

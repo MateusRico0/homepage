@@ -1,0 +1,1432 @@
+---
+title: "Aula 11: Máquinas de Vetores de Suporte (SVM)"
+subtitle: "Supervised Learning"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-10-25"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: homepage
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+import os
+os.environ["MPLCONFIGDIR"] = "/tmp/mpl"
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.datasets import load_breast_cancer
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC, SVR
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, brier_score_loss
+import warnings
+warnings.filterwarnings("ignore")
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({
+    "figure.dpi": 130,
+    "font.size": 11,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "legend.frameon": True,
+    "legend.framealpha": 0.9,
+})
+
+COR_A = "#2b5c8f"    # Azul institucional (Classe Benigna / +1)
+COR_B = "#d95f02"    # Laranja quente (Classe Maligna / -1)
+COR_NEU = "#7570b3"  # Roxo
+COR_CINZA = "#7f7f7f"
+COR_VERDE = "#1b9e77"
+
+# Semente determinística
+rng = np.random.default_rng(20261025)
+
+# Carregamento do dataset Breast Cancer Wisconsin
+cancer = load_breast_cancer()
+# Seleção de 2 atributos principais para ilustrações geométricas analíticas
+# Atributos: 0: mean radius, 1: mean texture
+X_raw = cancer.data[:, :2]
+# y original: 0 = Maligno, 1 = Benigno. Converteremos para convenção de SVM: -1 e +1
+y_svm = np.where(cancer.target == 0, -1, 1)
+
+# Padronização de escala (Z-score) — indispensável para SVM geométrica
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X_raw)
+
+# Divisão estratificada em treino (70%) e teste (30%)
+X_train, X_test, y_train, y_test = train_test_split(
+    X_scaled, y_svm, test_size=0.3, random_state=42, stratify=y_svm
+)
+
+# Ajuste de modelos de referência
+clf_linear = SVC(kernel='linear', C=1.0).fit(X_train, y_train)
+clf_rbf = SVC(kernel='rbf', C=1.0, gamma='scale').fit(X_train, y_train)
+
+acc_linear = accuracy_score(y_test, clf_linear.predict(X_test))
+acc_rbf = accuracy_score(y_test, clf_rbf.predict(X_test))
+```
+
+# Revisão e Ruptura de Paradigma
+
+## A Tese do Curso e o Paradigma Probabilístico
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Nas primeiras dez aulas deste curso, todo o edifício do aprendizado supervisionado foi estruturado em torno da seguinte tese epistemológica:
+
+$$\text{Algoritmo Supervisionado} = \text{Distribuição Assumida} + \text{Verossimilhança} + \text{Regra de Decisão Bayesiana}$$
+
+1. Na **Regressão Linear** (Aulas 2 e 3), assumimos erros gaussianos aditivos $y \mid \mathbf{x} \sim \mathcal{N}(\mathbf{w}^T \mathbf{x}, \sigma^2)$, o que conduziu aos Mínimos Quadrados Ordinários via Máxima Verossimilhança.
+2. Na **Regressão Logística** (Aula 6), modelamos a probabilidade a posteriori através da função logística $p(y = 1 \mid \mathbf{x}) = \sigma(\mathbf{w}^T \mathbf{x})$, minimizando a entropia cruzada sobre a totalidade das $N$ amostras.
+3. No **Gradient Tree Boosting** (Aula 10), realizamos descida de gradiente funcional para minimizar a deviance de Bernoulli, combinando centenas de árvores para aproximar o $\log$-odds populacional $f^*(\mathbf{x}) = \frac{1}{2}\ln \frac{p(y=1\mid\mathbf{x})}{1 - p(y=1\mid\mathbf{x})}$.
+
+Em todos esses métodos, existia uma premissa implícita: para classificar um novo ponto, é prudente estimar a função de probabilidade condicional $p(y \mid \mathbf{x})$ em todas as regiões do espaço amostral.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **A Trilogia Probabilística (Aulas 1 a 10):**
+  $$\text{Distribuição Assumida} \implies \text{Log-Verossimilhança} \implies \text{Risco de Bayes}$$
+:::
+
+::: {.fragment}
+- **O Foco em Todo o Espaço:**
+  - Regressão Logística: ajusta $p(y=1 \mid \mathbf{x}) = \sigma(\mathbf{w}^T \mathbf{x})$ gastando capacidade nos pontos fáceis e nos difíceis.
+  - Gradient Tree Boosting: minimiza a deviance no espaço funcional para calibrar $\log$-odds globais.
+:::
+
+::: {.fragment .callout-important}
+## A Pergunta de Vladimir Vapnik
+*"Se o seu objetivo prático é apenas tomar uma decisão binária de classificação ($y \in \{-1, +1\}$), por que resolver o problema infinitamente mais difícil e mal-posto de estimar densidades ou probabilidades em todo o espaço de entrada?"*
+:::
+:::
+
+## A Ruptura de Vapnik: O Princípio de Conservação da Capacidade
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Em 1995, Vladimir Vapnik e Corinna Cortes formularam uma proposta epistemológica radical que deu origem às **Máquinas de Vetores de Suporte (*Support Vector Machines* — SVM)**:
+
+> **O Princípio de Vapnik:** *"Ao resolver um problema de interesse prático, nunca resolva um problema mais geral como passo intermediário. Tente resolver o problema original diretamente, sem desperdiçar recursos na estimativa de grandezas desnecessárias."*
+
+Se o objetivo é traçar uma fronteira discriminante entre duas classes de células tumorais (malignas vs. benignas), não precisamos saber se uma célula localizada no extremo do espaço tem $99{,}9\%$ ou $99{,}999\%$ de probabilidade de ser benigna. **A única informação crítica reside na vizinhança imediata da fronteira de decisão**.
+
+Considere o caso linearmente separável: existem **infinitos hiperplanos** capazes de separar perfeitamente os dados com erro de treinamento igual a zero. Qual desses infinitos hiperplanos oferece a melhor garantia matemática de generalização para dados nunca vistos?
+
+A resposta da Teoria do Aprendizado Estatístico (Vapnik-Chervonenkis) é inequívoca: **o hiperplano que maximiza a distância ortogonal mínima até as amostras mais próximas de cada classe** — o chamado **hiperplano de margem máxima**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.columns}
+::: {.column width="50%"}
+::: {.fragment}
+- **Paradigma Verossimilhança:**
+  - Modela $p(y \mid \mathbf{x})$ globalmente.
+  - Cada ponto exerce atração gravitacional nos parâmetros via gradiente.
+  - Sensível à maldição da dimensionalidade.
+:::
+:::
+
+::: {.column width="50%"}
+::: {.fragment}
+- **Paradigma da Margem Máxima (SVM):**
+  - Foca **exclusivamente na fronteira**.
+  - Ignora pontos situados bem no interior das classes.
+  - Garantias de generalização baseadas na **margem geométrica**, independentes da dimensão $d$ do espaço.
+:::
+:::
+:::
+
+::: {.fragment .callout-tip}
+## O Dilema dos Infinitos Hiperplanos
+Com separabilidade linear, infinitas retas separam os dados com acurácia de treino de $100\%$. Apenas uma maximiza a **folga geométrica de segurança**.
+:::
+:::
+
+## Roteiro da Aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Nesta aula, desvendamos a teoria, a geometria e a implementação das SVMs através de cinco perguntas condutoras:
+
+1. **O que é a margem geométrica canônica e por que sua maximização equivale a um problema quadrático convexo em $\|\mathbf{w}\|^2$?**
+2. **Como a dualidade de Lagrange e as condições KKT (*Karush-Kuhn-Tucker*) revelam a esparsidade dos vetores de suporte?**
+3. **Como a introdução de variáveis de folga $\xi_i \ge 0$ (*Soft Margin*) conecta formalmente a SVM à minimização da perda Hinge regularizada?**
+4. **Como o Truque do Kernel (*Kernel Trick*) projeta dados não lineares em espaços de Hilbert de dimensão infinita operando apenas produtos internos locais?**
+5. **Como transformar os escores geométricos não calibrados da SVM em probabilidades estatisticamente rigorosas via Calibração de Platt (1999) e como estender o modelo para regressão ($\varepsilon$-SVR)?**
+:::
+
+::: {.content-visible when-format="revealjs"}
+1. **Margem Máxima Canônica:** Por que maximizar a margem equivale a minimizar $\frac{1}{2}\|\mathbf{w}\|^2$?
+2. **Dualidade e KKT:** De onde surge a esparsidade matemática dos vetores de suporte?
+3. **Margem Suave e Perda Hinge:** Como relaxar a separabilidade e qual a relação com o hiperparâmetro $C$?
+4. **O Truque do Kernel:** Como operar em espaços de dimensão infinita sem projetar explicitamente os pontos?
+5. **Calibração de Platt e SVR:** Como recuperar probabilidades $P(y=1 \mid \mathbf{x})$ e formular regressão esparsa.
+:::
+
+## Problema Motivador: Breast Cancer Wisconsin
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Utilizamos como fio condutor o dataset **Breast Cancer Wisconsin** ($N = 569$), no qual o objetivo é diagnosticar se uma biópsia por aspiração com agulha fina corresponde a um nódulo mamário **maligno** ($y = -1$) ou **benigno** ($y = +1$).
+
+Para permitir a intuição visual direta, selecionamos inicialmente os dois primeiros atributos padronizados:
+- $x_1$: Raio Médio (*mean radius*);
+- $x_2$: Textura Média (*mean texture*).
+
+Abaixo, ilustramos os dados e contrastamos três hiperplanos arbitrários que separam o subconjunto local com o **hiperplano ótimo de margem máxima**:
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.4))
+
+# Subconjunto ilustrativo 2D
+ax = axes[0]
+mask_neg = (y_train == -1)
+mask_pos = (y_train == 1)
+
+ax.scatter(X_train[mask_neg, 0], X_train[mask_neg, 1], color=COR_B, label="Maligno ($y=-1$)", alpha=0.6, s=35, edgecolor='k', linewidth=0.5)
+ax.scatter(X_train[mask_pos, 0], X_train[mask_pos, 1], color=COR_A, label="Benigno ($y=+1$)", alpha=0.6, s=35, edgecolor='k', linewidth=0.5)
+
+# Hiperplanos arbitrários plausíveis
+x_vals = np.linspace(-2.5, 3.0, 100)
+ax.plot(x_vals, -0.6 * x_vals + 0.3, '--', color=COR_CINZA, label="Hiperplano A (raspa Maligno)")
+ax.plot(x_vals, -1.8 * x_vals + 0.8, ':', color=COR_NEU, label="Hiperplano B (raspa Benigno)")
+ax.set_title("Vários Hiperplanos Separadores Válidos")
+ax.set_xlabel("Raio Médio (Z-score)")
+ax.set_ylabel("Textura Média (Z-score)")
+ax.set_xlim(-2.2, 3.0)
+ax.set_ylim(-2.5, 3.2)
+ax.legend(fontsize=9, loc="upper right")
+
+# Hiperplano SVM Linear de Margem Máxima
+ax = axes[1]
+ax.scatter(X_train[mask_neg, 0], X_train[mask_neg, 1], color=COR_B, label="Maligno ($y=-1$)", alpha=0.45, s=30)
+ax.scatter(X_train[mask_pos, 0], X_train[mask_pos, 1], color=COR_A, label="Benigno ($y=+1$)", alpha=0.45, s=30)
+
+# Grid para contorno de decisão
+xx, yy = np.meshgrid(np.linspace(-2.2, 3.0, 200), np.linspace(-2.5, 3.2, 200))
+Z = clf_linear.decision_function(np.c_[xx.ravel(), yy.ravel()])
+Z = Z.reshape(xx.shape)
+
+# Fronteira e margens canônicas
+cs = ax.contour(xx, yy, Z, levels=[-1.0, 0.0, 1.0], colors=[COR_B, 'black', COR_A],
+                linestyles=['--', '-', '--'], linewidths=[1.5, 2.2, 1.5])
+ax.clabel(cs, fmt={-1.0: "Margem -1", 0.0: "Hiperplano f(x)=0", 1.0: "Margem +1"}, fontsize=8)
+
+# Destacar Vetores de Suporte
+sv = clf_linear.support_vectors_
+ax.scatter(sv[:, 0], sv[:, 1], s=90, facecolors='none', edgecolors='black', linewidths=1.6, label="Vetores de Suporte")
+
+ax.set_title(f"SVM Linear: Margem Máxima Canônica (Acc Teste: {acc_linear:.1%})")
+ax.set_xlabel("Raio Médio (Z-score)")
+ax.set_ylabel("Textura Média (Z-score)")
+ax.set_xlim(-2.2, 3.0)
+ax.set_ylim(-2.5, 3.2)
+ax.legend(fontsize=9, loc="upper right")
+
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="revealjs"}
+::: {.columns}
+::: {.column width="55%"}
+::: {.fragment}
+- **Observações Cruciais do Gráfico:**
+  - O **Hiperplano A** passa perigosamente próximo a tumores malignos: qualquer ruído de medição gerará falso negativo.
+  - O **Hiperplano B** passa rente a nódulos benignos.
+  - A **SVM de Margem Máxima** constrói o corredor simétrico central mais espaçoso possível.
+:::
+:::
+::: {.column width="45%"}
+::: {.fragment .callout-tip}
+## Propriedade da Esparsidade
+Observe os círculos pretos: **apenas os pontos destacados** definem o hiperplano e as margens. Se removermos todos os outros pontos do gráfico, a solução final permanece estritamente idêntica!
+:::
+:::
+:::
+:::
+
+## Pausa 1: A Ruptura com a Verossimilhança
+
+::: {.callout-tip}
+## Pergunta aberta provocadora
+
+Em uma aplicação de diagnóstico médico, a Regressão Logística estima que um novo paciente tem probabilidade estimada $\hat{p} = 0{,}51$ de apresentar nódulo maligno, enquanto uma SVM Linear treinada no mesmo conjunto classifica o paciente como benigno com escore de margem $f(\mathbf{x}) = +0{,}85$. Explique conceitualmente por que esses dois modelos lineares podem produzir decisões divergentes mesmo tendo acesso aos mesmos dados.
+:::
+
+::: {.callout-tip}
+## Julgamento de V ou F
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Em conjuntos de dados linearmente separáveis, o algoritmo de Máxima Verossimilhança da Regressão Logística sem regularização converge para parâmetros finitos e atinge a margem máxima exata da SVM.
+- □ A distância geométrica euclidiana de um ponto $\mathbf{x}$ ao hiperplano $\mathbf{w}^T \mathbf{x} + b = 0$ depende inversamente da norma euclidiana $\|\mathbf{w}\|$.
+- □ Ao contrário da Regressão Logística, na qual cada observação do dataset exerce influência sobre o gradiente da função de perda, a SVM de margem rígida depende estritamente das amostras que repousam sobre as margens.
+- □ A teoria de VC (Vapnik-Chervonenkis) estabelece que a capacidade de generalização de um classificador linear de margem máxima depende exclusivamente da dimensionalidade $d$ do espaço de entrada, e não da razão entre o diâmetro dos dados e a largura da margem.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 1: A Ruptura com a Verossimilhança — Resposta
+
+::: {.callout-tip}
+## Julgamento de V ou F — Resposta
+
+- ✗ **F:** Na separabilidade linear perfeita, a verossimilhança da regressão logística não possui máximo finito ($\|\mathbf{w}\| \to \infty$ para empurrar as probabilidades para 0 e 1), exigindo regularização $L_2$; a SVM, por sua vez, resolve diretamente o hiperplano de margem máxima finita.
+- ✔ **V:** A distância ortogonal é expressa por $\frac{|\mathbf{w}^T \mathbf{x} + b|}{\|\mathbf{w}\|}$, sendo inversamente proporcional à norma $\|\mathbf{w}\|$.
+- ✔ **V:** Pela propriedade das condições KKT, pontos com margem estritamente maior que 1 possuem multiplicadores nulos ($\alpha_i = 0$), não exercendo nenhum efeito sobre o hiperplano.
+- ✗ **F:** A cota de erro de Vapnik independe diretamente de $d$; ela é governada pela razão $(R/\gamma)^2$, onde $R$ é o raio da esfera que envolve os dados e $\gamma$ é a margem geométrica.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** A Regressão Logística é influenciada por todos os pontos do dataset (inclusive amostras distantes que puxam a média condicional), enquanto a SVM foca exclusivamente na geometria local dos pontos fronteiriços. Em regiões de fronteira delicadas, o centro de gravidade das nuvens globais pode deslocar o limiar logístico para longe do corredor de máxima folga geométrica.
+:::
+
+:::
+
+# Bloco 1: Margem Máxima e Problema Dual (Hard Margin)
+
+## A Geometria do Hiperplano Canônico
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Seja um conjunto de treinamento $D = \{(\mathbf{x}_1, y_1), \dots, (\mathbf{x}_N, y_N)\}$ com atributos $\mathbf{x}_i \in \mathbb{R}^d$ e rótulos binários $y_i \in \{-1, +1\}$.
+
+Um **hiperplano afim** em $\mathbb{R}^d$ é definido pelo conjunto de pontos que satisfazem:
+
+$$\mathcal{H} = \{\mathbf{x} \in \mathbb{R}^d : \mathbf{w}^T \mathbf{x} + b = 0\}$$
+
+onde $\mathbf{w} \in \mathbb{R}^d$ é o **vetor normal ortogonal** à superfície do hiperplano e $b \in \mathbb{R}$ é o termo de deslocamento (*bias*).
+
+Para qualquer ponto $\mathbf{x} \in \mathbb{R}^d$, sua projeção ortogonal sobre o hiperplano $\mathcal{H}$ é dada por $\mathbf{x}_0 = \mathbf{x} - d \frac{\mathbf{w}}{\|\mathbf{w}\|}$, onde $d \in \mathbb{R}$ é a distância orientada com sinal. Como $\mathbf{x}_0$ pertence a $\mathcal{H}$:
+
+$$\mathbf{w}^T \left(\mathbf{x} - d \frac{\mathbf{w}}{\|\mathbf{w}\|}\right) + b = 0 \implies \mathbf{w}^T \mathbf{x} - d \frac{\|\mathbf{w}\|^2}{\|\mathbf{w}\|} + b = 0$$
+
+$$d(\mathbf{x}) = \frac{\mathbf{w}^T \mathbf{x} + b}{\|\mathbf{w}\|}$$
+
+Multiplicando pelo rótulo da classe $y \in \{-1, +1\}$, a distância euclidiana ortogonal perpendicular de uma amostra $(\mathbf{x}_i, y_i)$ ao hiperplano é:
+
+$$d_i = \frac{y_i(\mathbf{w}^T \mathbf{x}_i + b)}{\|\mathbf{w}\|}$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **Definição do Hiperplano:**
+  $$\mathbf{w}^T \mathbf{x} + b = 0$$
+  onde $\mathbf{w}$ é o vetor ortogonal à fronteira e $b/\|\mathbf{w}\|$ é a distância da origem ao hiperplano.
+:::
+
+::: {.fragment}
+- **Distância Euclidiana Ortogonal de um Ponto $\mathbf{x}_i$:**
+  $$d_i = \frac{y_i(\mathbf{w}^T \mathbf{x}_i + b)}{\|\mathbf{w}\|}$$
+:::
+
+::: {.fragment .callout-note}
+## Invariância de Escala
+Note que multiplicar $\mathbf{w}$ e $b$ por um escalar positivo $\kappa > 0$ gera exatamente o mesmo hiperplano geométrico e a mesma distância física $d_i$, pois $\frac{\kappa(\mathbf{w}^T \mathbf{x} + b)}{\kappa\|\mathbf{w}\|} = \frac{\mathbf{w}^T \mathbf{x} + b}{\|\mathbf{w}\|}$.
+:::
+:::
+
+## Fixação da Escala Canônica e o Problema Primal
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para eliminar a redundância de escala provocada por $\kappa > 0$, impomos a **convenção canônica**: escalonamos os parâmetros $(\mathbf{w}, b)$ de modo que o ponto mais próximo do hiperplano tenha valor absoluto exatamente igual a 1:
+
+$$\min_{i=1, \dots, N} y_i(\mathbf{w}^T \mathbf{x}_i + b) = 1$$
+
+Sob essa parametrização canônica:
+1. Para todos os pontos da classe positiva ($y_i = +1$), temos $\mathbf{w}^T \mathbf{x}_i + b \ge +1$.
+2. Para todos os pontos da classe negativa ($y_i = -1$), temos $\mathbf{w}^T \mathbf{x}_i + b \le -1$.
+3. Logo, para qualquer amostra $i = 1, \dots, N$:
+   $$y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1$$
+
+A distância do ponto mais próximo até o hiperplano é dada por $\gamma_{\text{half}} = \frac{1}{\|\mathbf{w}\|}$.
+
+Portanto, a **margem geométrica total** (a distância entre os dois hiperplanos de suporte paralelos $\mathbf{w}^T \mathbf{x} + b = +1$ e $\mathbf{w}^T \mathbf{x} + b = -1$) é:
+
+$$\gamma = \frac{2}{\|\mathbf{w}\|}$$
+
+Maximizar a margem geométrica $\frac{2}{\|\mathbf{w}\|}$ equivale estritamente a minimizar a sua recíproca quadrática $\frac{1}{2}\|\mathbf{w}\|^2$. Chegamos assim ao **Problema Primal da SVM de Margem Rígida (*Hard Margin*)**:
+
+$$\min_{\mathbf{w}, b} \frac{1}{2} \|\mathbf{w}\|^2 \quad \text{sujeito a } y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1, \quad \forall i = 1, \dots, N$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **Escala Canônica:**
+  Fixamos $\min_{i} y_i(\mathbf{w}^T \mathbf{x}_i + b) = 1$.
+:::
+
+::: {.fragment}
+- **A Margem Geométrica Total:**
+  $$\gamma = \frac{2}{\|\mathbf{w}\|}$$
+:::
+
+::: {.fragment .callout-important}
+## O Problema Primal Quadrático Convexo
+$$\min_{\mathbf{w}, b} \frac{1}{2} \|\mathbf{w}\|^2 \quad \text{sujeito a } y_i(\mathbf{w}^T \mathbf{x}_i + b) - 1 \ge 0, \quad \forall i=1, \dots, N$$
+- Função objetivo convexa quadrática estrita.
+- Restrições lineares afins de desigualdade.
+- **Mínimo global único**, solucionável via Otimização Convexa (Programação Quadrática).
+:::
+:::
+
+## Geometria do Hiperplano e Margem Canônica
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(8, 4.8))
+
+# Linhas do hiperplano e margens
+x_line = np.linspace(-4, 4, 200)
+slope = -0.6
+b0 = 0.0
+margin_offset = 1.4
+
+ax.plot(x_line, slope * x_line + b0 + margin_offset, '--', color=COR_A, linewidth=1.8, label=r"Margem Positiva: $\mathbf{w}^T\mathbf{x} + b = +1$")
+ax.plot(x_line, slope * x_line + b0, '-', color='black', linewidth=2.2, label=r"Fronteira de Decisão: $\mathbf{w}^T\mathbf{x} + b = 0$")
+ax.plot(x_line, slope * x_line + b0 - margin_offset, '--', color=COR_B, linewidth=1.8, label=r"Margem Negativa: $\mathbf{w}^T\mathbf{x} + b = -1$")
+
+# Faixa de margem sombreada
+ax.fill_between(x_line, slope * x_line + b0 - margin_offset, slope * x_line + b0 + margin_offset, color='#f0f4fa', alpha=0.5)
+
+# Vetor normal w
+w_vec = np.array([0.9, 1.5])
+ax.annotate("", xy=(w_vec[0], w_vec[1]), xytext=(0, 0),
+            arrowprops=dict(arrowstyle="->", color="black", lw=2.4))
+ax.text(w_vec[0] + 0.1, w_vec[1], r"$\mathbf{w}$ (Vetor Normal)", fontweight="bold", fontsize=11)
+
+# Seta indicando a margem 2/||w||
+ax.annotate("", xy=(-1.5, slope * (-1.5) + b0 + margin_offset), xytext=(-0.85, slope * (-1.5) + b0 - margin_offset + 0.39),
+            arrowprops=dict(arrowstyle="<->", color="black", lw=1.6))
+ax.text(-1.4, 0.4, r"Margem $\gamma = \frac{2}{\|\mathbf{w}\|}$", fontweight="bold", fontsize=11,
+        bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="gray", alpha=0.8))
+
+# Vetores de Suporte (sobre as margens)
+sv_pos = np.array([[-0.5, slope*(-0.5) + b0 + margin_offset], [2.0, slope*(2.0) + b0 + margin_offset]])
+sv_neg = np.array([[-1.2, slope*(-1.2) + b0 - margin_offset], [1.0, slope*(1.0) + b0 - margin_offset]])
+
+ax.scatter(sv_pos[:, 0], sv_pos[:, 1], color=COR_A, s=110, edgecolor='black', linewidth=1.8, zorder=5, label="Vetores de Suporte (+1)")
+ax.scatter(sv_neg[:, 0], sv_neg[:, 1], color=COR_B, s=110, marker='s', edgecolor='black', linewidth=1.8, zorder=5, label="Vetores de Suporte (-1)")
+
+# Anotações para SVs
+ax.annotate(r"Vetor de Suporte ($\alpha_i > 0$)", xy=(sv_pos[0, 0], sv_pos[0, 1]), xytext=(sv_pos[0, 0] - 1.2, sv_pos[0, 1] + 0.8),
+            arrowprops=dict(arrowstyle="->", color=COR_A, lw=1.2), fontweight="bold", color=COR_A, fontsize=9.5)
+ax.annotate(r"Vetor de Suporte ($\alpha_j > 0$)", xy=(sv_neg[0, 0], sv_neg[0, 1]), xytext=(sv_neg[0, 0] - 1.4, sv_neg[0, 1] - 0.9),
+            arrowprops=dict(arrowstyle="->", color=COR_B, lw=1.2), fontweight="bold", color=COR_B, fontsize=9.5)
+
+# Pontos internos além da margem (inativos, alpha=0)
+pts_pos = np.array([[-2.5, 3.2], [0.5, 2.5], [2.5, 1.8], [3.2, 1.0]])
+pts_neg = np.array([[-3.0, -1.5], [-1.0, -3.0], [0.5, -2.5], [2.5, -3.2]])
+
+ax.scatter(pts_pos[:, 0], pts_pos[:, 1], color=COR_A, s=45, alpha=0.6, zorder=4)
+ax.scatter(pts_neg[:, 0], pts_neg[:, 1], color=COR_B, s=45, marker='s', alpha=0.6, zorder=4)
+
+ax.text(0.6, 2.7, r"$\alpha_k = 0$ (Ponto Interno: Descartado)", color=COR_CINZA, fontsize=9, style='italic')
+ax.text(-2.8, -1.2, r"$\alpha_l = 0$ (Ponto Interno: Descartado)", color=COR_CINZA, fontsize=9, style='italic')
+
+ax.set_xlim(-4, 4)
+ax.set_ylim(-3.5, 3.8)
+ax.set_title("Geometria da Margem Máxima, Hiperplano Canônico e Vetores de Suporte", pad=12)
+ax.set_xlabel("Coordenada $x_1$")
+ax.set_ylabel("Coordenada $x_2$")
+ax.legend(fontsize=9, loc="upper right")
+plt.tight_layout()
+plt.show()
+```
+
+## O Lagrangeano Primal e as Condições de Ponto de Sela
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para resolver o problema quadrático sob restrições de desigualdade, introduzimos os multiplicadores de Lagrange $\alpha_i \ge 0$ para cada uma das $N$ restrições $y_i(\mathbf{w}^T \mathbf{x}_i + b) - 1 \ge 0$.
+
+A função Lagrangeana primal $\mathcal{L}(\mathbf{w}, b, \boldsymbol{\alpha})$ é formulada como:
+
+$$\mathcal{L}(\mathbf{w}, b, \boldsymbol{\alpha}) = \frac{1}{2} \|\mathbf{w}\|^2 - \sum_{i=1}^N \alpha_i \big[ y_i(\mathbf{w}^T \mathbf{x}_i + b) - 1 \big]$$
+
+com $\alpha_i \ge 0$. De acordo com o teorema da dualidade de Lagrange, o ponto ótimo deve satisfazer as condições de estacionariedade em relação às variáveis primais $(\mathbf{w}, b)$:
+
+1. **Derivada em relação ao vetor de pesos $\mathbf{w}$:**
+   $$\nabla_{\mathbf{w}} \mathcal{L} = \mathbf{w} - \sum_{i=1}^N \alpha_i y_i \mathbf{x}_i = \mathbf{0} \implies \mathbf{w} = \sum_{i=1}^N \alpha_i y_i \mathbf{x}_i$$
+
+   > **Propriedade Fundamental:** O vetor de pesos ótimo $\mathbf{w}$ é uma **combinação linear direta dos vetores de entrada dos dados de treinamento**.
+
+2. **Derivada em relação ao termo independente $b$:**
+   $$\frac{\partial \mathcal{L}}{\partial b} = -\sum_{i=1}^N \alpha_i y_i = 0 \implies \sum_{i=1}^N \alpha_i y_i = 0$$
+
+   > **Propriedade Fundamental:** A soma ponderada dos multiplicadores de Lagrange multiplicados por seus respectivos rótulos de classe anula-se identicamente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **O Lagrangeano Primal:**
+  $$\mathcal{L}(\mathbf{w}, b, \boldsymbol{\alpha}) = \frac{1}{2} \|\mathbf{w}\|^2 - \sum_{i=1}^N \alpha_i \big[ y_i(\mathbf{w}^T \mathbf{x}_i + b) - 1 \big], \quad \alpha_i \ge 0$$
+:::
+
+::: {.fragment}
+- **Estacionariedade em $\mathbf{w}$:**
+  $$\nabla_{\mathbf{w}} \mathcal{L} = \mathbf{0} \implies \mathbf{w} = \sum_{i=1}^N \alpha_i y_i \mathbf{x}_i$$
+:::
+
+::: {.fragment}
+- **Estacionariedade em $b$:**
+  $$\frac{\partial \mathcal{L}}{\partial b} = 0 \implies \sum_{i=1}^N \alpha_i y_i = 0$$
+:::
+:::
+
+## O Problema Dual de Wolfe
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Substituindo as relações de estacionariedade de volta na função Lagrangeana primal $\mathcal{L}(\mathbf{w}, b, \boldsymbol{\alpha})$:
+
+$$\mathcal{L} = \frac{1}{2} \left(\sum_{i=1}^N \alpha_i y_i \mathbf{x}_i\right)^T \left(\sum_{j=1}^N \alpha_j y_j \mathbf{x}_j\right) - \sum_{i=1}^N \alpha_i y_i \left(\sum_{j=1}^N \alpha_j y_j \mathbf{x}_j\right)^T \mathbf{x}_i - b \underbrace{\sum_{i=1}^N \alpha_i y_i}_{= 0} + \sum_{i=1}^N \alpha_i$$
+
+$$\mathcal{L} = \frac{1}{2} \sum_{i=1}^N \sum_{j=1}^N \alpha_i \alpha_j y_i y_j \mathbf{x}_i^T \mathbf{x}_j - \sum_{i=1}^N \sum_{j=1}^N \alpha_i \alpha_j y_i y_j \mathbf{x}_i^T \mathbf{x}_j + \sum_{i=1}^N \alpha_i$$
+
+$$\mathcal{Q}(\boldsymbol{\alpha}) = \sum_{i=1}^N \alpha_i - \frac{1}{2} \sum_{i=1}^N \sum_{j=1}^N \alpha_i \alpha_j y_i y_j \langle \mathbf{x}_i, \mathbf{x}_j \rangle$$
+
+Chegamos ao célebre **Problema Dual de Wolfe**:
+
+$$\max_{\boldsymbol{\alpha}} \sum_{i=1}^N \alpha_i - \frac{1}{2} \sum_{i=1}^N \sum_{j=1}^N \alpha_i \alpha_j y_i y_j \langle \mathbf{x}_i, \mathbf{x}_j \rangle$$
+
+$$\text{sujeito a } \alpha_i \ge 0, \quad \forall i = 1, \dots, N \quad \text{e} \quad \sum_{i=1}^N \alpha_i y_i = 0$$
+
+Note que a dimensionalidade original $d$ desapareceu completamente do problema de otimização: os vetores de dados $\mathbf{x}_i$ e $\mathbf{x}_j$ entram na formulação **exclusivamente através de seus produtos internos euclidianos $\langle \mathbf{x}_i, \mathbf{x}_j \rangle$**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment .callout-important}
+## O Problema Dual de Wolfe
+$$\max_{\boldsymbol{\alpha}} \sum_{i=1}^N \alpha_i - \frac{1}{2} \sum_{i=1}^N \sum_{j=1}^N \alpha_i \alpha_j y_i y_j \langle \mathbf{x}_i, \mathbf{x}_j \rangle$$
+$$\text{sujeito a } \alpha_i \ge 0, \quad \forall i=1, \dots, N \quad \text{e} \quad \sum_{i=1}^N \alpha_i y_i = 0$$
+:::
+
+::: {.fragment}
+- **Três Propriedades Extraordinárias do Dual:**
+  1. A otimização opera sobre $N$ multiplicadores $\alpha_i$, independente do número de atributos $d$.
+  2. O objetivo é puramente côncavo quadrático: todo máximo local é o **máximo global único**.
+  3. Os dados interagem **apenas via produto interno $\langle \mathbf{x}_i, \mathbf{x}_j \rangle$** (a porta de entrada para o Truque do Kernel!).
+:::
+:::
+
+## As Condições KKT e a Esparsidade
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Pelo Teorema de Karush-Kuhn-Tucker (KKT), as soluções ótimas primais $(\mathbf{w}^*, b^*)$ e duais $\boldsymbol{\alpha}^*$ devem satisfazer simultaneamente a condição de **folga complementar (*complementary slackness*)**:
+
+$$\alpha_i^* \big[ y_i((\mathbf{w}^*)^T \mathbf{x}_i + b^*) - 1 \big] = 0, \quad \forall i = 1, \dots, N$$
+
+Essa equação impõe uma dicotomia analítica estrita para cada observação $i$:
+
+1. **Caso 1: $\alpha_i^* = 0$.**  
+   Nesse caso, a restrição pode ser estritamente satisfeita como desigualdade: $y_i(\mathbf{w}^T \mathbf{x}_i + b) > 1$. O ponto encontra-se **além da margem canônica**, bem no interior de seu próprio território. Ele não participa da somatória de $\mathbf{w} = \sum \alpha_i y_i \mathbf{x}_i$ e não tem **absolutamente nenhuma influência na fronteira de decisão**.
+
+2. **Caso 2: $\alpha_i^* > 0$.**  
+   Para que o produto se anule quando $\alpha_i^* > 0$, o segundo termo deve ser identicamente nulo:
+   $$y_i(\mathbf{w}^T \mathbf{x}_i + b) - 1 = 0 \iff y_i(\mathbf{w}^T \mathbf{x}_i + b) = 1$$
+   O ponto repousa **exatamente sobre uma das superfícies da margem canônica**. Esses pontos privilegiados são denominados **Vetores de Suporte (*Support Vectors*)**.
+
+Para classificar um novo ponto $\mathbf{x}_{\text{novo}}$, a função de decisão é computada como:
+
+$$f(\mathbf{x}_{\text{novo}}) = \operatorname{sign}\left( \sum_{i \in \text{SV}} \alpha_i y_i \langle \mathbf{x}_i, \mathbf{x}_{\text{novo}} \rangle + b \right)$$
+
+O cálculo do termo independente $b$ é obtido avaliando qualquer vetor de suporte $j \in \text{SV}$ (onde $y_j (\mathbf{w}^T \mathbf{x}_j + b) = 1$):
+
+$$b = y_j - \sum_{i \in \text{SV}} \alpha_i y_i \langle \mathbf{x}_i, \mathbf{x}_j \rangle$$
+
+Na prática numérica, calcula-se a média de $b$ sobre todos os vetores de suporte para máxima estabilidade aritmética.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **Condição de Folga Complementar KKT:**
+  $$\alpha_i \big[ y_i(\mathbf{w}^T \mathbf{x}_i + b) - 1 \big] = 0$$
+:::
+
+::: {.fragment}
+- **A Dicotomia da Esparsidade:**
+  - Se $y_i(\mathbf{w}^T \mathbf{x}_i + b) > 1 \implies \boldsymbol{\alpha_i = 0}$ (ponto descartado!).
+  - Se $\boldsymbol{\alpha_i > 0} \implies y_i(\mathbf{w}^T \mathbf{x}_i + b) = 1$ (**Vetor de Suporte**!).
+:::
+
+::: {.fragment .callout-tip}
+## A Regra de Classificação Esparsa
+$$f(\mathbf{x}) = \operatorname{sign}\left( \sum_{i \in \text{SV}} \alpha_i y_i \langle \mathbf{x}_i, \mathbf{x} \rangle + b \right)$$
+O modelo armazena apenas os vetores de suporte. Todo o restante da base de treinamento pode ser completamente descartado após a otimização!
+:::
+:::
+
+## Pausa 2: Dualidade e Esparsidade dos Vetores de Suporte
+
+::: {.callout-tip}
+## Pergunta aberta provocadora
+
+Imagine que após treinar uma SVM de margem rígida em um banco com $N = 100.000$ transações financeiras, identificamos que exatamente 42 amostras são vetores de suporte ($\alpha_i > 0$). Se um operador acidentalmente deletar $50.000$ observações do conjunto de treino que possuíam $\alpha_i = 0$ e retreinar a SVM do zero nas $50.000$ restantes, o que acontecerá com os parâmetros $(\mathbf{w}, b)$ do hiperplano final?
+:::
+
+::: {.callout-tip}
+## Julgamento de V ou F
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O vetor de pesos $\mathbf{w}$ da SVM é expresso exclusivamente como uma combinação linear das amostras de treino que constituem vetores de suporte.
+- □ No problema dual de Wolfe, a função objetivo depende da dimensão $d$ do espaço de entrada unicamente através do custo computacional de calcular os produtos internos $\langle \mathbf{x}_i, \mathbf{x}_j \rangle$.
+- □ As condições KKT de folga complementar garantem que qualquer ponto com $\alpha_i > 0$ possui distância ortogonal estritamente maior que $1/\|\mathbf{w}\|$ em relação ao hiperplano separador.
+- □ O valor do termo independente $b$ é determinado unicamente pelo multiplicador de Lagrange $\alpha_i$ de maior magnitude.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 2: Dualidade e Esparsidade — Resposta
+
+::: {.callout-tip}
+## Julgamento de V ou F — Resposta
+
+- ✔ **V:** Como $\alpha_i = 0$ para todos os pontos fora das margens, $\mathbf{w} = \sum_{i=1}^N \alpha_i y_i \mathbf{x}_i = \sum_{i \in \text{SV}} \alpha_i y_i \mathbf{x}_i$.
+- ✔ **V:** O espaço $\mathbb{R}^d$ é encapsulado na matriz de Gram $G_{ij} = \langle \mathbf{x}_i, \mathbf{x}_j \rangle$, cujo tamanho é $N \times N$, independente de $d$.
+- ✗ **F:** Pela folga complementar, se $\alpha_i > 0$, o ponto repousa exatamente sobre a margem canônica, tendo distância perpendicular exatamente igual a $1/\|\mathbf{w}\|$.
+- ✗ **F:** O bias $b$ pode ser calculado a partir de qualquer vetor de suporte individual via $y_j - \mathbf{w}^T \mathbf{x}_j$; na prática, toma-se a média aritmética sobre todos os vetores de suporte.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Os parâmetros $(\mathbf{w}, b)$ permanecerão **estritamente inalterados**. Como as $50.000$ amostras deletadas tinham $\alpha_i = 0$, suas restrições já estavam inativas no ótimo global. A remoção de restrições inativas em um problema convexo preserva rigorosamente a mesma solução ótima.
+:::
+
+:::
+
+# Bloco 2: Margem Suave (Soft Margin) e a Perda Hinge
+
+## Variáveis de Folga e Dados Não Separáveis
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Na esmagadora maioria das aplicações reais (como no Breast Cancer Wisconsin), as classes **não são linearmente separáveis**. Há sobreposição estocástica entre distribuições tumorais benignas e malignas, além de possíveis ruídos de medição laboratorial. Se aplicássemos a SVM de margem rígida, o conjunto de restrições $y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1$ seria inviável, e o algoritmo de otimização falharia sem encontrar solução.
+
+Para superar esse impasse, Corinna Cortes e Vladimir Vapnik (1995) introduziram as **variáveis de folga (*slack variables*)** $\xi_i \ge 0$ para cada observação $i = 1, \dots, N$:
+
+$$y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1 - \xi_i, \quad \xi_i \ge 0$$
+
+A variável de folga $\xi_i$ mede a violação física da margem ideal:
+- **$\xi_i = 0$:** O ponto está classificado corretamente e repousa sobre a margem ou além dela (caso ideal).
+- **$0 < \xi_i \le 1$:** O ponto está classificado corretamente ($y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 0$), porém penetrou no interior da margem de segurança (violação de margem).
+- **$\xi_i > 1$:** O ponto violou a margem e cruzou a fronteira de decisão, sendo **classificado incorretamente** pelo hiperplano.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **O Dilema da Realidade:**
+  Dados biomédicos possuem ruído e sobreposição. A margem rígida torna o problema de otimização **inviável**.
+:::
+
+::: {.fragment}
+- **Relaxação via Variáveis de Folga $\xi_i \ge 0$:**
+  $$y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1 - \xi_i$$
+:::
+
+::: {.fragment}
+- **Os Três Regimes de Folga:**
+  1. $\xi_i = 0$: Ponto seguro (na margem ou além dela).
+  2. $0 < \xi_i \le 1$: Ponto correto, mas invadiu o corredor da margem.
+  3. $\xi_i > 1$: Ponto com erro de classificação ($y_i \neq \hat{y}_i$).
+:::
+:::
+
+## O Problema Primal Soft Margin e o Hiperparâmetro $C$
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para equilibrar o desejo de maximizar a margem (minimizando $\frac{1}{2}\|\mathbf{w}\|^2$) com a necessidade de penalizar as violações de margem, formulamos o **Problema Primal da SVM de Margem Suave**:
+
+$$\min_{\mathbf{w}, b, \boldsymbol{\xi}} \frac{1}{2}\|\mathbf{w}\|^2 + C \sum_{i=1}^N \xi_i$$
+
+$$\text{sujeito a } y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1 - \xi_i \quad \text{e} \quad \xi_i \ge 0, \quad \forall i = 1, \dots, N$$
+
+O escalar $C > 0$ é o **hiperparâmetro de regularização**:
+- **$C \to \infty$:** As violações $\xi_i$ são punidas infinitamente. O modelo recai na margem rígida (*Hard Margin*), com altíssima variância e sensibilidade extrema a ruídos.
+- **$C \to 0$:** O modelo prioriza a minimização de $\|\mathbf{w}\|^2$, tolerando margens largas e inúmeras violações $\xi_i$, aumentando o viés estrutural.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment .callout-important}
+## Formulação Primal Soft Margin
+$$\min_{\mathbf{w}, b, \boldsymbol{\xi}} \frac{1}{2}\|\mathbf{w}\|^2 + C \sum_{i=1}^N \xi_i \quad \text{s.a. } y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1 - \xi_i, \, \xi_i \ge 0$$
+:::
+
+::: {.fragment}
+- **O Papel do Hiperparâmetro $C$ (Tradeoff Viés-Variância):**
+  - **$C$ Grande:** Penalidade severa por invasão de margem $\to$ Margem estreita, baixo viés, alta variância (risco de overfitting).
+  - **$C$ Pequeno:** Alta tolerância a invasões $\to$ Margem ampla, alto viés, baixa variância (risco de underfitting).
+:::
+:::
+
+## O Dual com Restrições em Caixa (*Box Constraints*)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Introduzindo os multiplicadores $\alpha_i \ge 0$ para a restrição $1 - \xi_i - y_i(\mathbf{w}^T \mathbf{x}_i + b) \le 0$ e $\mu_i \ge 0$ para a não negatividade $-\xi_i \le 0$, a Lagrangeana primal é:
+
+$$\mathcal{L}(\mathbf{w}, b, \boldsymbol{\xi}, \boldsymbol{\alpha}, \boldsymbol{\mu}) = \frac{1}{2}\|\mathbf{w}\|^2 + C \sum_{i=1}^N \xi_i - \sum_{i=1}^N \alpha_i \big[ y_i(\mathbf{w}^T \mathbf{x}_i + b) - 1 + \xi_i \big] - \sum_{i=1}^N \mu_i \xi_i$$
+
+As condições de estacionariedade produzem:
+1. $\nabla_{\mathbf{w}} \mathcal{L} = \mathbf{0} \implies \mathbf{w} = \sum_{i=1}^N \alpha_i y_i \mathbf{x}_i$
+2. $\frac{\partial \mathcal{L}}{\partial b} = 0 \implies \sum_{i=1}^N \alpha_i y_i = 0$
+3. $\frac{\partial \mathcal{L}}{\partial \xi_i} = C - \alpha_i - \mu_i = 0 \implies \alpha_i + \mu_i = C$
+
+Como $\mu_i \ge 0$, temos necessariamente que $\alpha_i \le C$. Combinando com $\alpha_i \ge 0$, os multiplicadores ficam limitados a uma **caixa compacta**:
+
+$$0 \le \alpha_i \le C$$
+
+O **Problema Dual Soft Margin** é idêntico ao de margem rígida, exceto pelo teto $C$ sobre cada $\alpha_i$:
+
+$$\max_{\boldsymbol{\alpha}} \sum_{i=1}^N \alpha_i - \frac{1}{2}\sum_{i=1}^N \sum_{j=1}^N \alpha_i \alpha_j y_i y_j \langle \mathbf{x}_i, \mathbf{x}_j \rangle$$
+
+$$\text{sujeito a } 0 \le \alpha_i \le C, \quad \forall i=1, \dots, N \quad \text{e} \quad \sum_{i=1}^N \alpha_i y_i = 0$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **O Dual com Restrições em Caixa:**
+  $$\max_{\boldsymbol{\alpha}} \sum_{i=1}^N \alpha_i - \frac{1}{2}\sum_{i=1}^N \sum_{j=1}^N \alpha_i \alpha_j y_i y_j \langle \mathbf{x}_i, \mathbf{x}_j \rangle$$
+  $$\text{sujeito a } \mathbf{0 \le \alpha_i \le C} \quad \text{e} \quad \sum_{i=1}^N \alpha_i y_i = 0$$
+:::
+
+::: {.fragment}
+- **Os Três Status dos Multiplicadores de Lagrange:**
+  1. $\alpha_i = 0 \implies \xi_i = 0$: Ponto além da margem (inativo).
+  2. $0 < \alpha_i < C \implies \xi_i = 0$: **Vetor de Suporte Livre**, exatamente sobre a margem ($y_i f(\mathbf{x}_i) = 1$). Usado para calcular $b$!
+  3. $\alpha_i = C \implies \xi_i > 0$: **Vetor de Suporte Preso no Teto**, dentro da margem ou classificado incorretamente.
+:::
+:::
+
+## Impacto Empírico de $C$ no Breast Cancer
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 3.8))
+c_values = [0.01, 1.0, 100.0]
+
+for ax, C_val in zip(axes, c_values):
+    clf = SVC(kernel='linear', C=C_val).fit(X_train, y_train)
+    acc = accuracy_score(y_test, clf.predict(X_test))
+    n_sv = len(clf.support_vectors_)
+    
+    # Plot dados
+    ax.scatter(X_train[mask_neg, 0], X_train[mask_neg, 1], color=COR_B, alpha=0.35, s=25)
+    ax.scatter(X_train[mask_pos, 0], X_train[mask_pos, 1], color=COR_A, alpha=0.35, s=25)
+    
+    # Contorno
+    Z = clf.decision_function(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
+    ax.contour(xx, yy, Z, levels=[-1.0, 0.0, 1.0], colors=[COR_B, 'black', COR_A],
+               linestyles=['--', '-', '--'], linewidths=[1.3, 2.0, 1.3])
+    
+    # Destaque SVs
+    sv = clf.support_vectors_
+    ax.scatter(sv[:, 0], sv[:, 1], s=50, facecolors='none', edgecolors='black', linewidths=1.2)
+    
+    ax.set_title(f"C = {C_val} (SVs: {n_sv}, Acc: {acc:.1%})")
+    ax.set_xlabel("Raio Médio")
+    if ax == axes[0]:
+        ax.set_ylabel("Textura Média")
+    ax.set_xlim(-2.2, 3.0)
+    ax.set_ylim(-2.5, 3.2)
+
+plt.tight_layout()
+plt.show()
+```
+
+## A Equivalência com a Perda Hinge (*Hinge Loss*)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A formulação de margem suave possui uma conexão profunda com o arcabouço clássico de **Minimização do Risco Empírico Regularizado**.
+
+Observe que as restrições primais impõem $\xi_i \ge 0$ e $\xi_i \ge 1 - y_i(\mathbf{w}^T \mathbf{x}_i + b)$. Para minimizar a soma $\sum \xi_i$, a escolha ótima de $\xi_i$ em função de $\mathbf{w}$ e $b$ é exatamente o menor valor compatível com ambas as desigualdades:
+
+$$\xi_i^* = \max\big(0, 1 - y_i(\mathbf{w}^T \mathbf{x}_i + b)\big)$$
+
+Substituindo $\xi_i^*$ diretamente na função objetivo primal e dividindo toda a expressão pela constante $C$, obtemos:
+
+$$\min_{\mathbf{w}, b} \sum_{i=1}^N \max\big(0, 1 - y_i(\mathbf{w}^T \mathbf{x}_i + b)\big) + \frac{1}{2C} \|\mathbf{w}\|^2$$
+
+A função $L_{\text{hinge}}(y, f(\mathbf{x})) = \max(0, 1 - y f(\mathbf{x}))$ é a célebre **Perda Hinge (Perda em Dobradiça)**.
+
+Isso revela a verdadeira natureza da SVM de margem suave: ela é analiticamente equivalente a minimizar a **perda Hinge empírica somada a um termo de regularização Ridge ($L_2$) com coeficiente $\lambda = \frac{1}{C}$**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **A Dedução da Folga Ótima:**
+  $$\xi_i = \max\big(0, 1 - y_i f(\mathbf{x}_i)\big)$$
+:::
+
+::: {.fragment .callout-important}
+## A SVM como Risco Regularizado
+$$\min_{\mathbf{w}, b} \underbrace{\sum_{i=1}^N \max\big(0, 1 - y_i f(\mathbf{x}_i)\big)}_{\text{Perda Hinge Empírica}} + \underbrace{\lambda \|\mathbf{w}\|^2}_{\text{Regularizador } L_2}$$
+onde $\lambda = \frac{1}{2C}$.
+:::
+
+::: {.fragment}
+- **Por que a Hinge Loss Gera Esparsidade?**
+  Para qualquer ponto com margem funcional $y_i f(\mathbf{x}_i) \ge 1$, a perda Hinge é identicamente **zero** e sua derivada é **zero**. O gradiente da perda anula-se, tornando esses pontos invisíveis!
+:::
+:::
+
+## Comparação de Funções de Perda
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+z_vals = np.linspace(-2.5, 2.5, 400)
+
+loss_zero_one = np.where(z_vals < 0, 1.0, 0.0)
+loss_hinge = np.maximum(0, 1.0 - z_vals)
+loss_logistic = np.log2(1.0 + np.exp(-z_vals))
+loss_exp = np.exp(-z_vals)
+
+fig, ax = plt.subplots(figsize=(7.5, 3.8))
+ax.plot(z_vals, loss_zero_one, 'k-', linewidth=2.0, label="Erro 0-1 (Ideal, Não-Convexo)")
+ax.plot(z_vals, loss_hinge, color=COR_B, linewidth=2.5, label="Perda Hinge (SVM: $\max(0, 1 - yf)$)")
+ax.plot(z_vals, loss_logistic, color=COR_A, linewidth=2.2, linestyle='--', label="Perda Logística ($\log_2(1 + e^{-yf})$)")
+ax.plot(z_vals, loss_exp, color=COR_NEU, linewidth=1.8, linestyle=':', label="Perda Exponencial (AdaBoost: $e^{-yf}$)")
+
+ax.axvline(0, color='gray', linestyle=':', alpha=0.6)
+ax.axvline(1, color=COR_CINZA, linestyle='--', alpha=0.5, label="Margem Canônica ($yf = 1$)")
+ax.set_ylim(-0.1, 3.5)
+ax.set_xlim(-2.5, 2.5)
+ax.set_xlabel("Margem Funcional $z = y \cdot f(\mathbf{x})$")
+ax.set_ylabel("Custo de Perda $L(y, f)$")
+ax.set_title("Perda Hinge (SVM) vs. Logística vs. Exponencial vs. Erro 0-1")
+ax.legend(fontsize=9, loc="upper right")
+
+plt.tight_layout()
+plt.show()
+```
+
+## Pausa 3: Margem Suave, Perda Hinge e o Hiperparâmetro $C$
+
+::: {.callout-tip}
+## Pergunta aberta provocadora
+
+Compare a curva da Perda Hinge com a curva da Perda Logística para $z = y \cdot f(\mathbf{x}) \ge 2$. O que acontece com o gradiente de cada função nessa região e como esse comportamento matemático explica por que a SVM possui soluções esparsas enquanto a Regressão Logística é obrigada a manter coeficientes dependentes de todas as amostras?
+:::
+
+::: {.callout-tip}
+## Julgamento de V ou F
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Na formulação de margem suave, um ponto com variável de folga $\xi_i = 0{,}6$ foi classificado incorretamente pela SVM.
+- □ Configurar o hiperparâmetro $C$ para um valor excessivamente elevado reduz a margem geométrica e eleva o risco de sobreajuste (*overfitting*).
+- □ No problema dual com restrições em caixa, os vetores de suporte livres (aqueles com $0 < \alpha_i < C$) situam-se exatamente sobre a margem e possuem folga $\xi_i = 0$.
+- □ A perda Hinge é estritamente diferenciável em todo o seu domínio $\mathbb{R}$, o que permite o uso de descida de gradiente clássica sem necessidade de subgradientes.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 3: Margem Suave e Perda Hinge — Resposta
+
+::: {.callout-tip}
+## Julgamento de V ou F — Resposta
+
+- ✗ **F:** Para $0 < \xi_i \le 1$, o ponto penetrou na margem de segurança, mas ainda se encontra do lado correto da fronteira ($y_i f(\mathbf{x}_i) \ge 0$); erro de classificação ocorre apenas se $\xi_i > 1$.
+- ✔ **V:** $C \to \infty$ penaliza qualquer violação de margem, aproximando o modelo da margem rígida com alta variância e menor tolerância a ruídos.
+- ✔ **V:** Pela condição de KKT $(\alpha_i + \mu_i = C$ e $\mu_i \xi_i = 0$), se $\alpha_i < C$, temos $\mu_i > 0$, o que obriga $\xi_i = 0$.
+- ✗ **F:** A perda Hinge possui uma quina não diferenciável no ponto $z = 1$, exigindo métodos de otimização baseados em subgradientes ou formulação quadrática com restrições.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Para $z \ge 1$, a perda Hinge torna-se estritamente horizontal com derivada identicamente nula ($\frac{d L}{dz} = 0$), tornando esses pontos neutros no problema dual ($\alpha_i = 0$). Já a perda logística $\ln(1 + e^{-z})$ aproxima-se assintoticamente de zero mas **nunca é exatamente nula**, gerando gradientes infinitesimais que continuam atraindo o hiperplano para todos os pontos do dataset.
+:::
+
+:::
+
+# Bloco 3: O Truque do Kernel e Fronteiras Não-Lineares
+
+## A Limitação da Linearidade e Espaços de Alta Dimensão
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Apesar do rigor de margem máxima, um hiperplano afim $\mathbf{w}^T \mathbf{x} + b = 0$ é incapaz de separar conjuntos cujas classes formem anéis concêntricos, estruturas entrelaçadas (*duas luas*) ou a clássica operação lógica XOR.
+
+A estratégia teórica consagrada consiste em projetar os vetores de entrada originais $\mathbf{x} \in \mathbb{R}^d$ para um espaço de atributos de dimensionalidade muito mais alta (ou até infinita) $\mathcal{H}$ através de uma transformação não linear determinística:
+
+$$\phi: \mathbb{R}^d \to \mathcal{H}, \quad \mathbf{x} \mapsto \phi(\mathbf{x})$$
+
+Pelo **Teorema de Cover sobre a Separabilidade de Padrões (1965)**, um conjunto de dados não linearmente separável em baixa dimensão tem probabilidade substancialmente maior de tornar-se linearmente separável quando projetado não-linearmente em um espaço de dimensão superior.
+
+Contudo, calcular explicitamente $\phi(\mathbf{x})$ para cada ponto acarretaria custos computacionais proibitivos de memória e processamento. É aqui que entra a genialidade do Truque do Kernel.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **O Dilema da Não-Linearidade:**
+  Hiperplanos lineares falham diante de padrões complexos, anéis concêntricos ou manifolds entrelaçados.
+:::
+
+::: {.fragment}
+- **O Princípio de Cover (1965):**
+  Projetar $\mathbf{x} \in \mathbb{R}^d$ em um espaço $\mathcal{H}$ de altíssima dimensão $\phi(\mathbf{x})$ converte problemas não-lineares em **linearmente separáveis**.
+:::
+
+::: {.fragment .callout-warning}
+## O Desafio Computacional
+Se $\mathcal{H}$ tiver dimensão $D = 10^6$ ou dimensão infinita, como calcular e armazenar $\phi(\mathbf{x})$ sem estourar o tempo e a memória da máquina?
+:::
+:::
+
+## O Truque do Kernel e o Teorema de Mercer
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Relembremos a forma do **Problema Dual de Wolfe** da SVM:
+
+$$\max_{\boldsymbol{\alpha}} \sum_{i=1}^N \alpha_i - \frac{1}{2} \sum_{i=1}^N \sum_{j=1}^N \alpha_i \alpha_j y_i y_j \langle \phi(\mathbf{x}_i), \phi(\mathbf{x}_j) \rangle_{\mathcal{H}}$$
+
+E a regra final de inferência de classificação:
+
+$$f(\mathbf{x}) = \operatorname{sign}\left( \sum_{i \in \text{SV}} \alpha_i y_i \langle \phi(\mathbf{x}_i), \phi(\mathbf{x}) \rangle_{\mathcal{H}} + b \right)$$
+
+Perceba o detalhe supremo: **em nenhum momento precisamos das coordenadas isoladas de $\phi(\mathbf{x})$!** O algoritmo exige estritamente a avaliação do **produto interno** entre pares de vetores no espaço transformado.
+
+Se existir uma função computável diretamente no espaço original $k(\mathbf{x}, \mathbf{z})$ tal que:
+
+$$k(\mathbf{x}, \mathbf{z}) = \langle \phi(\mathbf{x}), \phi(\mathbf{z}) \rangle_{\mathcal{H}}$$
+
+podemos substituir todo $\langle \phi(\mathbf{x}_i), \phi(\mathbf{x}_j) \rangle$ diretamente por $k(\mathbf{x}_i, \mathbf{x}_j)$ com custo computacional associado a $\mathbb{R}^d$!
+
+> **Teorema de Mercer (1909):** Uma função contínua e simétrica $k(\mathbf{x}, \mathbf{z})$ admite uma representação como produto interno em algum espaço de Hilbert $\mathcal{H}$ se, e somente se, a matriz de Gram correspondente $K_{ij} = k(\mathbf{x}_i, \mathbf{x}_j)$ for **semidefinida positiva (PSD)** para qualquer conjunto finito de pontos $\{\mathbf{x}_1, \dots, \mathbf{x}_N\}$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment .callout-important}
+## O Truque do Kernel (*Kernel Trick*)
+Substituímos o produto interno no espaço transformado $\mathcal{H}$ por uma função escalar direta nos dados originais:
+$$k(\mathbf{x}, \mathbf{z}) = \langle \phi(\mathbf{x}), \phi(\mathbf{z}) \rangle_{\mathcal{H}}$$
+:::
+
+::: {.fragment}
+- **Teorema de Mercer:**
+  Para que $k(\mathbf{x}, \mathbf{z})$ seja um kernel válido, a matriz de Gram $K_{ij} = k(\mathbf{x}_i, \mathbf{x}_j)$ deve ser **simétrica e semidefinida positiva**:
+  $$\mathbf{v}^T K \mathbf{v} \ge 0, \quad \forall \mathbf{v} \in \mathbb{R}^N$$
+:::
+
+::: {.fragment}
+- **Vantagem:**
+  Otimizamos um hiperplano linear em $\mathcal{H}$ pagando apenas o custo aritmético de avaliar $k(\mathbf{x}, \mathbf{z})$ no espaço de entrada original $\mathbb{R}^d$!
+:::
+:::
+
+## Catálogo de Kernels: Linear, Polinomial e RBF Gaussiano
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Os três kernels mais celebrados no aprendizado estatístico são:
+
+1. **Kernel Linear:**
+   $$k_{\text{lin}}(\mathbf{x}, \mathbf{z}) = \mathbf{x}^T \mathbf{z} + c$$
+   Recai no hiperplano linear padrão. Ideal quando $d \gg N$ (ex.: bioinformática, genômica com microarrays, classificação de textos com TF-IDF).
+
+2. **Kernel Polinomial de Grau $d_p$:**
+   $$k_{\text{poly}}(\mathbf{x}, \mathbf{z}) = (\gamma \mathbf{x}^T \mathbf{z} + r)^{d_p}$$
+   Modela interações multivariadas entre atributos até a ordem $d_p$.
+
+3. **Kernel RBF Gaussiano (*Radial Basis Function*):**
+   $$k_{\text{rbf}}(\mathbf{x}, \mathbf{z}) = \exp(-\gamma \|\mathbf{x} - \mathbf{z}\|^2) = \exp\left(-\frac{\|\mathbf{x} - \mathbf{z}\|^2}{2\sigma^2}\right)$$
+   onde $\gamma = \frac{1}{2\sigma^2} > 0$ é o parâmetro de largura de banda (*bandwidth*).
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **1. Kernel Linear:**
+  $$k(\mathbf{x}, \mathbf{z}) = \mathbf{x}^T \mathbf{z}$$
+  Ideal para problemas com dimensionalidade maciça ($d \gg N$).
+:::
+
+::: {.fragment}
+- **2. Kernel Polinomial:**
+  $$k(\mathbf{x}, \mathbf{z}) = (\gamma \mathbf{x}^T \mathbf{z} + r)^{d}$$
+  Captura interações combinatórias entre os atributos originais.
+:::
+
+::: {.fragment}
+- **3. Kernel RBF Gaussiano (Radial Basis Function):**
+  $$k(\mathbf{x}, \mathbf{z}) = \exp(-\gamma \|\mathbf{x} - \mathbf{z}\|^2)$$
+  O kernel padrão para problemas tabulares e fronteiras suaves e não lineares.
+:::
+:::
+
+## O Kernel RBF e o Espaço de Dimensão Infinita
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Por que o Kernel RBF Gaussiano é considerado uma das construções mais elegantes da matemática aplicada?
+
+Considere o caso escalar simplificado com $\gamma = 1/2$: $k(x, z) = \exp(-\frac{1}{2}(x - z)^2)$. Expandindo o quadrado:
+
+$$k(x, z) = \exp\left(-\frac{1}{2}x^2\right) \exp\left(-\frac{1}{2}z^2\right) \exp(xz)$$
+
+Aplicando a expansão em série de potências de Taylor para a função exponencial $\exp(u) = \sum_{k=0}^\infty \frac{u^k}{k!}$:
+
+$$\exp(xz) = \sum_{k=0}^\infty \frac{(xz)^k}{k!} = \sum_{k=0}^\infty \left(\frac{x^k}{\sqrt{k!}}\right) \left(\frac{z^k}{\sqrt{k!}}\right)$$
+
+Multiplicando pelos fatores gaussianos prévios:
+
+$$k(x, z) = \sum_{k=0}^\infty \underbrace{\left( e^{-x^2/2} \frac{x^k}{\sqrt{k!}} \right)}_{\phi_k(x)} \underbrace{\left( e^{-z^2/2} \frac{z^k}{\sqrt{k!}} \right)}_{\phi_k(z)} = \langle \phi(x), \phi(z) \rangle_{\ell^2}$$
+
+O vetor de mapeamento implícito induzido pelo kernel RBF é uma sequência com **infinitos termos**:
+
+$$\phi(x) = e^{-x^2/2} \left[ 1, \, x, \, \frac{x^2}{\sqrt{2!}}, \, \frac{x^3}{\sqrt{3!}}, \, \dots, \, \frac{x^k}{\sqrt{k!}}, \, \dots \right]^T \in \ell^2$$
+
+Portanto, ao ajustar uma SVM com Kernel RBF Gaussiano, estamos calculando o hiperplano de margem máxima em um **espaço de Hilbert de dimensão infinita** avaliando meramente uma função exponencial em fração de microssegundo!
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment .callout-tip}
+## O Kernel RBF Opera em Dimensão Infinita!
+$$\exp(xz) = \sum_{k=0}^\infty \frac{(xz)^k}{k!} = \sum_{k=0}^\infty \frac{x^k}{\sqrt{k!}} \frac{z^k}{\sqrt{k!}}$$
+$$\phi(x) = e^{-x^2/2} \left[ 1, \, x, \, \frac{x^2}{\sqrt{2}}, \, \dots, \, \frac{x^k}{\sqrt{k!}}, \, \dots \right]^T \in \ell^2$$
+:::
+
+::: {.fragment}
+- **O Papel de $\gamma = \frac{1}{2\sigma^2}$:**
+  - **$\gamma$ Pequeno ($\sigma$ grande):** Gaussiana larga $\to$ A influência de cada vetor de suporte se estende para longe $\to$ Fronteira quase linear e suave (alto viés).
+  - **$\gamma$ Grande ($\sigma$ pequeno):** Gaussiana estreita $\to$ O suporte atua apenas localmente $\to$ Cria pequenas "ilhas circulares" ao redor de cada ponto $\to$ **Sobreajuste severo** (alta variância).
+:::
+:::
+
+## Impacto do Hiperparâmetro $\gamma$ no Breast Cancer
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 3.8))
+gamma_values = [0.05, 1.0, 20.0]
+
+for ax, g_val in zip(axes, gamma_values):
+    clf = SVC(kernel='rbf', C=1.0, gamma=g_val).fit(X_train, y_train)
+    acc = accuracy_score(y_test, clf.predict(X_test))
+    n_sv = len(clf.support_vectors_)
+    
+    # Plot dados
+    ax.scatter(X_train[mask_neg, 0], X_train[mask_neg, 1], color=COR_B, alpha=0.35, s=25)
+    ax.scatter(X_train[mask_pos, 0], X_train[mask_pos, 1], color=COR_A, alpha=0.35, s=25)
+    
+    # Contorno
+    Z = clf.decision_function(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
+    ax.contour(xx, yy, Z, levels=[-1.0, 0.0, 1.0], colors=[COR_B, 'black', COR_A],
+               linestyles=['--', '-', '--'], linewidths=[1.3, 2.0, 1.3])
+    
+    # Destaque SVs
+    sv = clf.support_vectors_
+    ax.scatter(sv[:, 0], sv[:, 1], s=45, facecolors='none', edgecolors='black', linewidths=1.1)
+    
+    ax.set_title(rf"$\gamma$ = {g_val} (SVs: {n_sv}, Acc: {acc:.1%})")
+    ax.set_xlabel("Raio Médio")
+    if ax == axes[0]:
+        ax.set_ylabel("Textura Média")
+    ax.set_xlim(-2.2, 3.0)
+    ax.set_ylim(-2.5, 3.2)
+
+plt.tight_layout()
+plt.show()
+```
+
+## Pausa 4: O Truque do Kernel e a Geometria de Hilbert
+
+::: {.callout-tip}
+## Pergunta aberta provocadora
+
+Um analista de dados afirma: *"Já que o Kernel RBF projeta os dados em um espaço de dimensão infinita, qualquer conjunto de dados com $N$ observações se tornará linearmente separável; logo, podemos dispensar as variáveis de folga $\xi_i$ e usar sempre $C \to \infty$."* Explique o erro conceitual dessa afirmação e descreva o que acontecerá com a fronteira de decisão se os dados contiverem rótulos com ruído.
+:::
+
+::: {.callout-tip}
+## Julgamento de V ou F
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Para que uma função $k(\mathbf{x}, \mathbf{z})$ seja um kernel válido pelo Teorema de Mercer, é estritamente necessário que os autovalores da matriz de Gram sejam todos estritamente negativos.
+- □ No Kernel RBF Gaussiano $k(\mathbf{x}, \mathbf{z}) = \exp(-\gamma \|\mathbf{x} - \mathbf{z}\|^2)$, o valor do produto interno atinge seu máximo quando os vetores são idênticos ($\mathbf{x} = \mathbf{z}$), decaindo para zero conforme a distância euclidiana tende ao infinito.
+- □ Aumentar excessivamente o hiperparâmetro $\gamma$ da RBF força o modelo a criar ilhas de decisão isoladas em torno dos vetores de suporte individuais, provocando sobreajuste severo.
+- □ Ao utilizar o Truque do Kernel com a RBF, o tempo computacional para avaliar a fronteira de decisão em um novo ponto de teste depende linearmente da dimensão infinita do espaço de Hilbert.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 4: O Truque do Kernel — Resposta
+
+::: {.callout-tip}
+## Julgamento de V ou F — Resposta
+
+- ✗ **F:** O Teorema de Mercer exige que a matriz de Gram seja **semidefinida positiva (PSD)**; logo, todos os seus autovalores devem ser **maiores ou iguais a zero** ($\lambda_i \ge 0$).
+- ✔ **V:** Para $\mathbf{x} = \mathbf{z}$, temos $\|\mathbf{x} - \mathbf{z}\| = 0 \implies \exp(0) = 1$; à medida que $\|\mathbf{x} - \mathbf{z}\| \to \infty$, o termo tende exponencialmente a zero.
+- ✔ **V:** Com $\gamma \to \infty$, o raio de vizinhança Gaussiana colapsa, decorando pontos de treino em ilhas microscópicas.
+- ✗ **F:** O tempo de inferência é $O(N_{\text{SV}} \cdot d)$, dependendo apenas do número de vetores de suporte e da dimensão original $d \in \mathbb{R}^d$, jamais da dimensão do espaço de Hilbert implícito.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Embora a RBF em dimensão infinita consiga separar qualquer conjunto sem pontos duplicados, forçar $C \to \infty$ em dados ruidosos fará o hiperplano criar túneis e ilhas estreitas contorcendo-se para isolar cada amostra ruidosa. Isso destrói a margem geométrica de segurança e anula a capacidade de generalização no conjunto de teste.
+:::
+
+:::
+
+# Bloco 4: Calibração de Platt e Support Vector Regression
+
+## O Escore da SVM e a Ausência de Probabilidades
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A predição da SVM é governada pelo valor escalar de margem:
+
+$$f(\mathbf{x}) = \sum_{i \in \text{SV}} \alpha_i y_i k(\mathbf{x}_i, \mathbf{x}) + b \in (-\infty, +\infty)$$
+
+A decisão binária utiliza unicamente a regra $\hat{y} = \operatorname{sign}(f(\mathbf{x}))$.
+
+Entretanto, em aplicações clínicas críticas — como decidir se uma paciente deve ser submetida a uma biópsia invasiva sob risco cirúrgico —, o médico não quer apenas saber se $f(\mathbf{x}) > 0$; ele precisa de uma estimativa calibrada da **probabilidade a posteriori**:
+
+$$P(Y = +1 \mid \mathbf{x})$$
+
+A SVM clássica **não é um modelo probabilístico**. O escore $f(\mathbf{x})$ mede apenas a distância funcional assinada até o hiperplano. Como converter $f(\mathbf{x})$ em probabilidade legítima sem perder as virtudes de margem da SVM?
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **O Escore Determinístico da SVM:**
+  $$f(\mathbf{x}) = \sum_{i \in \text{SV}} \alpha_i y_i k(\mathbf{x}_i, \mathbf{x}) + b \in \mathbb{R}$$
+  Gera apenas classes discretas via $\operatorname{sign}(f(\mathbf{x}))$.
+:::
+
+::: {.fragment}
+- **A Demanda Clínica por Probabilidades:**
+  Em triagens médicas de câncer, um paciente com $f(\mathbf{x}) = +0{,}02$ não pode receber o mesmo tratamento preventivo que alguém com $f(\mathbf{x}) = +4{,}50$.
+:::
+
+::: {.fragment .callout-warning}
+## O Erro Ingênuo
+Não basta aplicar a função sigmoide padrão $\sigma(f(\mathbf{x})) = \frac{1}{1 + e^{-f(\mathbf{x})}}$, pois a escala de $f(\mathbf{x})$ não reflete a razão de $\log$-odds populacional.
+:::
+:::
+
+## Calibração de Platt (1999)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Em 1999, John Platt propôs um método elegante e hoje canônico: ajustar uma **função logística paramétrica univariada** diretamente sobre os escores $f(\mathbf{x})$ produzidos pela SVM:
+
+$$P(Y = +1 \mid \mathbf{x}) = \frac{1}{1 + \exp\big(A \cdot f(\mathbf{x}) + B\big)}$$
+
+onde os parâmetros escalares $A, B \in \mathbb{R}$ são determinados por Máxima Verossimilhança via entropia cruzada.
+
+> **Cuidado Crítico com Vazamento (*Data Leakage*):** Se ajustarmos os parâmetros $A$ e $B$ da sigmoide sobre os mesmos dados de treino utilizados para determinar $\mathbf{w}$ e $b$, as probabilidades serão absurdamente superconfiantes e mal calibradas, porque os escores de treino $f(\mathbf{x}_i)$ já sofreram sobreajuste.
+>
+> Por essa razão, Platt estipulou que os escores devem ser gerados via **validação cruzada fora-da-amostra (*out-of-fold cross-validation*)**. É exatamente este procedimento que o `CalibratedClassifierCV` do scikit-learn executa.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment .callout-important}
+## A Formulação de Platt (1999)
+$$P(Y = +1 \mid \mathbf{x}) = \frac{1}{1 + \exp\big(A \cdot f(\mathbf{x}) + B\big)}$$
+- Ajusta uma sigmoide sobre o escore contínuo $f(\mathbf{x})$.
+:::
+
+::: {.fragment}
+- **Protocolo Out-of-Fold:**
+  Para evitar sobreajuste e obter probabilidades calibradas confiáveis, os escores de treino devem ser gerados via **K-fold out-of-fold**, garantindo que a sigmoide avalie apenas pontos que a SVM não viu no treino de margem.
+:::
+
+::: {.fragment}
+- **No scikit-learn:**
+  Implementado via `CalibratedClassifierCV(estimator=SVC(), method='sigmoid', cv=5)`.
+:::
+:::
+
+## Curva de Calibração: Escore vs. Probabilidade de Platt
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# Ajuste com calibração out-of-fold de Platt (5 folds)
+base_svc = SVC(kernel='rbf', C=1.0, gamma='scale')
+cal_svc = CalibratedClassifierCV(estimator=base_svc, method='sigmoid', cv=5)
+cal_svc.fit(X_train, y_train)
+
+scores_test = clf_rbf.decision_function(X_test)
+probs_test = cal_svc.predict_proba(X_test)[:, 1] # P(Benigno / +1)
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.0))
+
+# Gráfico 1: Escore vs Probabilidade
+ax = axes[0]
+order = np.argsort(scores_test)
+ax.plot(scores_test[order], probs_test[order], color=COR_A, linewidth=2.5, label="Sigmoide de Platt Calibrada")
+ax.scatter(scores_test, probs_test, color=COR_B, s=25, alpha=0.5, edgecolor='k', linewidth=0.5)
+ax.axvline(0, color='gray', linestyle=':', label="Fronteira SVM f(x)=0")
+ax.axhline(0.5, color='black', linestyle='--', alpha=0.5, label="P = 0.5")
+ax.set_title("Platt Scaling: Mapeamento Escore $\\to$ Probabilidade")
+ax.set_xlabel("Escore de Decisão da SVM $f(\\mathbf{x})$")
+ax.set_ylabel("Probabilidade Calibrada $P(Y=+1 \\mid \\mathbf{x})$")
+ax.legend(fontsize=8.5, loc="lower right")
+
+# Gráfico 2: Histograma de Probabilidades por Classe Real
+ax = axes[1]
+mask_test_benign = (y_test == 1)
+mask_test_malign = (y_test == -1)
+
+ax.hist(probs_test[mask_test_malign], bins=15, alpha=0.6, color=COR_B, label="Real Maligno ($y=-1$)", density=True)
+ax.hist(probs_test[mask_test_benign], bins=15, alpha=0.6, color=COR_A, label="Real Benigno ($y=+1$)", density=True)
+ax.set_title(f"Separação das Probabilidades Calibradas (Brier: {brier_score_loss((y_test==1), probs_test):.4f})")
+ax.set_xlabel("Probabilidade Estimada $P(Y=+1 \\mid \\mathbf{x})$")
+ax.set_ylabel("Densidade Amostral")
+ax.legend(fontsize=8.5, loc="upper center")
+
+plt.tight_layout()
+plt.show()
+```
+
+## Extensão para Regressão: Support Vector Regression ($\varepsilon$-SVR)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A genialidade do princípio de esparsidade por margem não se limita à classificação: ela estende-se naturalmente à regressão através da **Support Vector Regression ($\varepsilon$-SVR)** proposta por Vapnik (1995).
+
+Na regressão linear clássica, o erro quadrático $(y - f(\mathbf{x}))^2$ penaliza qualquer resíduo infinitesimal. Na $\varepsilon$-SVR, introduzimos a **função de perda $\varepsilon$-insensível (*$\varepsilon$-insensitive loss*)**:
+
+$$L_\varepsilon(y, f(\mathbf{x})) = \max\big(0, |y - f(\mathbf{x})| - \varepsilon\big)$$
+
+Essa perda cria um **tubo de tolerância cilíndrico de raio $\varepsilon$** ao redor da curva estimada:
+1. Qualquer resíduo com $|y_i - f(\mathbf{x}_i)| \le \varepsilon$ sofre custo **estritamente zero**.
+2. Apenas os pontos que caem **fora do tubo de tolerância** exercem tração no modelo e recebem multiplicadores de Lagrange $\alpha_i > 0$ ou $\alpha_i^* > 0$.
+
+Isso produz uma solução de regressão **esparsa**, que ignora o ruído de fundo contido no interior do tubo de tolerância.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **A Perda $\varepsilon$-Insensível:**
+  $$L_\varepsilon(y, f(\mathbf{x})) = \max\big(0, |y - f(\mathbf{x})| - \varepsilon\big)$$
+:::
+
+::: {.fragment}
+- **O Tubo de Tolerância de Vapnik:**
+  - Erros menores que $\varepsilon$ têm custo zero.
+  - O modelo não tenta ajustar o ruído microscópico de fundo.
+:::
+
+::: {.fragment .callout-tip}
+## Esparsidade na Regressão
+Apenas as observações que violam o tubo de raio $\varepsilon$ tornam-se vetores de suporte da regressão!
+:::
+:::
+
+## O Tubo de Tolerância da SVR em Diagrama
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(8, 4.4))
+
+x_reg = np.linspace(0, 10, 200)
+f_reg = 0.5 * x_reg + 1.2
+eps = 1.0
+
+# Tubo
+ax.plot(x_reg, f_reg, color='black', linewidth=2.2, label=r"Função Predita: $f(\mathbf{x}) = \mathbf{w}^T\mathbf{x} + b$")
+ax.plot(x_reg, f_reg + eps, '--', color=COR_A, linewidth=1.6, label=r"Limite Superior: $f(\mathbf{x}) + \varepsilon$")
+ax.plot(x_reg, f_reg - eps, '--', color=COR_A, linewidth=1.6, label=r"Limite Inferior: $f(\mathbf{x}) - \varepsilon$")
+ax.fill_between(x_reg, f_reg - eps, f_reg + eps, color='#eef4fb', alpha=0.7, label=r"Tubo de Tolerância $\varepsilon$-insensível")
+
+# Seta epsilon
+ax.annotate("", xy=(2.0, 0.5*2.0 + 1.2 + eps), xytext=(2.0, 0.5*2.0 + 1.2),
+            arrowprops=dict(arrowstyle="<->", color="black", lw=1.4))
+ax.text(1.4, 0.5*2.0 + 1.2 + 0.45, r"$\varepsilon$", fontweight="bold", fontsize=12)
+
+# Pontos dentro do tubo (resíduo zero)
+x_in = np.array([1.2, 3.0, 4.5, 6.2, 7.5, 8.8])
+y_in = 0.5 * x_in + 1.2 + np.array([-0.3, 0.4, -0.6, 0.2, -0.4, 0.5])
+ax.scatter(x_in, y_in, color=COR_A, s=55, alpha=0.8, zorder=5, label=r"Pontos no Tubo (Perda = 0, $\alpha_i = 0$)")
+
+# Pontos fora do tubo (Vetores de Suporte com folga xi)
+x_out_up = np.array([4.0])
+y_out_up = np.array([0.5 * 4.0 + 1.2 + eps + 1.2]) # xi* = 1.2
+x_out_dn = np.array([7.0])
+y_out_dn = np.array([0.5 * 7.0 + 1.2 - eps - 1.1]) # xi = 1.1
+
+ax.scatter(x_out_up, y_out_up, color=COR_B, s=110, edgecolor='black', linewidth=1.6, zorder=6, label=r"Vetor de Suporte ($\alpha_i^* > 0, \xi_i^* > 0$)")
+ax.scatter(x_out_dn, y_out_dn, color=COR_NEU, s=110, edgecolor='black', linewidth=1.6, zorder=6, label=r"Vetor de Suporte ($\alpha_j > 0, \xi_j > 0$)")
+
+# Segmentos de folga xi
+ax.annotate("", xy=(x_out_up[0], y_out_up[0]), xytext=(x_out_up[0], 0.5*x_out_up[0] + 1.2 + eps),
+            arrowprops=dict(arrowstyle="<-", color=COR_B, lw=1.8))
+ax.text(x_out_up[0] + 0.15, y_out_up[0] - 0.6, r"$\xi_i^*$ (Folga)", color=COR_B, fontweight="bold", fontsize=10.5)
+
+ax.annotate("", xy=(x_out_dn[0], y_out_dn[0]), xytext=(x_out_dn[0], 0.5*x_out_dn[0] + 1.2 - eps),
+            arrowprops=dict(arrowstyle="<-", color=COR_NEU, lw=1.8))
+ax.text(x_out_dn[0] + 0.15, y_out_dn[0] + 0.5, r"$\xi_j$ (Folga)", color=COR_NEU, fontweight="bold", fontsize=10.5)
+
+ax.set_title(r"Support Vector Regression ($\varepsilon$-SVR): O Tubo de Tolerância e Folgas", pad=10)
+ax.set_xlabel("Atributo $x$")
+ax.set_ylabel("Resposta $y$")
+ax.set_xlim(0, 10)
+ax.set_ylim(-0.5, 7.5)
+ax.legend(fontsize=8.5, loc="upper left")
+plt.tight_layout()
+plt.show()
+```
+
+## Pausa 5: Calibração de Platt e o Tubo da SVR
+
+::: {.callout-tip}
+## Pergunta aberta provocadora
+
+Na Support Vector Regression ($\varepsilon$-SVR), o cientista decide configurar o raio do tubo $\varepsilon = 0$. O que acontece com a esparsidade da solução resultante? O modelo ainda desfrutará da propriedade de ignorar observações não informativas?
+:::
+
+::: {.callout-tip}
+## Julgamento de V ou F
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ No método de Platt Scaling, estimar a sigmoide diretamente sobre os escores calculados na base de treino sem validação cruzada out-of-fold produz probabilidades confiáveis e imunes a viés de sobreajuste.
+- □ Na Support Vector Regression ($\varepsilon$-SVR), qualquer amostra de treino cujo erro absoluto $|y_i - f(\mathbf{x}_i)|$ seja menor ou igual a $\varepsilon$ possui multiplicadores de Lagrange nulos e não atua como vetor de suporte.
+- □ O escore contínuo da SVM $f(\mathbf{x})$ fornece nativamente uma probabilidade a posteriori calibrada de classe, tornando redundante qualquer calibração adicional.
+- □ Na $\varepsilon$-SVR, aumentar o valor de $\varepsilon$ reduz o número total de vetores de suporte do modelo, tornando a representação da função mais esparsa.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 5: Calibração de Platt e SVR — Resposta
+
+::: {.callout-tip}
+## Julgamento de V ou F — Resposta
+
+- ✗ **F:** Ajustar nos escores de treino contamina a sigmoide pelo sobreajuste da margem da SVM; o protocolo out-of-fold é indispensável para evitar estimativas de probabilidade severamente infladas.
+- ✔ **V:** Dentro do tubo de tolerância de raio $\varepsilon$, a perda é identicamente zero, de modo que suas variáveis de folga são nulas e $\alpha_i = \alpha_i^* = 0$.
+- ✗ **F:** O escore $f(\mathbf{x})$ é uma distância geométrica sem vínculo probabilístico direto; a calibração de Platt é necessária para projetá-lo no intervalo $[0, 1]$ com validade de calibração empírica.
+- ✔ **V:** À medida que $\varepsilon$ cresce, mais pontos são encapsulados pelo interior do tubo com resíduo zero, diminuindo a quantidade de amostras que necessitam de suporte.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Se configurarmos $\varepsilon = 0$, a perda $\varepsilon$-insensível degenera na perda em valor absoluto ($L_1$), e **todos os pontos** com resíduo não exatamente nulo se tornarão vetores de suporte. A esparsidade é completamente destruída, e o modelo perde sua principal vantagem geométrica sobre outros estimadores.
+:::
+
+:::
+
+# Fechamento da Aula
+
+## Retomando as Cinco Perguntas Centrais
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Ao longo desta aula, transformamos a geometria dos hiperplanos em um arcabouço rigoroso de aprendizado estatístico. Sintetizamos as respostas às cinco perguntas fundacionais:
+
+1. **Margem Máxima Canônica:** A margem física é $\frac{2}{\|\mathbf{w}\|}$ sob a escala canônica $y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1$. Maximizar essa folga geométrica equivale a minimizar a energia quadrática $\|\mathbf{w}\|^2/2$, resultando em um problema de otimização estritamente convexo imune a mínimos locais espúrios.
+2. **Dualidade e Esparsidade:** Pelo Teorema de Wolfe e condições KKT de folga complementar ($\alpha_i [y_i f(\mathbf{x}_i) - 1] = 0$), pontos que residem além da margem têm $\alpha_i = 0$ e são completamente ignorados. A fronteira depende unicamente dos **vetores de suporte** ($\alpha_i > 0$).
+3. **Margem Suave e Perda Hinge:** A introdução de variáveis de folga $\xi_i \ge 0$ penalizadas por $C$ equivale à minimização da perda Hinge regularizada $\max(0, 1 - y f(\mathbf{x})) + \lambda \|\mathbf{w}\|^2$. O patamar horizontal da Hinge para $y f \ge 1$ garante a esparsidade exata de $\boldsymbol{\alpha}$.
+4. **O Truque do Kernel:** Pelo Teorema de Mercer, produtos internos em espaços de Hilbert de dimensão infinita (RBF) são avaliados diretamente no espaço original via $k(\mathbf{x}, \mathbf{z}) = \exp(-\gamma \|\mathbf{x} - \mathbf{z}\|^2)$ com custo aritmético elementar.
+5. **Calibração de Platt e SVR:** Os escores determinísticos $f(\mathbf{x})$ são calibrados probabilisticamente ajustando-se uma sigmoide sobre previsões out-of-fold. Na regressão ($\varepsilon$-SVR), o tubo de tolerância $\varepsilon$-insensível restaura a esparsidade ao zerar o custo de pequenas oscilações de ruído.
+:::
+
+::: {.content-visible when-format="revealjs"}
+1. **Margem Máxima:** $\max \frac{2}{\|\mathbf{w}\|} \iff \min \frac{1}{2}\|\mathbf{w}\|^2$, garantindo mínimo global único via otimização convexa.
+2. **Esparsidade KKT:** $\alpha_i = 0$ para todos os pontos além da margem; o modelo final retém apenas os vetores de suporte.
+3. **Margem Suave:** Equivalência exata entre variáveis de folga $\xi_i$ e a **perda Hinge** regularizada com teto $0 \le \alpha_i \le C$.
+4. **Truque do Kernel:** Avaliação de produtos internos em espaços de Hilbert $\mathcal{H}$ (inclusive de dimensão infinita na RBF) sem computar $\phi(\mathbf{x})$.
+5. **Calibração e SVR:** Platt Scaling recupera $P(Y=1 \mid \mathbf{x})$ via validação out-of-fold; o tubo $\varepsilon$-insensível induz esparsidade na regressão.
+:::
+
+## Quadro Comparativo de Algoritmos Supervisionados
+
+| Propriedade | Regressão Logística | Gradient Boosting | SVM Linear | SVM Kernel RBF | SVR ($\varepsilon$-insensível) |
+|---|---|---|---|---|---|
+| **Alvo Principal** | Probabilidade $p(y \mid \mathbf{x})$ | $\log$-odds populacional | Hiperplano de margem | Hiperplano em $\mathcal{H}$ | Tubo esparso $\varepsilon$ |
+| **Função de Perda** | Entropia Cruzada | Deviance / Quadrática | Perda Hinge | Perda Hinge com Kernel | $\varepsilon$-insensível |
+| **Esparsidade** | Nenhuma ($\forall i$ pesa) | Nenhuma | **Exata em dados** | **Exata em dados** | **Exata em dados** |
+| **Capacidade Não Linear** | Apenas via features | Muito alta (árvores) | Nenhuma (linear pura) | Infinita (Hilbert) | Infinita (Hilbert) |
+| **Calibração Nativa** | Sim (direta na sigmoide) | Sim (na deviance) | Não (Platt Scaling) | Não (Platt Scaling) | N/A (regressão) |
+| **Escalonamento** | Recomendável | Dispensável | **Obrigatório!** | **Obrigatório!** | **Obrigatório!** |
+
+## Ponte para a Aula 12: Do Kernel Fixo ao Deep Learning
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Nesta aula, testemunhamos o poder quase mágico do Truque do Kernel: ao projetar dados em espaços de Hilbert de alta dimensão, fronteiras arbitrariamente complexas tornam-se hiperplanos lineares de margem máxima.
+
+No entanto, o Truque do Kernel carrega uma limitação arquitetural profunda: **o kernel $k(\mathbf{x}, \mathbf{z})$ é escolhido e fixado a priori pelo engenheiro humano** (seja ele polinomial ou gaussiano). O algoritmo projeta os dados em uma base fixa pré-definida e apenas otimiza pesos lineares $\boldsymbol{\alpha}$ sobre essa representação estática.
+
+O que aconteceria se, em vez de fixar manualmente a função de mapeamento $\phi(\mathbf{x})$, construíssemos uma arquitetura computacional capaz de **aprender as transformações não lineares ótimas a partir dos próprios dados de forma adaptativa e em múltiplas camadas hierárquicas**?
+
+Essa é a grande revolução que exploraremos na próxima aula:
+
+$$\mathbf{x} \longrightarrow \mathbf{h}^{(1)} = \sigma(W_1 \mathbf{x} + \mathbf{b}_1) \longrightarrow \mathbf{h}^{(2)} = \sigma(W_2 \mathbf{h}^{(1)} + \mathbf{b}_2) \longrightarrow \dots \longrightarrow \hat{y}$$
+
+Na **Aula 12: Redes Neurais e Aprendizado de Representações**, investigaremos como o algoritmo de *Backpropagation* (diferenciação automática reversa) permite treinar extratores hierárquicos de características profundas, inaugurando a era do *Deep Learning*.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **A Fronteira do Paradigma de Kernels:**
+  - A SVM RBF projeta em dimensão infinita, mas a transformação $\phi(\mathbf{x})$ é **fixada a priori** por uma fórmula analítica estática.
+:::
+
+::: {.fragment}
+- **O Próximo Salto Conceitual:**
+  E se o próprio algoritmo pudesse **aprender o mapeamento de atributos ótimo** através de sucessivas camadas parametrizadas?
+:::
+
+::: {.fragment .callout-tip}
+## Próxima Aula — Aula 12
+**Redes Neurais Artificiais e Aprendizado de Representações:**
+Do Perceptron de Rosenblatt ao Perceptron Multicamadas (MLP), diferenciação automática reversa (*Backpropagation*) e a transição para o Aprendizado Profundo (*Deep Learning*).
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Material Complementar e Exercícios
+
+- [Lista de Exercícios Teóricos e Práticos](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+- [Gabarito Analítico e Soluções Detalhadas](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+- [Respostas e Guia Pedagógico das Pausas Ativas](_02-respostas-pausas.md)
+:::
