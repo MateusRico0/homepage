@@ -1,0 +1,226 @@
+---
+title: "Projeto Final — Aprendizado de Máquina Supervisionado"
+subtitle: "Ciclo Completo de Modelagem Preditiva: Premissas Teóricas, Ensembles, Código Reprodutível e Avaliação"
+date: "2026-10-30"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+---
+
+[← Voltar para a página da disciplina](./index.qmd)
+
+---
+
+::: {.callout-tip}
+### Arquivos de Apoio do Projeto para Download
+* [📥 **Baixar Notebook de Validação do Gate de Sanidade (`projeto_apoio_gate_sanidade.ipynb`)**](./projeto_apoio_gate_sanidade.ipynb)
+* [⚙️ **Baixar Especificação de Dependências com `uv` (`pyproject.toml`)**](./pyproject.toml)
+:::
+
+---
+
+## Objetivo do Trabalho e o que Almejar Entregar
+
+O objetivo deste projeto é desenvolver e avaliar a capacidade dos alunos no **ciclo completo de modelagem de um problema real utilizando Aprendizado de Máquina Supervisionado**, conectando a prática computacional ao **rigor teórico e probabilístico** abordado ao longo da disciplina.
+
+Nesta disciplina, algoritmos de aprendizado não são tratados como "caixas-pretas" ou meros executores de funções prontas de biblioteca, mas sim como **estimadores estatísticos fundamentados em hipóteses distributivas, princípios de verossimilhança/perda e dinâmicas bem definidas de decomposição de erro**.
+
+Portanto, mais do que maximizar uma métrica de acurácia pontual em uma tabela, a equipe deve almejar entregar uma **investigação analítica aprofundada**, respondendo a questões conceituais centrais:
+
+* **As premissas do modelo fazem sentido para a aplicação escolhida? Por quê?**
+  * Quais são as hipóteses teóricas de cada família de modelos testada (linearidade, aditividade, ruído Gaussiano, ligação logit, independência condicional, margem máxima, particionamento constante por partes)?
+  * Qual modelo se mostra teoricamente mais adequado à geometria dos dados e à natureza da variável alvo?
+* **O comportamento dos Ensembles faz sentido à luz da teoria de erro?**
+  * Ao combinar múltiplos estimadores (Bagging / Random Forests ou Boosting), a performance melhorou ou não em relação aos modelos base individuais?
+  * Por qual mecanismo essa melhoria (ou estagnação) ocorreu? O ganho decorreu da **redução de variância** pelo descorrelacionamento de estimadores instáveis ou da **redução de viés** por aproximação sucessiva no espaço de funções?
+* **As decisões são consistentes com a Teoria de Decisão e Risco Estatístico?**
+  * O modelo produz probabilidades bem calibradas?
+  * Diante de custos operacionais assimétricos (falsos positivos vs. falsos negativos), como definir o limiar de decisão ótimo a partir da minimização do Risco de Bayes?
+* **O código é determinístico e reproduzível de forma transparente?**
+  * Entrega de um pipeline autocontido gerenciado via [`uv`](https://docs.astral.sh/uv/) com resolução exata de dependências.
+
+---
+
+## Formação das Equipes
+
+::: {.callout-important}
+### Regra de Composição dos Grupos
+Este trabalho **deverá ser realizado por 2 ou 3 alunos, impreterivelmente**.
+
+Não serão permitidos trabalhos individuais, nem grupos compostos por 4 ou mais estudantes. A colaboração na discussão das hipóteses de modelagem e a divisão estruturada dos experimentos empíricos fazem parte dos objetivos formativos da atividade.
+:::
+
+---
+
+## Escolha do Problema e dos Dados
+
+A equipe tem **total liberdade** para selecionar o domínio de aplicação (saúde, finanças, ciências naturais, engenharia, ciências sociais, visão computacional, etc.) e o conjunto de dados a ser investigado.
+
+::: {.callout-note}
+### Critérios de Não-Trivialidade e "Gate de Sanidade" do Conjunto de Dados
+Para garantir relevância prática e espaço estatístico real para a aplicação dos conceitos da disciplina, a base escolhida deve atender obrigatoriamente aos seguintes requisitos:
+
+1. **Volume Amostral e Dimensionalidade:** O conjunto deve possuir pelo menos $N \ge 1.000$ observações e $d \ge 8$ atributos informativos, permitindo particionamento confiável em treino, validação e teste.
+2. **Proibição de Bases de Brinquedo:** Não serão aceitas bases artificiais ou excessivamente simplificadas (como *Iris*, *Titanic* básico, *Boston Housing* ou *Wine Quality*).
+3. **Margem para Aprendizado (Não-Trivialidade):** O modelo linear inicial ingênuo (*baseline*) **não deve atingir acurácia, F1-Score ou ROC-AUC superior a $0{,}92$**. Se um estimador linear ingênuo já atinge performance quase perfeita, não há desafio estatístico nem espaço para investigar o mecanismo de redução de viés/variância dos ensembles.
+
+Fontes recomendadas: [Kaggle](https://www.kaggle.com/datasets), [UCI Machine Learning Repository](https://archive.ics.uci.edu/), [OpenML](https://www.openml.org/), [Hugging Face Datasets](https://huggingface.co/datasets) ou portais governamentais de dados abertos.
+:::
+
+---
+
+## Estrutura do Relatório Técnico
+
+O relatório deve ser redigido de forma clara e rigorosa, estruturado nas 6 seções descritas a seguir (estimativa total: **10 a 15 páginas**):
+
+### 1. Contextualização do Problema, Checagem e Sanidade dos Dados *(Estimativa: 1 a 2 páginas)*
+
+* **Contexto e Formulação do Problema:**
+  * Apresentação do domínio e formulação clara da pergunta de pesquisa ou problema de negócio.
+  * Notação matemática formal: especificação clara da matriz de atributos $\mathbf{X} \in \mathbb{R}^{N \times d}$ e da variável alvo $\mathbf{y} \in \mathcal{Y}^N$.
+  * Definição explícita da função objetivo e do custo de erro prático: o que se pretende mitigar ou otimizar no mundo real?
+* **Checagem e Sanidade dos Dados (Data Sanity Checks):**
+  * Breve descrição das variáveis, suas grandezas e tipos estatísticos (contínuas, ordinais, categóricas).
+  * Inspeção de sanidade: volume amostral ($N$ instâncias vs. $d$ atributos), diagnóstico de valores faltantes e estratégias simples e justificadas de tratamento, identificação de anomalias óbvias e análise da distribuição marginal do alvo (ex.: proporção de classes se classificação, ou cauda e assimetria se regressão).
+  *(Nota: não é necessário produzir dezenas de gráficos exploratórios exaustivos; foque nas características dos dados que condicionam as premissas dos modelos).*
+* **Métrica de Avaliação e Linha de Base (*Baseline*):**
+  * Escolha fundamentada das métricas de avaliação alinhadas à natureza do problema (ex.: F1-Score, PR-AUC, ROC-AUC, RMSE, MAE).
+  * Definição de uma linha de base ingênua (ex.: estimador majoritário ou média incondicional) como referência mínima de comparação.
+
+---
+
+### 2. Formalismo Teórico e Premissas dos Modelos *(Estimativa: 2 páginas)*
+
+Esta seção é o coração conceitual do projeto. Os alunos devem selecionar pelo menos **três famílias distintas de algoritmos** estudadas no curso (ex.: Modelos Lineares/GLMs com Regularização, Árvores de Decisão CART, Classificadores de Margem Máxima/SVMs, Redes Neurais/MLPs).
+
+Para cada modelo candidato, a equipe deve explicitar:
+
+* **Hipóteses Teóricas e Probabilísticas Fundamentais:**
+  * Qual a premissa de distribuição da resposta condicionada aos atributos (ex.: $Y \mid X \sim \mathcal{N}(\beta^T X, \sigma^2)$ na regressão linear com ruído homocedástico; $Y \mid X \sim \text{Bernoulli}(\sigma(\beta^T X))$ na regressão logística)?
+  * Como a regularização é interpretada estatisticamente (ex.: prioris Gaussianas induzindo Ridge vs. prioris de Laplace induzindo esparsidade no Lasso via estimação MAP)?
+  * Como o particionamento do CART aborda a densidade (função constante por partes com divisões ortogonais gulosas maximizando a verossimilhança de perfil via Gini/Entropia)?
+  * No SVM, como o princípio da margem máxima e a perda *Hinge* operam deliberadamente fora da formulação de verossimilhança direta?
+* **Discussão Crítica de Adequação ao Problema:**
+  * **As premissas de cada modelo fazem sentido para os dados e para a aplicação escolhida? Por quê?**
+  * A relação entre os atributos e a variável alvo é plausivelmente linear aditiva, ou espera-se forte presença de não-linearidades e interações de alta ordem?
+  * Os atributos contínuos possuem escalas muito heterogêneas ou correlações colineares severas?
+  * **Qual modelo mais se adequa *a priori* às premissas do problema?** A equipe deve formular uma hipótese clara antes de analisar os resultados empíricos.
+* **Registro Prévio de Hipótese e Critério de Falseamento:**
+  * Antes de avançar para os experimentos de ensemble, a equipe deve formalizar:
+    1. **Hipótese de Decomposição de Erro:** O problema é dominado por viés de aproximação (exigindo modelos com capacidade de aprender fronteiras complexas) ou por variância amostral (árvores instáveis que precisam de estabilização)?
+    2. **Previsão Observável:** Qual família de ensemble (Bagging/Random Forest vs. Boosting) deverá apresentar o ganho mais substancial em relação aos modelos individuais?
+    3. **Critério de Falseamento:** Qual resultado empírico refutará a expectativa teórica do grupo (ex.: falha do Boosting decorrente de ruído excessivo nas folhas, ou modelo linear superando ensembles, revelando que a fronteira de Bayes é essencialmente plana)?
+
+---
+
+### 3. Protocolo Experimental e Validação Estatística *(Estimativa: 1 página)*
+
+* **Esquema de Particionamento:**
+  * Divisão formal dos dados em **Treino**, **Validação** e **Teste Independente** (ou validação cruzada aninhada / *Nested Cross-Validation*).
+  * Justificativa da estratégia amostral à luz da estrutura dos dados (estratificação para classes desbalanceadas; particionamento temporal para evitar viés prospectivo / *lookahead bias*; agrupamento por grupos de observações independentes).
+* **Garantia Contra Vazamento de Dados (*Data Leakage*):**
+  * Explicitação formal de que qualquer normalização, imputação ou codificação foi ajustada **exclusivamente sobre o conjunto de treino** e apenas propagada para a validação e teste.
+* **Estratégia de Otimização de Hiperparâmetros:**
+  * Descrição dos métodos sistemáticos empregados (Grid Search, Random Search ou Otimização Bayesiana) e justificativa dos hiperparâmetros críticos selecionados para ajuste em cada modelo.
+
+---
+
+### 4. Modelagem, Teste de Ensembles e Decomposição de Erro *(Estimativa: 3 a 4 páginas)*
+
+* **Modelos Base Individuais:**
+  * Treinamento, convergência e ajuste dos modelos base formulados na Seção 2.
+  * Curvas de aprendizado/validação e diagnóstico empírico de sobreeajuste (*overfitting*) vs. subajuste (*underfitting*).
+* **Teste Obrigatório de Métodos de Ensemble:**
+  * A equipe **deve obrigatoriamente implementar e testar técnicas de ensemble** (ex.: Bagging / Random Forests e métodos de Boosting como AdaBoost ou Gradient Boosting / XGBoost / LightGBM).
+* **Investigação Teórica e Mecanística do Ensemble:**
+  * **A técnica de ensemble escolhida melhorou a performance em relação aos estimadores base individuais? Por quê?**
+  * Conecte os resultados diretamente à **Decomposição Viés-Variância** (estudada na Lição 8):
+    * Se o Bagging / Random Forest superou os modelos base: a árvore individual sofria de alta variância e o ensemble teve sucesso em **reduzir a variância** ao quebrar a correlação entre estimadores ($\rho$) via reamostragem bootstrap e amostragem aleatória de atributos?
+    * Se o Gradient Boosting superou os modelos base: o problema exigia **redução de viés** e o algoritmo foi capaz de aprender sucessivamente resíduos no espaço de funções através da descida de gradiente funcional?
+    * Se o ensemble **não** melhorou (ou até piorou): por que isso ocorreu? Houve amplificação de ruído no boosting? O modelo linear já era o limite de Bayes para os atributos observados?
+  * Análise de sensibilidade em relação aos hiperparâmetros-chave do ensemble: número de árvores ($M$), profundidade máxima e taxa de aprendizado ($\eta$).
+
+---
+
+### 5. Resultados, Calibração, Teoria de Decisão e Trade-offs *(Estimativa: 2 a 3 páginas)*
+
+* **Avaliação Comparativa no Conjunto de Teste:**
+  * Tabela consolidada com o desempenho final de todos os modelos avaliados na partição de teste (que permaneceu intocada durante a seleção de hiperparâmetros).
+  * Apresentação de curvas características (ROC, Precision-Recall) e métricas de incerteza (intervalos obtidos via reamostragem/Bootstrap, quando aplicável).
+* **Calibração de Probabilidades e Decisão Estatística:**
+  * O modelo campeão produz probabilidades bem calibradas? (Inspeção via *reliability diagram* / curvas de calibração).
+  * Em modelos não baseados diretamente em verossimilhança (como SVMs), foi necessária a aplicação de calibração a posteriori (como Platt scaling ou regressão isotônica)?
+  * **Ajuste de Limiar via Matriz de Perdas:** Diante de custos assimétricos de erro no mundo real (ex.: custo de um falso negativo muito superior ao de um falso positivo), demonstre como o limiar de decisão foi determinado a partir da minimização do Risco de Bayes, contrastando com o limiar ingênuo de $0{,}5$.
+* **Interpretabilidade Pós-Ajuste e Estrutura Interna do Modelo Campeão:**
+  * Para o modelo vencedor (especialmente se for um ensemble de árvores), inspecione os mecanismos de predição utilizando as ferramentas estudadas nas Aulas 9 e 10:
+    * **Importância por Impureza (MDI) vs. Importância por Permutação (MDA):** Compare os dois rankings de relevância de atributos. Houve divergência causada por atributos contínuos ou de alta cardinalidade superestimados pelo MDI? O MDA confirma quais variáveis realmente degradam o erro fora de amostra quando corrompidas?
+    * **Gráficos de Dependência Parcial (PDP):** Plote a dependência parcial de Friedman para os 2 atributos mais influentes. A relação inferida pelo ensemble é linear, monotônica ou exibe não-linearidades e quebras de patamar?
+    * **Contraste com os Coeficientes Lineares:** Os atributos destacados pelo ensemble concordam com os pesos $\boldsymbol{\beta}$ do modelo linear regularizado da Seção 2? O que eventuais discrepâncias revelam sobre interações não-lineares capturadas pelo ensemble?
+* **Trade-offs Práticos:**
+  * Discussão crítica entre **desempenho preditivo versus interpretabilidade**: o ganho de acurácia de um ensemble ou rede neural justifica o custo de sua opacidade?
+  * Custo computacional de treinamento e latência de inferência para um eventual cenário produtivo.
+
+---
+
+### 6. Conclusão e Diagnóstico Crítico *(Estimativa: 1 página)*
+
+* **Síntese dos Achados:**
+  * Qual modelo se consagrou como a melhor solução?
+  * O resultado empírico confirmou ou refutou a hipótese inicial da Seção 2 sobre qual modelo mais se adequava às premissas dos dados? O que aprendemos a partir dessa discrepância?
+* **Limitações e Trabalhos Futuros:**
+  * Limitações do conjunto de dados, variáveis ocultas/confundidoras não observadas e propostas concretas para futuras investigações.
+
+---
+
+## Entregáveis do Projeto
+
+Ao término do semestre, a equipe deverá submeter:
+
+### 1. Relatório Técnico Completo (PDF)
+* Documento em formato PDF estruturado rigorosamente nas 6 seções detalhadas acima.
+* Tamanho sugerido entre **10 e 15 páginas** de conteúdo (excluindo capa, referências e eventuais apêndices).
+
+### 2. Repositório / Pacote de Código Reprodutível com `uv`
+Todo o código desenvolvido deve estar versionado em um repositório limpo, modular e autossuficiente.
+
+O gerenciamento de dependências e ambiente virtual do projeto **deve obrigatoriamente utilizar o [`uv`](https://docs.astral.sh/uv/)**, incluindo seus documentos de especificação:
+
+* **`pyproject.toml`:** especificação padrão (PEP 621) declarando os metadados do projeto, as dependências principais (`dependencies`) e eventuais grupos auxiliares (`[dependency-groups]`, como Jupyter ou formatação).
+* **`uv.lock`:** arquivo de bloqueio determinístico gerado pelo `uv`, garantindo paridade exata de todas as dependências transitivas em qualquer máquina.
+* **`.python-version`:** fixação explícita da versão do interpretador Python utilizada (ex.: `3.12` ou `3.13`).
+* **`README.md`:** roteiro claro de reprodução demonstrando como sincronizar o ambiente e executar os pipelines:
+  ```bash
+  # 1. Sincronizar o ambiente com o lockfile determinístico
+  uv sync
+
+  # 2. Executar o pipeline principal de modelagem e testes
+  uv run python src/main.py
+
+  # 3. (Opcional) Abrir os notebooks de apoio
+  uv run --with jupyter jupyter lab
+  ```
+* **Scripts e Notebooks:** código estruturado e sementes fixadas (`seed` / `random_state`) para que todos os números, tabelas e gráficos do relatório sejam 100% reproduzíveis.
+
+---
+
+## Critérios de Avaliação
+
+Conforme estipulado no [Plano de Desenvolvimento da Disciplina (PDD)](./pdd.qmd), o Trabalho Final ($TF$) compõe **40% da nota do semestre**:
+
+$$NF = 0{,}20\,T_1 + 0{,}20\,T_2 + 0{,}20\,T_3 + 0{,}40\,TF$$
+
+A nota será atribuída com base na profundidade conceitual, rigor estatístico e qualidade da modelagem, seguindo a rubrica:
+
+| Dimensão | Peso | Critérios Avaliados |
+|:---|:---:|:---|
+| **Contextualização e Sanidade dos Dados** | 15% | Clareza na definição do problema, formulação matemática correta, cumprimento rigoroso do "gate de sanidade" e não-trivialidade da base ($N \ge 1.000, d \ge 8$, baseline $\le 0{,}92$), checagens de dados e métricas alinhadas à aplicação. |
+| **Formalismo Teórico e Hipóteses Prévias** | 25% | Rigor analítico na apresentação das hipóteses estatísticas/probabilísticas de cada família candidata; profundidade na justificativa de adequação às premissas dos dados; registro formal prévio da hipótese de erro (viés vs. variância) e critério de falseamento. |
+| **Protocolo Experimental, Ensembles e Viés-Variância** | 30% | Rigor no particionamento sem vazamento de dados, teste obrigatório de métodos de ensemble e análise mecanística do porquê o ensemble melhorou (ou não) o desempenho à luz do trade-off viés-variância, confrontando com a previsão inicial. |
+| **Resultados, Decisão e Interpretabilidade** | 15% | Avaliação honesta na partição de teste, calibração de probabilidades, ajuste de limiar via matriz de perdas/risco de Bayes e interpretabilidade pós-ajuste (MDI vs. MDA, PDPs e contraste com os coeficientes lineares). |
+| **Reprodutibilidade e Código com `uv`** | 15% | Ambiente padronizado com `uv` (`pyproject.toml`, `uv.lock`, `.python-version`), código modular limpo, documentado com `README.md`, sementes fixadas e correspondência exata com o relatório. |
+
+---
+
+::: {.callout-important}
+### Integridade Acadêmica e Plágio
+Todo o código, texto e gráficos submetidos devem ser de autoria própria dos integrantes da equipe. O uso de bibliotecas de código aberto e ferramentas de assistência deve ser devidamente referenciado. Cópia não autorizada de análises pré-existentes ou plágio de relatórios/códigos resultará em nota zero ($TF = 0$) e aplicação das sanções regimentais da Unicamp previstas no PDD.
+:::

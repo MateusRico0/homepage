@@ -1,0 +1,200 @@
+---
+title: "Soluções — Aula 10: Gradient Boosting e Otimização Numérica no Espaço de Funções"
+subtitle: "Supervised Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+
+::: {.callout-tip icon=false}
+Este documento contém o gabarito completo e comentado das questões de Verdadeiro/Falso e as resoluções passo a passo das questões discursivas da [Aula 10](index.qmd).
+:::
+
+## Resoluções das questões discursivas
+
+### Questão 1: Equivalência Formal entre AdaBoost.M1 e o Modelo Aditivo em Estágios com Perda Exponencial
+
+**Item a:**  
+O problema de otimização do *Forward Stagewise Additive Modeling (FSAM)* na iteração $m$ com perda exponencial $L(y, f) = e^{-yf}$ consiste em encontrar o passo $\beta > 0$ e o classificador base $h(\mathbf{x}) \in \{-1, +1\}$ que minimizam:
+
+$$\min_{\beta, h} \sum_{i=1}^N L(y_i, f_{m-1}(\mathbf{x}_i) + \beta h(\mathbf{x}_i)) = \min_{\beta, h} \sum_{i=1}^N \exp\Big( -y_i \big(f_{m-1}(\mathbf{x}_i) + \beta h(\mathbf{x}_i)\big) \Big)$$
+
+Aplicando as propriedades da função exponencial, decompomos o expoente em produto:
+
+$$\sum_{i=1}^N \exp\big(-y_i f_{m-1}(\mathbf{x}_i)\big) \cdot \exp\big(-\beta y_i h(\mathbf{x}_i)\big)$$
+
+Como o modelo acumulado $f_{m-1}$ está estritamente fixo na iteração $m$, o termo $w_i^{(m)} \equiv \exp\big(-y_i f_{m-1}(\mathbf{x}_i)\big)$ é uma constante positiva pré-determinada para cada observação $i = 1, \dots, N$. Assim, a função objetivo reescreve-se identicamente como:
+
+$$\min_{\beta, h} \sum_{i=1}^N w_i^{(m)} \exp\big(-\beta y_i h(\mathbf{x}_i)\big)$$
+
+**Item b:**  
+Como $y_i, h(\mathbf{x}_i) \in \{-1, +1\}$, o produto $y_i h(\mathbf{x}_i)$ assume apenas dois valores possíveis:
+- $y_i h(\mathbf{x}_i) = +1$ quando a classificação é correta ($y_i = h(\mathbf{x}_i)$).
+- $y_i h(\mathbf{x}_i) = -1$ quando a classificação é incorreta ($y_i \neq h(\mathbf{x}_i)$).
+
+Particionando o somatório nas duas situações:
+
+$$\sum_{i=1}^N w_i^{(m)} e^{-\beta y_i h(\mathbf{x}_i)} = \sum_{y_i = h(\mathbf{x}_i)} w_i^{(m)} e^{-\beta} + \sum_{y_i \neq h(\mathbf{x}_i)} w_i^{(m)} e^{+\beta}$$
+
+Adicionando e subtraindo $\sum_{y_i \neq h(\mathbf{x}_i)} w_i^{(m)} e^{-\beta}$, obtemos:
+
+$$\sum_{i=1}^N w_i^{(m)} e^{-\beta y_i h(\mathbf{x}_i)} = e^{-\beta} \sum_{i=1}^N w_i^{(m)} + (e^\beta - e^{-\beta}) \sum_{i=1}^N w_i^{(m)} \mathbb{I}(y_i \neq h(\mathbf{x}_i))$$
+
+Definindo a taxa de erro ponderada $\text{err}_m \equiv \frac{\sum_{i=1}^N w_i^{(m)} \mathbb{I}(y_i \neq h(\mathbf{x}_i))}{\sum_{i=1}^N w_i^{(m)}}$ e multiplicando/dividindo o segundo termo pela soma dos pesos $W = \sum_{i=1}^N w_i^{(m)}$:
+
+$$\sum_{i=1}^N w_i^{(m)} e^{-\beta y_i h(\mathbf{x}_i)} = W \Big[ e^{-\beta} (1 - \text{err}_m) + e^\beta \text{err}_m \Big]$$
+
+Para qualquer $\beta > 0$, temos $(e^\beta - e^{-\beta}) > 0$. Portanto, o termo $W [e^{-\beta} + (e^\beta - e^{-\beta})\text{err}_m]$ é estritamente crescente em relação a $\text{err}_m$. Conclui-se que o classificador base ótimo $h_m(\mathbf{x})$ é aquele que minimiza $\text{err}_m$, independentemente do valor de $\beta$:
+
+$$h_m = \arg\min_h \sum_{i=1}^N w_i^{(m)} \mathbb{I}(y_i \neq h(\mathbf{x}_i))$$
+
+**Item c:**  
+Substituindo $h_m$ fixo, derivamos a expressão em relação a $\beta$ para encontrar o minimizador:
+
+$$\frac{\partial}{\partial \beta} \Big\{ W \big[ e^{-\beta} (1 - \text{err}_m) + e^\beta \text{err}_m \big] \Big\} = W \big[ -e^{-\beta} (1 - \text{err}_m) + e^\beta \text{err}_m \big]$$
+
+Igualando a derivada a zero:
+
+$$-e^{-\beta} (1 - \text{err}_m) + e^\beta \text{err}_m = 0 \implies e^{2\beta} \text{err}_m = 1 - \text{err}_m \implies e^{2\beta} = \frac{1 - \text{err}_m}{\text{err}_m}$$
+
+Aplicando o logaritmo natural em ambos os lados:
+
+$$2\beta_m = \ln \left(\frac{1 - \text{err}_m}{\text{err}_m}\right) \implies \beta_m = \frac{1}{2} \ln \left(\frac{1 - \text{err}_m}{\text{err}_m}\right)$$
+
+Definindo $\alpha_m \equiv 2\beta_m = \ln \left(\frac{1 - \text{err}_m}{\text{err}_m}\right)$ ou, na convenção canônica do AdaBoost onde o modelo final adiciona $\alpha_m h_m(\mathbf{x})$:
+
+$$\alpha_m = \frac{1}{2} \ln \left(\frac{1 - \text{err}_m}{\text{err}_m}\right)$$
+
+A atualização recursiva dos pesos decorre de:
+
+$$w_i^{(m+1)} = \exp(-y_i f_m(\mathbf{x}_i)) = \exp(-y_i (f_{m-1}(\mathbf{x}_i) + \alpha_m h_m(\mathbf{x}_i))) = w_i^{(m)} \exp(-\alpha_m y_i h_m(\mathbf{x}_i))$$
+
+o que comprova a equivalência matemática exata entre FSAM com perda exponencial e o algoritmo AdaBoost.M1.
+
+---
+
+### Questão 2: Dedução Analítica de Pseudo-Resíduos e Busca Linear para Perdas Robustas
+
+**Item a (Perda Quadrática $L_2$):**  
+A perda é $L(y, f) = \frac{1}{2}(y - f)^2$.  
+1. **Pseudo-resíduo:**
+   $$r_{im} = -\left[\frac{\partial L(y_i, f)}{\partial f}\right]_{f = f_{m-1}(\mathbf{x}_i)} = -\left[-(y_i - f)\right]_{f = f_{m-1}(\mathbf{x}_i)} = y_i - f_{m-1}(\mathbf{x}_i)$$
+   O pseudo-resíduo coincide exatamente com o resíduo algébrico tradicional.
+2. **Busca Linear na Folha $R_{jm}$:**
+   $$\gamma_{jm} = \arg\min_\gamma \sum_{\mathbf{x}_i \in R_{jm}} \frac{1}{2} \big(y_i - f_{m-1}(\mathbf{x}_i) - \gamma\big)^2$$
+   Derivando em relação a $\gamma$ e igualando a zero:
+   $$\sum_{\mathbf{x}_i \in R_{jm}} -\big(y_i - f_{m-1}(\mathbf{x}_i) - \gamma\big) = 0 \implies \sum_{\mathbf{x}_i \in R_{jm}} \gamma = \sum_{\mathbf{x}_i \in R_{jm}} r_{im}$$
+   $$\gamma_{jm} = \frac{1}{|R_{jm}|} \sum_{\mathbf{x}_i \in R_{jm}} r_{im} = \text{média}_{\mathbf{x}_i \in R_{jm}}(r_{im})$$
+
+**Item b (Perda Absoluta $L_1$):**  
+A perda é $L(y, f) = |y - f|$.  
+1. **Pseudo-resíduo:**
+   Como $\frac{\partial}{\partial f}|y - f| = -\text{sign}(y - f)$ (para $y \neq f$):
+   $$r_{im} = -\left[-\text{sign}(y_i - f)\right]_{f = f_{m-1}(\mathbf{x}_i)} = \text{sign}(y_i - f_{m-1}(\mathbf{x}_i)) \in \{-1, +1\}$$
+   O pseudo-resíduo depende apenas da direção do erro, sendo invariante à escala do resíduo individual.
+2. **Busca Linear na Folha $R_{jm}$:**
+   $$\gamma_{jm} = \arg\min_\gamma \sum_{\mathbf{x}_i \in R_{jm}} |y_i - f_{m-1}(\mathbf{x}_i) - \gamma| = \arg\min_\gamma \sum_{\mathbf{x}_i \in R_{jm}} |r_{im}^{\text{raw}} - \gamma|$$
+   onde $r_{im}^{\text{raw}} = y_i - f_{m-1}(\mathbf{x}_i)$. Da estatística básica, a constante que minimiza a soma dos desvios absolutos em relação a uma amostra é a **mediana amostral**:
+   $$\gamma_{jm} = \text{mediana}_{\mathbf{x}_i \in R_{jm}} \big(y_i - f_{m-1}(\mathbf{x}_i)\big)$$
+
+**Item c (Perda de Huber):**  
+A perda de Huber com limiar $\delta > 0$ é:
+$$L_\delta(y, f) = \begin{cases} \frac{1}{2}(y - f)^2, & \text{se } |y - f| \le \delta \\ \delta |y - f| - \frac{1}{2}\delta^2, & \text{se } |y - f| > \delta \end{cases}$$
+1. **Pseudo-resíduo:**
+   Derivando por partes em relação a $f$:
+   $$r_{im} = -\left[\frac{\partial L_\delta(y_i, f)}{\partial f}\right]_{f = f_{m-1}} = \begin{cases} y_i - f_{m-1}(\mathbf{x}_i), & \text{se } |y_i - f_{m-1}(\mathbf{x}_i)| \le \delta \\ \delta \cdot \text{sign}(y_i - f_{m-1}(\mathbf{x}_i)), & \text{se } |y_i - f_{m-1}(\mathbf{x}_i)| > \delta \end{cases}$$
+2. **Mecanismo de Proteção contra Outliers:**
+   Para observações cujo erro é pequeno ($|y_i - f_{m-1}(\mathbf{x}_i)| \le \delta$), o pseudo-resíduo é proporcional ao erro exato, garantindo a convergência rápida e suave típica do método dos mínimos quadrados. Porém, quando um ponto é um outlier severo (com erro de magnitude $10^6$), a perda de Huber trunca a atração do gradiente em $\pm \delta$. O gradiente negativo não explode nem sequestra a árvore de regressão, impedindo que poucas observações anômalas governem o particionamento do ensemble.
+
+---
+
+### Questão 3: Dinâmica do Tradeoff $(\nu, M)$, Subamostragem e Controle de Interações
+
+**Item a:**  
+A taxa de encolhimento $\nu \in (0, 1]$ introduz regularização penalizando a magnitude de cada passo individual na expansão aditiva: $f_m(\mathbf{x}) = f_{m-1}(\mathbf{x}) + \nu h_m(\mathbf{x})$.  
+A relação entre $\nu$ e o número de iterações $M$ é inversamente proporcional: se $\nu$ for reduzido por um fator $k$, o modelo necessitará de aproximadamente $k$ vezes mais iterações para percorrer a mesma distância no espaço de funções e atingir o mesmo nível de ajuste no treino.  
+Friedman (2001) e Hastie et al. (ESL §10.12) demonstram empiricamente que escolher $\nu$ pequeno ($\nu \le 0{,}1$ ou mesmo $\nu \le 0{,}02$) melhora consistentemente o erro de generalização no conjunto de teste em comparação a dar passos plenos ($\nu = 1{,}0$). Passos curtos funcionam como um encolhimento $L_2$ implícito no espaço de funções: impedem que as primeiras árvores dominem completamente a representação e forçam árvores subsequentes a explorar atributos correlacionados secundários, diversificando o comitê. A prática recomendada é fixar $\nu$ pequeno e interromper o processo via *early stopping* quando o erro de validação atingir o ponto mínimo, prevenindo sobreajuste.
+
+**Item b:**  
+Uma árvore de regressão com $J$ nós terminais (folhas) possui exatamente $J-1$ nós internos de decisão. Cada nó interno divide o espaço com base em um único corte perpendicular a um dos eixos coordenados.  
+Para que uma função represente uma interação de ordem $K$ (isto é, um efeito conjunto de $K$ atributos distintos que não pode ser decomposto como soma de funções de dimensão inferior), é necessário que pelo menos um ramo da raiz até uma folha atravesse decisões sequenciais envolvendo cada uma das $K$ variáveis distintas. Como uma árvore com $J$ folhas possui no máximo $J-1$ divisões internas em toda a sua estrutura, o caminho mais longo possível contém no máximo $J-1$ nós de corte distintos. Logo, o nível máximo de interação modelável por uma árvore com $J$ folhas é $K_{\max} = J - 1$.  
+Para a função $g(x_1, x_2, x_3) = x_1 \cdot \sin(x_2) \cdot \exp(x_3)$, trata-se de uma interação simultânea irredutível de $3$ variáveis ($K = 3$). Portanto, é estritamente necessário que a árvore contenha no mínimo:
+$$J - 1 \ge 3 \implies J \ge 4 \text{ folhas terminais}$$
+(o que corresponde a uma profundidade mínima de 3 nós). Se utilizássemos *decision stumps* ($J = 2$), o modelo final seria puramente aditivo $\sum_j f_j(x_j)$ e jamais conseguiria capturar o produto dessas três variáveis.
+
+**Item c:**  
+No *Stochastic Gradient Boosting* (Friedman, 1999), em cada iteração $m$, seleciona-se aleatoriamente uma fração $\eta \in (0, 1)$ (tipicamente $\eta \in [0{,}5, 0{,}8]$) do conjunto de treino sem reposição para computar os pseudo-resíduos e ajustar a árvore $T_m$.  
+- **Variância:** A aleatoriedade introduzida pela subamostragem reduz a correlação par-a-par entre as árvores sucessivas do ensemble, diminuindo a variância do estimador final por um mecanismo análogo ao do Bagging (Aula 9).
+- **Viés:** Para valores moderados de $\eta$ ($\eta \ge 0{,}5$), o viés do modelo acumulado não é degradado de maneira perceptível.
+- **Tempo computacional:** O custo computacional de indução de cada árvore é reduzido diretamente por um fator $\eta$, acelerando o treinamento de forma substancial.
+
+---
+
+## Gabarito dos testes de Verdadeiro/Falso
+
+### Teste 1 — Fundamentos do Boosting e Contraste com Bagging
+
+- ✗ **F:** A afirmação inverte os dois conceitos: o Bagging foca em reduzir a **variância** de modelos de alto viés/baixa capacidade? Não! O Bagging reduz a **variância de modelos de baixo viés e alta variância** (árvores profundas). O Boosting foca em reduzir o **viés** combinando modelos simples de **alto viés** (*weak learners*).
+- ✔ **V:** Este é o princípio central do Boosting: o treinamento é sequencial e cada novo termo foca nos resíduos/erros do comitê pré-existente.
+- ✗ **F:** Árvores profundas com $J \ge 128$ sobreajustam imediatamente na primeira iteração, gerando resíduos ruidosos e arruinando o Boosting. O algoritmo necessita de árvores rasas ($J \in [4, 8]$).
+- ✔ **V:** No Bagging, cada árvore depende apenas de sua réplica bootstrap (paralelismo puro); no Boosting, a iteração $m$ requer calcular os resíduos sobre $f_{m-1}$ (sequencialidade intrínseca).
+
+### Teste 2 — Forward Stagewise Additive Modeling (FSAM) e AdaBoost
+
+- ✗ **F:** No FSAM, os parâmetros das iterações anteriores permanecem **congelados**; apenas o novo termo $(\beta_m, \gamma_m)$ é otimizado na iteração corrente.
+- ✔ **V:** Conforme deduzido analiticamente no Bloco 1, $h_m$ minimiza exatamente a soma ponderada das funções indicadoras de erro.
+- ✔ **V:** Substituindo $\text{err}_m = 0{,}5$ na fórmula, $\alpha_m = \frac{1}{2}\ln\left(\frac{1 - 0{,}5}{0{,}5}\right) = \frac{1}{2}\ln(1) = 0$.
+- ✔ **V:** Se $\text{err}_m > 0{,}5$, $\frac{1-\text{err}_m}{\text{err}_m} < 1 \implies \ln < 0$, resultando em $\alpha_m < 0$, o que inverte as previsões do modelo fraco para transformá-lo em um modelo com acurácia $> 50\%$.
+
+### Teste 3 — Propriedades da Perda Exponencial e Riscos de Robustez
+
+- ✔ **V:** Conforme derivado por Friedman, Hastie e Tibshirani (2000), o minimizador da esperança sob perda exponencial é exatamente a metade do log-odds de Bayes.
+- ✗ **F:** A penalidade da perda exponencial $e^{-yf}$ cresce a uma taxa **exponencial** em relação ao erro negativo, e não linear.
+- ✔ **V:** Observações ruidosas recebem pesos multiplicativos exponenciais que crescem sem limite, forçando as árvores seguintes a focarem exclusivamente em memorizar esses outliers.
+- ✔ **V:** A perda deviance binomial cresce como $- \ln(1 + e^{-yf}) \approx |yf|$ para erros graves, comportando-se de forma assintoticamente linear e muito mais robusta.
+
+### Teste 4 — Otimização Numérica no Espaço de Funções e Pseudo-Resíduos
+
+- ✔ **V:** O vetor $-\mathbf{g}_m = -\nabla_{\mathbf{f}} L \in \mathbb{R}^N$ é o vetor de descida mais íngreme (*steepest descent*) na superfície da perda avaliada nos pontos de treino.
+- ✔ **V:** Minimizar $\sum_{i=1}^N (r_{im} - h_m(\mathbf{x}_i))^2$ equivale formalmente a projetar ortogonalmente o vetor gradiente $-\mathbf{g}_m$ sobre a variedade das árvores de decisão.
+- ✗ **F:** Para funções não diferenciáveis (como $L_1$ na origem), utiliza-se o conceito de **subgradiente** (por exemplo, definindo o gradiente como $0$ quando $y_i = f(\mathbf{x}_i)$), viabilizando o algoritmo perfeitamente.
+- ✔ **V:** A derivada de $\frac{1}{2}(y - f)^2$ em relação a $f$ multiplicada por $-1$ resulta exatamente em $y_i - f_{m-1}(\mathbf{x}_i)$.
+
+### Teste 5 — Funções de Perda Robustas e Busca Linear nas Folhas
+
+- ✔ **V:** O subgradiente da perda $L_1$ é $\text{sign}(y_i - f_{m-1}(\mathbf{x}_i))$, que descarta a magnitude escalar e preserva apenas a direção do desvio.
+- ✗ **F:** Sob a perda $L_1$, o minimizador em cada folha terminal é a **mediana** dos resíduos, e não a média.
+- ✔ **V:** A função de Huber é construída para ter derivadas contínuas no ponto de junção $|y - f| = \delta$, garantindo transição analítica suave entre $L_2$ e $L_1$.
+- ✔ **V:** Devido à ausência de solução analítica fechada para a busca linear na deviance logística, aplica-se uma iteração de Newton-Raphson dividindo a soma dos resíduos pela soma das variâncias $p_i(1 - p_i)$.
+
+### Teste 6 — Regularização por Encolhimento (Shrinkage) e Convergência
+
+- ✔ **V:** O termo $\nu \in (0, 1]$ amortece o passo aditivo de cada árvore, funcionando exatamente como a taxa de aprendizado na descida de gradiente em espaços funcionais.
+- ✗ **F:** Reduzir $\nu$ diminui o tamanho de cada passo, exigindo um número $M$ **substancialmente maior** (e não menor) de iterações para atingir o mesmo ajuste.
+- ✔ **V:** Taxas de aprendizado pequenas ($\nu \le 0{,}1$) associadas a um maior número de iterações $M$ produzem sistematicamente menores erros de teste e melhores estimativas de probabilidade.
+- ✔ **V:** Ao contrário do Bagging, onde adicionar árvores estabiliza o erro sem gerar sobreajuste, no Boosting adicionar árvores excessivas ($M \to \infty$) eventualmente ajusta ruído e causa sobreajuste se o treinamento não for interrompido a tempo.
+
+### Teste 7 — Arquitetura de Árvores, Nós Terminais e Ordem de Interação
+
+- ✔ **V:** Toda árvore binária com $J$ folhas divide o domínio $\mathbb{R}^p$ em exatamente $J$ regiões hiper-retangulares ortogonais disjuntas.
+- ✗ **F:** *Decision stumps* ($J = 2$) contêm apenas uma única partição baseada em uma única variável; portanto, são incapazes de modelar qualquer interação entre variáveis.
+- ✔ **V:** Com $J = 2$, cada árvore depende de um único preditor $x_k$, fazendo com que a soma aditiva global se reduza a $\sum_{k=1}^p f_k(x_k)$, que é a definição de um Modelo Aditivo Generalizado.
+- ✔ **V:** Pelo teorema estrutural de Friedman (2001), para haver interação de ordem $K$, é necessário um caminho hierárquico com pelo menos $K$ cortes em variáveis distintas, exigindo no mínimo $K+1$ nós terminais.
+
+### Teste 8 — Interpretabilidade, EBM e Gráficos de Dependência Parcial (PDP)
+
+- ✔ **V:** A importância de Friedman soma a melhoria empírica na perda proporcionada pelos cortes em cada nó interno onde a variável em questão foi utilizada, ponderada por todas as $M$ árvores.
+- ✔ **V:** O EBM impõe ciclos *round-robin* onde cada micro-árvore divide apenas uma única variável por vez, garantindo que $f_j(x_j)$ seja uma função exata daquele atributo, sem necessitar de aproximações externas (como PDP ou SHAP).
+- ✗ **F:** O PDP não fixa as outras variáveis em suas médias; ele calcula a **média marginal das predições** variando $X_j$ e integrando numericamente sobre toda a distribuição empírica das variáveis complementares $X_C$.
+- ✔ **V:** Quando atributos complementares são fortemente correlacionados com $X_j$, a integração empírica do PDP avalia o modelo em combinações $(\mathbf{x}_S, \mathbf{x}_{i, C})$ que possuem densidade de probabilidade praticamente nula no mundo real, gerando extrapolações ilusórias.
+

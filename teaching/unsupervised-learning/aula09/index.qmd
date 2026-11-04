@@ -57,14 +57,11 @@ execute:
 # =====================================================================
 # SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
 # =====================================================================
-from huggingface_hub.utils import logging as hf_logging
-hf_logging.set_verbosity_error()
-from datasets import disable_progress_bar, load_dataset
-disable_progress_bar()
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import itertools
+from collections import defaultdict
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -88,15 +85,16 @@ COR_VERDE = "#1b9e77"
 def brl(val, dec=3):
     return f"{val:.{dec}f}".replace(".", ",")
 
-# Simulação controlada de Market Basket com Causa Comum (Confounding)
-# Variável C (Contexto: 1 = Manhã/Alta Renda, 0 = Noite/Baixa Renda)
+# =====================================================================
+# 1. Simulação controlada de Confounding (Café x Torradeira x Renda)
+# =====================================================================
 np.random.seed(42)
 N_sim = 10000
 P_C = 0.20
 C = (np.random.rand(N_sim) < P_C).astype(int)
 
-# Itens A (Café Gourmet) e B (Torradeira de Alta Potência)
-# Condicionados em C, A e B são independentes!
+# Itens A (Café Gourmet) e B (Torradeira Elétrica)
+# Condicionados em C, A e B são estritamente independentes!
 P_A_given_C1, P_A_given_C0 = 0.80, 0.10
 P_B_given_C1, P_B_given_C0 = 0.70, 0.05
 
@@ -113,115 +111,395 @@ p_AB_emp = np.mean(A * B)
 lift_emp = p_AB_emp / (p_A_emp * p_B_emp)
 
 # Métricas estratificadas por C
+p_B_C1 = np.mean(B[C == 1])
+p_B_given_A_C1 = np.mean(B[(C == 1) & (A == 1)])
 lift_C1 = np.mean(A[C == 1] * B[C == 1]) / (np.mean(A[C == 1]) * np.mean(B[C == 1]))
+
+p_B_C0 = np.mean(B[C == 0])
+p_B_given_A_C0 = np.mean(B[(C == 0) & (A == 1)])
 lift_C0 = np.mean(A[C == 0] * B[C == 0]) / (np.mean(A[C == 0]) * np.mean(B[C == 0]))
+
+# =====================================================================
+# 2. Implementação Didática e Eficiente do Algoritmo Apriori
+# =====================================================================
+def executar_apriori(transacoes, min_sup=0.20, min_conf=0.50):
+    N = len(transacoes)
+    itemsets_trans = [set(t) for t in transacoes]
+    todos_itens = sorted(list(set(i for t in transacoes for i in t)))
+    
+    # L1: Itens frequentes de tamanho 1
+    contagem_1 = defaultdict(int)
+    for t in itemsets_trans:
+        for item in todos_itens:
+            if item in t:
+                contagem_1[frozenset([item])] += 1
+    
+    L = {}
+    L[1] = {itemset: count/N for itemset, count in contagem_1.items() if count/N >= min_sup}
+    
+    k = 2
+    while True:
+        itens_prev = list(L[k-1].keys())
+        if not itens_prev:
+            break
+        
+        # Passo de Junção (Join Step: L_{k-1} x L_{k-1})
+        candidatos_k = set()
+        for i in range(len(itens_prev)):
+            for j in range(i + 1, len(itens_prev)):
+                uniao = itens_prev[i] | itens_prev[j]
+                if len(uniao) == k:
+                    # Passo de Poda (Prune Step via Antimonotonicidade)
+                    # Todos os subconjuntos de tamanho k-1 devem estar em L_{k-1}
+                    todos_subconjuntos_frequentes = True
+                    for sub in itertools.combinations(uniao, k - 1):
+                        if frozenset(sub) not in L[k-1]:
+                            todos_subconjuntos_frequentes = False
+                            break
+                    if todos_subconjuntos_frequentes:
+                        candidatos_k.add(uniao)
+        
+        # Passo de Contagem e Filtragem
+        contagem_k = defaultdict(int)
+        for t in itemsets_trans:
+            for cand in candidatos_k:
+                if cand.issubset(t):
+                    contagem_k[cand] += 1
+        
+        L_k = {cand: count/N for cand, count in contagem_k.items() if count/N >= min_sup}
+        if not L_k:
+            break
+        L[k] = L_k
+        k += 1
+        
+    # Geração de Regras de Associação a partir de todos os itemsets frequentes L_k (k >= 2)
+    regras = []
+    for k_val, itemsets_dict in L.items():
+        if k_val < 2:
+            continue
+        for itemset, sup_itemset in itemsets_dict.items():
+            # Gera todos os antecedentes não vazios
+            for r in range(1, len(itemset)):
+                for ant in itertools.combinations(itemset, r):
+                    antecedente = frozenset(ant)
+                    consequente = itemset - antecedente
+                    sup_ant = L[len(antecedente)][antecedente]
+                    sup_cons = L[len(consequente)][consequente]
+                    confianca = sup_itemset / sup_ant
+                    lift = sup_itemset / (sup_ant * sup_cons)
+                    if confianca >= min_conf:
+                        regras.append({
+                            "Antecedente": ", ".join(sorted(list(antecedente))),
+                            "Consequente": ", ".join(sorted(list(consequente))),
+                            "Suporte": sup_itemset,
+                            "Confiança": confianca,
+                            "Lift": lift
+                        })
+    df_regras = pd.DataFrame(regras)
+    if not df_regras.empty:
+        df_regras = df_regras.sort_values(by="Lift", ascending=False).reset_index(drop=True)
+    return L, df_regras
+
+# Base de compras transacionais realista para a demonstração prática
+transacoes_mercado = [
+    ["Pão", "Leite", "Manteiga"],
+    ["Pão", "Café"],
+    ["Pão", "Leite", "Café"],
+    ["Leite", "Manteiga"],
+    ["Pão", "Manteiga"],
+    ["Pão", "Leite", "Manteiga", "Café"],
+    ["Cerveja", "Fralda"],
+    ["Cerveja", "Fralda", "Batata"],
+    ["Cerveja", "Fralda", "Pão"],
+    ["Fralda", "Batata"],
+    ["Pão", "Leite"],
+    ["Pão", "Café", "Manteiga"],
+    ["Cerveja", "Batata"],
+    ["Pão", "Leite", "Fralda"],
+    ["Leite", "Café"],
+    ["Pão", "Leite", "Manteiga"],
+    ["Cerveja", "Fralda"],
+    ["Pão", "Manteiga", "Café"],
+    ["Fralda", "Cerveja"],
+    ["Pão", "Leite", "Manteiga"]
+]
+
+L_pratico, df_regras_pratico = executar_apriori(transacoes_mercado, min_sup=0.20, min_conf=0.60)
 ```
 
 # Revisão e Introdução
 
-## Revisão Cuidadosa: O Que a Parte 2 Deixou Pronto
+## O Fracasso do Espaço Contínuo em Dados Discretos
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Nas três aulas anteriores, exploramos a **Parte 2 do curso**, dedicada à redução de dimensionalidade e ao aprendizado de representações em espaços vetoriais contínuos:
+Até este ponto do curso, toda a nossa jornada em aprendizado não supervisionado ocorreu estritamente em **espaços contínuos e métricos** $\mathbb{R}^D$:
+- Agrupamos dados calculando distâncias euclidianas e matrizes de variância-covariância;
+- Modelamos densidades via misturas de Gaussianas e autoencoders contínuos (PCA, VAEs);
+- Preservamos vizinhanças locais projetando variedades curvas em planos 2D via t-SNE.
 
-1. **Aula 6 (O Mundo Linear):** Estudamos a PCA como a projeção que maximiza a variância retida ou minimiza o erro quadrático de reconstrução, e formulamos a Probabilistic PCA (PPCA) como um modelo generativo gaussiano de posto reduzido $\mathbf{x} = \mathbf{W}\mathbf{z} + \boldsymbol\mu + \boldsymbol\epsilon$.
-2. **Aula 7 (O Mundo Não Linear):** Estendemos a PPCA para variedades curvas com Autoencoders Profundos e Variational Autoencoders (VAEs), utilizando a inferência amortizada e a otimização estocástica do ELBO via truque de reparametrização.
-3. **Aula 8 (Visualização e Vizinhanças):** Descobrimos que, para visualização humana estrita em 2D, a métrica global de reconstrução colapsa devido ao *crowding problem* (gargalo de volume $r^D$ vs. $r^2$). Analisamos o t-SNE, que troca distâncias geométricas por probabilidades de vizinhança calibradas pela Perplexidade e substitui a Gaussiana pela cauda pesada de Student-$t$ no plano.
+Em todas essas formulações, as operações fundamentais dependiam de **normas, produtos internos, projeções ortogonais e gradientes**.
 
-Em todas essas abordagens, lidamos com **variáveis contínuas** em espaços euclidianos $\mathbb{R}^D$, onde distâncias, normas e produtos internos faziam sentido geométrico.
+Esta aula inaugura a **Parte 3: Descoberta de Informação e Estruturas em Grande Escala**, estabelecendo uma **ruptura conceitual e metodológica**:
+Em problemas do mundo real — como logs de comércio eletrônico, registros de navegação web, prontuários hospitalares e dados genômicos discretos —, os dados chegam como **vetores binários esparsos** $\mathbf{x} \in \{0, 1\}^D$ ou variáveis qualitativas puras. 
 
-Agora, inauguramos a **Parte 3: Descoberta de Informação e Estruturas em Grande Escala**. Em inúmeros cenários reais — como logs de comércio eletrônico, registros hospitalares, redes de co-ocorrência de termos e dados genômicos discretos —, os dados chegam como **vetores binários esparsos** $\mathbf{x} \in \{0, 1\}^D$ ou variáveis categóricas puras. Nesses domínios, calcular distâncias euclidianas perde o sentido físico. O que realmente desejamos descobrir são **estruturas de dependência**: quais eventos condicionam outros e como distinguir dependências causais verdadeiras de correlações espúrias.
+Nesse contexto discreto:
+1. **Distâncias euclidianas perdem o sentido físico:** Qual é a distância geométrica entre um cliente que comprou *Leite* e outro que comprou *Fralda*? Dizer que $\|\mathbf{x}_1 - \mathbf{x}_2\| = \sqrt{2}$ não traz nenhuma informação sobre hábitos de consumo ou complementaridade de produtos.
+2. **A média de observações não é um objeto válido:** O vetor médio de compras em um supermercado conteria frações como $0{,}03$ cafés e $0{,}07$ sabonetes — um estado abstrato que não representa nenhuma transação realizável.
+3. **O objetivo muda radicalmente:** O desafio não é projetar nuvens de pontos contínuas em um plano, mas **descobrir estruturas de co-ocorrência e dependência estatística** em espaços combinatórios massivos.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ::: {.callout-note}
-## O Que Construímos na Parte 2
-- **Espaços Latentes Contínuos:** PCA e PPCA (Aula 6), Autoencoders e VAEs (Aula 7).
-- **Preservação de Vizinhança:** t-SNE e o alívio da pressão de volume via cauda pesada (Aula 8).
-- **Métrica base:** Álgebra linear, distâncias euclidianas e densidades contínuas em $\mathbb{R}^D$.
+## O Que Construímos até Aqui: O Mundo Contínuo $\mathbb{R}^D$
+- **Geometria Métrica:** Distâncias euclidianas, normas e projeções lineares (PCA).
+- **Variedades Curvas:** Espaços latentes densos e contínuos (VAEs e t-SNE).
+- **Pressuposto Base:** Pontos vizinhos compartilham características geométricas suaves.
 :::
 
 ::: {.fragment}
-- **A Nova Fronteira (Parte 3):** Descoberta de estruturas em **dados categóricos e transações binárias esparsas** $\mathbf{x} \in \{0, 1\}^D$.
-- **O Desafio Central:** Distâncias geométricas perdem o sentido. O objetivo passa a ser **modelar dependências condicionais e descobrir a topologia das interações**.
+- **A Ruptura de Paradigma (Parte 3):** Transição para **dados discretos, categóricos e transações esparsas** $\mathbf{x} \in \{0, 1\}^D$.
+- **O Colapso da Métrica:**
+  - O que significa a distância euclidiana entre comprar *Pão* e comprar *Sabão*? Nada.
+  - A média de transações é uma ficção aritmética sem existência no catálogo.
 :::
 
 ::: {.fragment .callout-important}
-## A Pergunta Fundamental da Aula 9
-Contar co-ocorrências e extrair regras empíricas de "se comprou $A$, compra $B$" é suficiente para modelar a realidade, ou métricas tradicionais como o *Lift* são cegas a variáveis de confusão latentes?
+## O Novo Objetivo Não Supervisionado
+Em vez de estimar variedades contínuas, queremos **descobrir a estrutura de dependência**: quais eventos co-ocorrem, quais condicionam outros e como distinguir associações reais de correlações ilusórias.
 :::
 :::
-
-## Ideia Central: Da Co-ocorrência à Topologia de Dependência
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-A ideia central desta aula estrutura-se sobre uma distinção epistemológica fundamental: **co-ocorrência frequente não implica associação direta, e associação simétrica não implica direcionalidade**.
+## Ideia Central
 
-Na prática de mineração de dados (*data mining*), o ponto de partida habitual é a análise de cestas de compras (*market basket analysis*), formulada por Agrawal et al. (1993) e sistematizada no ESL (Cap. 14). Utilizam-se métricas empíricas como **Suporte** ($P(A \cap B)$), **Confiança** ($P(B \mid A)$) e **Lift** ($\frac{P(A \cap B)}{P(A)P(B)}$) para identificar itens frequentemente comprados juntos. O algoritmo **Apriori** explora a propriedade de antimonotonicidade do suporte para podar o espaço combinatorial de $2^D$ possíveis subconjuntos.
+A jornada desta aula ancora-se em quatro passos conceituais que conectam a mineração empírica de padrões ao rigor dos modelos gráficos probabilísticos:
 
-Entretanto, abordagens puramente baseadas em regras de associação possuem duas deficiências teóricas graves:
-1. **Simetria Ingênua:** O *Lift* é estritamente comutativo ($\text{Lift}(A \Rightarrow B) = \text{Lift}(B \Rightarrow A)$). Ele mede afastamento da independência marginal, mas é incapaz de indicar direcionalidade.
-2. **Cegueira a Confundidores Latentes:** Duas variáveis $A$ e $B$ podem apresentar um *Lift* expressivamente maior que $1$ puramente devido a uma causa comum não observada $C$ ($A \leftarrow C \to B$). Ao estratificarmos por $C$, a dependência dissipa-se completamente ($A \perp\!\!\!\perp B \mid C$), revelando que a associação empírica era espúria (Paradoxo de Simpson).
+### 1. O Objetivo: Encontrar Co-ocorrências e Padrões Frequentes
+Em grandes bases de dados discretas e transacionais — como logs de comércio eletrônico, registros de navegação web e prontuários médicos —, o primeiro objetivo do aprendizado não supervisionado é **descobrir quais eventos co-ocorrem com frequência**. Na clássica análise de cestas de compras (*market basket analysis*; Agrawal et al., 1993; ESL §14.2), o objetivo é rastrear regras da forma $\{Item_A\} \Rightarrow \{Item_B\}$. Avaliamos contagens empíricas através de métricas como **Suporte** ($P(A \cap B)$), **Confiança** ($P(B \mid A)$) e **Lift** ($\frac{P(A \cap B)}{P(A)P(B)}$). O algoritmo **Apriori** explora a propriedade de antimonotonicidade do suporte para varrer o espaço de busca combinatorial e listar todos os conjuntos de itens frequentes.
 
-Para superar essas deficiências de forma estatisticamente rigorosa, recorremos aos **Modelos Gráficos Probabilísticos Direcionados (Redes Bayesianas)** (Bishop, 2006, Cap. 8; Pearl, 1988). Em uma Rede Bayesiana, a topologia de um Grafo Acíclico Direcionado (DAG) codifica diretamente a fatoração da probabilidade conjunta:
-$$p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid \text{pa}_k)$$
-Através do critério de **$d$-separação**, podemos inspecionar graficamente se dois conjuntos de nós são condicionalmente independentes dado um terceiro, desvendando as três estruturas canônicas do fluxo de informação: **cadeias**, **bifurcações** e **colisores** (*explaining away*).
+### 2. A Incerteza: Padrões Observados são Realmente Válidos?
+Encontrar que dois produtos co-ocorrem com frequência elevada e alto *Lift* na base transacional não significa que exista uma atração real ou direta entre eles. As contagens empíricas agregadas sofrem de armadilhas estatísticas severas:
+- **Correlações Espúrias por Causas Comuns (Confounding):** Dois itens podem aparecer repetidamente na mesma cesta simplesmente porque ambos são comprados pelo mesmo perfil demográfico ou na mesma época do ano (ex.: Café Gourmet e Torradeira comprados por famílias de maior renda). A regra direta $\{Café\} \Rightarrow \{Torradeira\}$ é uma ilusão estatística.
+- **Atalhos Transitivos Redundantes:** Se a compra de Pão induz Manteiga ($P \Rightarrow M$) e a Manteiga induz Geleia ($M \Rightarrow G$), o algoritmo também gerará a regra $\{Pão\} \Rightarrow \{Geleia\}$. Aceitar essa regra agregada inflaciona a complexidade do sistema com atalhos redundantes, pois toda a influência é mediada pelo intermediário.
+- **Vieses de Seleção:** Recortar a base por critérios de amostragem pode fazer variáveis perfeitamente independentes parecerem fortemente correlacionadas.
+
+Em suma: **co-ocorrência bruta não garante relação estrutural válida**.
+
+### 3. A Solução: O Teste da Probabilidade Condicional
+Como discernir quais associações são estruturais e quais são espúrias ou redundantes? A resposta está em um poderoso princípio da teoria das probabilidades: a **independência condicional**.
+
+Dizemos que duas variáveis $A$ e $B$ são condicionalmente independentes dado um terceiro fator $C$ (denotado por $A \perp\!\!\!\perp B \mid C$) se:
+$$P(A, B \mid C) = P(A \mid C) P(B \mid C) \quad \iff \quad P(A \mid B, C) = P(A \mid C)$$
+Na prática, isso significa que, uma vez conhecido o estado de $C$, saber que $B$ ocorreu não adiciona nenhuma informação nova sobre $A$:
+- Se a alta correlação entre Café e Torradeira desaparecer quando estratificamos os clientes por faixa de renda ($Café \perp\!\!\!\perp Torradeira \mid Renda$), provamos que a relação direta não existe;
+- Se o intermediário $M$ bloquear a transmissão entre $P$ e $G$ ($P \perp\!\!\!\perp G \mid M$), provamos que o atalho direto é desnecessário.
+
+### 4. O Modelo Formal: Representação em DAGs e Exemplo Prático
+Para unificar essas independências condicionais em uma representação computacional e visual tratável, recorremos aos **Modelos Gráficos Probabilísticos Direcionados (Redes Bayesianas)** baseados em Grafos Acíclicos Direcionados (DAGs; Pearl, 1988; Bishop, 2006, Cap. 8):
+- Cada **nó** do grafo representa uma variável ou produto do catálogo;
+- Cada **aresta direcionada** ($A \to B$) representa uma dependência direta;
+- A **ausência de aresta** codifica rigorosamente uma hipótese de independência condicional: duas variáveis não conectadas tornam-se condicionalmente independentes quando controlamos pelos seus pais ou mediadores!
+
+Considere o grafo de exemplo a seguir com itens de um catálogo de varejo:
+1. O nó de contexto **Perfil de Renda ($R$)** é uma causa comum para **Café Gourmet ($C$)** e **Torradeira ($T$)**. Na tabela agregada do Apriori, Café e Torradeira apresentam alto *Lift*; contudo, **no DAG não há aresta direta entre $C$ e $T$**, pois $C \perp\!\!\!\perp T \mid R$.
+2. Por outro lado, a compra de **Pão Francês ($P$)** possui uma aresta direta para **Manteiga ($M$)**, refletindo uma afinidade genuína de consumo na mesma categoria de matinais.
 :::
 
 ::: {.content-visible when-format="revealjs"}
+
+## Ideia Central: 1. Minerar Co-ocorrências e Padrões
+
 ::: {.callout-note}
-## O Paradigma Heurístico vs. O Paradigma Gráfico
-- **Regras de Associação (ESL §14.2):** Mineração gulosa de co-ocorrências frequentes baseada em Suporte, Confiança e *Lift*.
-- **A Fragilidade:** O *Lift* é simétrico e confunde correlação espúria por causa comum latente com relação direta.
+## O Ponto de Partida Não Supervisionado
+- Em dados transacionais e discretos ($\mathbf{x} \in \{0, 1\}^D$), o primeiro objetivo é:
+  **Quais itens aparecem juntos com frequência?**
+- Mineração de regras de associação (ESL §14.2): $\{A\} \Rightarrow \{B\}$.
+- Métricas empíricas: **Suporte**, **Confiança** e **Lift**.
 :::
 
 ::: {.fragment}
-- **Redes Bayesianas (PRML §8.1):** Grafos Acíclicos Direcionados (DAGs) que fatoram distribuições conjuntas multivariadas:
+- **O Algoritmo Apriori (Agrawal & Srikant, 1994):**
+  - Explora o princípio da antimonotonicidade do suporte.
+  - Varre o espaço combinatorial e gera a lista de candidatos frequentes.
+:::
+
+## Ideia Central: 2. Padrões Encontrados são Realmente Válidos?
+
+::: {.callout-warning}
+## Co-ocorrência Empírica $\neq$ Associação Direta Real
+Encontrar alto suporte e alto *Lift* na base bruta não garante que a relação seja verdadeira:
+:::
+
+::: {.fragment}
+- **1. Causas Comuns Latentes (Confounding):**
+  - Café Gourmet e Torradeira co-ocorrem com frequência apenas porque clientes de alta renda compram ambos. A regra direta é espúria!
+- **2. Atalhos Transitivos Redundantes:**
+  - Se $A \Rightarrow B$ e $B \Rightarrow C$, a regra agregada $A \Rightarrow C$ é um atalho dispensável.
+- **3. Vieses de Seleção:**
+  - Amostras restritas criam correlações artificiais entre variáveis independentes.
+:::
+
+## Ideia Central: 3. O Teste da Probabilidade Condicional
+
+::: {.callout-note}
+## A Régua Formal: Independência Condicional (PRML §8.2)
+Como separar associações estruturais genuínas de ilusões estatísticas?
+$$P(A, B \mid C) = P(A \mid C) P(B \mid C) \quad \iff \quad \mathbf{A \perp\!\!\!\perp B \mid C}$$
+:::
+
+::: {.fragment}
+- **O "Truque" Condicional:**
+  - Estratificamos ou controlamos pela variável de contexto $C$.
+  - Se a dependência entre $A$ e $B$ **desaparece** ($A \perp\!\!\!\perp B \mid C$), a regra direta é descartada como espúria ou redundante!
+  - Se a dependência **resiste**, temos evidência de uma conexão local direta.
+:::
+
+## Ideia Central: 4. O Grafo de Dependências (DAG)
+
+::: {.callout-note}
+## Redes Bayesianas e Modelos Gráficos (Pearl, 1988)
+- **Nós:** Itens ou variáveis do sistema ($R, C, T, P, M$).
+- **Arestas:** Relações diretas locais.
+- **Ausência de arestas:** Declaração formal de independência condicional!
+:::
+
+::: {.fragment}
+- **A Fatoração Conjunta:**
   $$p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid \text{pa}_k)$$
+  Cada variável só precisa olhar para os seus pais diretos $\text{pa}_k$, reduzindo drasticamente o número de parâmetros.
 :::
 
-::: {.fragment .callout-important}
-## O Poder da $d$-Separação (Pearl, 1988)
-A geometria do grafo dita exatamente como a informação flui. Condicionar em uma causa comum dissipa correlações espúrias; condicionar em um colisor induz dependência (*explaining away*).
+## Ideia Central: O DAG do Varejo na Prática
+
+::: {.fig-resize style="width: 85%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{43,92,143}
+\definecolor{laranja}{RGB}{217,95,2}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{vermelho}{RGB}{214,39,40}
+\definecolor{cinza}{RGB}{127,127,127}
+
+\begin{tikzpicture}[>=latex, font=\small, thick, scale=0.85]
+  % -------------------------------------------------------------
+  % Camada 1: Causa Comum (Contexto Socioeconômico)
+  % -------------------------------------------------------------
+  \node[draw=azul, fill=azul!10, rounded corners=6pt, inner sep=6pt, align=center, line width=1.2pt] 
+    (R) at (0, 2.7) {\textbf{Perfil de Renda ($R$)}\\\footnotesize(Variável de Contexto / Causa Comum)};
+  
+  % -------------------------------------------------------------
+  % Camada 2: Itens com Associação Espúria (Confounded)
+  % -------------------------------------------------------------
+  \node[draw=laranja, fill=laranja!10, rounded corners=6pt, inner sep=6pt, align=center] 
+    (C) at (-3.8, 0.9) {\textbf{Café Gourmet ($C$)}};
+  \node[draw=laranja, fill=laranja!10, rounded corners=6pt, inner sep=6pt, align=center] 
+    (T) at (3.8, 0.9) {\textbf{Torradeira ($T$)}};
+
+  \draw[->, very thick, azul] (R) -- (C) node[midway, above left=2pt, font=\scriptsize] {$P(C \mid R)$};
+  \draw[->, very thick, azul] (R) -- (T) node[midway, above right=2pt, font=\scriptsize] {$P(T \mid R)$};
+
+  % Aresta espúria conectando estritamente as faces internas com fundo branco
+  \draw[<->, dashed, line width=1.3pt, vermelho] (C.east) to[bend right=14] 
+    node[midway, fill=white, inner sep=3pt, font=\scriptsize\bfseries, text=vermelho, align=center] 
+    {Regra espúria no Apriori!\\$\mathbf{C \perp\!\!\!\perp T \mid R}$\\\footnotesize(Sem aresta direta no DAG)} (T.west);
+
+  % -------------------------------------------------------------
+  % Camada 3: Itens com Afinidade Direta (descidos para folga ampla)
+  % -------------------------------------------------------------
+  \node[draw=verde, fill=verde!10, rounded corners=6pt, inner sep=6pt, align=center] 
+    (P) at (-2.8, -2.8) {\textbf{Pão Francês ($P$)}};
+  \node[draw=verde, fill=verde!10, rounded corners=6pt, inner sep=6pt, align=center] 
+    (M) at (2.8, -2.8) {\textbf{Manteiga ($M$)}};
+
+  \draw[->, very thick, verde!70!black] (P) -- (M) 
+    node[midway, above=4pt, font=\scriptsize\bfseries, text=verde!70!black] {Afinidade Direta Real ($P \to M$)};
+\end{tikzpicture}
+```
+:::
+
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.fig-resize style="width: 85%; margin: 1.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{43,92,143}
+\definecolor{laranja}{RGB}{217,95,2}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{vermelho}{RGB}{214,39,40}
+\definecolor{cinza}{RGB}{127,127,127}
+
+\begin{tikzpicture}[>=latex, font=\small, thick, scale=0.85]
+  % -------------------------------------------------------------
+  % Camada 1: Causa Comum (Contexto Socioeconômico)
+  % -------------------------------------------------------------
+  \node[draw=azul, fill=azul!10, rounded corners=6pt, inner sep=6pt, align=center, line width=1.2pt] 
+    (R) at (0, 2.7) {\textbf{Perfil de Renda ($R$)}\\\footnotesize(Variável de Contexto / Causa Comum)};
+  
+  % -------------------------------------------------------------
+  % Camada 2: Itens com Associação Espúria (Confounded)
+  % -------------------------------------------------------------
+  \node[draw=laranja, fill=laranja!10, rounded corners=6pt, inner sep=6pt, align=center] 
+    (C) at (-3.8, 0.9) {\textbf{Café Gourmet ($C$)}};
+  \node[draw=laranja, fill=laranja!10, rounded corners=6pt, inner sep=6pt, align=center] 
+    (T) at (3.8, 0.9) {\textbf{Torradeira ($T$)}};
+
+  \draw[->, very thick, azul] (R) -- (C) node[midway, above left=2pt, font=\scriptsize] {$P(C \mid R)$};
+  \draw[->, very thick, azul] (R) -- (T) node[midway, above right=2pt, font=\scriptsize] {$P(T \mid R)$};
+
+  % Aresta espúria conectando estritamente as faces internas com fundo branco
+  \draw[<->, dashed, line width=1.3pt, vermelho] (C.east) to[bend right=14] 
+    node[midway, fill=white, inner sep=3pt, font=\scriptsize\bfseries, text=vermelho, align=center] 
+    {Regra espúria no Apriori!\\$\mathbf{C \perp\!\!\!\perp T \mid R}$\\\footnotesize(Sem aresta direta no DAG)} (T.west);
+
+  % -------------------------------------------------------------
+  % Camada 3: Itens com Afinidade Direta (descidos para folga ampla)
+  % -------------------------------------------------------------
+  \node[draw=verde, fill=verde!10, rounded corners=6pt, inner sep=6pt, align=center] 
+    (P) at (-2.8, -2.8) {\textbf{Pão Francês ($P$)}};
+  \node[draw=verde, fill=verde!10, rounded corners=6pt, inner sep=6pt, align=center] 
+    (M) at (2.8, -2.8) {\textbf{Manteiga ($M$)}};
+
+  \draw[->, very thick, verde!70!black] (P) -- (M) 
+    node[midway, above=4pt, font=\scriptsize\bfseries, text=verde!70!black] {Afinidade Direta Real ($P \to M$)};
+\end{tikzpicture}
+```
 :::
 :::
 
 ## Roteiro da Aula
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Para construir essa teoria do empírico ao formal, estruturaremos a aula em cinco blocos conceituais:
+Para construir essa transição das regras práticas ao rigor probabilístico, estruturaremos a aula em quatro blocos conceituais:
 
-1. **Como formalizar matematicamente a mineração de regras de associação e a poda do Apriori?** Definir suporte, confiança e *lift*, provando a propriedade de antimonotonicidade em conjuntos de dados transacionais.
-2. **Por que o Lift falha como métrica de descoberta estrutural?** Demonstrar analiticamente a simetria do *Lift* e o surgimento de correlações espúrias devido a causas comuns latentes (Paradoxo de Simpson em cestas de compras).
-3. **Como as Redes Bayesianas fatoram a distribuição conjunta e geram economia paramétrica exponencial?** Traduzir a regra da cadeia da probabilidade em grafos acíclicos direcionados (DAGs) condicionados aos nós pais.
-4. **Quais são as três geometrias canônicas de dependência condicional?** Analisar formalmente a cadeia (*head-to-tail*), a bifurcação (*tail-to-tail*) e o colisor (*head-to-head*), derivando analiticamente o fenômeno de *explaining away*.
-5. **Como funciona o critério geral de $d$-separação e quais são os limites da inferência observacional?** Aplicar o bloqueio de caminhos para distribuições gerais e provar o conceito de classes de equivalência de Markov (I-equivalência).
+1. **Como formalizar matematicamente transações, Suporte, Confiança e a Antimonotonicidade?** Definir os vetores binários, deduzir a antimonotonicidade do suporte e provar a comutatividade do Lift.
+2. **Como o algoritmo Apriori opera na prática para podar o espaço de busca combinatorial?** Acompanhar passo a passo o ciclo de junção e poda em memória RAM com dados de supermercado.
+3. **Como as Redes Bayesianas e as três geometrias canônicas filtram regras do Apriori?** Usar o DAG como mapa de dependências e as estruturas canônicas para descartar regras espúrias, podar atalhos redundantes e alertar sobre viés de seleção.
+4. **Como montar o grafo de dependências e quais são os limites da observação passiva?** Compreender a construção do Grafo Essencial (CPDAG) por componentes locais e a barreira da I-Equivalência de Markov.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-1. **Mineração de Itens Frequentes:** Suporte, Confiança, *Lift* e antimonotonicidade do Apriori.
-2. **Falhas do Lift e Variáveis de Confusão:** A simetria comutativa e a indução de correlações espúrias por causas comuns.
-3. **Redes Bayesianas e Fatoração:** Economia paramétrica de $2^K - 1$ para dependências locais em DAGs.
-4. **As Três Estruturas Canônicas:** Cadeia ($A \to B \to C$), Causa Comum ($A \leftarrow B \to C$) e Colisor ($A \to C \leftarrow B$).
-5. **$d$-Separação e Equivalência de Markov:** Bloqueio formal de caminhos e os limites do aprendizado não supervisionado puramente observacional.
+1. **Mineração de Regras:** Suporte, Confiança, *Lift* e o Teorema de Antimonotonicidade.
+2. **O Algoritmo Apriori na Prática:** Mecânica de junção, poda de candidatos e execução em Python.
+3. **Redes Bayesianas como Filtro Estrutural:** As 3 geometrias canônicas podando regras espúrias e redundantes.
+4. **Montagem do Grafo e I-Equivalência:** Componentes do Grafo Essencial (CPDAG) e o teto da observação passiva.
 :::
 
-## Problema Motivador: A Regra Ilusória do Café e da Torradeira
+## Problema Motivador
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Considere uma base transacional de varejo com $N=10.000$ compras. Analisando as vendas de dois produtos específicos — **Café Gourmet ($A$)** e **Torradeira Elétrica ($B$)** —, um cientista de dados calcula as seguintes métricas empíricas:
+Considere uma base transacional de varejo com $N=10.000$ compras observadas. Analisando as vendas de dois itens do catálogo — **Café Gourmet ($A$)** e **Torradeira Elétrica ($B$)** —, um analista de dados extrai as frequências empíricas:
+
 - Suporte marginal do café: $P(A=1) \approx 0{,}24$;
 - Suporte marginal da torradeira: $P(B=1) \approx 0{,}18$;
 - Suporte conjunto: $P(A=1, B=1) \approx 0{,}116$.
 
-Ao calcular o *Lift* da regra $\{Caf\acute{e}\} \Rightarrow \{Torradeira\}$, ele encontra:
+Ao calcular o *Lift* da regra $\{Caf\acute{e}\} \Rightarrow \{Torradeira\}$, ele obtém:
 $$\text{Lift} = \frac{P(A=1, B=1)}{P(A=1)P(B=1)} \approx \frac{0{,}116}{(0{,}24)(0{,}18)} \approx 2{,}69$$
 
-Um *Lift* de $2{,}69$ sugere aos tomadores de decisão que comprar café gourmet quase triplica a propensão de comprar uma torradeira. A equipe de marketing sugere colocar torradeiras na prateleira ao lado dos grãos de café.
+Um *Lift* de $2{,}69$ sugere forte complementaridade comercial: a presença de café gourmet na cesta parece quase triplicar a probabilidade de compra da torradeira. A equipe de marketing prontamente propõe posicionar os pacotes de café ao lado dos eletrodomésticos.
 
-Porém, ao inspecionarmos uma terceira variável de contexto — **Perfil do Cliente ($C$)**, onde $C=1$ indica clientes de alta renda que compram eletrodomésticos premium e grãos especiais, e $C=0$ representa o público geral —, revelamos a seguinte realidade:
-- Dentro do grupo $C=1$: $\text{Lift}(A \Rightarrow B \mid C=1) \approx 1{,}00$;
-- Dentro do grupo $C=0$: $\text{Lift}(A \Rightarrow B \mid C=0) \approx 1{,}00$.
+Contudo, ao inspecionarmos uma terceira variável — **Perfil de Renda do Cliente ($C$)**, onde $C=1$ representa clientes de alta renda e $C=0$ o público geral —, revelamos a verdadeira estrutura geradora:
+- Dentro do estrato $C=1$: $\text{Lift}(A \Rightarrow B \mid C=1) \approx 1{,}00$;
+- Dentro do estrato $C=0$: $\text{Lift}(A \Rightarrow B \mid C=0) \approx 1{,}00$.
 
 Condicionalmente à renda do cliente, a compra de café e a compra de torradeira são **rigorosamente independentes**! A suposta atração de $2{,}69$ é uma correlação inteiramente espúria causada pela variável de confusão $C$.
 :::
@@ -229,7 +507,7 @@ Condicionalmente à renda do cliente, a compra de café e a compra de torradeira
 ::: {.content-visible when-format="revealjs"}
 ::: {.callout-note}
 ## O Caso Empírico das $10.000$ Transações
-Avaliando a associação entre Café Gourmet ($A$) e Torradeira ($B$):
+Avaliando Café Gourmet ($A$) e Torradeira Elétrica ($B$):
 - $P(A) \approx 0{,}24$, $P(B) \approx 0{,}18$, $P(A \cap B) \approx 0{,}116$.
 - $\text{Lift}(A \Rightarrow B) \approx \frac{0{,}116}{0{,}24 \times 0{,}18} \approx \mathbf{2{,}69}$.
 :::
@@ -240,10 +518,9 @@ Avaliando a associação entre Café Gourmet ($A$) e Torradeira ($B$):
   $$\text{Lift}(A \Rightarrow B \mid C=1) = \mathbf{1{,}00} \quad \text{e} \quad \text{Lift}(A \Rightarrow B \mid C=0) = \mathbf{1{,}00}$$
 :::
 
-::: {.fragment .callout-important}
-## O Paradoxo de Simpson em Regras de Associação
-A associação de $2{,}69$ é puramente espúria. Café e torradeira nunca interagiram: ambos são efeitos independentes da causa comum $C$.
-:::
+
+## O Paradoxo de Simpson em Ação
+A associação de $2{,}69$ é puramente espúria. Café e torradeira nunca interagiram: ambos são efeitos independentes da causa comum latente $C$.
 :::
 
 ::: {.fig-resize style="width: 85%; margin: 0 auto;"}
@@ -263,11 +540,6 @@ for bar in bars1:
     axes[0].text(bar.get_x() + bar.get_width()/2.0, yval + 0.02, brl(yval, 3), ha='center', va='bottom', weight='bold')
 
 # Gráfico 2: Estratificado por Renda C (Independência Revelada)
-p_B_C1 = np.mean(B[C == 1])
-p_B_given_A_C1 = np.mean(B[(C == 1) & (A == 1)])
-p_B_C0 = np.mean(B[C == 0])
-p_B_given_A_C0 = np.mean(B[(C == 0) & (A == 1)])
-
 x = np.arange(2)
 width = 0.35
 axes[1].bar(x - width/2, [p_B_C0, p_B_C1], width, label="P(B | C)", color=COR_CINZA)
@@ -283,609 +555,1430 @@ plt.show()
 ```
 :::
 
-## Pausa Ativa 1: Regras de Associação e Antimonotonicidade
+## Pausa 1: O Espaço Binário e a Ruptura Métrica
 
 ::: {.callout-tip}
-## O Superconjunto e o Suporte
-Se um conjunto de 3 produtos $\{Caf\acute{e}, Leite, P\tilde{a}o\}$ possui suporte medido de $15\%$ em uma base de 1 milhão de transações, o que podemos deduzir com certeza matemática absoluta sobre o suporte do par $\{Caf\acute{e}, P\tilde{a}o\}$ e do quarteto $\{Caf\acute{e}, Leite, P\tilde{a}o, Manteiga\}$?
-
-*Dica para conduzir:* Pense na probabilidade da interseção de conjuntos de eventos aleatórios. O que acontece com a probabilidade quando acrescentamos restrições adicionais?
-:::
-
-::: {.callout-tip}
-## V ou F: Métricas de Regras de Associação
+## V ou F: Espaços Discretos e Métricas
 Julgue V ou F — a questão só conta se acertar os 4 itens:
 
-- □ Se o itemset $\{A, B\}$ tem suporte de $0{,}05$, é matematicamente impossível que o item isolado $\{A\}$ tenha suporte inferior a $0{,}05$.
-- □ Uma regra com confiança de $100\%$ ($c(A \Rightarrow B) = 1{,}0$) comprova que a compra de $A$ causou a compra de $B$.
-- □ O espaço de todos os possíveis subconjuntos de itens em um catálogo de $D$ produtos escala linearmente com $D$.
-- □ A métrica de suporte expressa a probabilidade conjunta empírica $P(A \cap B)$, enquanto a confiança expressa a probabilidade condicional $P(B \mid A)$.
+- □ A distância euclidiana entre dois vetores de compra binários penaliza igualmente a ausência conjunta de um item e a presença discordante de um item.
+- □ Em um catálogo de $D=50$ produtos, o número total de possíveis cestas distintas de compras é superior a $10^{15}$.
+- □ Se duas variáveis $A$ e $B$ apresentam $\text{Lift}(A \Rightarrow B) > 1$ em uma base transacional agregada, é matematicamente impossível que elas sejam condicionalmente independentes dado um terceiro fator $C$.
+- □ Modelos baseados em gradiente contínuo e projeções ortogonais podem ser aplicados diretamente a matrizes binárias esparsas sem perdas conceituais ou semânticas.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Pausa Ativa 1: Resposta
+## Pausa 1: Resposta
 
 ::: {.callout-tip}
 ## V ou F: Resposta
-- ✔ **V:** Pela antimonotonicidade do suporte, $\{A\} \subset \{A, B\} \implies s(\{A\}) \ge s(\{A, B\}) = 0{,}05$.
-- ✗ **F:** Confiança mede apenas a condicional $P(B \mid A)$; se todos na loja compram $B$ ($P(B)=1$), a confiança é $100\%$ mesmo sem nenhuma relação causal.
-- ✗ **F:** O espaço de subconjuntos é $2^D - 1$, escalando exponencialmente.
-- ✔ **V:** Suporte é $P(A \cap B)$ e Confiança é $P(A \cap B)/P(A) = P(B \mid A)$.
+- ✗ **F:** A distância euclidiana só soma $(1-0)^2 = 1$; a ausência conjunta $(0-0)^2 = 0$ não adiciona distância, mas catálogos esparsos tornam quase todos os vetores ortogonais a distância fixa $\sqrt{2}$.
+- ✔ **V:** $2^{50} \approx 1{,}12 \times 10^{15}$.
+- ✗ **F:** O Paradoxo de Simpson comprova exatamente o oposto: o Lift agregado pode ser $> 1$ enquanto o Lift condicional em cada estrato é estritamente $1$.
+- ✗ **F:** Variáveis binárias violam a topologia contínua; projeções produzem frações contínuas sem correspondência em transações reais.
 :::
 
 ::: {.fragment}
-**Voltando à pergunta:** O suporte de $\{Caf\acute{e}, P\tilde{a}o\}$ deve ser **pelo menos $15\%$** ($s \ge 0{,}15$), e o do quarteto $\{Caf\acute{e}, Leite, P\tilde{a}o, Manteiga\}$ pode ser **no máximo $15\%$** ($s \le 0{,}15$). Adicionar itens restringe a probabilidade da interseção. Essa antimonotonicidade é a chave da poda do Apriori.
+**Voltando à pergunta:** $\|\mathbf{x}_1 - \mathbf{x}_2\| = \sqrt{1^2 + 1^2} = \sqrt{2} \approx 1{,}41$. Já $\|\mathbf{x}_1 - \mathbf{x}_3\| = \sqrt{8} \approx 2{,}83$. Geometricamente, o Cliente 1 está muito mais próximo de quem comprou apenas uma Torradeira ($\sqrt{2}$) do que de quem comprou Café junto com outros 8 itens de café da manhã ($\sqrt{8}$)! A métrica euclidiana mede tamanho de cesta, e não afinidade de consumo.
 :::
 :::
 
-# Bloco 1: Mineração de Itens Frequentes — Suporte, Confiança e Lift
+# Intuição — O Mercado, a Cesta e a Busca Combinatória
 
-## Formalização de Itens e Transações
+## A Explosão Combinatória e o Funil de Frequências
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Seguindo a formulação de Agrawal et al. (1993) e ESL (§14.2), consideramos um universo de $D$ itens discretos $\mathcal{I} = \{i_1, i_2, \dots, i_D\}$.
-Uma transação de compras $t$ é um subconjunto de itens $t \subseteq \mathcal{I}$, convenientemente representada como um vetor binário:
-$$\mathbf{x} = (x_1, \dots, x_D)^T \in \{0, 1\}^D, \quad \text{onde } x_j = \mathbb{I}(i_j \in t)$$
+Imagine a esteira de um hipermercado moderno. O catálogo da loja dispõe de $D = 10.000$ produtos diferentes. Cada consumidor deposita no carrinho um pequeno subconjunto desses itens — tipicamente entre $5$ e $30$ produtos.
 
-Dispomos de uma base não supervisionada com $N$ transações observadas:
-$$\mathcal{D} = \{\mathbf{x}_1, \mathbf{x}_2, \dots, \mathbf{x}_N\}$$
+Se quiséssemos descobrir padrões procurando exaustivamente quais combinações de itens aparecem frequentemente juntas, o número de combinações possíveis seria:
+$$\sum_{k=1}^D \binom{D}{k} = 2^D - 1 = 2^{10.000} - 1 \approx 10^{3.010}$$
+Este número é ordens de grandeza superior ao número total de átomos no universo observável ($\approx 10^{80}$). Nenhuma superestrutura computacional existente ou futura jamais conseguirá computar a frequência de todos os subconjuntos de um catálogo modesto.
 
-::: {.callout-note icon=false}
-## Definição 1 (Itemset e Suporte; ESL §14.2.1)
-Um **itemset** $I \subseteq \mathcal{I}$ é qualquer subconjunto de itens. O **Suporte** de $I$, denotado por $s(I)$, é a frequência relativa de transações na base $\mathcal{D}$ que contêm todos os itens de $I$:
-$$s(I) = \frac{1}{N}\sum_{n=1}^N \prod_{j \in I} x_{nj} = P\left(\bigwedge_{j \in I} (x_j = 1)\right)$$
-Um itemset é dito **frequente** se seu suporte satisfaz $s(I) \ge s_{\min}$, onde $s_{\min} \in (0, 1]$ é um limiar de suporte fixado pelo analista.
-:::
+No entanto, a intuição fundamental do varejo é que **a imensa maioria dos produtos nunca é comprada em conjunto**. Se quase ninguém compra simultaneamente *Prego* e *Iogurte*, é um desperdício computacional avaliar se alguém comprou *Prego, Iogurte e Pão Francês*.
 
-O cálculo exato de suporte para todos os possíveis itemsets candidatos envolveria testar $2^D - 1$ combinações. Para $D=50$ itens, $2^{50} \approx 1{,}12 \times 10^{15}$, tornando impossível a busca exaustiva. A viabilidade computacional decorre de uma propriedade teórica fundamental.
-
-::: {.callout-note icon=false}
-## Teorema 1 (Propriedade de Antimonotonicidade do Suporte; Agrawal et al., 1993)
-Sejam $A$ e $B$ dois itemsets. Se $A \subseteq B$, então:
-$$s(B) \le s(A)$$
-*Demonstração:* Seja $\mathcal{T}_I = \{n \in \{1, \dots, N\} \mid \forall j \in I, x_{nj} = 1\}$. Se $A \subseteq B$, então qualquer transação que satisfaça todos os itens de $B$ satisfaz trivialmente todos os itens de $A$, logo $\mathcal{T}_B \subseteq \mathcal{T}_A$. Pela monotonicidade da cardinalidade de conjuntos finitos, $|\mathcal{T}_B| \le |\mathcal{T}_A|$, de onde segue que $\frac{|\mathcal{T}_B|}{N} \le \frac{|\mathcal{T}_A|}{N}$, ou seja, $s(B) \le s(A)$. $\blacksquare$
-:::
-
-A contrapositiva do Teorema 1 estabelece a regra de poda do algoritmo **Apriori**:
-$$\text{Se } s(A) < s_{\min}, \quad \text{então } \forall B \supseteq A, \quad s(B) < s_{\min}$$
-Se qualquer subconjunto for infrequente, nenhum superconjunto precisa ser sequer gerado ou computado.
+Essa constatação intuitiva sustenta o princípio do **funil de frequências**: um conjunto de itens só tem chance de ser popular se todos os seus ingredientes forem, por si sós, populares. Se pudermos cortar os galhos secos da árvore combinatorial logo na raiz, o número de combinações candidatas desaba de trilhões para algumas dezenas.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ::: {.callout-note}
-## Definição: Transações e Suporte (ESL §14.2)
-- Vetor binário de itens: $\mathbf{x} = (x_1, \dots, x_D)^T \in \{0, 1\}^D$.
-- **Suporte de um itemset $I$:** Proporção de transações que contêm todos os itens de $I$:
-  $$s(I) = P\left(\bigwedge_{j \in I} x_j = 1\right) = \frac{1}{N}\sum_{n=1}^N \prod_{j \in I} x_{nj}$$
-:::
-
-::: {.fragment .callout-note icon=false}
-## Teorema: Antimonotonicidade do Suporte
-Para quaisquer itemsets $A$ e $B$:
-$$A \subseteq B \implies s(B) \le s(A)$$
-- **Regra de Poda do Apriori:** Se $s(A) < s_{\min}$, **nenhum** superconjunto $B \supseteq A$ pode ser frequente.
+## O Desafio da Escala Combinatória
+- Catálogo com $D$ itens $\implies 2^D - 1$ combinações possíveis.
+- Para $D = 100$: $2^{100} \approx 1{,}26 \times 10^{30}$ conjuntos candidatos.
+- A busca por força bruta é **computacionalmente impossível**.
 :::
 
 ::: {.fragment}
-- **O Gargalo:** Em $D$ variáveis, há $2^D - 1$ combinações. A antimonotonicidade transforma uma busca de ordem exponencial em podas sistemáticas por camadas de tamanho $k$.
+- **A Intuição do Funil:**
+  - A quase totalidade das combinações aleatórias tem probabilidade praticamente nula.
+  - Para um quarteto $\{A, B, C, D\}$ ser frequente, é indispensável que o par $\{A, B\}$ e o trio $\{A, B, C\}$ já sejam frequentes.
+:::
+
+::: {.fragment .callout-important}
+## A Ideia de Poda em Árvore
+Se um item ou par falhar no critério mínimo de frequência, **nenhum de seus superconjuntos precisa ser testado**. Cortamos o galho na raiz antes de olhar para a base de dados.
+:::
+:::
+
+# Bloco 1: Mineração de Itens Frequentes — Suporte, Confiança e Antimonotonicidade
+
+## Da Cesta de Compras à Matriz Binária
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Antes de formalizarmos analiticamente as propriedades estatísticas de suporte e confiança, é essencial visualizar como transações qualitativas do varejo são estruturadas na memória computacional.
+
+Considere uma amostra de $N=5$ transações observadas no caixa de um supermercado, extraídas de um catálogo restrito com $D=5$ produtos:
+$$\mathcal{I} = \{P\tilde{a}o, Leite, Manteiga, Caf\acute{e}, Cerveja\}$$
+
+A tabela a seguir apresenta a correspondência exata entre a cesta observada e a **matriz binária de incidência** $\mathbf{X} \in \{0, 1\}^{N \times D}$:
+
+| Transação ($n$) | Cesta Observada ($t_n$) | Pão ($x_1$) | Leite ($x_2$) | Manteiga ($x_3$) | Café ($x_4$) | Cerveja ($x_5$) |
+|:---:|:---|:---:|:---:|:---:|:---:|:---:|
+| $T_1$ | $\{P\tilde{a}o, Leite, Manteiga\}$ | **1** | **1** | **1** | 0 | 0 |
+| $T_2$ | $\{P\tilde{a}o, Caf\acute{e}\}$ | **1** | 0 | 0 | **1** | 0 |
+| $T_3$ | $\{Leite, Manteiga, Caf\acute{e}\}$ | 0 | **1** | **1** | **1** | 0 |
+| $T_4$ | $\{P\tilde{a}o, Leite, Caf\acute{e}\}$ | **1** | **1** | 0 | **1** | 0 |
+| $T_5$ | $\{Cerveja\}$ | 0 | 0 | 0 | 0 | **1** |
+
+A partir dessa matriz, discriminamos os três conceitos centrais:
+1. **Item ($i_j \in \mathcal{I}$):** Um produto específico do catálogo (uma **coluna** da matriz binária).
+2. **Transação ($\mathbf{x}_n \in \{0, 1\}^D$):** O conjunto de itens adquiridos em uma compra (uma **linha** da matriz binária).
+3. **Itemset ($I \subseteq \mathcal{I}$):** Qualquer subconjunto de itens avaliado conjuntamente. Um itemset de cardinalidade $|I|=k$ é denominado **$k$-itemset**.
+
+Dizemos que uma transação $n$ **contém o itemset $I$** ($I \subseteq t_n$) se e somente se todos os seus componentes estiverem presentes simultaneamente:
+$$\mathbb{I}(I \subseteq t_n) = \prod_{j \in I} x_{nj}$$
+No exemplo acima, para o par $I = \{P\tilde{a}o, Leite\}$, verificamos que $x_{n, 1} \cdot x_{n, 2} = 1$ apenas nas transações $T_1$ e $T_4$. Em $T_2$ falta Leite ($1 \times 0 = 0$); em $T_3$ falta Pão ($0 \times 1 = 0$); e em $T_5$ faltam ambos ($0 \times 0 = 0$). O suporte empírico desse par é de $2$ em $5$ transações ($s = 40\%$).
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Da Cesta Qualitativa ao Vetor Binário
+- **Universo de Itens:** $\mathcal{I} = \{P\tilde{a}o, Leite, Manteiga, Caf\acute{e}, Cerveja\}$.
+- Cada compra vira uma linha indicadora $\mathbf{x}_n \in \{0, 1\}^D$: $x_{nj} = 1$ se o item $j$ foi adquirido.
+:::
+
+::: {.fragment}
+| TID | Cesta de Compras | Pão | Leite | Manteiga | Café | Cerveja |
+|:---:|:---|:---:|:---:|:---:|:---:|:---:|
+| $T_1$ | $\{P\tilde{a}o, Leite, Manteiga\}$ | **1** | **1** | **1** | 0 | 0 |
+| $T_2$ | $\{P\tilde{a}o, Caf\acute{e}\}$ | **1** | 0 | 0 | **1** | 0 |
+| $T_3$ | $\{Leite, Manteiga, Caf\acute{e}\}$ | 0 | **1** | **1** | **1** | 0 |
+| $T_4$ | $\{P\tilde{a}o, Leite, Caf\acute{e}\}$ | **1** | **1** | 0 | **1** | 0 |
+| $T_5$ | $\{Cerveja\}$ | 0 | 0 | 0 | 0 | **1** |
+:::
+
+::: {.fragment .callout-important}
+## Conceito de Itemset
+- **Itemset ($I$):** Subconjunto de itens $I \subseteq \mathcal{I}$ (ex.: $I = \{P\tilde{a}o, Leite\}$).
+- **Condição de Presença:** O itemset está contido na transação $n \iff \prod_{j \in I} x_{nj} = 1$.
+- O par $\{P\tilde{a}o, Leite\}$ ocorre em $T_1$ e $T_4$ (Suporte $= 2/5 = 40\%$).
+:::
+:::
+
+## Formalização de Itens e Transações
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Consolidando a representação da matriz binária na linguagem matemática formal de Agrawal et al. (1993) e ESL (§14.2), consideramos um universo de $D$ itens discretos indexados por $\mathcal{I} = \{i_1, i_2, \dots, i_D\}$.
+Uma transação de compras $t$ é um subconjunto de itens $t \subseteq \mathcal{I}$, formalizada como um vetor binário de incidência:
+$$\mathbf{x} = (x_1, \dots, x_D)^T \in \{0, 1\}^D, \quad \text{onde } x_j = \mathbb{I}(i_j \in t)$$
+
+A base de dados observada $\mathcal{D}$ contém $N$ transações independentes:
+$$\mathcal{D} = \{\mathbf{x}_1, \mathbf{x}_2, \dots, \mathbf{x}_N\}$$
+
+::: {.callout-note icon=false}
+## Definição 1 (Itemset e Suporte; ESL §14.2.1)
+Um **itemset** $I \subseteq \mathcal{I}$ é qualquer subconjunto de itens. O **Suporte** de $I$, denotado por $s(I)$, é a frequência relativa de transações na base $\mathcal{D}$ que contêm concomitantemente todos os itens de $I$:
+$$s(I) = \frac{1}{N}\sum_{n=1}^N \prod_{j \in I} x_{nj} = P\left(\bigwedge_{j \in I} (x_j = 1)\right)$$
+Um itemset é classificado como **frequente** se seu suporte empírico atinge ou supera um limiar mínimo fixado pelo especialista:
+$$s(I) \ge s_{\min}, \quad \text{onde } s_{\min} \in (0, 1]$$
+:::
+
+A viabilidade de encontrar todos os itemsets frequentes sem enumerar os $2^D - 1$ candidatos decorre da propriedade matemática formalizada a seguir.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Formalismo: Transações e Suporte (ESL §14.2)
+- Vetor binário de transação: $\mathbf{x} = (x_1, \dots, x_D)^T \in \{0, 1\}^D$.
+- Base com $N$ observações: $\mathcal{D} = \{\mathbf{x}_1, \dots, \mathbf{x}_N\}$.
+- **Suporte de um itemset $I \subseteq \mathcal{I}$:**
+  $$s(I) = P\left(\bigwedge_{j \in I} x_j = 1\right) = \frac{1}{N}\sum_{n=1}^N \prod_{j \in I} x_{nj}$$
+:::
+
+::: {.fragment}
+- Um itemset é **frequente** se $s(I) \ge s_{\min}$.
+- O espaço de busca bruto contém $2^D - 1$ combinações.
+:::
+:::
+
+## Teorema da Antimonotonicidade do Suporte
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-note icon=false}
+## Teorema 1 (Antimonotonicidade do Suporte; Agrawal et al., 1993)
+Sejam $A$ e $B$ dois itemsets arbitrários. Se $A \subseteq B$, então:
+$$s(B) \le s(A)$$
+
+*Demonstração:* Seja $\mathcal{T}_I = \{n \in \{1, \dots, N\} \mid \forall j \in I, x_{nj} = 1\}$ o conjunto de índices das transações que contêm o itemset $I$. 
+Se $A \subseteq B$, então qualquer transação $n$ que contenha todos os itens de $B$ contém, por inclusão lógica, todos os itens de $A$. Logo:
+$$\mathcal{T}_B \subseteq \mathcal{T}_A$$
+Pela monotonicidade da medida de contagem em conjuntos finitos:
+$$|\mathcal{T}_B| \le |\mathcal{T}_A|$$
+Dividindo ambos os membros pelo tamanho da base $N$:
+$$s(B) = \frac{|\mathcal{T}_B|}{N} \le \frac{|\mathcal{T}_A|}{N} = s(A) \quad \blacksquare$$
+:::
+
+A contrapositiva lógica do Teorema 1 estabelece a regra de ouro da poda algorítmica:
+$$\text{Se } s(A) < s_{\min}, \quad \text{então } \forall B \supseteq A, \quad s(B) < s_{\min}$$
+Se qualquer subconjunto for infrequente, nenhum superconjunto precisa sequer ser computado.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note icon=false}
+## Teorema 1: Antimonotonicidade do Suporte
+Para quaisquer itemsets $A$ e $B$:
+$$A \subseteq B \implies s(B) \le s(A)$$
+:::
+
+::: {.fragment}
+- **Demonstração em 1 passo:**
+  Transações que contêm $B$ contêm obrigatoriamente $A \subseteq B$.
+  $$\mathcal{T}_B \subseteq \mathcal{T}_A \implies |\mathcal{T}_B| \le |\mathcal{T}_A| \implies \frac{|\mathcal{T}_B|}{N} \le \frac{|\mathcal{T}_A|}{N}$$
+:::
+
+::: {.fragment .callout-important}
+## A Contrapositiva (Regra de Poda)
+$$s(A) < s_{\min} \implies \forall B \supseteq A, \quad s(B) < s_{\min}$$
+Se $\{Caf\acute{e}, Ch\acute{a}\}$ é infrequente, $\{Caf\acute{e}, Ch\acute{a}, A\text{ç}\acute{u}car\}$ é eliminado sem ser testado!
 :::
 :::
 
 ## Regras de Associação: Confiança e Lift
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-A partir de um itemset frequente $I$, constroem-se **regras de associação** da forma:
+A partir de um itemset frequente $I$, constroem-se **regras de associação** particionando os itens em antecedente e consequente:
 $$A \Rightarrow B, \quad \text{onde } A, B \subset I, \quad A \cap B = \emptyset, \quad A \cup B = I$$
-Onde $A$ é denominado *antecedente* e $B$ é o *consequente*.
+Onde $A$ representa o itemset antecedente ("se a compra contém $A$") e $B$ o consequente ("então também contém $B$").
+
+Para quantificar a relevância de uma regra, a literatura clássica de mineração de dados (Agrawal et al., 1993; ESL §14.2.2) adota duas métricas fundamentais:
 
 ::: {.callout-note icon=false}
 ## Definição 2 (Confiança e Lift; ESL §14.2.2)
-1. A **Confiança** de uma regra $A \Rightarrow B$ mede a probabilidade condicional empírica de observar $B$ dado que $A$ foi observado:
+1. A **Confiança** da regra $A \Rightarrow B$ mede a probabilidade condicional empírica de observar $B$ dado que $A$ está presente:
    $$c(A \Rightarrow B) = \frac{s(A \cup B)}{s(A)} = \frac{P(A \cap B)}{P(A)} = P(B \mid A)$$
-2. O **Lift** mede a razão entre a probabilidade conjunta observada e a probabilidade esperada caso $A$ e $B$ fossem estatisticamente independentes:
+2. O **Lift** mede a razão entre a probabilidade conjunta observada da co-ocorrência e a probabilidade esperada caso $A$ e $B$ fossem estocasticamente independentes na base agregada:
    $$\text{Lift}(A \Rightarrow B) = \frac{P(A \cap B)}{P(A)P(B)} = \frac{P(B \mid A)}{P(B)}$$
 :::
 
-Interpretando o *Lift*:
-- $\text{Lift}(A \Rightarrow B) = 1$: $A$ e $B$ são estatisticamente independentes ($P(B \mid A) = P(B)$);
-- $\text{Lift}(A \Rightarrow B) > 1$: $A$ e $B$ co-ocorrem com frequência superior à independência (associação positiva aparente);
-- $\text{Lift}(A \Rightarrow B) < 1$: $A$ e $B$ co-ocorrem menos do que o esperado (associação negativa ou substituição).
-
-Contudo, repare na seguinte propriedade matemática imediata:
-$$\text{Lift}(A \Rightarrow B) = \frac{P(A \cap B)}{P(A)P(B)} = \frac{P(B \cap A)}{P(B)P(A)} = \text{Lift}(B \Rightarrow A)$$
-O *Lift* é **estritamente comutativo**. Ele trata $A \Rightarrow B$ e $B \Rightarrow A$ com o mesmíssimo número. Não há nenhum mecanismo dentro do cálculo do *Lift* capaz de dizer se $A$ atrai $B$, se $B$ atrai $A$, ou se ambos decorrem de uma causa oculta.
+Interpretando os valores do *Lift*:
+- **$\text{Lift} = 1$:** Independência estocástica ($P(B \mid A) = P(B)$). A presença de $A$ não altera em nada a propensão de compra de $B$.
+- **$\text{Lift} > 1$:** Associação positiva aparente ($P(B \mid A) > P(B)$). Os itens co-ocorrem mais frequentemente do que o esperado pelo mero acaso.
+- **$\text{Lift} < 1$:** Associação negativa ou substituição ($P(B \mid A) < P(B)$). A compra de $A$ inibe ou compete com a compra de $B$.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ::: {.callout-note}
-## Métricas da Regra $A \Rightarrow B$
-- **Confiança:** Probabilidade condicional de observar o consequente dado o antecedente:
-  $$c(A \Rightarrow B) = \frac{P(A \cap B)}{P(A)} = P(B \mid A)$$
-- **Lift:** Desvio relativo em relação à independência estocástica:
+## Métricas de Associação: Confiança e Lift (ESL §14.2)
+- Regra $A \Rightarrow B$: antecedente $A$, consequente $B$ ($A \cap B = \emptyset$).
+- **Confiança:** Probabilidade condicional empírica:
+  $$c(A \Rightarrow B) = \frac{s(A \cup B)}{s(A)} = \frac{P(A \cap B)}{P(A)} = P(B \mid A)$$
+- **Lift:** Razão sobre a independência estocástica:
   $$\text{Lift}(A \Rightarrow B) = \frac{P(A \cap B)}{P(A)P(B)} = \frac{P(B \mid A)}{P(B)}$$
 :::
 
 ::: {.fragment}
-- $\text{Lift} = 1 \iff$ Independência estocástica ($P(A \cap B) = P(A)P(B)$).
-- $\text{Lift} > 1 \iff$ Co-ocorrência superior à independência.
-- $\text{Lift} < 1 \iff$ Efeito de substituição / inibição mútua.
+- **Escala de Interpretação:**
+  - $\text{Lift} = 1 \iff$ Independência estatística ($P(B \mid A) = P(B)$).
+  - $\text{Lift} > 1 \iff$ Co-ocorrência acima da independência aleatória.
+  - $\text{Lift} < 1 \iff$ Relação de substituição ou concorrência mútua.
+:::
 :::
 
-::: {.fragment .callout-important}
 ## A Falácia da Simetria do Lift
-$$\text{Lift}(A \Rightarrow B) \equiv \text{Lift}(B \Rightarrow A)$$
-O Lift é incapaz de codificar direcionalidade. Uma regra $A \Rightarrow B$ com Lift elevado pode ter confiança assimétrica dramática ($90\%$ em um sentido e $5\%$ no outro), e é cega a confundidores latentes.
-:::
-:::
 
-## Pausa Ativa 2: A Simetria do Lift e o Confounding
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Apesar de ser amplamente utilizado em ferramentas comerciais para ranquear regras de recomendação, o *Lift* carrega uma deficiência matemática estrutural que induz a erros críticos de interpretação: **o Lift é estritamente comutativo**.
 
-::: {.callout-tip}
-## O Paradoxo da Regra Simétrica
-Uma drogaria descobre que a regra $\{Fraldas\} \Rightarrow \{Cerveja\}$ possui $\text{Lift} = 2{,}5$, e a regra inversa $\{Cerveja\} \Rightarrow \{Fraldas\}$ possui exatamente o mesmo $\text{Lift} = 2{,}5$. O que a igualdade estrita desses valores revela sobre a capacidade do *Lift* de indicar direcionalidade causal? Se a variável oculta $\{Sexta\text{-}feira\ \grave{a}\ tarde\}$ duplicar as vendas de ambos os itens de forma independente, o que acontece com a dependência real entre eles?
-:::
+Pela comutatividade da probabilidade da interseção ($P(A \cap B) = P(B \cap A)$) e do produto real:
+$$\text{Lift}(A \Rightarrow B) = \frac{P(A \cap B)}{P(A)P(B)} = \frac{P(B \cap A)}{P(B)P(A)} = \text{Lift}(B \Rightarrow A)$$
 
-::: {.callout-tip}
-## V ou F: Propriedades do Lift e Confounding
-Julgue V ou F — a questão só conta se acertar os 4 itens:
+Essa simetria matemática demonstra que o *Lift* não possui nenhuma direcionalidade: ele mede apenas o afastamento da independência conjunta entre duas variáveis, sendo incapaz de distinguir se $A$ atrai $B$, se $B$ atrai $A$, ou se ambos decorrem de um fator externo.
 
-- □ Um valor de $\text{Lift}(A \Rightarrow B) = 1{,}0$ indica que a ocorrência de $A$ e a ocorrência de $B$ são estatisticamente independentes na base de dados.
-- □ Se $\text{Lift}(A \Rightarrow B) = 3{,}0$, então necessariamente a confiança da regra $c(A \Rightarrow B)$ é o triplo da confiança inversa $c(B \Rightarrow A)$.
-- □ O paradoxo de Simpson ocorre quando uma associação observada em uma população agregada se inverte ou desaparece ao estratificarmos por uma variável confundidora.
-- □ Uma regra de associação com alto Lift e alta Confiança é imune a variáveis de confusão latentes.
+### O Abismo entre o Lift Simétrico e a Confiança Assimétrica
+
+A relação formal entre a Confiança (que é assimétrica) e o Lift (que é simétrico) é dada por:
+$$c(A \Rightarrow B) = \text{Lift}(A \Rightarrow B) \times P(B)$$
+$$c(B \Rightarrow A) = \text{Lift}(B \Rightarrow A) \times P(A) = \text{Lift}(A \Rightarrow B) \times P(A)$$
+
+Dividindo as duas equações:
+$$\frac{c(A \Rightarrow B)}{c(B \Rightarrow A)} = \frac{P(B)}{P(A)}$$
+
+A assimetria comportamental entre as duas regras depende exclusivamente da **razão entre as probabilidades marginais** dos itens:
+- Se $B$ for um produto popular de alta penetração (ex.: sacola plástica, pão francês) e $A$ for um produto específico e raro (ex.: smartphone, cafeteira expresso), teremos $P(B) \gg P(A)$.
+- Como consequência direta, $c(A \Rightarrow B)$ será altíssima (ex.: $95\%$), enquanto $c(B \Rightarrow A)$ será ínfima (ex.: $0{,}1\%$).
+- No entanto, ambas as regras apresentarão **rigorosamente o mesmíssimo Lift**!
+
+### A Ilusão Causal no Varejo
+
+A armadilha analítica manifesta-se quando o cientista de dados interpreta a notação de seta $A \Rightarrow B$ como um canal de atração causal:
+1. O analista encontra uma regra $\{Smartphone\} \Rightarrow \{Capinha\}$ com $\text{Lift} = 4{,}75$ e supõe erroneamente que a relação é bidirecional ou simétrica.
+2. Se a loja criar uma campanha concedendo descontos agressivos em capinhas esperando com isso alavancar a venda de smartphones, o resultado será nulo: quem compra smartphone costuma levar uma capinha ($c = 95\%$), mas a imensa maioria dos que compram capinhas avulsas jamais compra um smartphone naquela visita ($c = 4{,}75\%$).
+3. O Lift é cego a qual item é a âncora de intenção de compra e a variáveis de confusão latentes, impondo a necessidade de modelos gráficos com representação explícita de dependência condicional.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Pausa Ativa 2: Resposta
+::: {.callout-note}
+## Demonstração Analítica da Simetria
+$$\text{Lift}(A \Rightarrow B) = \frac{P(A \cap B)}{P(A)P(B)} \equiv \frac{P(B \cap A)}{P(B)P(A)} = \text{Lift}(B \Rightarrow A)$$
+
+- A métrica é **estritamente comutativa**: atribui o mesmo número exato a $A \Rightarrow B$ e $B \Rightarrow A$.
+- **O Lift não carrega informação de direcionalidade, tempo ou causalidade.**
+:::
+
+::: {.fragment}
+- **A Conexão com as Confianças:**
+  $$c(A \Rightarrow B) = \text{Lift} \times P(B) \quad \text{e} \quad c(B \Rightarrow A) = \text{Lift} \times P(A) \implies \mathbf{\frac{c(A \Rightarrow B)}{c(B \Rightarrow A)} = \frac{P(B)}{P(A)}}$$
+:::
+
+
+## Simetria do Lift: Smartphone ($A$) vs. Capinha ($B$):
+
+  - Marginais: $P(A) = 1\%$ e $P(B) = 20\%$. O Lift é idêntico nas duas direções: $\text{Lift} = \mathbf{4{,}75}$.
+  - $c(A \Rightarrow B) = 4{,}75 \times 0{,}20 = \mathbf{95\%}$ ("quem compra celular quase sempre leva capinha").
+  - $c(B \Rightarrow A) = 4{,}75 \times 0{,}01 = \mathbf{4{,}75\%}$ ("quem compra capinha quase nunca leva celular").
+
+::: {.fragment .callout-important}
+## A Falácia Causal
+Interpretar Lift elevado como atração causal mútua induz a erros graves: promover o consequente popular ($B$) não atrai compradores do antecedente raro ($A$).
+:::
+:::
+
+## Pausa 2: Suporte, Confiança e a Falácia da Simetria
+
+::: {.callout-tip}
+## V ou F: Métricas de Regras de Associação
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Pela propriedade de antimonotonicidade, se o itemset $\{P\tilde{a}o, Caf\acute{e}\}$ tem suporte de $0{,}30$, o item isolado $\{P\tilde{a}o\}$ tem suporte maior ou igual a $0{,}30$.
+- □ A confiança $c(A \Rightarrow B)$ é uma métrica simétrica, satisfazendo sempre $c(A \Rightarrow B) = c(B \Rightarrow A)$.
+- □ Se um produto $B$ for comprado em $90\%$ de todas as transações de uma loja, qualquer regra $A \Rightarrow B$ terá confiança mínima de $90\%$, mesmo que $A$ e $B$ sejam completamente independentes.
+- □ Um valor de $\text{Lift}(A \Rightarrow B) = 3{,}0$ prova que comprar $A$ causa diretamente um aumento de $300\%$ nas vendas de $B$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 2: Resposta
 
 ::: {.callout-tip}
 ## V ou F: Resposta
-- ✔ **V:** $\text{Lift} = 1 \iff P(A \cap B) = P(A)P(B)$, indicando independência.
-- ✗ **F:** O Lift é idêntico nas duas direções; as confianças dependem das marginais $P(A)$ e $P(B)$, podendo ser muito diferentes ou iguais.
-- ✔ **V:** É a definição formal do paradoxo de Simpson.
-- ✗ **F:** Frequências agregadas são altamente sensíveis a causas comuns latentes que inflam o Lift sem haver ligação direta.
+- ✔ **V:** $A \subseteq B \implies s(B) \le s(A)$, logo $s(\{P\tilde{a}o\}) \ge s(\{P\tilde{a}o, Caf\acute{e}\}) = 0{,}30$.
+- ✗ **F:** Confiança é $P(B \mid A)$, que depende de $P(A)$, enquanto $c(B \Rightarrow A) = P(A \mid B)$, sendo fortemente assimétrica.
+- ✔ **V:** Se $A \perp\!\!\!\perp B$, $P(B \mid A) = P(B) = 0{,}90$. A confiança é alta apenas pela popularidade de $B$.
+- ✗ **F:** O Lift mede correlação marginal simétrica; não estabelece relação causal nem direcionalidade.
 :::
 
 ::: {.fragment}
-**Voltando à pergunta:** A igualdade $\text{Lift}(A \Rightarrow B) = \text{Lift}(B \Rightarrow A)$ reflete a comutatividade da interseção, provando que o *Lift* não carrega direcionalidade. Se a causa comum $\{Sexta\text{-}feira\}$ inflar ambos os itens de forma não correlacionada internamente, o Lift na base agregada será artificialmente elevado ($> 1$), mas a dependência real condicional será nula ($\text{Lift} = 1$).
+**Voltando à pergunta:** $\text{Lift} = \frac{P(B \mid A)}{P(B)} = \frac{P(A \mid B)}{P(A)}$. Como quase todos que compram tablet levam sacola, $P(Sacola \mid Tablet) \approx 1$. Mas como quase todos na loja compram sacola ($P(Sacola) \approx 0{,}95$), o Lift é próximo de $1$. Abaixar o preço da sacola não atrairá compradores de tablet; a alta confiança decorre exclusivamente da onipresença da sacola.
 :::
 :::
 
-# Bloco 2: Redes Bayesianas e a Fatoração da Distribuição Conjunta
+# Bloco 2: O Algoritmo Apriori na Prática
 
-## Grafos Acíclicos Direcionados (DAGs) como Modelos Probabilísticos
+## Um Cenário Concreto: A Mini-Base de 5 Transações
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Para ir além de tabelas empíricas de regras de associação e modelar a estrutura geradora dos dados, adotamos o paradigma dos **Modelos Gráficos Probabilísticos (PGMs)** (Bishop, 2006, Cap. 8).
+Para compreender a mecânica do algoritmo Apriori sem se perder em abstrações, vamos acompanhar a execução passo a passo em uma mini-base de dados com $N = 5$ transações e $5$ produtos do catálogo: **Café ($C$), Leite ($L$), Manteiga ($M$), Pão ($P$) e Cerveja ($V$)**.
 
-Considere um vetor com $K$ variáveis aleatórias discretas $\mathbf{x} = (x_1, x_2, \dots, x_K)$. Pela **regra do produto** da teoria da probabilidade, qualquer distribuição conjunta pode ser expandida sem perda de generalidade como:
-$$p(x_1, \dots, x_K) = p(x_K \mid x_1, \dots, x_{K-1}) \cdots p(x_2 \mid x_1) p(x_1) = \prod_{k=1}^K p(x_k \mid x_1, \dots, x_{k-1})$$
-Essa fatoração é sempre válida, mas é maximalmente complexa: para $K$ variáveis binárias, especificar essa distribuição sem simplificações exige $2^K - 1$ números reais livres. Para $K=30$, são mais de 1 bilhão de parâmetros.
+| TID | Cesta de Compras | Itens Presentes |
+|:---:|:---|:---:|
+| $T_1$ | $\{Café, Leite, Pão\}$ | $\{C, L, P\}$ |
+| $T_2$ | $\{Café, Leite, Manteiga\}$ | $\{C, L, M\}$ |
+| $T_3$ | $\{Café, Leite, Manteiga, Pão\}$ | $\{C, L, M, P\}$ |
+| $T_4$ | $\{Leite, Manteiga, Pão\}$ | $\{L, M, P\}$ |
+| $T_5$ | $\{Café, Cerveja, Pão\}$ | $\{C, P, V\}$ |
 
-A intuição de uma **Rede Bayesiana** (ou grafo acíclico direcionado) é que, para cada variável $x_k$, o condicionamento a todo o passado histórico $x_1, \dots, x_{k-1}$ pode ser reduzido a um subconjunto restrito denominado **conjunto de pais** de $x_k$, denotado por $\text{pa}_k$:
+### O Nosso Objetivo
+Definimos um **suporte mínimo de $60\%$**:
+$$s_{\min} = 0{,}60 \iff \text{contagem mínima } \sigma_{\min} = 0{,}60 \times 5 = \mathbf{3 \text{ transações}}$$
 
-::: {.callout-note icon=false}
-## Definição 3 (Rede Bayesiana e Fatoração Conjunta; PRML §8.1.1)
-Dado um Grafo Acíclico Direcionado (DAG) $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ cujos vértices $\mathcal{V} = \{1, \dots, K\}$ correspondem às variáveis aleatórias, a distribuição conjunta $p(\mathbf{x})$ fatora de acordo com o grafo se:
-$$p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid \text{pa}_k)$$
-onde $\text{pa}_k = \{j \in \mathcal{V} \mid (j \to k) \in \mathcal{E}\}$ representa o conjunto de nós que possuem arestas direcionadas apontando diretamente para o nó $k$.
-:::
-
-A economia paramétrica é drástica: se cada nó possui no máximo $m \ll K$ pais binários, a tabela de probabilidades condicionais (CPT) de cada nó exige no máximo $2^m$ parâmetros. O total de parâmetros do modelo passa a ser de ordem $O(K \cdot 2^m)$, que escala **linearmente com o número de variáveis $K$**, em vez de exponencialmente.
+Uma busca exaustiva por força bruta exigiria testar todas as $2^5 - 1 = 31$ combinações possíveis de produtos. O algoritmo Apriori (Agrawal & Srikant, 1994) resolve isso de forma inteligente: opera **em camadas de tamanho crescente** ($k = 1, 2, 3, \dots$), descartando ramos inteiros na raiz através da antimonotonicidade.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ::: {.callout-note}
-## Da Regra da Cadeia à Fatoração em Grafos
-- Pela regra do produto (válida para qualquer distribuição):
-  $$p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid x_1, \dots, x_{k-1})$$
-- Custo tabular irrestrito para $K$ variáveis binárias: $2^K - 1$ parâmetros.
-:::
+## O Problema Concreto: 5 Transações de Supermercado
+Base didática com 5 compras ($N=5$) e 5 produtos:
 
-::: {.fragment .callout-note icon=false}
-## Fatoração de uma Rede Bayesiana (PRML §8.1.1)
-Sob um Grafo Acíclico Direcionado (DAG), cada variável depende apenas dos seus **pais imediatos** $\text{pa}_k$:
-$$p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid \text{pa}_k)$$
-:::
-
-::: {.fragment}
-- **Economia Paramétrica Exponencial:**
-  - Se cada nó tem no máximo $m$ pais, precisamos de $O(K \cdot 2^m)$ parâmetros em vez de $2^K$.
-  - Para $K=30$ e $m=2$: de $10^9$ parâmetros para apenas $\approx 120$ parâmetros!
-:::
-:::
-
-::: {.fig-resize style="width: 70%; margin: 0 auto;"}
-```{.tikz}
-\definecolor{azul}{RGB}{43,92,143}
-\definecolor{laranja}{RGB}{217,95,2}
-\definecolor{cinza}{RGB}{127,127,127}
-\begin{tikzpicture}[>=latex, font=\small, thick]
-  \node[draw=azul, fill=azul!10, circle, inner sep=3pt, minimum size=1cm] (C) at (2,2) {$C$};
-  \node[draw=laranja, fill=laranja!10, circle, inner sep=3pt, minimum size=1cm] (A) at (0,0) {$A$};
-  \node[draw=laranja, fill=laranja!10, circle, inner sep=3pt, minimum size=1cm] (B) at (4,0) {$B$};
-  \draw[->, very thick, azul] (C) -- (A) node[midway, left=2pt] {$p(A|C)$};
-  \draw[->, very thick, azul] (C) -- (B) node[midway, right=2pt] {$p(B|C)$};
-  \node[below=8pt of A] {Café Gourmet};
-  \node[below=8pt of B] {Torradeira};
-  \node[above=8pt of C] {Perfil de Renda (Causa Comum)};
-\end{tikzpicture}
-```
-:::
-
-## Pausa Ativa 3: Redes Bayesianas e Fatoração
-
-::: {.callout-tip}
-## O Custo do Catálogo Completo
-Considere um conjunto de $K=10$ produtos binários em um supermercado. Quantos números livres seriam necessários para especificar a distribuição conjunta completa $p(x_1, \dots, x_{10})$ sem nenhuma hipótese de independência? Se organizarmos esses itens em uma Rede Bayesiana onde cada produto tem no máximo 2 pais, quantos parâmetros tornam-se suficientes?
-:::
-
-::: {.callout-tip}
-## V ou F: Redes Bayesianas e Grafos
-Julgue V ou F — a questão só conta se acertar os 4 itens:
-
-- □ Pela regra da cadeia da probabilidade, qualquer distribuição conjunta fatora como $p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid x_1, \dots, x_{k-1})$.
-- □ A ausência de uma aresta direcionada entre dois nós em uma Rede Bayesiana é apenas uma escolha visual e não expressa nenhuma restrição estatística.
-- □ Um Grafo Acíclico Direcionado (DAG) pode conter ciclos fechados desde que a probabilidade condicional seja normalizada.
-- □ Para um nó binário com $m$ pais binários, o número de parâmetros independentes em sua tabela condicional (CPT) é $2^m$.
-:::
-
-::: {.content-visible when-format="revealjs"}
-## Pausa Ativa 3: Resposta
-
-::: {.callout-tip}
-## V ou F: Resposta
-- ✔ **V:** É a regra da cadeia fundamental de probabilidades.
-- ✗ **F:** A ausência de arestas é exatamente o que codifica hipóteses de independência condicional.
-- ✗ **F:** DAGs proíbem estritamente ciclos direcionados para manter a consistência da ordenação topológica.
-- ✔ **V:** Há $2^m$ configurações de pais; fixar $P(X=1 \mid \text{pais})$ determina $P(X=0 \mid \text{pais})$.
+- $T_1: \{Café, Leite, Pão\}$
+- $T_2: \{Café, Leite, Manteiga\}$
+- $T_3: \{Café, Leite, Manteiga, Pão\}$
+- $T_4: \{Leite, Manteiga, Pão\}$
+- $T_5: \{Café, Cerveja, Pão\}$
 :::
 
 ::: {.fragment}
-**Voltando à pergunta:** Sem simplificações, precisamos de $2^{10} - 1 = 1023$ parâmetros livres. Na Rede Bayesiana com no máximo 2 pais por nó, cada nó exige no máximo $2^2 = 4$ parâmetros livres, totalizando no máximo $10 \times 4 = 40$ parâmetros (redução de mais de $96\%$).
+- **Parâmetro de Corte:**
+  - Suporte mínimo: $s_{\min} = 60\% \implies \text{contagem } \ge \mathbf{3 \text{ cestas}}$.
+- **A Meta do Apriori:**
+  - Encontrar todos os conjuntos de itens frequentes sem testar as $2^5 - 1 = 31$ combinações possíveis.
+  - Como? Operando **nível a nível** com poda antecipada!
 :::
 :::
 
-# Bloco 3: Independência Condicional e as Três Estruturas Canônicas
-
-## As Três Geometrias Fundamentais do Fluxo de Informação
+## Nível 1 ($k=1$): Contagem Individual e a Primeira Poda
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-A propriedade mais profunda dos Modelos Gráficos Probabilísticos é a capacidade de ler **independências condicionais** diretamente a partir do desenho do grafo (PRML §8.2).
+No primeiro nível ($k=1$), o algoritmo realiza uma única varredura na base de dados para contar a frequência de cada item isolado:
 
-Dizemos que $A$ é condicionalmente independente de $B$ dado $C$, denotado por $A \perp\!\!\!\perp B \mid C$, se:
-$$p(A, B \mid C) = p(A \mid C) p(B \mid C) \quad \iff \quad p(A \mid B, C) = p(A \mid C)$$
+| Candidato ($C_1$) | Transações em que aparece | Contagem Real | Suporte $s(i)$ | Status ($s \ge 60\%$) |
+|:---:|:---:|:---:|:---:|:---:|
+| $\{Café\}$ | $T_1, T_2, T_3, T_5$ | $4$ | $80\%$ | ✔ **Frequente ($L_1$)** |
+| $\{Leite\}$ | $T_1, T_2, T_3, T_4$ | $4$ | $80\%$ | ✔ **Frequente ($L_1$)** |
+| $\{Manteiga\}$ | $T_2, T_3, T_4$ | $3$ | $60\%$ | ✔ **Frequente ($L_1$)** |
+| $\{Pão\}$ | $T_1, T_3, T_4, T_5$ | $4$ | $80\%$ | ✔ **Frequente ($L_1$)** |
+| $\{Cerveja\}$ | $T_5$ | $1$ | $20\%$ | ✗ **INFREQUENTE!** |
 
-Em grafos direcionados com 3 variáveis, existem exatamente **três estruturas elementares**, que governam todo o fluxo de informação probabilística:
+O conjunto de itens frequentes de tamanho 1 é:
+$$L_1 = \{\{Café\}, \{Leite\}, \{Manteiga\}, \{Pão\}\}$$
+
+### O Poder da Antimonotonicidade em Ação
+A Cerveja foi comprada em apenas 1 cesta e foi reprovada. Pelo Teorema 1 ($A \subseteq B \implies s(B) \le s(A)$), sabemos com certeza matemática que **qualquer combinação futura contendo Cerveja** (como $\{Café, Cerveja\}$ ou $\{Cerveja, Pão, Leite\}$) terá no máximo suporte de $1/5 = 20\%$. 
+
+Portanto, **a Cerveja é eliminada da árvore de busca para sempre**. Nenhum candidato com cerveja jamais será gerado ou contado.
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ::: {.callout-note}
-## O Conceito de Independência Condicional (PRML §8.2)
-$$A \perp\!\!\!\perp B \mid C \iff p(A, B \mid C) = p(A \mid C)p(B \mid C) \iff p(A \mid B, C) = p(A \mid C)$$
-- Saber o valor de $B$ não altera em nada o conhecimento sobre $A$, uma vez que $C$ já é conhecido.
+## Nível 1 ($k=1$): Contagem e Poda na Raiz
+Varremos as 5 transações contando cada item isolado ($s_{\min} = 3$):
+
+- $\{Café\}: 4/5 = 80\%$ ✔
+- $\{Leite\}: 4/5 = 80\%$ ✔
+- $\{Manteiga\}: 3/5 = 60\%$ ✔
+- $\{Pão\}: 4/5 = 80\%$ ✔
+- $\{Cerveja\}: 1/5 = 20\%$ ✗ **Eliminada!**
 :::
 
 ::: {.fragment}
-- Existem apenas **três geometrias canônicas** de 3 nós que formam os blocos construtores de qualquer grafo complexo:
-  1. **Cadeia** (*Head-to-tail*): $A \to B \to C$
-  2. **Bifurcação / Causa Comum** (*Tail-to-tail*): $A \leftarrow B \to C$
-  3. **Colisor / Efeito Comum** (*Head-to-head*): $A \to C \leftarrow B$
-:::
-:::
-
-## 1. A Cadeia (Head-to-Tail) e a Causalidade Indireta
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-Considere o grafo $A \to B \to C$. Pela fatoração de DAGs:
-$$p(A, B, C) = p(A) p(B \mid A) p(C \mid B)$$
-
-Marginalmente, $A$ e $C$ são dependentes:
-$$p(A, C) = \sum_B p(A, B, C) = p(A) \sum_B p(B \mid A) p(C \mid B) \neq p(A) p(C)$$
-
-Contudo, ao condicionarmos no nó intermediário $B$:
-$$p(A, C \mid B) = \frac{p(A, B, C)}{p(B)} = \frac{p(A) p(B \mid A) p(C \mid B)}{p(B)} = \frac{p(A, B) p(C \mid B)}{p(B)} = p(A \mid B) p(C \mid B)$$
-Portanto:
-$$A \perp\!\!\!\perp C \mid B$$
-O nó intermediário $B$ **bloqueia** o fluxo de informação quando é condicionado.
-:::
-
-::: {.content-visible when-format="revealjs"}
-::: {.callout-note}
-## Estrutura 1: Cadeia (Head-to-tail) — $A \to B \to C$
-- Fatoração: $p(A, B, C) = p(A) p(B \mid A) p(C \mid B)$.
-- Sem condicionar: $A$ e $C$ são **marginalmente dependentes** ($A \not\perp\!\!\!\perp C$).
-:::
-
-::: {.fragment}
-- **Ao condicionar no intermediário $B$:**
-  $$p(A, C \mid B) = \frac{p(A) p(B \mid A) p(C \mid B)}{p(B)} = p(A \mid B) p(C \mid B) \implies \mathbf{A \perp\!\!\!\perp C \mid B}$$
-- O nó $B$ **bloqueia** o caminho *head-to-tail*.
-:::
-:::
-
-## 2. A Bifurcação (Tail-to-Tail) e a Causa Comum
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-Considere o grafo $A \leftarrow B \to C$. Pela fatoração:
-$$p(A, B, C) = p(B) p(A \mid B) p(C \mid B)$$
-
-Marginalmente, $A$ e $C$ são dependentes pela causa comum $B$:
-$$p(A, C) = \sum_B p(B) p(A \mid B) p(C \mid B) \neq p(A) p(C)$$
-Esta é exatamente a estrutura do nosso Problema Motivador: Café ($A$) e Torradeira ($C$) compartilham a causa comum Renda ($B$), gerando o *Lift* espúrio de $2{,}69$.
-
-Ao condicionarmos em $B$:
-$$p(A, C \mid B) = \frac{p(A, B, C)}{p(B)} = \frac{p(B) p(A \mid B) p(C \mid B)}{p(B)} = p(A \mid B) p(C \mid B)$$
-Portanto:
-$$A \perp\!\!\!\perp C \mid B$$
-O nó de causa comum $B$ **bloqueia** o caminho *tail-to-tail* quando é condicionado.
-:::
-
-::: {.content-visible when-format="revealjs"}
-::: {.callout-note}
-## Estrutura 2: Causa Comum (Tail-to-tail) — $A \leftarrow B \to C$
-- Fatoração: $p(A, B, C) = p(B) p(A \mid B) p(C \mid B)$.
-- Sem condicionar: $A$ e $C$ são **dependentes** via causa comum $B$ (fonte do Paradoxo de Simpson).
-:::
-
-::: {.fragment}
-- **Ao condicionar na causa comum $B$:**
-  $$p(A, C \mid B) = \frac{p(B) p(A \mid B) p(C \mid B)}{p(B)} = p(A \mid B) p(C \mid B) \implies \mathbf{A \perp\!\!\!\perp C \mid B}$$
-- O nó $B$ **bloqueia** o caminho *tail-to-tail*, dissipando a correlação espúria.
-:::
-:::
-
-## 3. O Colisor (Head-to-Head) e o Fenômeno de Explaining Away
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-Considere agora o grafo $A \to C \leftarrow B$, onde as setas colidem no nó central $C$. Pela fatoração:
-$$p(A, B, C) = p(A) p(B) p(C \mid A, B)$$
-
-Integrando sobre $C$:
-$$p(A, B) = \sum_C p(A) p(B) p(C \mid A, B) = p(A) p(B) \sum_C p(C \mid A, B) = p(A) p(B)$$
-As variáveis $A$ e $B$ são **marginalmente independentes** ($A \perp\!\!\!\perp B$).
-
-Contudo, ao condicionarmos no efeito comum $C$:
-$$p(A, B \mid C) = \frac{p(A, B, C)}{p(C)} = \frac{p(A) p(B) p(C \mid A, B)}{p(C)} \neq p(A \mid C) p(B \mid C)$$
-Quando condicionamos no colisor $C$, **o caminho abre-se e $A$ e $B$ tornam-se dependentes**!
-
-Esse comportamento contra-intuitivo é o fenômeno de **explaining away** (Pearl, 1988): quando duas causas independentes disputam a explicação de um efeito comum observado, saber que uma delas ocorreu reduz a necessidade probabilística da outra.
-:::
-
-::: {.content-visible when-format="revealjs"}
-::: {.callout-note}
-## Estrutura 3: Colisor (Head-to-head) — $A \to C \leftarrow B$
-- Fatoração: $p(A, B, C) = p(A) p(B) p(C \mid A, B)$.
-- **Marginalmente:** $p(A, B) = \sum_C p(A)p(B)p(C \mid A, B) = p(A)p(B) \implies \mathbf{A \perp\!\!\!\perp B}$.
-  As duas causas são naturalmente independentes!
+- **Resultado do Nível 1:**
+  $$L_1 = \{\{Café\}, \{Leite\}, \{Manteiga\}, \{Pão\}\}$$
 :::
 
 ::: {.fragment .callout-important}
-## A Inversão do Colisor: Explaining Away
-- Ao condicionar no efeito comum $C$:
-  $$p(A, B \mid C) = \frac{p(A) p(B) p(C \mid A, B)}{p(C)} \neq p(A \mid C) p(B \mid C) \implies \mathbf{A \not\perp\!\!\!\perp B \mid C}$$
-- Condicionar no colisor (ou em seus descendentes) **abre o caminho** e induz dependência negativa mútua.
+## A Poda da Cerveja
+Como $\{Cerveja\}$ é infrequente, **nenhum superconjunto com cerveja pode ser frequente**. Eliminamos instantaneamente 16 das 31 combinações do catálogo!
 :::
 :::
 
-::: {.fig-resize style="width: 85%; margin: 0 auto;"}
+## Nível 2 ($k=2$): Geração de Pares e Contagem
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para construir os pares candidatos de tamanho 2 ($C_2$), o Apriori combina apenas os itens sobreviventes em $L_1$:
+$$\binom{|L_1|}{2} = \binom{4}{2} = 6 \text{ pares candidatos}$$
+
+Adotamos a ordem alfabética estrita para evitar duplicações: $Café < Leite < Manteiga < Pão$.
+
+Realizamos a segunda varredura na base de dados, contando a frequência de cada um dos 6 pares:
+
+| Par Candidato ($C_2$) | Transações em que co-ocorre | Contagem Real | Suporte | Status ($s \ge 60\%$) |
+|:---:|:---:|:---:|:---:|:---:|
+| $\{Café, Leite\}$ | $T_1, T_2, T_3$ | $3$ | $60\%$ | ✔ **Frequente ($L_2$)** |
+| $\{Café, Manteiga\}$ | $T_2, T_3$ | $2$ | $40\%$ | ✗ **Infrequente (Descartado)** |
+| $\{Café, Pão\}$ | $T_1, T_3, T_5$ | $3$ | $60\%$ | ✔ **Frequente ($L_2$)** |
+| $\{Leite, Manteiga\}$ | $T_2, T_3, T_4$ | $3$ | $60\%$ | ✔ **Frequente ($L_2$)** |
+| $\{Leite, Pão\}$ | $T_1, T_3, T_4$ | $3$ | $60\%$ | ✔ **Frequente ($L_2$)** |
+| $\{Manteiga, Pão\}$ | $T_3, T_4$ | $2$ | $40\%$ | ✗ **Infrequente (Descartado)** |
+
+Aprovando apenas os pares com contagem $\ge 3$, obtemos a tabela de itemsets frequentes de tamanho 2:
+$$L_2 = \{\{Café, Leite\}, \{Café, Pão\}, \{Leite, Manteiga\}, \{Leite, Pão\}\}$$
+
+Observe com atenção: os pares **$\{Café, Manteiga\}$** e **$\{Manteiga, Pão\}$** falharam no suporte mínimo e **não entraram em $L_2$**. Guarde esse fato: ele será a chave do passo de poda no próximo nível!
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Nível 2 ($k=2$): Junção de Pares e Contagem
+Combinamos os 4 itens de $L_1$ gerando $\binom{4}{2} = 6$ candidatos em $C_2$:
+:::
+
+::: {.fragment}
+- **Contagem nas 5 transações:**
+  - $\{Café, Leite\}: 3/5$ ✔ ($T_1, T_2, T_3$)
+  - $\{Café, Manteiga\}: 2/5$ ✗ ($T_2, T_3$) $\implies$ **Reprovado!**
+  - $\{Café, Pão\}: 3/5$ ✔ ($T_1, T_3, T_5$)
+  - $\{Leite, Manteiga\}: 3/5$ ✔ ($T_2, T_3, T_4$)
+  - $\{Leite, Pão\}: 3/5$ ✔ ($T_1, T_3, T_4$)
+  - $\{Manteiga, Pão\}: 2/5$ ✗ ($T_3, T_4$) $\implies$ **Reprovado!**
+:::
+
+::: {.fragment .callout-important}
+## Resultado do Nível 2 ($L_2$)
+$$L_2 = \{\{Café, Leite\}, \{Café, Pão\}, \{Leite, Manteiga\}, \{Leite, Pão\}\}$$
+*Atenção:* $\{Café, Manteiga\}$ e $\{Manteiga, Pão\}$ foram **reprovados**!
+:::
+:::
+
+## Nível 3 ($k=3$): O Passo de Junção ($L_{k-1} \bowtie L_{k-1}$)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Agora chegamos ao núcleo do algoritmo Apriori: como gerar candidatos de tamanho 3 ($C_3$) a partir de $L_2$?
+
+Se tentássemos unir pares arbitrários, geraríamos o mesmo trio várias vezes (ex.: $\{A, B\} \cup \{A, C\}$ e $\{A, B\} \cup \{B, C\}$ produzem o mesmo $\{A, B, C\}$). Para evitar qualquer redundância, Agrawal & Srikant (1994) definem a **regra do prefixo comum de tamanho $k-2$**:
+Dois itemsets de tamanho $k-1$ só podem ser unidos se forem idênticos nos primeiros $k-2$ itens e diferirem apenas no último item:
+$$p[1]=q[1], \dots, p[k-2]=q[k-2] \quad \text{e} \quad p[k-1] < q[k-1]$$
+
+Para passar de $k=2$ para $k=3$ ($k-2=1$ item de prefixo comum), ordenamos os pares de $L_2$ alfabeticamente:
+1. **Pares com prefixo $\{Café\}$:**
+   Temos $\{Café, Leite\}$ e $\{Café, Pão\}$.
+   Ambos começam com $Café$, e $Leite < Pão$.
+   A junção produz:
+   $$c_1 = \{Café, Leite, Pão\}$$
+2. **Pares com prefixo $\{Leite\}$:**
+   Temos $\{Leite, Manteiga\}$ e $\{Leite, Pão\}$.
+   Ambos começam com $Leite$, e $Manteiga < Pão$.
+   A junção produz:
+   $$c_2 = \{Leite, Manteiga, Pão\}$$
+
+A junção gerou exatamente **dois candidatos de tamanho 3**:
+$$C_3 = \{\{Café, Leite, Pão\}, \{Leite, Manteiga, Pão\}\}$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## A Regra do Prefixo Comum ($L_{k-1} \bowtie L_{k-1}$)
+Dois itemsets só se unem se compartilharem os primeiros $k-2$ itens ($k=3 \implies k-2=1$ item de prefixo):
+:::
+
+::: {.fragment}
+- **Aplicando aos pares de $L_2$:**
+  - **Prefixo $Café$:**
+    $$\{Café, Leite\} \bowtie \{Café, Pão\} \implies \mathbf{c_1 = \{Café, Leite, Pão\}}$$
+  - **Prefixo $Leite$:**
+    $$\{Leite, Manteiga\} \bowtie \{Leite, Pão\} \implies \mathbf{c_2 = \{Leite, Manteiga, Pão\}}$$
+:::
+
+::: {.fragment .callout-important}
+## Candidatos Gerados ($C_3$)
+$$C_3 = \{\{Café, Leite, Pão\}, \{Leite, Manteiga, Pão\}\}$$
+Cada candidato foi gerado **uma única vez**, sem duplicatas!
+:::
+:::
+
+## O Passo de Poda (*Pruning Step*) em Memória RAM
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Antes de ler o banco de dados em disco para contar o suporte de $C_3$, o Apriori executa o **passo de poda (*prune step*)**.
+
+Pela antimonotonicidade, para que um trio $\{X, Y, Z\}$ seja frequente, **todos os seus 3 subconjuntos de tamanho 2 devem pertencer a $L_2$**.
+Essa checagem é feita instantaneamente consultando a tabela $L_2$ já carregada na memória RAM:
+
+### 1. Testando o Candidato $c_1 = \{Café, Leite, Pão\}$
+Verificamos todos os seus subconjuntos de tamanho 2:
+- $\{Café, Leite\} \in L_2$? **Sim** (contagem 3);
+- $\{Café, Pão\} \in L_2$? **Sim** (contagem 3);
+- $\{Leite, Pão\} \in L_2$? **Sim** (contagem 3).
+
+Como todos os subconjuntos de tamanho 2 são frequentes, **o candidato $c_1$ sobrevive à poda** e avança para a contagem no banco de dados.
+
+### 2. Testando o Candidato $c_2 = \{Leite, Manteiga, Pão\}$
+Verificamos todos os seus subconjuntos de tamanho 2:
+- $\{Leite, Manteiga\} \in L_2$? **Sim** (contagem 3);
+- $\{Leite, Pão\} \in L_2$? **Sim** (contagem 3);
+- $\{Manteiga, Pão\} \in L_2$? **NÃO!**
+
+No nível anterior, vimos que o par $\{Manteiga, Pão\}$ apareceu em apenas 2 transações e foi reprovado. Pelo princípio da antimonotonicidade, se $\{Manteiga, Pão\}$ não é frequente, **é matematicamente impossível** que o trio $\{Leite, Manteiga, Pão\}$ seja frequente!
+
+**A Ação do Algoritmo:**
+O candidato $c_2 = \{Leite, Manteiga, Pão\}$ é **PODADO IMEDIATAMENTE EM MEMÓRIA RAM**.
+Ele é descartado sem que o algoritmo precise ler uma única linha de dados do disco!
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Filtro de Poda (Prune Step) em Memória
+Todo subconjunto de tamanho 2 de um candidato deve estar em $L_2$.
+Testamos em RAM antes de ler o disco:
+:::
+
+::: {.fragment}
+- **Teste de $c_1 = \{Café, Leite, Pão\}$:**
+  - $\{Café, Leite\} \in L_2$? ✔ Sim.
+  - $\{Café, Pão\} \in L_2$? ✔ Sim.
+  - $\{Leite, Pão\} \in L_2$? ✔ Sim.
+  $\implies$ **SOBREVIVE à poda!**
+:::
+
+::: {.fragment}
+- **Teste de $c_2 = \{Leite, Manteiga, Pão\}$:**
+  - $\{Leite, Manteiga\} \in L_2$? ✔ Sim.
+  - $\{Leite, Pão\} \in L_2$? ✔ Sim.
+  - $\{Manteiga, Pão\} \in L_2$? ✗ **NÃO!** (falhou no Nível 2)
+  $\implies$ **PODADO IMEDIATAMENTE EM RAM!**
+:::
+
+::: {.fragment .callout-important}
+## Zero Acesso a Disco
+O candidato $c_2$ é descartado sem ler nenhuma transação. Apenas $c_1$ vai para a contagem!
+:::
+:::
+
+## Varredura Final e o Critério de Parada
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Após a poda em RAM, apenas um único candidato sobreviveu em $C_3$:
+$$C_3^{\text{filtrado}} = \{\{Café, Leite, Pão\}\}$$
+
+Agora sim, realizamos a terceira varredura no banco de dados para computar a contagem real:
+- O trio $\{Café, Leite, Pão\}$ aparece nas transações $T_1$ e $T_3$.
+- **Contagem Real:** $2$ transações.
+- **Suporte Real:** $s = 2/5 = 40\%$.
+
+Como o suporte exigido é de pelo menos $60\%$ (contagem $\ge 3$), o candidato não atinge o limiar e é reprovado.
+
+Consequentemente:
+$$L_3 = \emptyset$$
+
+### O Critério de Parada
+Como $L_3$ é vazio, **o algoritmo Apriori encerra sua execução imediatamente**.
+Não há nenhum candidato para formar $C_4$, poupando o sistema de testar quartetos ou quintetos.
+
+O conjunto final de todos os itemsets frequentes da base é:
+$$L = L_1 \cup L_2 = \{\{Café\}, \{Leite\}, \{Manteiga\}, \{Pão\}, \{Café, Leite\}, \{Café, Pão\}, \{Leite, Manteiga\}, \{Leite, Pão\}\}$$
+
+Em vez de avaliar $31$ combinações e fazer dezenas de acessos a disco, o Apriori encontrou todos os itemsets frequentes com apenas $3$ passadas pelo banco e com quase todas as combinações podadas em memória!
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Varredura de $C_3$ e Encerramento
+- Apenas $c_1 = \{Café, Leite, Pão\}$ sobreviveu à poda em RAM.
+- **Leitura do disco:** aparece em $T_1$ e $T_3 \implies \text{contagem } = \mathbf{2 < 3}$.
+- Como $2 < 3$, o trio é reprovado!
+:::
+
+::: {.fragment}
+- **Resultado do Nível 3:**
+  $$L_3 = \emptyset$$
+:::
+
+::: {.fragment .callout-important}
+## Critério de Parada
+Quando $L_k = \emptyset$, o algoritmo encerra imediatamente!
+
+- Não testa quartetos nem quintetos.
+- Varreu o disco apenas 3 vezes.
+- Encontrou o resultado exato com um mínimo de esforço computacional.
+:::
+:::
+
+## Da Poda de Itens à Extração de Regras
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Uma vez que o algoritmo Apriori encerra e retorna o conjunto completo de todos os itemsets frequentes $L = \bigcup_k L_k$, a tarefa subsequente é converter esses conjuntos em **regras de associação acionáveis** da forma:
+$$A \Rightarrow B, \quad \text{onde } A \subset I, \quad B = I \setminus A, \quad A \neq \emptyset, \quad B \neq \emptyset$$
+
+Para cada itemset frequente $I$ de tamanho $|I| \ge 2$, existem $2^{|I|} - 2$ partições possíveis em antecedente e consequente.
+
+### Exemplo Concreto Passo a Passo
+
+Considere que o Apriori identificou como frequente o itemset de 3 produtos:
+$$I = \{Caf\acute{e}, Leite, P\tilde{a}o\} \quad \text{com suporte medido } s(I) = 0{,}30 \ (30\%)$$
+
+Suponha que nas etapas anteriores tenhamos medido os suportes dos subconjuntos:
+- $s(\{Caf\acute{e}, Leite\}) = 0{,}35$, \quad $s(\{Caf\acute{e}, P\tilde{a}o\}) = 0{,}40$, \quad $s(\{Leite, P\tilde{a}o\}) = 0{,}50$;
+- $s(\{Caf\acute{e}\}) = 0{,}50$, \quad $s(\{Leite\}) = 0{,}60$, \quad $s(\{P\tilde{a}o\}) = 0{,}75$.
+
+A partir de $I$, geramos todas as 6 regras possíveis ($2^3 - 2 = 6$) e calculamos a confiança de cada uma:
+
+| Tipo | Regra Candidata ($A \Rightarrow B$) | Suporte Conjunto $s(I)$ | Suporte Antecedente $s(A)$ | Confiança $c = \frac{s(I)}{s(A)}$ |
+|---|:---:|:---:|:---:|:---:|
+| **1 item no consequente** | $\{Caf\acute{e}, Leite\} \Rightarrow \{P\tilde{a}o\}$ | $0{,}30$ | $0{,}35$ | $\mathbf{85{,}7\%}$ |
+| **1 item no consequente** | $\{Caf\acute{e}, P\tilde{a}o\} \Rightarrow \{Leite\}$ | $0{,}30$ | $0{,}40$ | $\mathbf{75{,}0\%}$ |
+| **1 item no consequente** | $\{Leite, P\tilde{a}o\} \Rightarrow \{Caf\acute{e}\}$ | $0{,}30$ | $0{,}50$ | $\mathbf{60{,}0\%}$ |
+| **2 itens no consequente** | $\{Caf\acute{e}\} \Rightarrow \{Leite, P\tilde{a}o\}$ | $0{,}30$ | $0{,}50$ | $\mathbf{60{,}0\%}$ |
+| **2 itens no consequente** | $\{Leite\} \Rightarrow \{Caf\acute{e}, P\tilde{a}o\}$ | $0{,}30$ | $0{,}60$ | $\mathbf{50{,}0\%}$ |
+| **2 itens no consequente** | $\{P\tilde{a}o\} \Rightarrow \{Caf\acute{e}, Leite\}$ | $0{,}30$ | $0{,}75$ | $\mathbf{40{,}0\%}$ |
+
+### A Poda na Geração de Regras (*Rule Pruning*)
+
+Repare no padrão matemático da tabela: em todas as regras geradas a partir do mesmo itemset $I$, o **numerador da confiança é idêntico** ($s(I) = 0{,}30$). O único elemento que varia é o denominador $s(A)$.
+
+Pela antimonotonicidade do suporte:
+$$A' \subset A \implies s(A') \ge s(A) \implies \frac{s(I)}{s(A')} \le \frac{s(I)}{s(A)} \implies c(A' \Rightarrow (I \setminus A')) \le c(A \Rightarrow (I \setminus A))$$
+
+**A consequência prática é imediata:** Mover itens do antecedente para o consequente (ou seja, diminuir $A$) só pode **diminuir a confiança**.
+Se fixarmos um limiar de confiança mínima $c_{\min} = 70\%$:
+- Como $\{Leite, P\tilde{a}o\} \Rightarrow \{Caf\acute{e}\}$ atinge apenas $60{,}0\% < 70\%$, podemos deduzir matematicamente que as regras derivadas $\{Leite\} \Rightarrow \{Caf\acute{e}, P\tilde{a}o\}$ ($50\%$) e $\{P\tilde{a}o\} \Rightarrow \{Caf\acute{e}, Leite\}$ ($40\%$) **jamais atingirão $70\%$**.
+- Elas são descartadas antecipadamente sem necessidade de consulta ou cálculo!
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Como Gerar Regras a partir de um Itemset $I$
+- Para cada itemset frequente $I$, particiona-se em $A \Rightarrow (I \setminus A)$.
+- O suporte conjunto no numerador é constante: $s(I)$.
+- A **Confiança** varia com o antecedente: $c = \frac{s(I)}{s(A)}$.
+:::
+
+::: {.fragment}
+- **Exemplo com $I = \{Caf\acute{e}, Leite, P\tilde{a}o\}$ ($s(I) = 0{,}30$):**
+  - $\{Caf\acute{e}, Leite\} \Rightarrow \{P\tilde{a}o\}: \quad c = \frac{0{,}30}{0{,}35} = \mathbf{85{,}7\%}$ (Aprovada para $c_{\min} = 70\%$).
+  - $\{Leite, P\tilde{a}o\} \Rightarrow \{Caf\acute{e}\}: \quad c = \frac{0{,}30}{0{,}50} = \mathbf{60{,}0\%}$ (Reprovada!).
+  - $\{P\tilde{a}o\} \Rightarrow \{Caf\acute{e}, Leite\}: \quad c = \frac{0{,}30}{0{,}75} = \mathbf{40{,}0\%}$ (Reprovada!).
+:::
+
+::: {.fragment .callout-important}
+## A Poda de Regras (Rule Pruning)
+$$A' \subset A \implies s(A') \ge s(A) \implies c(A' \Rightarrow B') \le c(A \Rightarrow B)$$
+Mover itens do antecedente para o consequente **só reduz a confiança**. Se uma regra com consequente de 1 item falha no limiar $c_{\min}$, nenhum de seus desdobramentos com consequentes maiores precisa ser testado!
+:::
+:::
+
+## Aplicação Prática: Minerando Transações de Mercado
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Executamos agora o algoritmo Apriori sobre a nossa base transacional de mercado (`transacoes_mercado`), configurando suporte mínimo $s_{\min} = 0{,}20$ ($20\%$) e confiança mínima $c_{\min} = 0{,}60$ ($60\%$).
+
+A tabela abaixo exibe as regras de associação mineradas, ordenadas pelo *Lift* decrescente:
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Mineração Prática de Cestas de Compras
+- Base com $N=20$ transações de supermercado.
+- Parâmetros: $s_{\min} = 0{,}20$ ($20\%$) e $c_{\min} = 0{,}60$ ($60\%$).
+- Execução do pipeline: $L_1 \to C_2 \to L_2 \to C_3 \to L_3 \to \text{Regras}$.
+:::
+:::
+
+```{python}
+#| echo: true
+# Exibição das regras mineradas pelo algoritmo Apriori
+print(f"Total de regras mineradas: {len(df_regras_pratico)}")
+df_regras_display = df_regras_pratico.copy()
+df_regras_display["Suporte"] = df_regras_display["Suporte"].apply(lambda v: brl(v, 2))
+df_regras_display["Confiança"] = df_regras_display["Confiança"].apply(lambda v: brl(v, 2))
+df_regras_display["Lift"] = df_regras_display["Lift"].apply(lambda v: brl(v, 2))
+df_regras_display.head(8)
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Repare nos resultados práticos obtidos:
+- A regra clássica $\{Cerveja\} \Rightarrow \{Fralda\}$ atinge $\text{Lift} = 2{,}14$, com suporte de $25\%$ e confiança de $71\%$.
+- As combinações de café da manhã $\{Leite, Manteiga\} \Rightarrow \{P\tilde{a}o\}$ atingem confiança de $100\%$ ($c = 1{,}00$) e $\text{Lift} = 1{,}43$.
+
+Essas regras são acionáveis no varejo para decisões operacionais de sortimento e cross-selling. No entanto, o algoritmo Apriori funciona estritamente como um **gerador exaustivo de candidatos**: ele produz uma lista plana de regras empíricas sem qualquer hierarquia ou filtro de causalidade estatística. Ele não nos diz:
+1. Quais regras refletem **dependências diretas** e quais são meros **atalhos transitivos redundantes** ($A \Rightarrow B$ e $B \Rightarrow C$ tornam $A \Rightarrow C$ desnecessária?);
+2. Quais regras decorrem de **causas comuns não observadas** (correlações espúrias, como no nosso exemplo do Café e da Torradeira);
+3. Quais regras surgem de **vieses de seleção** ao recortar a base de clientes.
+
+Para **validar, filtrar e estruturar** essa lista de regras candidatas, precisamos do ferramental formal dos **Modelos Gráficos Probabilísticos (PGMs)**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Que a Tabela Prática Mostra
+- Regras clássicas como $\{Cerveja\} \Rightarrow \{Fralda\}$ emergem com $\text{Lift} > 2$.
+- Regras de café da manhã $\{Leite, Manteiga\} \Rightarrow \{P\tilde{a}o\}$ com confiança de $100\%$.
+:::
+
+## O Apriori como Gerador de Candidatos
+O Apriori gera uma lista plana de regras empíricas. Mas ele é incapaz de distinguir:
+
+- **Dependências diretas** vs. **atalhos transitivos redundantes** ($A \Rightarrow B \Rightarrow C$);
+- **Associações genuínas** vs. **correlações espúrias** por causas comuns ($A \Leftarrow B \Rightarrow C$);
+- **Vieses de seleção** ao recortar subconjuntos da base ($A \Rightarrow C \Leftarrow B$).
+
+$\implies$ Precisamos de **Modelos Gráficos Probabilísticos** para **filtrar e validar** as regras candidatas!
+:::
+
+## Pausa 3: A Poda do Apriori e a Mineração Prática
+
+::: {.callout-tip}
+## V ou F: Mecânica do Algoritmo Apriori
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ No algoritmo Apriori, o passo de poda (*prune step*) exige varrer novamente o banco de dados em disco para checar a frequência dos subconjuntos.
+- □ Se um candidato de tamanho 3 tem um subconjunto de tamanho 2 que não está em $L_2$, ele é descartado imediatamente pela antimonotonicidade.
+- □ O algoritmo Apriori garante encontrar todos os itemsets frequentes da base de dados para o limiar $s_{\min}$ escolhido.
+- □ Se uma base transacional contiver $1$ milhão de compras, o Apriori realizará $1$ milhão de varreduras na base de dados.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 3: Resposta
+
+::: {.callout-tip}
+## V ou F: Resposta
+- ✗ **F:** O passo de poda consulta apenas a tabela $L_{k-1}$ já em memória RAM; não há leitura de disco.
+- ✔ **V:** Pela antimonotonicidade, se um subconjunto é infrequente, o candidato não pode ser frequente.
+- ✔ **V:** A poda do Apriori é exata (não heurística ou aproximada); nenhum itemset frequente é omitido.
+- ✗ **F:** O número de varreduras é igual ao tamanho do maior itemset frequente ($k_{\max} + 1$), tipicamente entre 3 e 6 passadas.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Para o trio $\{A, B, C\}$, seus subconjuntos $\{A, B\}, \{A, C\}, \{B, C\}$ estão em $L_2$, logo ele sobrevive. Para o trio $\{A, B, D\}$, $\{A, B\}, \{A, D\}, \{B, D\} \in L_2$, sobrevivendo. Mas para qualquer candidato contendo $\{C, D\}$ (como $\{A, C, D\}$ ou $\{B, C, D\}$), a ausência de $\{C, D\} \in L_2$ causa descarte imediato! O quarteto $\{A, B, C, D\}$ sequer é gerado.
+:::
+:::
+
+# Bloco 3: Redes Bayesianas como Filtro Estrutural de Regras
+
+## O DAG como Mapa de Dependências
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Na primeira metade da aula, vimos que o Apriori gera uma lista plana de regras empíricas candidatas. Mas como saber quais dessas regras refletem conexões diretas genuínas e quais são meras ilusões estatísticas?
+
+A resposta natural seria modelar a distribuição de probabilidade conjunta de todas as variáveis da loja. No entanto, para um catálogo de apenas $K=30$ produtos, uma tabela conjunta irrestrita exigiria especificar:
+$$2^{30} - 1 = \mathbf{1.073.741.823 \text{ parâmetros livres (mais de 1 bilhão!)}}$$
+Nenhum banco de dados no mundo tem transações suficientes para estimar 1 bilhão de probabilidades por força bruta.
+
+É aqui que entram os **Modelos Gráficos Probabilísticos Direcionados**, conhecidos como **Redes Bayesianas** (Bishop, 2006, Cap. 8; Pearl, 1988). A premissa central de um Grafo Acíclico Direcionado (DAG) é elegante e intuitiva: **uma variável não precisa olhar para todo o histórico do universo**: basta olhar para os seus **pais imediatos** no grafo ($\text{pa}_k$).
+
+::: {.callout-note icon=false}
+## Fatoração em Grafos Acíclicos Direcionados (DAGs)
+A distribuição conjunta multivariada fatora como o produto das probabilidades condicionais locais restritas aos pais diretos:
+$$p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid \text{pa}_k)$$
+:::
+
+Na prática do aprendizado não supervisionado, o DAG funciona como um mapa visual rigoroso:
+- **Nós:** Produtos ou variáveis de contexto ($A, B, C, \dots$);
+- **Arestas direcionadas ($A \to B$):** Relações diretas de dependência ou atração;
+- **Ausência de arestas:** Declaração formal de **independência condicional**! Duas variáveis sem aresta direta tornam-se condicionalmente independentes quando controlamos pelos seus pais ou mediadores intermediários.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Por Que Precisamos de Grafos?
+- O Apriori produz uma lista plana de candidatos empíricos.
+- Tentar estimar a distribuição conjunta completa de 30 itens por força bruta exigiria:
+  $$2^{30} - 1 > \mathbf{1 \text{ bilhão de parâmetros!}}$$
+:::
+
+::: {.fragment}
+- **A Solução das Redes Bayesianas (PRML §8.1):**
+  - Cada variável depende **apenas dos seus pais imediatos** $\text{pa}_k$ no DAG:
+    $$p(x_1, \dots, x_K) = \prod_{k=1}^K p(x_k \mid \text{pa}_k)$$
+:::
+
+::: {.fragment .callout-important}
+## A Leitura Visual do DAG
+- **Nós:** Itens ou variáveis.
+- **Arestas direcionadas:** Relações diretas.
+- **Ausência de arestas:** Independência condicional formal!
+:::
+:::
+
+## As Três Geometrias Canônicas do Fluxo de Informação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A propriedade mais poderosa dos Modelos Gráficos Probabilísticos é a capacidade de ler **independências condicionais** diretamente a partir da topologia do grafo (PRML §8.2; Pearl, 1988).
+
+Dizemos que duas variáveis $A$ e $B$ são condicionalmente independentes dado $C$, denotado por $A \perp\!\!\!\perp B \mid C$, se:
+$$p(A, B \mid C) = p(A \mid C) p(B \mid C) \quad \iff \quad p(A \mid B, C) = p(A \mid C)$$
+Em termos práticos: **conhecer o estado de $B$ não adiciona nenhuma informação nova sobre $A$ quando o estado de $C$ já é conhecido**.
+
+Em caminhos de 3 variáveis, existem exatamente **três geometrias canônicas** que determinam se o canal de informação está aberto ou bloqueado:
+
+1. **Cadeia (*Head-to-tail*): $A \to B \to C$**
+   - *Sem condicionamento:* O canal está aberto ($A \not\perp\!\!\!\perp C$). A informação flui de $A$ para $C$ passando por $B$.
+   - *Condicionando em $B$:* O canal é **bloqueado** ($\mathbf{A \perp\!\!\!\perp C \mid B}$). Uma vez que conhecemos o estado do intermediário $B$, a variável $A$ não acrescenta informação sobre $C$.
+
+2. **Causa Comum (*Tail-to-tail*): $A \leftarrow B \to C$**
+   - *Sem condicionamento:* O canal está aberto ($A \not\perp\!\!\!\perp C$). Ambas as variáveis variam juntas porque compartilham a mesma causa comum $B$ (como Café Gourmet e Torradeira induzidos por alta Renda).
+   - *Condicionando em $B$:* O canal é **bloqueado** ($\mathbf{A \perp\!\!\!\perp C \mid B}$). Ao controlar pela causa comum, a correlação espúria se dissipa completamente.
+
+3. **Colisor (*Head-to-head*): $A \to C \leftarrow B$**
+   - *Sem condicionamento:* O canal está **naturalmente bloqueado** ($\mathbf{A \perp\!\!\!\perp B}$). Duas causas independentes que geram um mesmo efeito comum não têm nenhuma correlação entre si.
+   - *Condicionando em $C$ (ou em descendentes de $C$):* O canal é **aberto** ($\mathbf{A \not\perp\!\!\!\perp B \mid C}$) pelo fenômeno de **Explaining Away**! Quando o efeito comum $C$ é observado, confirmar uma causa reduz a necessidade da outra, induzindo dependência estatística artificial entre elas.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Independência Condicional (PRML §8.2)
+$$A \perp\!\!\!\perp B \mid C \iff p(A, B \mid C) = p(A \mid C)p(B \mid C) \iff p(A \mid B, C) = p(A \mid C)$$
+- Conhecer $B$ não traz nenhuma informação sobre $A$ quando $C$ já é conhecido.
+:::
+
+::: {.fragment}
+- **As Três Geometrias Canônicas em 3 Nós:**
+  1. **Cadeia** ($A \to B \to C$): Bloqueada por $B \implies \mathbf{A \perp\!\!\!\perp C \mid B}$.
+  2. **Causa Comum** ($A \leftarrow B \to C$): Bloqueada por $B \implies \mathbf{A \perp\!\!\!\perp C \mid B}$.
+  3. **Colisor** ($A \to C \leftarrow B$): Bloqueado marginalmente ($\mathbf{A \perp\!\!\!\perp B}$), mas **aberto dado $C$** ($\mathbf{A \not\perp\!\!\!\perp B \mid C}$).
+:::
+
+::: {.fragment .callout-important}
+## A Assinatura Única do Colisor (*Explaining Away*)
+Cadeias e causas comuns são bloqueadas pelo condicionamento. O colisor é a **única geometria ativada ao condicionar no efeito comum**!
+:::
+:::
+
+## Comparação das Três Geometrias Canônicas
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A tabela e o diagrama a seguir consolidam a geometria completa do fluxo de informação em redes bayesianas de 3 nós:
+
+| Geometria | Grafo | Sem Condicionamento | Condicionado no Nó Central ($B$ ou $C$) |
+|---|:---:|:---:|:---:|
+| **Cadeia (*Head-to-tail*)** | $A \to B \to C$ | Aberto ($A \not\perp\!\!\!\perp C$) | **Bloqueado:** $\mathbf{A \perp\!\!\!\perp C \mid B}$ |
+| **Causa Comum (*Tail-to-tail*)** | $A \leftarrow B \to C$ | Aberto ($A \not\perp\!\!\!\perp C$) | **Bloqueado:** $\mathbf{A \perp\!\!\!\perp C \mid B}$ |
+| **Colisor (*Head-to-head*)** | $A \to C \leftarrow B$ | **Bloqueado:** $\mathbf{A \perp\!\!\!\perp B}$ | **Aberto:** $\mathbf{A \not\perp\!\!\!\perp B \mid C}$ |
+
+::: {.fig-resize style="width: 88%; margin: 1.5rem auto;"}
 ```{.tikz}
 \definecolor{azul}{RGB}{43,92,143}
 \definecolor{laranja}{RGB}{217,95,2}
 \definecolor{cinza}{RGB}{127,127,127}
-\begin{tikzpicture}[>=latex, font=\small, thick]
-  % Cadeia
-  \node[draw=azul, fill=azul!10, circle, inner sep=2pt] (A1) at (0,2) {$A$};
-  \node[draw=laranja, fill=laranja!30, circle, inner sep=2pt] (B1) at (1.5,2) {$B$};
-  \node[draw=azul, fill=azul!10, circle, inner sep=2pt] (C1) at (3,2) {$C$};
-  \draw[->, thick] (A1) -- (B1);
-  \draw[->, thick] (B1) -- (C1);
-  \node[below=4pt of B1] {\textbf{Cadeia:} Bloqueado por $B$};
+\definecolor{vermelho}{RGB}{214,39,40}
 
-  % Causa Comum
-  \node[draw=laranja, fill=laranja!30, circle, inner sep=2pt] (B2) at (5.5,2.7) {$B$};
-  \node[draw=azul, fill=azul!10, circle, inner sep=2pt] (A2) at (4.5,1.3) {$A$};
-  \node[draw=azul, fill=azul!10, circle, inner sep=2pt] (C2) at (6.5,1.3) {$C$};
-  \draw[->, thick] (B2) -- (A2);
-  \draw[->, thick] (B2) -- (C2);
-  \node[below=4pt of B2, yshift=-1.1cm] {\textbf{Causa Comum:} Bloqueado por $B$};
+\begin{tikzpicture}[>=latex, font=\small, thick, scale=0.92]
+  % -----------------------------------------------------------------
+  % 1. Cadeia (Head-to-tail)
+  % -----------------------------------------------------------------
+  \begin{scope}[xshift=0cm]
+    \node[align=center, font=\footnotesize\bfseries] at (1.5, 3.2) {1. Cadeia};
+    \node[draw=azul, fill=azul!10, circle, inner sep=2pt, minimum size=0.85cm] (A1) at (0, 2.0) {$A$};
+    \node[draw=laranja, fill=laranja!30, circle, line width=1.5pt, inner sep=2pt, minimum size=0.85cm] (B1) at (1.5, 2.0) {$B$};
+    \node[draw=azul, fill=azul!10, circle, inner sep=2pt, minimum size=0.85cm] (C1) at (3.0, 2.0) {$C$};
+    
+    \draw[->, very thick] (A1) -- (B1);
+    \draw[->, very thick] (B1) -- (C1);
+    
+    \node[align=center, font=\scriptsize] at (1.5, 0.9) {$A \to B \to C$};
+    \node[align=center, font=\scriptsize\bfseries, text=azul] at (1.5, 0.2) {Bloqueado dado $B$\\( $A \perp\!\!\!\perp C \mid B$ )};
+  \end{scope}
 
-  % Colisor
-  \node[draw=azul, fill=azul!10, circle, inner sep=2pt] (A3) at (8,2.7) {$A$};
-  \node[draw=azul, fill=azul!10, circle, inner sep=2pt] (B3) at (10,2.7) {$B$};
-  \node[draw=laranja, fill=laranja!30, circle, inner sep=2pt] (C3) at (9,1.3) {$C$};
-  \draw[->, thick] (A3) -- (C3);
-  \draw[->, thick] (B3) -- (C3);
-  \node[below=4pt of C3] {\textbf{Colisor:} Aberto por $C$};
+  % -----------------------------------------------------------------
+  % 2. Causa Comum (Tail-to-tail)
+  % -----------------------------------------------------------------
+  \begin{scope}[xshift=4.5cm]
+    \node[align=center, font=\footnotesize\bfseries] at (1.5, 3.2) {2. Causa Comum};
+    \node[draw=laranja, fill=laranja!30, circle, line width=1.5pt, inner sep=2pt, minimum size=0.85cm] (B2) at (1.5, 2.3) {$B$};
+    \node[draw=azul, fill=azul!10, circle, inner sep=2pt, minimum size=0.85cm] (A2) at (0.3, 1.1) {$A$};
+    \node[draw=azul, fill=azul!10, circle, inner sep=2pt, minimum size=0.85cm] (C2) at (2.7, 1.1) {$C$};
+    
+    \draw[->, very thick] (B2) -- (A2);
+    \draw[->, very thick] (B2) -- (C2);
+    
+    \node[align=center, font=\scriptsize] at (1.5, 0.3) {$A \leftarrow B \to C$};
+    \node[align=center, font=\scriptsize\bfseries, text=azul] at (1.5, -0.4) {Bloqueado dado $B$\\( $A \perp\!\!\!\perp C \mid B$ )};
+  \end{scope}
+
+  % -----------------------------------------------------------------
+  % 3. Colisor (Head-to-head)
+  % -----------------------------------------------------------------
+  \begin{scope}[xshift=9.0cm]
+    \node[align=center, font=\footnotesize\bfseries] at (1.5, 3.2) {3. Colisor};
+    \node[draw=azul, fill=azul!10, circle, inner sep=2pt, minimum size=0.85cm] (A3) at (0.3, 2.3) {$A$};
+    \node[draw=azul, fill=azul!10, circle, inner sep=2pt, minimum size=0.85cm] (B3) at (2.7, 2.3) {$B$};
+    \node[draw=laranja, fill=laranja!30, circle, line width=1.5pt, inner sep=2pt, minimum size=0.85cm] (C3) at (1.5, 1.1) {$C$};
+    
+    \draw[->, very thick] (A3) -- (C3);
+    \draw[->, very thick] (B3) -- (C3);
+    \draw[<->, dashed, line width=1.2pt, vermelho] (A3) -- (B3) node[midway, above=1pt, font=\tiny\bfseries] {Induzido!};
+    
+    \node[align=center, font=\scriptsize] at (1.5, 0.3) {$A \to C \leftarrow B$};
+    \node[align=center, font=\scriptsize\bfseries, text=vermelho] at (1.5, -0.4) {ABERTO dado $C$\\( $A \not\perp\!\!\!\perp B \mid C$ )};
+  \end{scope}
 \end{tikzpicture}
 ```
-:::
-
-## Pausa Ativa 4: As Três Estruturas Canônicas e o Colisor
-
-::: {.callout-tip}
-## O Regador e a Chuva
-Considere as variáveis $A$ (Choveu), $B$ (Regador automático ligou) e $C$ (Grama está molhada). A física dita que $A$ e $B$ ocorrem de forma independente ($A \perp\!\!\!\perp B$). Se você olhar pela janela e vir a grama molhada ($C=1$), e logo depois souber que o regador ligou com certeza ($B=1$), o que acontece com a probabilidade de que tenha chovido ($A=1$)?
-:::
-
-::: {.callout-tip}
-## V ou F: As Geometrias Canônicas
-Julgue V ou F — a questão só conta se acertar os 4 itens:
-
-- □ Na cadeia $A \to B \to C$, as variáveis $A$ e $C$ tornam-se condicionalmente independentes dado $B$ ($A \perp\!\!\!\perp C \mid B$).
-- □ Na bifurcação $A \leftarrow B \to C$, condicionar em $B$ induz dependência espúria entre $A$ e $C$.
-- □ No colisor $A \to C \leftarrow B$, $A$ e $B$ são marginalmente independentes sem condicionamento ($A \perp\!\!\!\perp B$).
-- □ Se $C$ é um colisor no caminho entre $A$ e $B$, condicionar em um descendente de $C$ mantém o caminho bloqueado.
-:::
-
-::: {.content-visible when-format="revealjs"}
-## Pausa Ativa 4: Resposta
-
-::: {.callout-tip}
-## V ou F: Resposta
-- ✔ **V:** Condicionar no nó intermediário bloqueia o caminho *head-to-tail*.
-- ✗ **F:** Condicionar na causa comum dissipa a dependência espúria e restaura a independência.
-- ✔ **V:** Sem condicionamento, o colisor está naturalmente bloqueado ($A \perp\!\!\!\perp B$).
-- ✗ **F:** Condicionar no colisor **ou em seus descendentes** abre o canal e induz dependência.
-:::
-
-::: {.fragment}
-**Voltando à pergunta:** A certeza de que o regador ligou ($B=1$) "explica e afasta" (*explains away*) a evidência de que a grama está molhada, reduzindo a probabilidade a posteriori de chuva ($P(A=1 \mid C=1, B=1) < P(A=1 \mid C=1)$). É a assinatura matemática do colisor.
-:::
-:::
-
-# Bloco 4: d-Separação Geral, Cobertura de Markov e Equivalência
-
-## O Critério Geral de d-Separação
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-Para analisar grafos com dezenas de nós, generalizamos as regras canônicas através do **critério de $d$-separação** (*directed separation*), formulado por Judea Pearl (1988) e detalhado em PRML (§8.2.2).
-
-::: {.callout-note icon=false}
-## Teorema 2 (Critério de $d$-Separação; Pearl, 1988; PRML §8.2.2)
-Considere um grafo acíclico direcionado $\mathcal{G}$ e três conjuntos disjuntos de nós $A$, $B$ e $C$.
-Dizemos que um caminho não direcionado $p$ entre um nó de $A$ e um nó de $B$ está **bloqueado** pelo conjunto condicionado $C$ se:
-1. O caminho contém um nó $m$ que é *head-to-tail* ($\to m \to$ ou $\leftarrow m \leftarrow$) ou *tail-to-tail* ($\leftarrow m \to$), e $m \in C$; OU
-2. O caminho contém um nó $m$ que é *head-to-head* ($\to m \leftarrow$, colisor), e nem $m$ nem qualquer descendente de $m$ pertence a $C$.
-
-Se **todos** os caminhos possíveis entre os nós de $A$ e os nós de $B$ estiverem bloqueados por $C$, dizemos que **$A$ é $d$-separado de $B$ por $C$** no grafo $\mathcal{G}$, o que implica rigorosamente:
-$$A \perp\!\!\!\perp B \mid C$$
-para qualquer distribuição de probabilidade que fature de acordo com $\mathcal{G}$.
-:::
-
-Um conceito correlato essencial em inferência e amostragem é a **Cobertura de Markov** (*Markov Blanket*):
-
-::: {.callout-note icon=false}
-## Definição 4 (Cobertura de Markov; PRML §8.3.2)
-A Cobertura de Markov de um nó $X_i$, denotada por $\text{MB}(X_i)$, é o menor conjunto de nós que torna $X_i$ condicionalmente independente de todas as outras variáveis do grafo:
-$$X_i \perp\!\!\!\perp (\mathcal{V} \setminus \{X_i \cup \text{MB}(X_i)\}) \mid \text{MB}(X_i)$$
-Em uma Rede Bayesiana, $\text{MB}(X_i)$ é formada por:
-$$\text{MB}(X_i) = \text{pa}(X_i) \cup \text{ch}(X_i) \cup \text{co-pais}(X_i)$$
-onde $\text{co-pais}(X_i)$ são os outros pais dos filhos de $X_i$. A inclusão dos co-pais é estritamente obrigatória para bloquear os colisores induzidos pelos nós filhos!
 :::
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ::: {.callout-note}
-## O Critério de $d$-Separação (Pearl, 1988; PRML §8.2.2)
-Um caminho entre $A$ e $B$ está **bloqueado** por $C$ se contiver:
-1. Um nó não colisor ($\to m \to$ ou $\leftarrow m \to$) que **está em $C$**; OU
-2. Um colisor ($\to m \leftarrow$) tal que **nem $m$ nem seus descendentes estão em $C$**.
+## Resumo do Fluxo de Informação
+- **Cadeia ($A \to B \to C$):** Aberto marginalmente $\to$ **Bloqueado dado $B$** ($A \perp\!\!\!\perp C \mid B$).
+- **Causa Comum ($A \leftarrow B \to C$):** Aberto marginalmente $\to$ **Bloqueado dado $B$** ($A \perp\!\!\!\perp C \mid B$).
+- **Colisor ($A \to C \leftarrow B$):** **Bloqueado marginalmente** ($A \perp\!\!\!\perp B$) $\to$ **Aberto dado $C$** ($A \not\perp\!\!\!\perp B \mid C$).
+:::
+
+## Visualização das Três Geometrias Canônicas
+
+::: {.fig-resize style="width: 88%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{43,92,143}
+\definecolor{laranja}{RGB}{217,95,2}
+\definecolor{cinza}{RGB}{127,127,127}
+\definecolor{vermelho}{RGB}{214,39,40}
+
+\begin{tikzpicture}[>=latex, font=\small, thick, scale=0.92]
+  % -----------------------------------------------------------------
+  % 1. Cadeia (Head-to-tail)
+  % -----------------------------------------------------------------
+  \begin{scope}[xshift=0cm]
+    \node[align=center, font=\footnotesize\bfseries] at (1.5, 3.2) {1. Cadeia};
+    \node[draw=azul, fill=azul!10, circle, inner sep=2pt, minimum size=0.85cm] (A1) at (0, 2.0) {$A$};
+    \node[draw=laranja, fill=laranja!30, circle, line width=1.5pt, inner sep=2pt, minimum size=0.85cm] (B1) at (1.5, 2.0) {$B$};
+    \node[draw=azul, fill=azul!10, circle, inner sep=2pt, minimum size=0.85cm] (C1) at (3.0, 2.0) {$C$};
+    
+    \draw[->, very thick] (A1) -- (B1);
+    \draw[->, very thick] (B1) -- (C1);
+    
+    \node[align=center, font=\scriptsize] at (1.5, 0.9) {$A \to B \to C$};
+    \node[align=center, font=\scriptsize\bfseries, text=azul] at (1.5, 0.2) {Bloqueado dado $B$\\( $A \perp\!\!\!\perp C \mid B$ )};
+  \end{scope}
+
+  % -----------------------------------------------------------------
+  % 2. Causa Comum (Tail-to-tail)
+  % -----------------------------------------------------------------
+  \begin{scope}[xshift=4.5cm]
+    \node[align=center, font=\footnotesize\bfseries] at (1.5, 3.2) {2. Causa Comum};
+    \node[draw=laranja, fill=laranja!30, circle, line width=1.5pt, inner sep=2pt, minimum size=0.85cm] (B2) at (1.5, 2.3) {$B$};
+    \node[draw=azul, fill=azul!10, circle, inner sep=2pt, minimum size=0.85cm] (A2) at (0.3, 1.1) {$A$};
+    \node[draw=azul, fill=azul!10, circle, inner sep=2pt, minimum size=0.85cm] (C2) at (2.7, 1.1) {$C$};
+    
+    \draw[->, very thick] (B2) -- (A2);
+    \draw[->, very thick] (B2) -- (C2);
+    
+    \node[align=center, font=\scriptsize] at (1.5, 0.3) {$A \leftarrow B \to C$};
+    \node[align=center, font=\scriptsize\bfseries, text=azul] at (1.5, -0.4) {Bloqueado dado $B$\\( $A \perp\!\!\!\perp C \mid B$ )};
+  \end{scope}
+
+  % -----------------------------------------------------------------
+  % 3. Colisor (Head-to-head)
+  % -----------------------------------------------------------------
+  \begin{scope}[xshift=9.0cm]
+    \node[align=center, font=\footnotesize\bfseries] at (1.5, 3.2) {3. Colisor};
+    \node[draw=azul, fill=azul!10, circle, inner sep=2pt, minimum size=0.85cm] (A3) at (0.3, 2.3) {$A$};
+    \node[draw=azul, fill=azul!10, circle, inner sep=2pt, minimum size=0.85cm] (B3) at (2.7, 2.3) {$B$};
+    \node[draw=laranja, fill=laranja!30, circle, line width=1.5pt, inner sep=2pt, minimum size=0.85cm] (C3) at (1.5, 1.1) {$C$};
+    
+    \draw[->, very thick] (A3) -- (C3);
+    \draw[->, very thick] (B3) -- (C3);
+    \draw[<->, dashed, line width=1.2pt, vermelho] (A3) -- (B3) node[midway, above=1pt, font=\tiny\bfseries] {Induzido!};
+    
+    \node[align=center, font=\scriptsize] at (1.5, 0.3) {$A \to C \leftarrow B$};
+    \node[align=center, font=\scriptsize\bfseries, text=vermelho] at (1.5, -0.4) {ABERTO dado $C$\\( $A \not\perp\!\!\!\perp B \mid C$ )};
+  \end{scope}
+\end{tikzpicture}
+```
+:::
+:::
+
+## As Geometrias Canônicas como Filtro de Regras
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Agora podemos conectar formalmente os dois universos da aula: **como usar a teoria das estruturas canônicas para validar, filtrar e organizar as regras empíricas geradas pelo algoritmo Apriori?**
+
+Em bases reais de varejo, o Apriori gera centenas ou milhares de regras candidatas que superam os limiares de suporte e confiança. Em vez de aceitar passivamente essa lista plana ou tentar aprender um DAG global de 50 nós por força bruta (o que é computacionalmente proibitivo), realizamos **testes locais de independência condicional** sobre os candidatos minerados.
+
+Vejamos exatamente o que é feito com a relação candidata em cada uma das três geometrias:
+
+### 1. Filtragem de Regras Espúrias (Causa Comum: $A \leftarrow B \to C$)
+- **O Candidato do Apriori:** O algoritmo aponta a regra direta $\{Café\} \Rightarrow \{Torradeira\}$ com alto suporte, alta confiança e $\text{Lift} = 2{,}69$.
+- **O Teste Gráfico:** Testamos a independência condicional controlando pela variável de contexto socioeconômico $B$ (Perfil de Renda):
+  $$P(Café, Torradeira \mid Renda) \stackrel{?}{=} P(Café \mid Renda) \cdot P(Torradeira \mid Renda)$$
+- **O Que é Feito com a Relação:**
+  - **No Grafo (DAG):** Constatado que $Café \perp\!\!\!\perp Torradeira \mid Renda$, **eliminamos a aresta direta** entre Café e Torradeira. O DAG não terá aresta entre eles; apenas arestas originadas na causa comum: $Renda \to Café$ e $Renda \to Torradeira$.
+  - **No Sistema de Recomendação:** **A regra direta é descartada**. Se recomendarmos torradeiras para quem comprou café, a taxa de conversão será decepcionante porque o café não atrai torradeiras. A recomendação correta deve ser contextualizada pela causa comum (oferecer itens premium apenas a clientes de maior poder aquisitivo).
+
+### 2. Poda de Regras Redundantes (Cadeia / Transitividade: $A \to B \to C$)
+- **Os Candidatos do Apriori:** O algoritmo extrai três regras simultâneas sobre a mesma cesta:
+  $$\{Manteiga\} \Rightarrow \{Pão\}, \quad \{Pão\} \Rightarrow \{Café\}, \quad \text{e} \quad \{Manteiga\} \Rightarrow \{Café\}$$
+- **O Teste Gráfico:** Avaliamos se o intermediário $B$ ($Pão$) bloqueia a transmissão de informação entre os extremos:
+  $$P(Café \mid Pão, Manteiga) \stackrel{?}{=} P(Café \mid Pão)$$
+- **O Que é Feito com a Relação:**
+  - **No Grafo (DAG):** Comprovado que $Manteiga \perp\!\!\!\perp Café \mid Pão$, **podamos a aresta direta** $\{Manteiga\} \to \{Café\}$. Mantemos apenas as arestas adjacentes da cadeia: $Manteiga \to Pão$ e $Pão \to Café$.
+  - **No Sistema de Recomendação:** **A regra de atalho é arquivada como redundante**. Não sobrecarregamos a interface do cliente recomendando tudo de uma vez. O sistema sugere o próximo complemento imediato ($Pão$); uma vez que o pão é adicionado à cesta, o sistema sugere o café. O pipeline de recomendações ganha clareza sequencial e evita repetições cansativas.
+
+### 3. Proteção contra Falsas Associações por Seleção (Colisor: $A \to C \leftarrow B$)
+- **O Cenário e a Armadilha:** Na população geral de clientes, $\{Fraldas\}$ e $\{Vinho\}$ são itens independentes ($A \perp\!\!\!\perp B$). Contudo, se um analista filtrar a base de dados considerando apenas compras de tíquete elevado ou clientes do programa "Supermercado VIP" ($C=1$), o efeito comum é condicionado.
+- **O Teste Gráfico:** Pelo fenômeno de *explaining away*, condicionar no colisor $C$ abre o canal e faz os itens parecerem correlacionados na subamostra ($A \not\perp\!\!\!\perp B \mid C=1$).
+- **O Que é Feito com a Relação:**
+  - **No Grafo (DAG):** **Mantemos $A$ e $B$ estritamente desconectados** ($A \perp\!\!\!\perp B$). Orientamos ambas as setas convergindo para o colisor: $Fraldas \to CestaVIP \leftarrow Vinho$.
+  - **No Sistema de Recomendação:** **Rejeitamos a regra para a loja ampla**. Não criamos promoções cruzadas entre Fraldas e Vinho na loja física geral, pois essa regra foi um artefato criado pelo recorte amostral. Evitamos investimentos promocionais em falsas sinergias.
+
+| Situação no Apriori | Teste Estatístico | Geometria | Ação no Grafo (DAG) | Decisão no Sistema / Negócio |
+|---|:---:|:---:|---|---|
+| Regra isolada com alto Lift: $A \Rightarrow C$ | $A \perp\!\!\!\perp C \mid B$ | Causa Comum ($A \leftarrow B \to C$) | **Eliminar aresta direta** ($A - C$) | **Descartar regra** (Correlação Espúria) |
+| Triângulo de regras: $A \Rightarrow B, B \Rightarrow C, A \Rightarrow C$ | $A \perp\!\!\!\perp C \mid B$ | Cadeia ($A \to B \to C$) | **Podar atalho transitivo** ($A \to C$) | **Arquivar redundância** (Manter fluxo linear) |
+| Regra detectada apenas em subamostra | $A \not\perp\!\!\!\perp B \mid C$ | Colisor ($A \to C \leftarrow B$) | **Manter nós desconectados** ($A \perp\!\!\!\perp B$) | **Rejeitar promoção geral** (Viés de Seleção) |
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## O Que Fazer com a Regra em Cada Geometria?
+- **1. Causa Comum ($A \leftarrow B \to C$):**
+  - Teste: $Café \perp\!\!\!\perp Torradeira \mid Renda$.
+  - **Ação no Grafo:** Eliminar aresta direta.
+  - **Decisão no Negócio:** Descartar a regra do sistema de recomendação (espúria!).
 :::
 
 ::: {.fragment}
-- Se **todos** os caminhos entre $A$ e $B$ estiverem bloqueados por $C$, então:
-  $$\mathbf{A \perp\!\!\!\perp B \mid C}$$
+- **2. Cadeia / Transitividade ($A \to B \to C$):**
+  - Teste: $Manteiga \perp\!\!\!\perp Café \mid Pão$.
+  - **Ação no Grafo:** Podar a aresta de atalho $\{Manteiga\} \to \{Café\}$.
+  - **Decisão no Negócio:** Arquivar regra redundante; sugerir apenas o próximo passo.
 :::
 
-::: {.fragment .callout-note icon=false}
-## Cobertura de Markov (Markov Blanket)
-Menor conjunto que isola completamente um nó $X_i$ do restante do grafo:
-$$\text{MB}(X_i) = \text{pais}(X_i) \cup \text{filhos}(X_i) \cup \text{co-pais}(X_i)$$
-*Os co-pais são obrigatórios para bloquear os colisores abertos pelos nós filhos.*
+::: {.fragment .callout-warning}
+## 3. Colisor / Seleção ($A \to C \leftarrow B$)
+Condicionar em subamostras (ex: "Clientes VIP" $C=1$) induz dependências artificiais via *explaining away*.
+- **Ação no Grafo:** Manter $A$ e $B$ desconectados.
+- **Decisão no Negócio:** Rejeitar promoções gerais baseadas em recortes amostrais!
 :::
 :::
 
-::: {.fig-resize style="width: 65%; margin: 0 auto;"}
+## Pausa 4: As Geometrias Canônicas como Filtro de Regras
+
+::: {.callout-tip}
+## O Alarme e o Terremoto
+Considere três variáveis: $A$ (Ocorreu um terremoto), $B$ (Houve uma tentativa de assalto) e $C$ (O alarme da casa tocou). Terremotos e assaltos são independentes na natureza ($A \perp\!\!\!\perp B$).
+
+Se você estiver viajando e receber uma notificação de que o alarme tocou ($C=1$), e dez segundos depois ouvir no rádio que um terremoto acabou de ocorrer na sua cidade ($A=1$), o que acontece com a probabilidade de que sua casa tenha sido assaltada ($B=1$)?
+:::
+
+::: {.callout-tip}
+## V ou F: As Três Geometrias Canônicas
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Na cadeia $A \to B \to C$, condicionar no nó intermediário $B$ torna $A$ e $C$ condicionalmente independentes ($A \perp\!\!\!\perp C \mid B$).
+- □ Na causa comum $A \leftarrow B \to C$, condicionar em $B$ induz dependência espúria entre $A$ e $C$.
+- □ No colisor $A \to C \leftarrow B$, as causas $A$ e $B$ são marginalmente independentes sem nenhum condicionamento ($A \perp\!\!\!\perp B$).
+- □ Se $C$ for um colisor entre $A$ e $B$, condicionar no nó $C$ (ou em qualquer de seus descendentes) mantém o caminho bloqueado.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 4: Resposta
+
+::: {.callout-tip}
+## V ou F: Resposta
+- ✔ **V:** Condicionar no intermediário bloqueia o canal *head-to-tail*.
+- ✗ **F:** Condicionar na causa comum dissipa a correlação espúria e restaura a independência condicional.
+- ✔ **V:** Sem condicionamento no colisor nem em seus descendentes, o canal está naturalmente fechado.
+- ✗ **F:** Condicionar no colisor **ou em qualquer de seus descendentes** abre o caminho e induz dependência estatística.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** A confirmação do terremoto ($A=1$) "explica e afasta" (*explains away*) o disparo do alarme, fazendo com que a probabilidade a posteriori de um assalto despenque ($P(B=1 \mid C=1, A=1) \ll P(B=1 \mid C=1)$). É a assinatura matemática do colisor.
+:::
+:::
+
+# Bloco 4: Montando o Grafo e os Limites dos Dados Observacionais
+
+## Montando o Grafo por Componentes Locais
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Uma das dúvidas mais naturais ao estudar Redes Bayesianas é: **como sair da lista de regras do Apriori e chegar ao grafo geral de dependências da loja sem se perder na explosão combinatória?**
+
+Tentar testar todos os DAGs possíveis para um catálogo de 30 ou 50 produtos é computacionalmente intratável (o espaço de grafos cresce super-exponencialmente). A solução moderna, inspirada em algoritmos baseados em restrições como o **algoritmo PC** (Spirtes, Glymour & Scheines, 2000), consiste em **construir o grafo por montagem de componentes locais**:
+
+1. **Esqueleto Inicial via Apriori:** Em vez de começar com todas as conexões possíveis, usamos os pares frequentes minerados pelo Apriori ($L_2$) como o esqueleto inicial de arestas não direcionadas candidatas.
+2. **Poda Local de Espúrios e Transitividades:** Para cada aresta candidata $A - C$, testamos a independência condicional $A \perp\!\!\!\perp C \mid B$ condicionando nos possíveis intermediários ou causas comuns $B$. Se a independência for confirmada:
+   - Se $B$ for causa comum ($A \leftarrow B \to C$), descartamos a aresta direta (remoção de correlação espúria);
+   - Se $B$ for mediador ($A \to B \to C$), podamos a aresta direta (remoção de atalho transitivo redundante).
+3. **Orientação dos Colisores Unívocos:** Se duas variáveis $A$ e $B$ eram independentes ($A \perp\!\!\!\perp B$), mas tornam-se dependentes ao condicionar em um vizinho compartilhado $C$ ($A \not\perp\!\!\!\perp B \mid C$), identificamos uma **v-structure não blindada** e orientamos as setas convergentes de forma unívoca:
+   $$A \longrightarrow C \longleftarrow B$$
+4. **Grafo Essencial (CPDAG):** As arestas que fazem parte de colisores recebem direções fixas, enquanto as demais permanecem não orientadas, formando a classe de equivalência observacional.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Por Que Montar por Componentes Locais?
+- Ajustar um DAG global entre dezenas de itens por força bruta é intratável (espaço super-exponencial).
+- Em vez de buscar o grafo inteiro de uma vez, **montamos o grafo validando cada componente local** (abordagem baseada em restrições / Algoritmo PC).
+:::
+
+::: {.fragment}
+- **O Pipeline de Montagem em 3 Etapas:**
+  1. **Esqueleto:** O Apriori fornece os pares frequentes ($L_2$) como conexões candidatas.
+  2. **Poda Local:** Testes de independência condicional ($A \perp\!\!\!\perp C \mid B$) eliminam regras espúrias e atalhos transitivos.
+  3. **Orientação de Colisores:** Pares independentes que se tornam dependentes dado $C$ orientam setas unívocas ($A \to C \leftarrow B$).
+:::
+
+::: {.fragment .callout-important}
+## O Resultado
+Obtemos o **Grafo Essencial (CPDAG)**: esqueleto limpo com as direções identificáveis fixadas!
+:::
+:::
+
+## Exemplo Prático: Da Lista de Regras ao DAG
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para compreender concretamente como sair de uma lista de regras do Apriori e chegar ao grafo, acompanhemos um exemplo prático com cinco variáveis monitoradas em $50.000$ transações de um supermercado:
+- $R$: Perfil de Renda Alta (variável de contexto)
+- $C$: Café Gourmet
+- $T$: Torradeira Elétrica
+- $P$: Pão Francês
+- $M$: Manteiga
+
+### 1. O Ponto de Partida: As Regras Brutas do Apriori
+O algoritmo Apriori varreu a base transacional e retornou seis regras de associação frequentes que superaram os limiares mínimos de suporte e confiança:
+1. $\{R\} \Rightarrow \{C\}$ ($\text{Lift} = 2{,}5$)
+2. $\{R\} \Rightarrow \{T\}$ ($\text{Lift} = 2{,}8$)
+3. $\{C\} \Rightarrow \{T\}$ ($\text{Lift} = 2{,}69$) — *Candidata a correlação espúria!*
+4. $\{P\} \Rightarrow \{M\}$ ($\text{Lift} = 2{,}2$)
+5. $\{M\} \Rightarrow \{C\}$ ($\text{Lift} = 1{,}8$)
+6. $\{P\} \Rightarrow \{C\}$ ($\text{Lift} = 1{,}7$) — *Candidata a atalho redundante!*
+
+Se parássemos no Apriori, o supermercado tentaria ativar seis promoções e recomendações diferentes. Veja como o processo de montagem por restrições locais organiza essas regras:
+
+### 2. Passo 1: Construção do Esqueleto Inicial (Arestas Não Direcionadas)
+Convertemos cada uma das seis regras frequentes em uma aresta não direcionada no grafo:
+$$\text{Esqueleto} = \{ R - C, \quad R - T, \quad C - T, \quad P - M, \quad M - C, \quad P - C \}$$
+Neste estágio, o grafo inicial é ruidoso e contém dois triângulos densos: $\{R, C, T\}$ e $\{P, M, C\}$.
+
+### 3. Passo 2: Poda de Causa Comum (Filtro de Espúrios)
+Analisamos o triângulo $\{R, C, T\}$. Testamos a independência condicional entre $C$ e $T$ controlando pela variável comum $R$:
+$$P(C, T \mid R) = P(C \mid R) P(T \mid R) \implies \mathbf{C \perp\!\!\!\perp T \mid R}$$
+- **O que acontece:** A aresta direta $C - T$ é **removida do esqueleto**! A regra $\{C\} \Rightarrow \{T\}$ é descartada do catálogo. Restam apenas as arestas legítimas ligadas à causa comum: $R - C$ e $R - T$.
+
+### 4. Passo 3: Poda de Transitividade (Cadeia)
+Analisamos o triângulo $\{P, M, C\}$. Testamos se a compra de manteiga $M$ atua como intermediário entre $P$ e $C$:
+$$P(C \mid P, M) = P(C \mid M) \implies \mathbf{P \perp\!\!\!\perp C \mid M}$$
+- **O que acontece:** A aresta $P - C$ é um atalho redundante e é **podada**! Resta a cadeia linear limpa: $P - M$ e $M - C$.
+
+### 5. Passo 4: Orientação e Obtenção do DAG Final
+- O perfil de renda é uma característica socioeconômica prévia do cliente, orientando as causas comuns: $R \to C$ e $R \to T$.
+- Na cesta matinal, a ordem de decisão de consumo orienta a cadeia: $P \to M \to C$.
+- **O Resultado:** Das 6 regras ruidosas iniciais, o processo converge para um DAG com **apenas 4 arestas essenciais**, sem correlações espúrias e sem atalhos repetitivos!
+
+::: {.fig-resize style="width: 95%; margin: 1.5rem auto;"}
 ```{.tikz}
 \definecolor{azul}{RGB}{43,92,143}
 \definecolor{laranja}{RGB}{217,95,2}
 \definecolor{verde}{RGB}{27,158,119}
-\begin{tikzpicture}[>=latex, font=\small, thick]
-  \node[draw=azul, fill=azul!20, circle, inner sep=3pt, minimum size=1.1cm] (X) at (2,2) {$X_i$};
-  \node[draw=laranja, fill=laranja!10, circle, inner sep=2pt] (P1) at (0.8,3.5) {Pai 1};
-  \node[draw=laranja, fill=laranja!10, circle, inner sep=2pt] (P2) at (3.2,3.5) {Pai 2};
-  \node[draw=laranja, fill=laranja!10, circle, inner sep=2pt] (F1) at (1.2,0.5) {Filho 1};
-  \node[draw=laranja, fill=laranja!10, circle, inner sep=2pt] (F2) at (2.8,0.5) {Filho 2};
-  \node[draw=verde, fill=verde!10, circle, inner sep=2pt] (CP) at (4.2,1.8) {Co-pai};
+\definecolor{vermelho}{RGB}{214,39,40}
+\definecolor{cinza}{RGB}{127,127,127}
 
-  \draw[->, very thick] (P1) -- (X);
-  \draw[->, very thick] (P2) -- (X);
-  \draw[->, very thick] (X) -- (F1);
-  \draw[->, very thick] (X) -- (F2);
-  \draw[->, very thick, verde] (CP) -- (F2);
+\begin{tikzpicture}[>=latex, font=\small, thick, scale=0.88]
+  % -----------------------------------------------------------------
+  % Painel 1: Esqueleto Inicial do Apriori
+  % -----------------------------------------------------------------
+  \begin{scope}[xshift=0cm]
+    \node[align=center, font=\footnotesize\bfseries] at (0.5, 3.4) {1. Esqueleto Bruto do Apriori\\{\scriptsize(6 arestas candidatas, 2 triângulos)}};
+    
+    \node[draw=azul, fill=azul!10, rounded corners=4pt, inner sep=4pt] (R1) at (1.5, 2.4) {$R$ (Renda)};
+    \node[draw=laranja, fill=laranja!10, rounded corners=4pt, inner sep=4pt] (C1) at (0.0, 0.8) {$C$ (Café)};
+    \node[draw=laranja, fill=laranja!10, rounded corners=4pt, inner sep=4pt] (T1) at (3.0, 0.8) {$T$ (Torradeira)};
+    
+    \node[draw=verde, fill=verde!10, rounded corners=4pt, inner sep=4pt] (M1) at (0.0, -1.0) {$M$ (Manteiga)};
+    \node[draw=verde, fill=verde!10, rounded corners=4pt, inner sep=4pt] (P1) at (-2.4, -1.0) {$P$ (Pão)};
+    
+    % Triângulo 1 (Causa Comum)
+    \draw[very thick] (R1) -- (C1);
+    \draw[very thick] (R1) -- (T1);
+    \draw[very thick, cinza] (C1) -- (T1);
+    
+    % Triângulo 2 (Cadeia com Atalho)
+    \draw[very thick] (P1) -- (M1);
+    \draw[very thick] (M1) -- (C1);
+    \draw[very thick, cinza] (P1) -- (C1);
+  \end{scope}
 
-  \draw[dashed, red, rounded corners=12pt] (-0.2, -0.2) rectangle (5.2, 4.2);
-  \node[red, above=2pt] at (2.5, 4.2) {Markov Blanket $\text{MB}(X_i)$};
+  % -----------------------------------------------------------------
+  % Seta de Transformação (bem afastada dos nós)
+  % -----------------------------------------------------------------
+  \draw[->, line width=2.5pt, azul!40] (4.0, 0.8) -- (5.2, 0.8) 
+    node[midway, above=2pt, font=\scriptsize\bfseries, text=azul, align=center] {Poda\\Local};
+
+  % -----------------------------------------------------------------
+  % Painel 2: DAG Final Validado (xshift com folga total)
+  % -----------------------------------------------------------------
+  \begin{scope}[xshift=8.2cm]
+    \node[align=center, font=\footnotesize\bfseries] at (0.5, 3.4) {2. DAG Final Validado\\{\scriptsize(4 arestas essenciais, 0 redundâncias)}};
+    
+    \node[draw=azul, fill=azul!10, rounded corners=4pt, inner sep=4pt] (R2) at (1.5, 2.4) {$R$ (Renda)};
+    \node[draw=laranja, fill=laranja!10, rounded corners=4pt, inner sep=4pt] (C2) at (0.0, 0.8) {$C$ (Café)};
+    \node[draw=laranja, fill=laranja!10, rounded corners=4pt, inner sep=4pt] (T2) at (3.0, 0.8) {$T$ (Torradeira)};
+    
+    \node[draw=verde, fill=verde!10, rounded corners=4pt, inner sep=4pt] (M2) at (0.0, -1.0) {$M$ (Manteiga)};
+    \node[draw=verde, fill=verde!10, rounded corners=4pt, inner sep=4pt] (P2) at (-2.4, -1.0) {$P$ (Pão)};
+    
+    % Arestas direcionadas essenciais
+    \draw[->, very thick, azul] (R2) -- (C2);
+    \draw[->, very thick, azul] (R2) -- (T2);
+    \draw[->, very thick, verde!70!black] (P2) -- (M2);
+    \draw[->, very thick, verde!70!black] (M2) -- (C2);
+    
+    % Poda da Causa Comum (horizontal)
+    \draw[<->, dashed, line width=1.2pt, vermelho] (C2) -- (T2) 
+      node[midway, fill=white, inner sep=2pt, draw=vermelho!50, rounded corners=2pt, font=\tiny\bfseries, text=vermelho] 
+      {Cortado! ($C \perp\!\!\!\perp T \mid R$)};
+      
+    % Poda da Transitividade (diagonal)
+    \draw[<->, dashed, line width=1.2pt, vermelho] (P2) -- (C2) 
+      node[midway, fill=white, inner sep=2pt, draw=vermelho!50, rounded corners=2pt, font=\tiny\bfseries, text=vermelho] 
+      {Podado! ($P \perp\!\!\!\perp C \mid M$)};
+  \end{scope}
+\end{tikzpicture}
+```
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note}
+## Exemplo: As 6 Regras Candidatas do Apriori
+1. $\{R\} \Rightarrow \{C\}$ ($\text{Lift} = 2{,}5$)
+2. $\{R\} \Rightarrow \{T\}$ ($\text{Lift} = 2{,}8$)
+3. $\{C\} \Rightarrow \{T\}$ ($\text{Lift} = 2{,}69$) — *Espúrio!*
+4. $\{P\} \Rightarrow \{M\}$ ($\text{Lift} = 2{,}2$)
+5. $\{M\} \Rightarrow \{C\}$ ($\text{Lift} = 1{,}8$)
+6. $\{P\} \Rightarrow \{C\}$ ($\text{Lift} = 1{,}7$) — *Atalho redundante!*
+- O esqueleto inicial do Apriori forma **dois triângulos densos e sobrepostos**.
+:::
+
+## Visualização: 1. Esqueleto Bruto do Apriori
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{43,92,143}
+\definecolor{laranja}{RGB}{217,95,2}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{cinza}{RGB}{127,127,127}
+
+\begin{tikzpicture}[>=latex, font=\small, thick, scale=1.05]
+  \node[draw=azul, fill=azul!10, rounded corners=5pt, inner sep=5pt] (R) at (1.5, 2.5) {\textbf{Perfil de Renda ($R$)}};
+  \node[draw=laranja, fill=laranja!10, rounded corners=5pt, inner sep=5pt] (C) at (0.0, 0.8) {\textbf{Café ($C$)}};
+  \node[draw=laranja, fill=laranja!10, rounded corners=5pt, inner sep=5pt] (T) at (3.5, 0.8) {\textbf{Torradeira ($T$)}};
+  
+  \node[draw=verde, fill=verde!10, rounded corners=5pt, inner sep=5pt] (M) at (0.0, -1.1) {\textbf{Manteiga ($M$)}};
+  \node[draw=verde, fill=verde!10, rounded corners=5pt, inner sep=5pt] (P) at (-2.8, -1.1) {\textbf{Pão ($P$)}};
+  
+  % Triângulo Superior (Causa Comum)
+  \draw[very thick] (R) -- (C);
+  \draw[very thick] (R) -- (T);
+  \draw[very thick, cinza] (C) -- (T) node[midway, above=2pt, font=\scriptsize\bfseries, text=cinza!80!black] {Regra Espúria};
+  
+  % Triângulo Inferior (Cadeia com Atalho)
+  \draw[very thick] (P) -- (M);
+  \draw[very thick] (M) -- (C);
+  \draw[very thick, cinza] (P) -- (C) node[midway, left=2pt, font=\scriptsize\bfseries, text=cinza!80!black] {Atalho Redundante};
 \end{tikzpicture}
 ```
 :::
 
-## Classes de Equivalência de Markov (I-Equivalência)
+## Montando o DAG Passo a Passo
+
+::: {.callout-important}
+## 1. Poda de Causa Comum (Filtro de Espúrios)
+- Teste: $P(C, T \mid R) = P(C \mid R)P(T \mid R) \implies \mathbf{C \perp\!\!\!\perp T \mid R}$.
+- **Ação:** Aresta direta $C - T$ é **removida** do grafo!
+:::
+
+::: {.fragment .callout-important}
+## 2. Poda de Transitividade (Cadeia)
+- Teste: $P(C \mid P, M) = P(C \mid M) \implies \mathbf{P \perp\!\!\!\perp C \mid M}$.
+- **Ação:** Atalho redundante $P - C$ é **podado**! Resta $P \to M \to C$.
+:::
+
+::: {.fragment}
+- **Resultado:** De 6 regras ruidosas para **4 dependências essenciais**!
+:::
+
+## Visualização: 2. O DAG Final Validado
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{43,92,143}
+\definecolor{laranja}{RGB}{217,95,2}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{vermelho}{RGB}{214,39,40}
+
+\begin{tikzpicture}[>=latex, font=\small, thick, scale=1.05]
+  \node[draw=azul, fill=azul!10, rounded corners=5pt, inner sep=5pt] (R) at (1.5, 2.5) {\textbf{Perfil de Renda ($R$)}};
+  \node[draw=laranja, fill=laranja!10, rounded corners=5pt, inner sep=5pt] (C) at (0.0, 0.8) {\textbf{Café ($C$)}};
+  \node[draw=laranja, fill=laranja!10, rounded corners=5pt, inner sep=5pt] (T) at (3.5, 0.8) {\textbf{Torradeira ($T$)}};
+  
+  \node[draw=verde, fill=verde!10, rounded corners=5pt, inner sep=5pt] (M) at (0.0, -1.1) {\textbf{Manteiga ($M$)}};
+  \node[draw=verde, fill=verde!10, rounded corners=5pt, inner sep=5pt] (P) at (-2.8, -1.1) {\textbf{Pão ($P$)}};
+  
+  % Arestas direcionadas essenciais
+  \draw[->, very thick, azul] (R) -- (C);
+  \draw[->, very thick, azul] (R) -- (T);
+  \draw[->, very thick, verde!70!black] (P) -- (M);
+  \draw[->, very thick, verde!70!black] (M) -- (C);
+  
+  % Poda da Causa Comum (horizontal) com badge isolado
+  \draw[<->, dashed, line width=1.3pt, vermelho] (C) -- (T) 
+    node[midway, fill=white, inner sep=3pt, draw=vermelho!50, rounded corners=3pt, font=\scriptsize\bfseries, text=vermelho] 
+    {Cortado! ($C \perp\!\!\!\perp T \mid R$)};
+    
+  % Poda da Transitividade (diagonal) com badge isolado
+  \draw[<->, dashed, line width=1.3pt, vermelho] (P) -- (C) 
+    node[midway, fill=white, inner sep=3pt, draw=vermelho!50, rounded corners=3pt, font=\scriptsize\bfseries, text=vermelho] 
+    {Podado! ($P \perp\!\!\!\perp C \mid M$)};
+\end{tikzpicture}
+```
+:::
+:::
+
+## I-Equivalência e o Limite Epistemológico Observacional
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Chegamos à questão metodológica decisiva do aprendizado não supervisionado de estruturas: **podemos aprender a direção causal exata de todas as arestas apenas a partir de dados observacionais passivos?**
+Chegamos à questão metodológica decisiva do aprendizado não supervisionado: **podemos descobrir relações de causa e efeito genuínas apenas observando matrizes de dados passivos?**
 
-A resposta analítica é **não**. Considere os três grafos:
-1. $A \to B \to C$
-2. $A \leftarrow B \leftarrow C$
-3. $A \leftarrow B \to C$
+A resposta teórica é **não**. Considere os três grafos a seguir:
+1. $A \to B \to C$ (Cadeia direta)
+2. $A \leftarrow B \leftarrow C$ (Cadeia reversa)
+3. $A \leftarrow B \to C$ (Causa comum)
 
-Todos os três codificam rigorosamente a mesma única declaração de independência condicional: $A \perp\!\!\!\perp C \mid B$. Nenhuma matriz de dados observacionais, por maior que seja o número de transações $N$, consegue diferenciar esses três modelos.
+Todos os três modelos codificam **exatamente a mesma declaração de independência condicional**: $A \perp\!\!\!\perp C \mid B$. Nenhuma massa de dados puramente observacionais, por maior que seja o número de transações $N$, consegue distinguir esses três grafos.
 
 ::: {.callout-note icon=false}
-## Teorema 3 (I-Equivalência de Markov; Verma & Pearl, 1990)
-Dois Grafos Acíclicos Direcionados $\mathcal{G}_1$ e $\mathcal{G}_2$ induzem exatamente as mesmas declarações de independência condicional ($I(\mathcal{G}_1) = I(\mathcal{G}_2)$) se e somente se:
-1. Possuem o mesmo **esqueleto** (as mesmas arestas quando desconsideradas as direções); E
+## Teorema 2 (I-Equivalência de Markov; Verma & Pearl, 1990)
+Dois DAGs $\mathcal{G}_1$ e $\mathcal{G}_2$ induzem rigorosamente o mesmo conjunto de independências condicionais ($I(\mathcal{G}_1) = I(\mathcal{G}_2)$) se e somente se:
+1. Possuem o mesmo **esqueleto** (as mesmas arestas não direcionadas); E
 2. Possuem as mesmas **v-structures não blindadas** (os mesmos colisores $A \to C \leftarrow B$ sem aresta direta entre $A$ e $B$).
 :::
 
-O colisor $A \to B \leftarrow C$ é observacionalmente único: ele codifica $A \perp\!\!\!\perp C$ (marginalmente) e $A \not\perp\!\!\!\perp C \mid B$, sendo distinguível dos outros três.
-Por isso, algoritmos não supervisionados de aprendizado de estrutura (*structure learning*, como o algoritmo PC) retornam um **Grafo Essencial (CPDAG)**: as arestas que formam v-structures recebem direções fixas, enquanto arestas pertencentes a cadeias/bifurcações permanecem não orientadas ($A - B - C$), exigindo ou ordem temporal a priori ou experimentos de intervenção ativa ($do$-calculus de Pearl) para determinar o fluxo causal.
+O colisor $A \to C \leftarrow B$ é a única estrutura de 3 nós observacionalmente unívoca, pois codifica $A \perp\!\!\!\perp B$ e $A \not\perp\!\!\!\perp B \mid C$. Em contrapartida, cadeias e causas comuns pertencem à mesma classe de equivalência de Markov.
+
+### O Teto Observacional e a Intervenção Ativa
+Essa equivalência define o teto epistemológico do aprendizado puramente observacional:
+- Com dados passivos, aprendemos o **esqueleto** e a orientação dos **colisores**;
+- Para desvendar a direção das arestas restantes e afirmar causalidade real ("$A$ causa a compra de $B$"), é indispensável recorrer ao **operador $do(x)$ de Pearl** — ou seja, realizar **intervenções experimentais ativas** (como um Teste A/B alterando preço, posicionamento ou estoque de $A$ e medindo a resposta em $B$).
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ::: {.callout-note}
 ## O Limite Epistemológico dos Dados Observacionais
-- Três estruturas distintas:
+- Três estruturas com orientações distintas:
   $$A \to B \to C \quad \Longleftrightarrow \quad A \leftarrow B \leftarrow C \quad \Longleftrightarrow \quad A \leftarrow B \to C$$
-- Todas as três dizem exatamente a mesma coisa: **$A \perp\!\!\!\perp C \mid B$**.
-- Nenhum algoritmo não supervisionado sobre dados passivos consegue separá-las!
+- Todas as três codificam exatamente a mesma declaração: **$A \perp\!\!\!\perp C \mid B$**.
+- Nenhum algoritmo sobre dados puramente passivos consegue separá-las!
 :::
 
 ::: {.fragment .callout-note icon=false}
 ## Teorema de I-Equivalência (Verma & Pearl, 1990)
 Dois DAGs pertencem à mesma classe de equivalência de Markov se e somente se:
-1. Compartilham o mesmo **esqueleto não direcionado**; E
-2. Compartilham as mesmas **v-structures** (colisores $A \to C \leftarrow B$).
+1. Compartilham o mesmo **esqueleto**; E
+2. Compartilham as mesmas **v-structures** ($A \to C \leftarrow B$).
 :::
 
 ::: {.fragment .callout-important}
-## O CPDAG (Grafo Essencial)
-Algoritmos puramente observacionais orientam apenas as v-structures. Cadeias e bifurcações ficam como arestas não orientadas ($A - B - C$), exigindo suposições prévias de temporalidade ou intervenções causais ativas.
+## Causalidade Exige Intervenção ($do(x)$)
+Dados observacionais passivos constroem o CPDAG e orientam colisores. Para determinar a direção causal de arestas reversíveis, é indispensável a **intervenção experimental ativa** (teste A/B no varejo, forçando $do(A)$).
 :::
 :::
 
-## Pausa Ativa 5: d-Separação e Equivalência de Markov
-
-::: {.callout-tip}
-## O Limite da Observação Passiva
-Suponha que, analisando 500 mil transações de varejo com os itens $A$, $B$ e $C$, seus testes estatísticos comprovem que $A \perp\!\!\!\perp C \mid B$, e nenhuma outra independência exista. É viável determinar apenas com os dados e sem fazer intervenções de preços se o modelo correto é $A \to B \to C$ ou $A \leftarrow B \to C$? O que isso nos ensina sobre mineração de dados não supervisionada?
-:::
+## Pausa 5: Componentes do Grafo e o Teto Observacional
 
 ::: {.callout-tip}
-## V ou F: d-Separação e Equivalência
+## O Teto dos Dados Passivos
+Suponha que, analisando 500 mil transações de varejo com os produtos $A$, $B$ e $C$, seus testes estatísticos comprovem rigorosamente que $A \perp\!\!\!\perp C \mid B$, e nenhuma outra independência exista. É possível afirmar apenas com esses dados se $A$ causa $B$ ou se $B$ causa $A$? O que seria necessário fazer na loja para desvendar a seta com certeza científica?
+:::
+
+::: {.callout-tip}
+## V ou F: Componentes e Equivalência Observacional
 Julgue V ou F — a questão só conta se acertar os 4 itens:
 
-- □ O critério de $d$-separação assegura que, se todos os caminhos entre $A$ e $B$ estiverem bloqueados por $C$, então $A \perp\!\!\!\perp B \mid C$ em qualquer distribuição compatível com o DAG.
-- □ A Cobertura de Markov de um nó $X$ é formada unicamente por seus pais e seus filhos imediatos.
-- □ Dois DAGs com o mesmo esqueleto e as mesmas v-structures geram o mesmo conjunto de independências condicionais.
-- □ O grafo de colisor $A \to B \leftarrow C$ pertence à mesma classe de equivalência de Markov que $A \to B \to C$.
+- □ O Apriori fornece o esqueleto inicial de conexões frequentes, enquanto os testes locais de independência condicional podam regras espúrias e atalhos transitivos.
+- □ Dois DAGs com o mesmo esqueleto e as mesmas v-structures pertencem à mesma classe de equivalência de Markov e são indistinguíveis por dados puramente observacionais.
+- □ O grafo de colisor $A \to B \leftarrow C$ gera a mesma distribuição de independência condicional que a cadeia $A \to B \to C$.
+- □ Apenas com dados passivos de compras de supermercado, sem qualquer experimento ativo ($do(x)$), é sempre possível determinar a direção de causa e efeito de todas as arestas do grafo.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Pausa Ativa 5: Resposta
+## Pausa 5: Resposta
 
 ::: {.callout-tip}
 ## V ou F: Resposta
-- ✔ **V:** É o teorema fundamental de Pearl (1988).
-- ✗ **F:** A Cobertura de Markov inclui obrigatoriamente os co-pais para bloquear os colisores abertos pelos filhos.
-- ✔ **V:** Critério formal de Verma & Pearl (1990) para I-equivalência.
-- ✗ **F:** O colisor introduz uma v-structure exclusiva que torna $A$ e $C$ marginalmente independentes, sendo distinguível.
+- ✔ **V:** Essa é a estratégia computacionalmente tratável de algoritmos baseados em restrições (como o PC).
+- ✔ **V:** Teorema de Verma & Pearl (1990); ambos produzem exatamente as mesmas independências condicionais.
+- ✗ **F:** O colisor possui assinatura observacional única ($A \perp\!\!\!\perp C$ marginalmente, mas dependente dado $B$).
+- ✗ **F:** Dados observacionais encontram apenas a classe de equivalência (CPDAG); causalidade exige intervenção ativa ($do(x)$) ou premissas temporais externas.
 :::
 
 ::: {.fragment}
-**Voltando à pergunta:** É impossível distinguir $A \to B \to C$ de $A \leftarrow B \to C$ apenas com dados observacionais, pois ambos pertencem à mesma classe de equivalência de Markov. Para desvendar a seta, é indispensável informação a priori (como ordem temporal de checkout) ou uma intervenção causal ativa.
+**Voltando à pergunta:** É impossível determinar a direção causal apenas com dados observacionais passivos, pois $A \to B \to C$, $A \leftarrow B \leftarrow C$ e $A \leftarrow B \to C$ geram exatamente as mesmas independências condicionais. Para descobrir a seta causal, seria indispensável uma **intervenção ativa**: intervir no preço, vitrine ou estoque de $B$ (forçar $do(B)$) e observar se as compras de $A$ e $C$ se alteram.
 :::
 :::
 
@@ -893,31 +1986,45 @@ Julgue V ou F — a questão só conta se acertar os 4 itens:
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 
-## Retomando as Cinco Perguntas
+## A Síntese: Do Candidato Bruto aos Componentes Validados
 
-1. **Como formalizar matematicamente a mineração de regras de associação e a poda do Apriori?**
-   O suporte é a probabilidade conjunta empírica $s(I) = P(\bigwedge_{j \in I} x_j = 1)$. A propriedade de antimonotonicidade ($A \subseteq B \implies s(B) \le s(A)$) garante que qualquer superconjunto de um itemset infrequente é obrigatoriamente infrequente, permitindo podar exponencialmente a busca em $2^D - 1$ combinações.
-2. **Por que o Lift falha como métrica de descoberta estrutural?**
-   O *Lift* é estritamente simétrico ($\text{Lift}(A \Rightarrow B) \equiv \text{Lift}(B \Rightarrow A)$) e mede apenas o desvio da independência marginal agregada. Ele é cego a causas comuns latentes: duas variáveis independentes podem apresentar um *Lift* muito superior a $1$ devido a um confundidor comum (Paradoxo de Simpson).
-3. **Como as Redes Bayesianas fatoram a distribuição conjunta e geram economia paramétrica exponencial?**
-   Sob um DAG, a regra da cadeia fatora localmente: $p(x_1, \dots, x_K) = \prod_k p(x_k \mid \text{pa}_k)$. Isso reduz o espaço de parâmetros de $2^K - 1$ para $O(K \cdot 2^m)$, viabilizando inferência e estimação com amostras finitas.
-4. **Quais são as três geometrias canônicas de dependência condicional?**
-   Cadeia ($A \to B \to C$, bloqueada por $B$), Causa Comum ($A \leftarrow B \to C$, bloqueada por $B$), e Colisor ($A \to C \leftarrow B$, aberto por $C$). No colisor, duas causas marginalmente independentes tornam-se dependentes ao condicionarmos no efeito comum (*explaining away*).
-5. **Como funciona o critério geral de $d$-separação e quais são os limites da inferência observacional?**
-   Um caminho é bloqueado se contiver um não colisor condicionado ou um colisor não condicionado (nem em seus descendentes). Dois DAGs com o mesmo esqueleto e as mesmas v-structures pertencem à mesma classe de equivalência de Markov, impondo um limite formal: dados observacionais passivos não orientam arestas fora de v-structures.
+Nesta aula, articulamos dois pilares metodológicos fundamentais para lidar com dados discretos e transacionais:
+
+1. **O Algoritmo Apriori como Gerador Eficiente de Candidatos:**
+   A força do Apriori reside na propriedade de antimonotonicidade do suporte. Ele consegue varrer milhões de cestas de compras esparsas e encontrar de forma exaustiva todas as associações frequentes que superam os limiares mínimos. No entanto, o Apriori entrega uma tabela plana de regras empíricas, sem distinção entre causas reais, atalhos redundantes e correlações espúrias.
+
+2. **Modelos Gráficos Probabilísticos como Filtro e Validador Estrutural:**
+   As Redes Bayesianas e a independência condicional fornecem a régua formal para testar a validade de cada regra candidata:
+   - **Bifurcação / Causa Comum ($A \leftarrow B \to C$):** filtra e descarta regras diretas espúrias quando $A \perp\!\!\!\perp C \mid B$;
+   - **Cadeia / Transitividade ($A \to B \to C$):** poda atalhos diretos redundantes quando o intermediário bloqueia o fluxo ($A \perp\!\!\!\perp C \mid B$);
+   - **Colisor ($A \to C \leftarrow B$):** alerta contra regras artificiais originadas por viés de seleção e condicionamento em efeitos comuns.
+
+3. **Construção do Grafo por Montagem de Componentes Locais:**
+   Em vez de nos perdermos na armadilha combinatória intratável de tentar ajustar um DAG global completo a partir de $2^K - 1$ parâmetros, **construímos o grafo geral validando cada componente local**. O resultado observacional rigoroso é o **Grafo Essencial (CPDAG)**: esqueleto despoluído de transitividades e espúrios, com colisores unicamente orientados.
+
+## Retomando as Quatro Perguntas
+
+1. **Como formalizar matematicamente transações, Suporte, Confiança e a Antimonotonicidade?**
+   Transações são vetores binários $\mathbf{x} \in \{0, 1\}^D$. O suporte $s(I)$ é a frequência conjunta empírica. Pela antimonotonicidade ($A \subseteq B \implies s(B) \le s(A)$), subconjuntos infrequentes garantem a infrequência de qualquer superconjunto. O *Lift* é comutativo e falha perante variáveis de confusão latentes (Paradoxo de Simpson).
+2. **Como o algoritmo Apriori opera na prática para podar o espaço de busca combinatorial?**
+   Gera candidatos por junção $L_{k-1} \bowtie L_{k-1}$, descarta candidatos cujos subconjuntos de tamanho $k-1$ não estejam em $L_{k-1}$ na memória RAM antes de acessar o disco, e varre a base apenas para os candidatos sobreviventes.
+3. **Como as Redes Bayesianas e as três geometrias canônicas filtram regras do Apriori?**
+   Sob um DAG, a conjunta fatora nos pais imediatos ($p(\mathbf{x}) = \prod_k p(x_k \mid \text{pa}_k)$), reduzindo parâmetros de $2^K$ para $O(K \cdot 2^m)$. As três geometrias canônicas atuam como filtros estruturais: a Causa Comum ($A \leftarrow B \to C$) descarta regras espúrias, a Cadeia ($A \to B \to C$) poda atalhos redundantes, e o Colisor ($A \to C \leftarrow B$) previne armadilhas de seleção e *explaining away*.
+4. **Como montar o grafo de dependências e quais são os limites da observação passiva?**
+   Construímos o grafo validando componentes locais (esqueleto do Apriori $\to$ testes de independência $\to$ colisores unívocos), gerando o Grafo Essencial (CPDAG). Pelo Teorema de I-Equivalência de Markov (Verma & Pearl, 1990), dados observacionais passivos não determinam a direção causal de arestas reversíveis; a causalidade plena exige intervenções experimentais ativas ($do(x)$, teste A/B).
 
 ## O Que Fica em Aberto e Limitações
 
-- **Complexidade do Aprendizado de Estrutura:** Encontrar o DAG ótimo que maximiza o escore BIC/BDeu a partir de dados é NP-difícil; algoritmos práticos utilizam heurísticas gulosas ou restrições de independência (algoritmo PC).
-- **Variáveis Ocultas não Observadas:** Quando confundidores latentes não são medidos, as classes de equivalência tornam-se Grafos Acíclicos Ancestrais (MAGs/PAGs), exigindo o cálculo de causalidade formal ($do$-calculus de Pearl).
-- **Dados Esparsos Massivos:** Em matrizes transacionais de catálogo gigante com milhões de produtos e poucos cliques por usuário, Redes Bayesianas tornam-se densas demais; métodos de fatoração contínua de matrizes oferecem uma saída algébrica complementar.
+- **Complexidade do Aprendizado de Estrutura:** Aprender a estrutura do DAG a partir de dados observacionais é um problema NP-difícil; algoritmos como o PC ou métodos baseados em pontuação (BIC/BDeu) utilizam aproximações gulosas.
+- **Variáveis Latentes não Observadas:** Quando causas comuns não são medidas na base de dados, a equivalência de Markov exige extensões como Grafos Acíclicos Ancestrais (MAGs/PAGs).
+- **Esparsidade Extrema em Catálogos Massivos:** Em sistemas de recomendação com milhões de itens e matrizes com mais de $99\%$ de entradas ausentes, modelos gráficos tabulares tornam-se densos demais.
 
 ::: {.callout-tip}
 ## Ponte para a Aula 10
 
-Nesta aula, modelamos a dependência entre variáveis discretas através de grafos direcionados e probabilidades condicionais.
+Nesta aula, modelamos dependências entre variáveis discretas através de regras de associação e redes bayesianas.
 
-Na próxima aula (**Aula 10: Sistemas de Recomendação — Fatoração de Matrizes: SVD e NMF**), enfrentaremos o problema da esparsidade extrema sob uma ótica algébrica e geométrica. Investigaremos como decompor matrizes gigantescas de preferências incompletas utilizando **Truncated SVD** e **Fatoração de Matrizes Não Negativas (NMF)**, demonstrando como a imposição de restrições de não negatividade altera radicalmente a interpretabilidade dos fatores latentes em partes aditivas reais.
+Na próxima aula (**Aula 10: Sistemas de Recomendação — Fatoração de Matrizes: SVD e NMF**), enfrentaremos o problema da esparsidade extrema sob a perspectiva de fatores latentes contínuos e matriciais. Investigaremos como decompor matrizes massivas e incompletas utilizando **Truncated SVD (Funk-SVD)** e **Fatoração de Matrizes Não Negativas (NMF)**, demonstrando como restrições de positividade produzem representações aditivas naturais e altamente interpretáveis.
 
 [Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
 [Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
@@ -927,40 +2034,56 @@ Na próxima aula (**Aula 10: Sistemas de Recomendação — Fatoração de Matri
 
 ::: {.content-visible when-format="revealjs"}
 
-## Retomando as Cinco Perguntas
+## A Síntese: Candidato Bruto vs. Validação Gráfica
 
-::: {.fragment}
-**1.** Suporte é probabilidade conjunta empírica; antimonotonicidade ($A \subseteq B \implies s(B) \le s(A)$) permite a poda exponencial do Apriori.
+::: {.callout-note}
+## 1. O Apriori como Gerador de Candidatos
+- Rápido, exaustivo e escalável via antimonotonicidade do suporte.
+- Produz a lista inicial de regras frequentes com suporte e confiança.
 :::
 
 ::: {.fragment}
-**2.** O Lift é simétrico ($\text{Lift}(A \Rightarrow B) \equiv \text{Lift}(B \Rightarrow A)$) e vulnerável ao Paradoxo de Simpson por causas comuns latentes.
+- **2. PGMs e Independência Condicional como Validador e Filtro:**
+  - **Causa Comum ($A \leftarrow B \to C$):** descarta regras espúrias ($A \perp\!\!\!\perp C \mid B$).
+  - **Cadeia ($A \to B \to C$):** poda atalhos redundantes ($A \perp\!\!\!\perp C \mid B$).
+  - **Colisor ($A \to C \leftarrow B$):** previne vieses de seleção e orienta setas essenciais.
+:::
+
+::: {.fragment .callout-important}
+## 3. Montando o Grafo por Componentes Locais
+Não ajustamos um DAG global intratável: **validamos cada componente local**. A união desses blocos forma o esqueleto e os colisores (CPDAG) da Rede Bayesiana!
+:::
+
+## Retomando as Quatro Perguntas
+
+::: {.fragment}
+**1.** Suporte é frequência empírica conjunta; antimonotonicidade ($A \subseteq B \implies s(B) \le s(A)$) permite a poda exponencial de superconjuntos. O Lift é simétrico e vulnerável a variáveis de confusão latentes.
 :::
 
 ::: {.fragment}
-**3.** Redes Bayesianas fatoram a conjunta como $p(\mathbf{x}) = \prod_k p(x_k \mid \text{pa}_k)$, reduzindo os parâmetros de $2^K$ para $O(K \cdot 2^m)$.
+**2.** O Apriori executa junção $L_{k-1} \bowtie L_{k-1}$, poda candidatos em memória RAM e varre o disco apenas para conjuntos válidos.
 :::
 
 ::: {.fragment}
-**4.** Cadeia e Causa Comum são bloqueadas pelo nó intermediário; Colisores são abertos pelo condicionamento no efeito comum (*explaining away*).
+**3.** Redes Bayesianas fatoram a conjunta nos pais imediatos. As três geometrias canônicas filtram regras espúrias (causa comum), podam redundâncias (cadeia) e alertam sobre viés de seleção (colisor).
 :::
 
 ::: {.fragment}
-**5.** $d$-Separação formaliza o bloqueio de caminhos gerais. Classes de equivalência de Markov (mesmo esqueleto e v-structures) limitam a descoberta causal em dados observacionais.
+**4.** O grafo é montado por componentes locais gerando o CPDAG. Pela I-Equivalência de Markov, dados puramente observacionais não revelam causalidade plena sem intervenção experimental ativa ($do(x)$).
 :::
 
 ## O Que Fica em Aberto
 
 ::: {.fragment}
 - **Aprendizado de Estrutura:** Achar o melhor DAG é NP-difícil (algoritmos gulosos e algoritmo PC).
-- **Variáveis Latentes:** Exigem extensões causais e o $do$-calculus de Pearl.
-- **Esparsidade Massiva em Varejo:** Para milhões de itens, modelos tabulares tornam-se intratáveis.
+- **Variáveis Ocultas:** Exigem o ferramental do $do$-calculus de Pearl.
+- **Esparsidade Massiva em Varejo:** Catálogos com milhões de itens pedem representações matriciais contínuas.
 :::
 
 ::: {.fragment .callout-tip}
 ## Ponte para a Aula 10
 - **Aula 10:** *Sistemas de Recomendação — Fatoração de Matrizes (SVD e NMF)*.
-- Como fatorar matrizes massivas com valores faltantes e por que restrições de positividade no NMF produzem representações baseadas em partes interpretáveis.
+- Como fatorar matrizes massivas com mais de $99\%$ de valores ausentes e extrair fatores latentes interpretáveis baseados em partes aditivas.
 :::
 
 ::: {.fragment}
@@ -969,4 +2092,3 @@ Na próxima aula (**Aula 10: Sistemas de Recomendação — Fatoração de Matri
 :::
 
 :::
-

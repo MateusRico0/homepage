@@ -24,7 +24,7 @@ teaching/
         ├── exercicios.qmd     # público
         ├── soluções.qmd       # público — gabarito dos V/F
         ├── _00-plano-aula.md  # plano + fontes citadas (oculto)
-        └── _02-respostas-pausas.md  # gabarito das Pausas Ativas (oculto)
+        └── _02-respostas-pausas.md  # gabarito das Pausas (oculto)
 ```
 
 O Quarto nunca publica arquivos/pastas com prefixo `_` (link para eles dá 404) — é assim que material de apoio e PDFs com direitos autorais ficam fora do site. Aulas antigas podem ter nomes legados (`_00-planejamento.md`, `_01-respostas.md`, `_03-respostas-pausas.md`); leia-os normalmente, mas crie arquivos novos só com os nomes acima.
@@ -62,12 +62,12 @@ Caminhos abaixo são relativos à subpasta da disciplina.
    - *Ideia Central* (Ausubel): a ponte entre o que já se sabe e o novo.
    - *Roteiro*: quais são os principais conceitos que vão ser aprendidos e qual a conexão com os conceitos anteriores.
    - *Problema Motivador*: um resultado concreto (de preferência numérico/gráfico, no dataset-fio) que provoca antes do formalismo.
-   - Pausa Ativa.
+   - Pausa (escreva sempre apenas "Pausa", nunca "Pausa Ativa").
 2. **`# Intuição — ...`** (~10 min; quase sempre em A, quando couber em B): o algoritmo/modelo em linhas gerais, com gráfico/diagrama, sem matemática pesada.
-3. **`# Bloco N: ...`** — blocos de 10–15 min, cada um com um único ponto de aterrissagem e uma Pausa Ativa ao final. Sinalize hierarquia ("este é o resultado central", "esta hipótese vamos relaxar depois"). Depois da Intuição o rigor sobe: anuncie as premissas, depois derive passo a passo (ver "Precisão de conteúdo técnico").
+3. **`# Bloco N: ...`** — blocos de 10–15 min, cada um com um único ponto de aterrissagem e uma Pausa ao final. Sinalize hierarquia ("este é o resultado central", "esta hipótese vamos relaxar depois"). Depois da Intuição o rigor sobe: anuncie as premissas, depois derive passo a passo (ver "Precisão de conteúdo técnico").
 4. **`# Fechamento`** (~5 min): *Retomando as N Perguntas* (uma resposta curta por pergunta do Roteiro) → *O Que Fica em Aberto* → *Ponte para a Aula N+1* → links de Exercícios/Soluções.
 
-**Pausa Ativa (~3 min, nas notas e nos slides)** — duas caixas no mesmo slide:
+**Pausa (~3 min, nas notas e nos slides; use sempre apenas "Pausa", nunca "Pausa Ativa")** — duas caixas no mesmo slide:
 1. uma **pergunta aberta** provocadora (com dica para conduzir);
 2. um **bloco de V/F (4 itens)** que ajuda o raciocínio da pergunta aberta sem ser intrinsecamente ligado a ela — outros ângulos do mesmo conteúdo, não a resposta da aberta fatiada em itens.
 
@@ -87,7 +87,7 @@ Um único `aulaNN/index.qmd` com saída dupla via `::: {.content-visible when-fo
 
 Regras de slide (detalhes e exemplos em `_ref-conteudo.md#slides`):
 - Revelação progressiva com `::: {.fragment}` (a conclusão/alerta do slide pode ser `::: {.fragment .callout-important}`); fórmulas e listas em itens, não em parágrafo denso.
-- No máximo uma caixa por slide, exceto no slide da Pausa Ativa.
+- No máximo uma caixa por slide, exceto no slide da Pausa.
 - Nenhum slide vazio ou picotado: depois de cada bloco, releia a sequência de `##` e funda os slides que são fração da mesma ideia; figura e comentário ficam juntos.
 - Blocos HTML e RevealJS intercalados; um chunk de figura compartilhado vem depois dos dois textos (evita rodar o código duas vezes).
 
