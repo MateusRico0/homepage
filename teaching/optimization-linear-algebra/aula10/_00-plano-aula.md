@@ -106,13 +106,13 @@ Para sanar esse impasse, deduzimos as históricas **Condições de Convergência
      - Em redes neurais profundas, o ruído atua como regularizador implícito.
      - Escape de pontos de sela e mínimos locais estreitos (*sharp minima*): a covariância do ruído $\Sigma(\mathbf{w})$ tem maior energia nas direções de maior curvatura, empurrando os parâmetros para fora de vales pontiagudos em direção a mínimos planos (*flat minima*).
      - Conexão com generalização: mínimos planos são mais tolerantes a desvios entre a distribuição de treino e a distribuição de teste.
-   - *Transição:* O ruído auxilia na generalização, mas o gradiente estocástico oscila severamente em vales mal-condicionados. Como acelerar o SGD combinando inércia e memória direcional? $\to$ Métodos Acelerados e Momento (Aula 11).
+   - *Transição:* O ruído auxilia na generalização, mas o passo escalar global $\alpha$ trata todas as coordenadas de maneira uniforme. Como incorporar a curvatura local para dar passos ótimos por coordenada? $\to$ Métodos de Segunda Ordem e Precondicionamento (Aula 11).
    - *Pausa 5.*
 
 7. **Fechamento** (~7 min)
    - *Retomando as 4 Perguntas:* Síntese concisa das respostas construídas na aula.
    - *Fechamento do Bloco 3 (Abertura):* O SGD e o Mini-Batching constituem o coração do treinamento moderno de aprendizado de máquina em grande escala.
-   - *Ponte para a Aula 11:* Como suavizar as oscilações estocásticas e acelerar o avanço em vales estreitos através de aproximações quadráticas locais de Taylor e inércia física $\to$ **Aula 11: Momento, Curvatura e Métodos Acelerados**.
+   - *Ponte para a Aula 11:* A aproximação quadrática de Taylor multivariada, o passo ideal de Newton ($H^{-1}\nabla f$), o colapso cúbico em alta dimensão e as taxas de aprendizado adaptativas por coordenada via precondicionamento diagonal $\to$ **Aula 11: Otimização de Segunda Ordem e Precondicionamento Diagonal (AdaGrad e RMSProp)**.
    - Links para Exercícios e Soluções.
 
 ---

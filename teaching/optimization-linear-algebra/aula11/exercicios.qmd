@@ -1,0 +1,121 @@
+---
+title: "Exercícios — Aula 11: Otimização de Segunda Ordem e Precondicionamento Diagonal"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado das questões de Verdadeiro/Falso está em
+[`soluções.qmd`](soluções.qmd). Encontrou um erro numa questão? Corrija
+diretamente neste arquivo e abra um *pull request*.
+:::
+
+## Contexto e notação
+
+Considere a minimização de uma função suave duas vezes diferenciável $f: \mathbb{R}^d \to \mathbb{R}$. Denotamos por $\mathbf{g}_k = \nabla f(\mathbf{w}_k) \in \mathbb{R}^d$ o vetor gradiente e por $H_k = \nabla^2 f(\mathbf{w}_k) \in \mathbb{R}^{d \times d}$ a matriz Hessiana calculados no ponto $\mathbf{w}_k$.
+
+O **Método de Newton Puro** minimiza a aproximação quadrática local de Taylor de segunda ordem:
+$$q(\Delta\mathbf{w}) = f(\mathbf{w}_k) + \mathbf{g}_k^T \Delta\mathbf{w} + \frac{1}{2}\Delta\mathbf{w}^T H_k \Delta\mathbf{w}$$
+gerando a direção de descida $\Delta\mathbf{w}_{\text{nt}} = -H_k^{-1} \mathbf{g}_k$, com atualização $\mathbf{w}_{k+1} = \mathbf{w}_k + \Delta\mathbf{w}_{\text{nt}}$.
+
+O **Decremento de Newton** é definido por:
+$$\lambda(\mathbf{w}) = \left(\mathbf{g}_k^T H_k^{-1} \mathbf{g}_k\right)^{1/2}$$
+e quantifica o dobro da redução de custo prevista pelo modelo quadrático local.
+
+O **Precondicionamento Diagonal** substitui a matriz Hessiana densa $H_k$ por uma matriz diagonal positiva definida $D_k = \text{diag}(s_{1, k}, \dots, s_{d, k}) \succ 0$, gerando a regra desacoplada por coordenada:
+$$w_{i, k+1} = w_{i, k} - \alpha \frac{g_{i, k}}{s_{i, k}}$$
+
+No algoritmo **AdaGrad** (Duchi et al., 2011), o fator de escala é a raiz do acúmulo histórico dos quadrados das derivadas parciais:
+$$G_{t, i} = G_{t-1, i} + g_{t, i}^2 = \sum_{\tau=1}^t g_{\tau, i}^2, \quad w_{t+1, i} = w_{t, i} - \frac{\alpha}{\sqrt{G_{t, i}} + \epsilon} g_{t, i}$$
+
+No algoritmo **RMSProp** (Tieleman & Hinton, 2012), a soma infinita é substituída por uma média móvel exponencial (EMA) com hiperparâmetro de decaimento $\beta_2 \in (0, 1)$:
+$$v_{t, i} = \beta_2 v_{t-1, i} + (1 - \beta_2) g_{t, i}^2, \quad w_{t+1, i} = w_{t, i} - \frac{\alpha}{\sqrt{v_{t, i}} + \epsilon} g_{t, i}$$
+
+---
+
+## Questões discursivas
+
+1. **Invariância Afim de Newton vs. Sensibilidade do Gradiente Descendente.**
+   Seja $\phi: \mathbb{R}^d \to \mathbb{R}$ dada por $\phi(\tilde{\mathbf{w}}) = f(A^{-1}\tilde{\mathbf{w}})$, onde $A \in \mathbb{R}^{d \times d}$ é uma transformação linear não-singular e $\tilde{\mathbf{w}} = A \mathbf{w}$.
+   a) Mostre que o gradiente e a Hessiana no espaço transformado satisfazem $\nabla_{\tilde{\mathbf{w}}} \phi(\tilde{\mathbf{w}}) = A^{-T} \nabla_{\mathbf{w}} f(\mathbf{w})$ e $\nabla_{\tilde{\mathbf{w}}}^2 \phi(\tilde{\mathbf{w}}) = A^{-T} \nabla_{\mathbf{w}}^2 f(\mathbf{w}) A^{-1}$.
+   b) Deduza que o passo de Newton no espaço transformado satisfaz rigorosamente $\Delta\tilde{\mathbf{w}}_{\text{nt}} = A \Delta\mathbf{w}_{\text{nt}}$, provando que as trajetórias de Newton nos dois espaços são idênticas sob a transformação afim.
+   c) Mostre por que a direção do Gradiente Descendente clássico $-\nabla_{\tilde{\mathbf{w}}} \phi$ não preserva essa equivalência a menos que a matriz $A$ seja ortogonal ($A^T A = I$).
+
+2. **Dinâmica Assintótica de Escalas: AdaGrad vs. RMSProp sob Ruído Estacionário.**
+   Considere o treinamento estocástico de um parâmetro escalar $w$ sujeito a um ruído estocástico gaussiano não-nulo no gradiente com variância constante, tal que $\mathbb{E}[g_t^2] = \sigma^2 > 0$ ao longo de todas as iterações $t \ge 1$.
+   a) Demonstre que, em esperança, o acumulador do AdaGrad satisfaz $\mathbb{E}[G_t] = t \sigma^2$ e determine a ordem assintótica do tamanho do passo efetivo $\alpha_t^{\text{eff}} = \frac{\alpha}{\sqrt{\mathbb{E}[G_t]} + \epsilon}$ quando $t \to \infty$.
+   b) Demonstre que, para o RMSProp inicializado com $v_0 = 0$, a esperança do acumulador converge para um valor estacionário finito $\lim_{t\to\infty} \mathbb{E}[v_t] = \sigma^2$, e deduza o passo efetivo assintótico resultante.
+   c) Com base nos resultados acima, explique por que o AdaGrad sofre de paralisia prematura em problemas não-convexos com platôs extensos e por que o RMSProp mantém a capacidade de navegação contínua.
+
+---
+
+## Questões de Verdadeiro/Falso
+
+Julgue V ou F para cada um dos itens abaixo. A pontuação de cada teste é computada pelo critério de blocos de 4 afirmações.
+
+::: {.callout-note icon=false}
+## Teste 1 — O Modelo Quadrático de Taylor e o Passo de Newton
+
+- □ O passo de Newton $\Delta\mathbf{w}_{\text{nt}} = -H^{-1}\mathbf{g}$ é derivado analiticamente impondo a condição de primeira ordem para que o gradiente do modelo quadrático de Taylor de 2ª ordem se anule.
+- □ Se a função objetivo $f(\mathbf{w})$ for uma forma quadrática estritamente convexa ($f(\mathbf{w}) = \frac{1}{2}\mathbf{w}^T A \mathbf{w} - \mathbf{b}^T \mathbf{w}$ com $A \succ 0$), o Método de Newton converge para o minimizador global exato em uma única iteração, independentemente do ponto de partida $\mathbf{w}_0$.
+- □ Sob convexidade forte e Lipschitz-continuidade da Hessiana, o regime de convergência quadrática local de Newton garante que o erro $\|\mathbf{w}_k - \mathbf{w}^\star\|$ decai a uma taxa estritamente geométrica constante, satisfazendo $\|\mathbf{w}_{k+1} - \mathbf{w}^\star\| \le c \|\mathbf{w}_k - \mathbf{w}^\star\|$ com $c \in (0, 1)$.
+- □ O decremento de Newton $\lambda(\mathbf{w}) = \sqrt{\mathbf{g}^T H^{-1} \mathbf{g}}$ representa a norma do gradiente induzida pelo produto interno associado à inversa da Hessiana, sendo estritamente invariante sob qualquer reescalonamento afim das variáveis.
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — Patologias e Limitações Computacionais de Newton
+
+- □ Em modelos com $d$ parâmetros, a resolução do sistema linear de Newton $H \Delta\mathbf{w} = -\mathbf{g}$ via decomposição de Cholesky exige complexidade temporal $\mathcal{O}(d^2)$ e consumo de memória $\mathcal{O}(d)$.
+- □ Se a matriz Hessiana $H(\mathbf{w}_k)$ possuir um ou mais autovalores estritamente negativos em um ponto não-ótimo, o passo de Newton puro pode apontar numa direção de subida da função de perda ($\mathbf{g}_k^T \Delta\mathbf{w}_{\text{nt}} > 0$), atraindo o otimizador para pontos de sela ou máximos locais.
+- □ A regularização de Levenberg-Marquardt modifica o sistema linear para $(H_k + \lambda_k I)\Delta\mathbf{w} = -\mathbf{g}_k$; quando $\lambda_k \to \infty$, a direção resultante converge para a direção do Gradiente Descendente euclidiano com taxa infinitesimais.
+- □ Em problemas de aprendizado supervisionado em larga escala, estimar a Hessiana exata através de mini-batches reduz a zero o ruído estocástico de segunda ordem devido à simetria da matriz.
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — Fundamentação Geométrica do Precondicionamento
+
+- □ Precondicionar o gradiente descendente com uma matriz simétrica positiva definida $P \succ 0$ ($\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha P^{-1}\mathbf{g}_k$) equivale geometricamente a aplicar um passo de gradiente descendente padrão em um espaço transformado $\tilde{\mathbf{w}} = P^{1/2}\mathbf{w}$.
+- □ Se escolhermos a matriz de precondicionamento $P = H_k$ em cada iteração, o gradiente descendente precondicionado coincide matematicamente com o Método de Newton puro com taxa de aprendizado $\alpha = 1$.
+- □ A escolha de uma matriz de precondicionamento diagonal $D = \text{diag}(s_1, \dots, s_d) \succ 0$ permite desacoplar completamente o sistema, reduzindo o custo de inversão de $\mathcal{O}(d^3)$ para $\mathcal{O}(d)$ e o armazenamento para $\mathcal{O}(d)$.
+- □ O precondicionamento diagonal é capaz de rotacionar os eixos de coordenadas de modo a zerar os elementos fora da diagonal da matriz de covariância cruzada entre parâmetros.
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — Otimizador AdaGrad e Tratamento de Esparsidade
+
+- □ O algoritmo AdaGrad divide o gradiente de cada coordenada pela raiz quadrada da soma de todos os quadrados das derivadas parciais passadas dessa coordenada: $\sqrt{\sum_{\tau=1}^t g_{\tau, i}^2} + \epsilon$.
+- □ Em modelos com atributos categóricos de alta dimensionalidade (como termos raros em sacos de palavras ou IDs em sistemas de recomendação), o AdaGrad atribui passos efetivos maiores aos atributos esparsos e passos menores aos atributos frequentes.
+- □ A sequência de denominadores $G_{t, i} = G_{t-1, i} + g_{t, i}^2$ do AdaGrad pode diminuir ao longo do treinamento caso o otimizador entre em uma região de platô com derivadas nulas.
+- □ A patologia central do AdaGrad em redes neurais profundas com milhares de iterações é o congelamento prematuro do treinamento, decorrente do crescimento estritamente monotônico do acumulador $G_t$, que empurra a taxa efetiva de aprendizado para zero.
+:::
+
+::: {.callout-note icon=false}
+## Teste 5 — Otimizador RMSProp e Memória Exponencial
+
+- □ O RMSProp resolve a saturação prematura do AdaGrad ao substituir a soma cumulativa infinita por uma média móvel ponderada exponencialmente (EMA) dos gradientes quadrados.
+- □ O hiperparâmetro $\beta_2 \in (0, 1)$ do RMSProp atua como um fator de amortecimento temporal, definindo uma janela de memória retrospectiva efetiva de aproximadamente $\frac{1}{1 - \beta_2}$ iterações.
+- □ No RMSProp, se uma coordenada do gradiente estocástico $g_{t, i}$ for mantida em um valor constante não-nulo $c$ por muitas iterações, a escala adaptativa $\sqrt{v_{t, i}}$ converge assintoticamente para $|c|$, normalizando o passo dessa coordenada para $\approx \alpha \cdot \text{sgn}(g_{t, i})$.
+- □ O RMSProp requer o cálculo explícito dos elementos da diagonal da matriz Hessiana a cada época de treinamento para calibrar a escala adaptativa.
+:::
+
+::: {.callout-note icon=false}
+## Teste 6 — Comparação Estrutural e Transferência em Modelos de ML
+
+- □ Ao treinar uma Regressão Logística binária clássica no California Housing, a aplicação do Método de Newton com Hessiana completa é computacionalmente vantajosa quando o número de parâmetros $d$ é pequeno ($d \le 10$), pois o problema é estritamente convexo e atinge convergência em pouquíssimas iterações.
+- □ Em transformadores modernos (LLMs) com dezenas de bilhões de parâmetros, o otimizador AdaGrad puro é preferido em relação ao RMSProp porque o decaimento contínuo da taxa evita o esquecimento catastrófico no pré-treinamento de tokens repetidos.
+- □ A inclusão do termo de suavização $\epsilon > 0$ no denominador do AdaGrad e do RMSProp ($\frac{\alpha}{\sqrt{v_t} + \epsilon}$) tem como único objetivo matemático acelerar a convergência assintótica quando o gradiente atinge magnitudes astronômicas.
+- □ Tanto o AdaGrad quanto o RMSProp são invariantes a transformações afins completas das variáveis, eliminando integralmente o impacto de correlações não-diagonais entre pesos de camadas sucessivas.
+:::
+
