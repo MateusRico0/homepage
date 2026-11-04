@@ -2,7 +2,7 @@
 title: "Aula 10: Sistemas de Recomendação: Fatoração de Matrizes (SVD e NMF)"
 subtitle: "Aprendizado Não Supervisionado"
 author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
-date: "2026-10-22"
+date: "2026-11-04"
 lang: pt-BR
 format:
   html:
@@ -39,7 +39,7 @@ format:
     theme: [simple, ../../lesson-theme.scss]
     fig-width: 6
     fig-height: 3.8
-jupyter: python3
+jupyter: homepage
 execute:
   echo: false
   warning: false
@@ -53,13 +53,21 @@ execute:
 
 ```{python}
 #| echo: false
-#| fig-align: center
 
 # =====================================================================
 # SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
 # =====================================================================
+from huggingface_hub.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
+from datasets import disable_progress_bar, load_dataset
+disable_progress_bar()
+
+import re
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.optimize import linear_sum_assignment
+from scipy.stats import spearmanr
 from sklearn.decomposition import NMF, PCA
 import warnings
 warnings.filterwarnings("ignore")
@@ -84,932 +92,1735 @@ COR_ALERTA = "#e7298a"   # Magenta / alerta
 def brl(val, dec=2):
     return f"{val:.{dec}f}".replace(".", ",")
 
-# --- Simulação Controlada de Matriz de Avaliação de Filmes (MovieLens Toy) ---
-np.random.seed(42)
-M_users = 12
-N_movies = 10
-K_factors = 2
+def pct(val, dec=0):
+    return f"{100 * val:.{dec}f}".replace(".", ",") + "%"
 
-# Fatores latentes verdadeiros de usuários (Ação vs Drama)
-P_true = np.array([
-    [2.4, 0.2], [2.6, 0.3], [2.1, 0.1], [2.8, 0.4], # Fãs de Ação
-    [0.2, 2.5], [0.1, 2.7], [0.3, 2.2], [0.4, 2.9], # Fãs de Drama
-    [1.9, 1.8], [1.7, 2.1], [2.2, 1.6], [0.3, 0.4]  # Ecléticos / Críticos
-])
+def milhar(val):
+    return f"{int(val):,}".replace(",", ".")
 
-# Fatores latentes verdadeiros de filmes (4 Ação, 4 Drama, 2 Mistos)
-Q_true = np.array([
-    [2.5, 0.1], [2.8, 0.2], [2.2, 0.3], [2.9, 0.0], # Blockbusters Ação
-    [0.1, 2.6], [0.2, 2.9], [0.0, 2.4], [0.3, 2.7], # Dramas Aclamados
-    [1.8, 1.7], [2.1, 1.9]                           # Mistos (Ação + Drama)
-])
+def titulo(t):
+    return re.sub(r"\s*\(\d{4}\)\s*$", "", t)
 
-mu_true = 3.0
-b_u_true = np.array([0.4, 0.2, 0.6, -0.3, 0.5, -0.4, 0.1, 0.3, 0.0, -0.2, 0.7, -1.0])
-b_i_true = np.array([0.5, 0.7, -0.2, 0.8, 0.4, -0.3, 0.2, 0.5, 0.6, -0.1])
 
-R_clean = mu_true + b_u_true[:, None] + b_i_true[None, :] + P_true @ Q_true.T
-noise = 0.25 * np.random.randn(M_users, N_movies)
-R_noisy = np.clip(np.round(R_clean + noise, 1), 1.0, 5.0)
+# --- MovieLens: núcleo de usuários ativos e filmes populares ---
+_d = load_dataset("ashraq/movielens_ratings")
+base = pd.concat([_d["train"].to_pandas(), _d["validation"].to_pandas()])[
+    ["user_id", "movie_id", "rating", "title", "genres"]
+].drop_duplicates(["user_id", "movie_id"])
+n_notas = len(base)
+n_usuarios_base, n_filmes_base = base.user_id.nunique(), base.movie_id.nunique()
+dens_base = n_notas / (n_usuarios_base * n_filmes_base)
+med_notas_usuario = base.user_id.value_counts().median()
 
-# Criar máscara de dados observados (70% faltante, 30% observado)
-observed_mask = np.random.rand(M_users, N_movies) < 0.35
-# Garantir que todo usuário e todo filme tenha ao menos 1 observação
-for u in range(M_users):
-    if not np.any(observed_mask[u, :]):
-        observed_mask[u, np.random.randint(N_movies)] = True
-for i in range(N_movies):
-    if not np.any(observed_mask[:, i]):
-        observed_mask[np.random.randint(M_users), i] = True
+M_users, N_movies = 2000, 1000
+_top_f = base.movie_id.value_counts().head(N_movies).index
+nucleo = base[base.movie_id.isin(_top_f)]
+_top_u = nucleo.user_id.value_counts().head(M_users).index
+nucleo = nucleo[nucleo.user_id.isin(_top_u)].copy()
+nucleo["u"] = nucleo.user_id.astype("category").cat.codes.astype(int)
+nucleo["i"] = nucleo.movie_id.astype("category").cat.codes.astype(int)
+dens = len(nucleo) / (M_users * N_movies)
+filmes = nucleo.drop_duplicates("i").set_index("i").sort_index()
+nomes = filmes.title.values
 
-R_obs = np.where(observed_mask, R_noisy, np.nan)
-n_observed = int(np.sum(observed_mask))
-n_missing = int(M_users * N_movies - n_observed)
-sparsity_pct = (n_missing / (M_users * N_movies)) * 100.0
+_x = np.random.default_rng(0).random(len(nucleo))
+treino, valid, teste = nucleo[_x < .8], nucleo[(_x >= .8) & (_x < .9)], nucleo[_x >= .9]
+R_obs = np.full((M_users, N_movies), np.nan)
+R_obs[treino.u, treino.i] = treino.rating
+observed_mask = ~np.isnan(R_obs)
+n_treino = int(observed_mask.sum())
+frac_vazia_treino = 1 - observed_mask.mean()
+min_notas_usuario = int(observed_mask.sum(1).min())
 
-# 1. SVD Clássica com Imputação por Zero
-R_zero_imp = np.nan_to_num(R_obs, nan=0.0)
-U_z, S_z, Vt_z = np.linalg.svd(R_zero_imp, full_matrices=False)
-R_svd_zero = U_z[:, :2] @ np.diag(S_z[:2]) @ Vt_z[:2, :]
 
-# 2. SVD Clássica com Imputação pela Média
-mu_emp = np.nanmean(R_obs)
-R_mean_imp = np.where(observed_mask, R_obs, mu_emp)
-U_m, S_m, Vt_m = np.linalg.svd(R_mean_imp, full_matrices=False)
-R_svd_mean = U_m[:, :2] @ np.diag(S_m[:2]) @ Vt_m[:2, :]
+def rmse(P, df):
+    return float(np.sqrt(np.mean((P[df.u, df.i] - df.rating.values) ** 2)))
 
-# 3. Funk-SVD Regularizada com Vieses (SGD nos dados observados)
-P_sgd = 0.1 * np.random.randn(M_users, K_factors)
-Q_sgd = 0.1 * np.random.randn(N_movies, K_factors)
-bu_sgd = np.zeros(M_users)
-bi_sgd = np.zeros(N_movies)
-gamma_lr = 0.04
-lambda_reg = 0.05
-epochs = 250
 
-obs_coords = [(u, i) for u in range(M_users) for i in range(N_movies) if observed_mask[u, i]]
+def melhor_svd(A, soma=0.):
+    """SVD truncada de A + soma, com K escolhido na validação."""
+    U, S, Vt = np.linalg.svd(A, full_matrices=False)
+    preds = {K: soma + (U[:, :K] * S[:K]) @ Vt[:K] for K in [2, 5, 10, 20, 50]}
+    K = min(preds, key=lambda k: rmse(preds[k], valid))
+    return K, preds[K], Vt
 
-for ep in range(epochs):
-    np.random.shuffle(obs_coords)
-    for u, i in obs_coords:
-        r_ui = R_obs[u, i]
-        pred = mu_emp + bu_sgd[u] + bi_sgd[i] + np.dot(P_sgd[u], Q_sgd[i])
-        err = r_ui - pred
-        bu_sgd[u] += gamma_lr * (err - lambda_reg * bu_sgd[u])
-        bi_sgd[i] += gamma_lr * (err - lambda_reg * bi_sgd[i])
-        p_u_old = P_sgd[u].copy()
-        P_sgd[u] += gamma_lr * (err * Q_sgd[i] - lambda_reg * P_sgd[u])
-        Q_sgd[i] += gamma_lr * (err * p_u_old - lambda_reg * Q_sgd[i])
 
-R_pred_funk = np.clip(mu_emp + bu_sgd[:, None] + bi_sgd[None, :] + P_sgd @ Q_sgd.T, 1.0, 5.0)
+# --- Média global, SVD com imputação e preditores de baseline ---
+mu_emp = treino.rating.mean()
+rmse_media_test = rmse(np.full((M_users, N_movies), mu_emp), teste)
+nota_media_teste = teste.rating.mean()
 
-rmse_zero_test = np.sqrt(np.mean((R_noisy[~observed_mask] - R_svd_zero[~observed_mask])**2))
-rmse_mean_test = np.sqrt(np.mean((R_noisy[~observed_mask] - R_svd_mean[~observed_mask])**2))
-rmse_funk_test = np.sqrt(np.mean((R_noisy[~observed_mask] - R_pred_funk[~observed_mask])**2))
+K_zero, R_svd_zero, _ = melhor_svd(np.nan_to_num(R_obs))
+rmse_zero_test = rmse(R_svd_zero, teste)
+pred_zero = R_svd_zero[teste.u, teste.i].mean()
+razao_zero = rmse_zero_test / rmse_media_test
+K_med, R_svd_mean, _ = melhor_svd(np.where(observed_mask, R_obs, mu_emp))
+rmse_mean_test = rmse(R_svd_mean, teste)
 
-# --- Simulação de NMF vs PCA (Partes Aditivas vs Combinações Holísticas) ---
-parts_patterns = np.array([
-    [1, 1, 1, 0, 0, 0, 0, 0, 0], # Linha superior (olhos)
-    [0, 0, 0, 0, 1, 0, 0, 0, 0], # Ponto central (nariz)
-    [0, 0, 0, 0, 0, 0, 1, 1, 1], # Linha inferior (boca)
-    [1, 0, 0, 1, 0, 0, 1, 0, 0]  # Borda lateral (perfil)
-], dtype=float)
 
-H_parts_true = np.random.exponential(scale=1.5, size=(120, 4))
-V_faces = H_parts_true @ parts_patterns
-V_faces_noisy = np.clip(V_faces + 0.1 * np.random.rand(*V_faces.shape), 0, None)
+def vieses(rb):
+    bu, bi = np.zeros(M_users), np.zeros(N_movies)
+    for _ in range(20):
+        bi = np.nansum(R_obs - mu_emp - bu[:, None], 0) / (observed_mask.sum(0) + rb)
+        bu = np.nansum(R_obs - mu_emp - bi[None, :], 1) / (observed_mask.sum(1) + rb)
+    return bu, bi
 
-nmf_model = NMF(n_components=4, init='nndsvd', random_state=42, max_iter=600)
-W_nmf_coef = nmf_model.fit_transform(V_faces_noisy)
-H_nmf_basis = nmf_model.components_
 
-pca_model = PCA(n_components=4, random_state=42)
-W_pca_coef = pca_model.fit_transform(V_faces_noisy)
-H_pca_basis = pca_model.components_
+_bs = {rb: vieses(rb) for rb in [0, 1, 5, 10, 25, 50]}
+_lb = lambda rb: mu_emp + _bs[rb][0][:, None] + _bs[rb][1][None, :]
+rb_ot = min(_bs, key=lambda rb: rmse(_lb(rb), valid))
+bu_ot, bi_ot = _bs[rb_ot]
+B_lin = _lb(rb_ot)
+rmse_vies_test = rmse(B_lin, teste)
+Y_res = np.where(observed_mask, R_obs - B_lin, 0.)
+
+K_res, R_svd_res, Vt_res = melhor_svd(Y_res, B_lin)
+rmse_res_test = rmse(R_svd_res, teste)
+
+
+# --- ALS nas entradas observadas ---
+def als(Y, Obs, K, lam, it=15, seed=1, base=None):
+    r = np.random.default_rng(seed)
+    P = r.normal(0, .1, (Y.shape[0], K))
+    Q = r.normal(0, .1, (Y.shape[1], K))
+    I = np.eye(K)
+    hist = []
+    for _ in range(it):
+        for u in range(Y.shape[0]):
+            o = Obs[u]
+            if o.any():
+                A = Q[o]
+                P[u] = np.linalg.solve(A.T @ A + lam * I, A.T @ Y[u, o])
+        for i in range(Y.shape[1]):
+            o = Obs[:, i]
+            if o.any():
+                A = P[o]
+                Q[i] = np.linalg.solve(A.T @ A + lam * I, A.T @ Y[o, i])
+        if base is not None:
+            hist.append(rmse(base + P @ Q.T, valid))
+    return P, Q, hist
+
+
+lambdas = [0.01, 1, 10, 20, 40]
+curva_50 = {}
+for _l in lambdas:
+    _P, _Q, _ = als(Y_res, observed_mask, 50, _l)
+    curva_50[_l] = (rmse(B_lin + _P @ _Q.T, treino), rmse(B_lin + _P @ _Q.T, valid), rmse(B_lin + _P @ _Q.T, teste))
+treino_50_sem, teste_50_sem = curva_50[0.01][0], curva_50[0.01][2]
+lam_50 = min(lambdas, key=lambda l: curva_50[l][1])
+treino_50_com, teste_50_com = curva_50[lam_50][0], curva_50[lam_50][2]
+params_50 = 50 * (M_users + N_movies)
+
+K_fat = 20
+_ajustes = {_l: als(Y_res, observed_mask, K_fat, _l, base=B_lin) for _l in [1, 10, 20, 40]}
+lam_als = min(_ajustes, key=lambda l: _ajustes[l][2][-1])
+P_als, Q_als, hist_als = _ajustes[lam_als]
+rmse_als_test = rmse(B_lin + P_als @ Q_als.T, teste)
+
+
+# --- Funk-SVD com vieses (SGD por entrada observada) ---
+# lambda_reg = 0,05 foi o melhor de {0,05; 0,1; 0,2} na validação.
+gamma_lr, lambda_reg, epocas = 0.01, 0.05, 20
+_r = np.random.default_rng(1)
+_P, _Q = _r.normal(0, .1, (M_users, K_fat)).tolist(), _r.normal(0, .1, (N_movies, K_fat)).tolist()
+_bu, _bi = [0.] * M_users, [0.] * N_movies
+_ul, _il, _rl = treino.u.tolist(), treino.i.tolist(), treino.rating.tolist()
+_rg, _c = range(K_fat), 1 - gamma_lr * lambda_reg
+hist_sgd = []
+for _ep in range(epocas):
+    for _t in _r.permutation(len(_rl)).tolist():
+        _u, _i = _ul[_t], _il[_t]
+        _pu, _qi = _P[_u], _Q[_i]
+        _pred = mu_emp + _bu[_u] + _bi[_i]
+        for _k in _rg:
+            _pred += _pu[_k] * _qi[_k]
+        _e = _rl[_t] - _pred
+        _bu[_u] += gamma_lr * (_e - lambda_reg * _bu[_u])
+        _bi[_i] += gamma_lr * (_e - lambda_reg * _bi[_i])
+        for _k in _rg:
+            _a, _b = _pu[_k], _qi[_k]
+            _pu[_k] = _a * _c + gamma_lr * _e * _b
+            _qi[_k] = _b * _c + gamma_lr * _e * _a
+    R_pred_funk = mu_emp + np.array(_bu)[:, None] + np.array(_bi)[None, :] + np.array(_P) @ np.array(_Q).T
+    hist_sgd.append(rmse(R_pred_funk, valid))
+rmse_funk_test = rmse(R_pred_funk, teste)
+
+
+# --- Como ler o espaço latente (fatores do ALS) ---
+n_aval = observed_mask.sum(0)
+norma_q = np.linalg.norm(Q_als, axis=1)
+spear_norma = spearmanr(norma_q, n_aval).statistic
+_Qn = Q_als / np.maximum(norma_q[:, None], 1e-9)
+
+
+def achar(padrao):
+    return next(k for k, t in enumerate(nomes) if padrao in t)
+
+
+def vizinhos(padrao, n=4):
+    j = achar(padrao)
+    s = _Qn @ _Qn[j]
+    top = [k for k in np.argsort(-s) if k != j][:n]
+    return ", ".join(f"{titulo(nomes[k])} ({brl(s[k])})" for k in top)
+
+
+viz_moana, viz_thor, viz_lalaland = vizinhos("Moana"), vizinhos("Thor: Ragnarok"), vizinhos("La La Land")
+
+_animacao = [k for k in np.argsort(-n_aval) if "Animation" in filmes.genres.iloc[k]]
+_ranking_base = np.argsort(-(mu_emp + bi_ot))
+
+
+def usuario_novo(idx, n=5):
+    """Calcula p do usuário novo que deu nota 5 aos filmes idx (uma etapa do ALS)."""
+    A = Q_als[idx]
+    p = np.linalg.solve(A.T @ A + lam_als * np.eye(K_fat), A.T @ (5 - mu_emp - bi_ot[idx]))
+    delta = Q_als @ p
+    delta[idx] = -np.inf
+    sc = mu_emp + bi_ot + delta
+    top = np.argsort(-sc)[:n]
+    sobem = np.argsort(-delta)[:n]
+    base_sem = [k for k in _ranking_base if k not in idx][:n]
+    return dict(rec=", ".join(titulo(nomes[k]) for k in top),
+                sobem=", ".join(f"{titulo(nomes[k])} (+{brl(delta[k])})" for k in sobem),
+                iguais=len(set(top) & set(base_sem)), norma=np.linalg.norm(p),
+                maior=delta[sobem[0]],
+                anim=float(np.mean(["Animation" in filmes.genres.iloc[k] for k in sobem])))
+
+
+novo_3, novo_30 = usuario_novo(_animacao[:3]), usuario_novo(_animacao[:30])
+dp_bi = bi_ot.std()
+top_vieses = ", ".join(titulo(nomes[k]) for k in _ranking_base[:5])
+
+
+# --- Suposição de falta ignorável: simulação controlada ---
+_r = np.random.default_rng(7)
+_Zt, _Wt = _r.normal(0, .5, (800, 5)), _r.normal(0, .5, (400, 5))
+Rs = 3 + _Zt @ _Wt.T + _r.normal(0, .3, (800, 400))
+_pn = np.exp(1.5 * (Rs - 3))
+_pn = np.clip(_pn * .15 / _pn.mean(), 0, 1)
+sim = {}
+for _nome, _p in [("alea", np.full(Rs.shape, .15)), ("nota", _pn)]:
+    _obs = _r.random(Rs.shape) < _p
+    _aj = _obs & (_r.random(Rs.shape) < .8)
+    _ret, _nunca = _obs & ~_aj, ~_obs
+    _m = Rs[_aj].mean()
+    _Pn, _Qn2, _ = als(np.where(_aj, Rs - _m, 0.), _aj, 5, 2.)
+    _erro = _m + _Pn @ _Qn2.T - Rs
+    sim[_nome] = dict(obs=Rs[_aj].mean(), ret=np.sqrt((_erro[_ret] ** 2).mean()),
+                      nunca=np.sqrt((_erro[_nunca] ** 2).mean()), vies=_erro[_nunca].mean())
+media_real_sim = Rs.mean()
+_ag = base.groupby("movie_id").rating.agg(["mean", "count"])
+_ag = _ag[_ag["count"] >= 20]
+spear_pop = spearmanr(_ag["count"], _ag["mean"]).statistic
+
+
+# --- NMF: feedback implícito, notas com máscara e MNIST ---
+V_imp = np.zeros((M_users, N_movies))
+V_imp[nucleo.u, nucleo.i] = 1.
+
+
+def concentracao(Hm, k=20):
+    """Fração média dos k filmes de cada fator que têm o gênero mais comum entre eles."""
+    return float(np.mean([
+        pd.Series("|".join(filmes.genres.iloc[np.argsort(-Hm[j])[:k]]).split("|")).value_counts().iloc[0] / k
+        for j in range(Hm.shape[0])
+    ]))
+
+
+def frac_nula(A):
+    return float((A < 1e-3 * A.max()).mean())
+
+
+K_nmf = 12
+_nm = NMF(K_nmf, init="nndsvda", max_iter=500, random_state=0).fit(V_imp)
+H_imp = _nm.components_
+_Vi = np.linalg.svd(V_imp, full_matrices=False)[2]
+neg_svd = float((_Vi[1:K_nmf] < 0).mean())
+nula_imp = frac_nula(H_imp)
+
+
+def nmf_mascara(K, it=300, rg=1.):
+    r = np.random.default_rng(2)
+    W, H = r.random((M_users, K)), r.random((K, N_movies))
+    Vn, e = np.nan_to_num(R_obs), 1e-9
+    for _ in range(it):
+        H *= (W.T @ Vn) / (W.T @ (observed_mask * (W @ H)) + rg * H + e)
+        W *= (Vn @ H.T) / ((observed_mask * (W @ H)) @ H.T + rg * W + e)
+    return W, H
+
+
+def melhor_mascara(K):
+    """NMF com máscara nas notas, com regularização escolhida na validação."""
+    ajustes = {rg: nmf_mascara(K, rg=rg) for rg in [1, 5, 10, 20, 40]}
+    rg = min(ajustes, key=lambda r: rmse(ajustes[r][0] @ ajustes[r][1], valid))
+    return rg, ajustes
+
+
+rg_not, _aj = melhor_mascara(K_nmf)
+W_not, H_not = _aj[rg_not]
+nula_not = frac_nula(H_not)
+conc_imp, conc_not = concentracao(H_imp), concentracao(H_not)
+conc_ale = concentracao(np.random.default_rng(3).random((200, N_movies)))
+
+
+def fatores_ativos(W, H, mask, lim=.05):
+    """Número médio de fatores com pelo menos lim da previsão, nas células de mask."""
+    u, i = np.nonzero(mask)
+    C = W[u] * H[:, i].T
+    return float((C / np.maximum(C.sum(1, keepdims=True), 1e-12) >= lim).sum(1).mean())
+
+
+ativos_imp = fatores_ativos(_nm.transform(V_imp), H_imp, V_imp > 0)
+ativos_not = fatores_ativos(W_not, H_not, observed_mask)
+
+_gen_pt = {"Action": "Ação", "Adventure": "Aventura", "Animation": "Animação", "Comedy": "Comédia", "Crime": "Crime",
+           "Drama": "Drama", "Horror": "Terror", "Romance": "Romance", "Sci-Fi": "Ficção científica", "Thriller": "Suspense"}
+tabela_fatores = []
+for _j in range(K_nmf):
+    _top = np.argsort(-H_imp[_j])[:20]
+    _g = pd.Series("|".join(filmes.genres.iloc[_top]).split("|")).value_counts()
+    tabela_fatores.append(dict(filmes=", ".join(titulo(nomes[t]) for t in _top[:3]),
+                               genero=_gen_pt.get(_g.index[0], _g.index[0]), frac=_g.iloc[0] / 20))
+tabela_fatores.sort(key=lambda f: -f["frac"])
+n_fatores_acao = sum(f["genero"] == "Ação" for f in tabela_fatores)
+n_fatores_drama = sum(f["genero"] == "Drama" for f in tabela_fatores)
+
+_C = [NMF(K_nmf, init="random", max_iter=500, random_state=s).fit(V_imp).components_ for s in [1, 2]]
+_a, _b2 = [c / np.linalg.norm(c, axis=1, keepdims=True) for c in _C]
+_sim = _a @ _b2.T
+_ri, _ci = linear_sum_assignment(-_sim)
+cos_medio, cos_min = float(_sim[_ri, _ci].mean()), float(_sim[_ri, _ci].min())
+
+# Hit@10: a mesma avaliação de lista para todos os modelos
+_conhecidos = observed_mask.copy()
+_conhecidos[valid.u, valid.i] = True
+_bons = teste[teste.rating >= 4]
+_gostou = _bons.groupby("u").i.apply(set)
+
+
+def hit10(S, k=10):
+    """Fração dos usuários com ao menos um filme de teste com nota >= 4 entre os k recomendados."""
+    S = np.array(S, dtype=float)
+    S[_conhecidos] = -np.inf
+    top = np.argpartition(-S, k, axis=1)[:, :k]
+    return float(np.mean([len(v & set(top[u])) > 0 for u, v in _gostou.items()]))
+
+
+_Vb = observed_mask.astype(float)
+_mb = NMF(K_fat, init="nndsvda", max_iter=300, random_state=0).fit(_Vb)
+rg_nmf20, _aj20 = melhor_mascara(K_fat)
+_P_nmf = _aj20[rg_nmf20][0] @ _aj20[rg_nmf20][1]
+rmse_nmf_not = rmse(_P_nmf, teste)
+_hits_rg = [hit10(w @ h) for w, h in _aj20.values()]
+hit_nmf_min, hit_nmf_max = min(_hits_rg), max(_hits_rg)
+aval_lista = [
+    ("Funk-SVD", rmse_funk_test, hit10(R_pred_funk)),
+    ("ALS", rmse_als_test, hit10(B_lin + P_als @ Q_als.T)),
+    ("SVD no resíduo", rmse_res_test, hit10(R_svd_res)),
+    ("Vieses", rmse_vies_test, hit10(B_lin)),
+    ("NMF nas notas", rmse_nmf_not, hit10(_P_nmf)),
+    ("SVD, buracos = média", rmse_mean_test, hit10(R_svd_mean)),
+    ("SVD, buracos = zero", rmse_zero_test, hit10(R_svd_zero)),
+    ("Popularidade", None, hit10(np.tile(_Vb.sum(0), (M_users, 1)))),
+    ("NMF binária", None, hit10(_mb.transform(_Vb) @ _mb.components_)),
+]
+aval_lista.sort(key=lambda a: (a[1] is None, a[1] or 0))
+hit_lista = {n: h for n, _, h in aval_lista}
+hit_aleatorio = hit10(np.random.default_rng(0).random((M_users, N_movies)))
+
+_mn = load_dataset("ylecun/mnist", split="train").with_format("numpy")
+V_mn = np.asarray(_mn["image"][:5000], dtype=np.float32).reshape(-1, 784) / 255
+_nmn = NMF(16, init="nndsvda", max_iter=500, random_state=0).fit(V_mn)
+H_mn = _nmn.components_
+pca_mn = PCA(16).fit(V_mn)
+_Sm = np.linalg.svd(V_mn, compute_uv=False)
+erro_nmf_mn = np.linalg.norm(V_mn - _nmn.transform(V_mn) @ H_mn) / np.linalg.norm(V_mn)
+erro_svd_mn = np.sqrt((_Sm[16:] ** 2).sum()) / np.linalg.norm(V_mn)
+nula_mn = frac_nula(H_mn)
+neg_pca_mn = float((pca_mn.components_ < 0).mean())
 ```
 
 # Revisão e Introdução
 
+## Que filme recomendar para esta pessoa?
+
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-## O Salto da Aula 9 para o Universo das Matrizes Esparsas
+Você abre um serviço de streaming e ele sugere um filme. Para fazer isso, o sistema sabe muito pouco sobre você: quais filmes você já avaliou e que nota deu a cada um. E sabe o mesmo sobre milhares de outras pessoas.
 
-Na **Aula 9**, inauguramos a Parte 3 do curso explorando a mineração de dados discretos e categóricos através de Regras de Associação e Modelos Gráficos Probabilísticos direcionados (Redes Bayesianas). Vimos como estruturas em grafos fatoram probabilidades conjuntas e dissipam correlações espúrias decorrentes de causas comuns latentes.
+Podemos guardar tudo isso numa tabela $R\in\mathbb{R}^{M\times N}$. Cada linha $u$ é um usuário, cada coluna $i$ é um filme, e $r_{ui}$ é a nota que $u$ deu a $i$. A figura mostra um pedaço dessa tabela no **MovieLens**, a base que vocês usarão no trabalho final. O cinza é o que importa: são os filmes que aquela pessoa nunca avaliou.
 
-No entanto, em grandes ecossistemas digitais modernos — como Netflix, Spotify, Amazon, YouTube ou Steam —, os dados não chegam organizados como transações de itens isolados nem como tabelas com todos os atributos preenchidos. Em vez disso, a informação manifesta-se como uma gigantesca **matriz de interações de dois modos** (*bipartite user-item matrix*):
+Recomendar é tentar adivinhar o que está escrito nas células cinza. Se soubermos estimar a nota que você daria a um filme que ainda não viu, basta sugerir os filmes com as maiores estimativas.
 
-$$R \in \mathbb{R}^{M \times N}$$
-
-onde cada linha $u \in \{1, \dots, M\}$ representa um **usuário** e cada coluna $i \in \{1, \dots, N\}$ representa um **item** (filme, música, produto ou livro). O elemento $r_{ui}$ denota a avaliação explícita dada pelo usuário ao item (uma nota de 1 a 5 estrelas) ou uma métrica implícita (número de reproduções, tempo de visualização ou clique).
-
-### A Patologia Singular da Filtragem Colaborativa: Esparsidade Extrema
-
-Nas Aulas 5 e 6 (Álgebra Linear e PCA), operamos com matrizes de design completas $X \in \mathbb{R}^{N \times d}$. Em contraste brutal, uma matriz de recomendação real possui uma característica definidora:
-
-> **Esparsidade Colossal:** Em um catálogo com $M = 10^7$ usuários e $N = 10^5$ filmes, a matriz conteria $10^{12}$ células. Como um usuário médio assiste a poucas dezenas ou centenas de filmes ao longo da vida, **mais de $99{,}5\%$ das entradas da matriz são desconhecidas**.
-
-Não se trata de mero ruído amostral: a grande maioria dos pares $(u, i)$ **nunca foi avaliada**. O desafio central do Aprendizado Não Supervisionado aqui é o **Completamento de Baixo Posto de Matrizes (*Low-Rank Matrix Completion*)**: como descobrir a estrutura de preferências oculta para inferir as notas dos itens não vistos e realizar recomendações assertivas?
+O MovieLens completo tem `{python} milhar(n_notas)` notas, de 0,5 a 5, dadas por `{python} milhar(n_usuarios_base)` usuários a `{python} milhar(n_filmes_base)` filmes. Só `{python} pct(dens_base, 2)` da tabela está preenchida, e o usuário mediano avaliou `{python} f"{med_notas_usuario:.0f}"` filmes. Para que as contas caibam na aula, vamos ficar com os `{python} milhar(M_users)` usuários mais ativos e os `{python} milhar(N_movies)` filmes mais avaliados. Nesse recorte, `{python} pct(dens, 1)` da tabela está preenchida, cerca de cem vezes mais que na base completa. É um cenário bem favorável, e vale lembrar disso ao ler os resultados.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## O Desafio da Filtragem Colaborativa
+- Considere o problema de recomendar filmes para uma pessoa com base nas notas que ela deu a outros filmes, e também nas notas de milhares de outras pessoas.
+- Cada linha é um usuário, cada coluna é um filme, e $r_{ui}$ é a nota de $u$ para $i$.
+- O cinza são os filmes que a pessoa nunca avaliou. **Recomendar é adivinhar o que há nas células cinza.**
+- **MovieLens** (a base do trabalho final): `{python} milhar(n_notas)` notas de 0,5 a 5, `{python} pct(dens_base, 2)` da tabela preenchida, e o usuário mediano avaliou `{python} f"{med_notas_usuario:.0f}"` filmes.
+- **Nosso recorte:** `{python} milhar(M_users)` usuários ativos × `{python} milhar(N_movies)` filmes populares, `{python} pct(dens, 1)` preenchido. É um cenário favorável.
+:::
 
-- **A Matriz Usuário-Item:** $R \in \mathbb{R}^{M \times N}$, onde $r_{ui}$ é a nota do usuário $u$ para o item $i$.
-- **Esparsidade Extrema:** Tipicamente, **mais de $99\%$** das entradas são desconhecidas!
-- **A Pergunta:** Se o usuário $u$ nunca assistiu ao filme $i$, ele vai gostar?
-- **O Objetivo:** Descobrir dimensões latentes de baixo posto para prever as notas não observadas.
+::: {.fig-resize style="width: 60%; margin: 0 auto;"}
+```{python}
+#| echo: false
 
-::: {.fragment .callout-warning}
-## O Erro Fatal
-Uma célula vazia **não é nota zero**. Dizer que $r_{ui} = 0$ equivale a assumir que o usuário detestou um filme que ele sequer sabe que existe!
+fig, ax = plt.subplots(figsize=(6.4, 3.3))
+_ord_u = np.argsort(-observed_mask.sum(1))[::13][:120]
+_ord_f = np.argsort(-observed_mask.sum(0))[::8][:120]
+_cm = plt.get_cmap("YlGnBu").copy()
+_cm.set_bad("#f4f4f4")
+im0 = ax.imshow(R_obs[np.ix_(_ord_u, _ord_f)], cmap=_cm, aspect="auto", vmin=0.5, vmax=5)
+ax.set_title("Notas conhecidas (cinza = sem nota)")
+ax.set_xlabel("filmes (do mais ao menos avaliado)")
+ax.set_ylabel("usuários")
+ax.set_xticks([]); ax.set_yticks([]); ax.grid(False)
+plt.colorbar(im0, ax=ax, fraction=0.046, pad=0.04, label="Nota")
+fig.tight_layout()
+plt.show()
+```
+:::
+
+## O que já vimos que pode ajudar
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Essa tabela lembra duas coisas que já estudamos.
+
+Na **Aula 6**, a PCA resumia uma tabela com poucos fatores: encontrava o subespaço que minimiza o erro de reconstrução, e a PPCA dava a versão probabilística, $\mathbf{x}=\mathbf{W}\mathbf{z}+\boldsymbol\mu+\boldsymbol\epsilon$. Aqui também parece razoável que poucos fatores expliquem muita coisa, já que as pessoas não têm gostos totalmente independentes para cada filme. A diferença é que, na Aula 6, todos os atributos eram conhecidos.
+
+Na **Aula 9**, trabalhamos com tabelas discretas e quase vazias. As regras de associação olhavam poucas variáveis por vez, e as redes Bayesianas nos ensinaram a desconfiar do que aparece nos dados. Uma ideia de lá vai voltar no fim da aula: condicionar num efeito comum, o **colisor**, cria dependência entre as causas. Toda nota que vemos existe porque alguém escolheu ver o filme e avaliá-lo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Aula 6:** a PCA resume uma tabela com poucos fatores, e a PPCA dá a versão probabilística, $\mathbf{x}=\mathbf{W}\mathbf{z}+\boldsymbol\mu+\boldsymbol\epsilon$. Mas lá todos os atributos eram conhecidos.
+- **Aula 9:** tabelas discretas e quase vazias. O **colisor** mostrou que condicionar num efeito comum cria dependência entre as causas. Ele volta no fim da aula: toda nota existe porque alguém escolheu ver o filme.
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Ideia central
+
+Recomendação é parecida com a PCA da Aula 6, só que boa parte da tabela está escondida. Continuamos supondo que poucos fatores explicam os dados, agora os gostos das pessoas. O que precisa mudar é o objetivo, que passa a olhar apenas para as células conhecidas. No fim, teremos um espaço em que usuários e filmes convivem, e vamos querer saber o que esse espaço diz.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Ideia central
+
+::: {.callout-important}
+## Recomendação é parecida com a PCA da Aula 6, com boa parte da tabela escondida
+- **Continua igual:** supomos que poucos fatores explicam os dados.
+- **Muda:** o objetivo olha só para as células conhecidas.
+- **No fim:** um espaço em que usuários e filmes convivem, e que precisamos saber ler.
 :::
 :::
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-## Roteiro e Perguntas Centrais
+## Roteiro
 
-Ao longo desta aula, investigaremos quatro questões essenciais que conectam a decomposição espectral, a otimização com dados faltantes e a geometria da não-negatividade:
+Vamos do mais simples ao mais completo, tentando responder a cinco perguntas:
 
-1. **O Colapso da SVD Clássica:** Por que o Teorema de Eckart-Young-Mirsky (SVD truncada) é inaplicável diretamente a matrizes esparsas e por que a imputação prévia de médias ou zeros gera distorções catastróficas?
-2. **O Modelo de Fatores Latentes com Vieses:** Como projetar usuários e itens em um mesmo espaço vetorial $\mathbb{R}^K$ e por que termos aditivos de viés (*baseline predictors*) são cruciais para capturar efeitos sistemáticos?
-3. **A Mecânica de Otimização (SGD vs. ALS):** Como contornar a não-convexidade conjunta da perda bilinear através de gradiente estocástico por entrada observada e mínimos quadrados alternados?
-4. **A Geometria da NMF e o Princípio Aditivo:** Por que restringir as matrizes à não-negatividade ($W \ge 0, H \ge 0$) impede o cancelamento subtrativo e força a emergência de representações interpretáveis baseadas em partes puramente aditivas?
+1. **Baselines:** até onde vão a média e a SVD com os buracos preenchidos?
+2. **Modelo:** como colocar pessoas e filmes no mesmo espaço e separar o gosto da generosidade de quem dá a nota?
+3. **Treino:** como ajustar esse modelo com SGD e com ALS?
+4. **NMF:** o que muda quando proibimos números negativos?
+5. **Leitura e suposições:** como interpretar o espaço aprendido, e o que estamos supondo sobre os dados?
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## As 4 Perguntas Centrais da Aula
+## Roteiro: 5 perguntas
 
-1. **Colapso da SVD:** Por que a SVD clássica falha diante de matrizes com dados faltantes?
-2. **Espaço Latente e Vieses:** Como modelar gostos de usuários e atributos de itens no mesmo espaço $\mathbb{R}^K$?
-3. **SGD vs. ALS:** Como treinar modelos bilineares de forma eficiente em bases massivas?
-4. **NMF e Partes Aditivas:** Por que proibir números negativos ($W \ge 0, H \ge 0$) cria representações físicas interpretáveis?
+1. **Baselines:** até onde vão a média e a SVD com os buracos preenchidos?
+2. **Modelo:** como colocar pessoas e filmes no mesmo espaço, separando gosto e generosidade?
+3. **Treino:** como ajustar esse modelo com SGD e com ALS?
+4. **NMF:** o que muda quando proibimos números negativos?
+5. **Leitura e suposições:** como interpretar o espaço aprendido, e o que estamos supondo?
 :::
 
----
 
-# Intuição: Gostos Ocultos e Blocos de Montar
+# Baselines
+
+## Primeiro, o mais simples
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-## O Espaço dos Gostos Ocultos
+Antes de qualquer modelo elaborado, vale perguntar o que dá para fazer com quase nada. Para comparar as tentativas, separamos 80% das notas para treino, 10% para escolher hiperparâmetros e 10% para teste, e medimos a raiz do erro quadrático médio (RMSE) nas notas de teste. É um erro na mesma escala das estrelas.
 
-Por que um usuário gosta de um filme? Raramente a decisão depende do título ou da data de lançamento em si; ela depende de **propriedades latentes subjacentes**: o filme contém perseguições eletrizantes? É uma comédia romântica leve? Tem um roteiro complexo de ficção científica? 
+**Tentativa 1: dar a mesma nota para tudo.** Prevemos sempre a média das notas de treino, $\mu$. O erro de teste é `{python} brl(rmse_media_test, 3)`, ou seja, erramos por volta de uma estrela. Qualquer método mais sofisticado precisa pelo menos superar esse número.
 
-Se pudéssemos associar cada filme $i$ a um vetor de características latentes $\mathbf{q}_i \in \mathbb{R}^K$ (onde a primeira coordenada mede o teor de ação, a segunda o teor de romance, etc.), e cada usuário $u$ a um vetor de preferências latentes $\mathbf{p}_u \in \mathbb{R}^K$ (o quanto esse usuário aprecia ação e romance):
+**Tentativa 2: considerar quem dá a nota e qual é o filme.** Há pessoas generosas e pessoas exigentes, e há filmes de que quase todo mundo gosta. Podemos somar à média um ajuste por usuário, $b_u$, e um ajuste por filme, $b_i$:
 
-$$\hat{r}_{ui} = \mathbf{p}_u^T \mathbf{q}_i = \sum_{k=1}^K p_{uk} q_{ik}$$
+$$\hat r_{ui}=\mu+b_u+b_i.$$
 
-A nota prevista é simplesmente o **produto interno** entre a afinidade do usuário e a assinatura do filme! Se o filme é rico em ação ($q_{i1} > 0$) e o usuário ama ação ($p_{u1} > 0$), o produto contribui positivamente para uma nota alta.
-
-## A Metáfora: Massinha de Modelar (PCA/SVD) vs. Blocos de Lego (NMF)
-
-Para compreender a diferença entre a SVD/PCA e a NMF (*Non-Negative Matrix Factorization*), imagine que você precisa ensinar um computador a construir o desenho de um rosto humano:
-
-*   **A Abordagem PCA/SVD (Massinha de Modelar):**
-    A PCA permite números positivos e negativos arbitrários. Para construir um rosto específico, ela começa com um "rosto médio fantasmagórico", adiciona um autovetor global, **subtrai** uma intensidade em outra região para apagar um excesso e compensa em outra dimensão. Os componentes individuais não têm significado físico isolado: são combinações holísticas abstratas cheias de cancelamentos destrutivos.
-*   **A Abordagem NMF (Blocos de Lego):**
-    A NMF impõe que nenhuma coordenada pode ser negativa. Logo, **subtrair é proibido**. A única forma de gerar um rosto é empilhar partes existentes: um bloco para os olhos, um bloco para o nariz, um bloco para a boca. Cada componente latente é forçado a se especializar em uma **parte aditiva localizada**.
+Esses são os **vieses**, ou preditores de baseline. Com eles, o erro cai para `{python} brl(rmse_vies_test, 3)`. Como veremos, nenhum outro passo da aula reduz tanto o erro. No trabalho final, é esse o modelo que vocês precisam vencer primeiro.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Intuição: O Espaço Latente Compartilhado
+**Como medir:** 80% das notas para treino, 10% para validação, 10% para teste. Usamos o RMSE nas notas de teste, na mesma escala das estrelas.
+
+::: {.fragment}
+**Tentativa 1, a mesma nota para tudo:** prever sempre a média $\mu$. RMSE `{python} brl(rmse_media_test, 3)`, cerca de uma estrela.
+:::
+
+::: {.fragment}
+**Tentativa 2, considerar quem dá a nota e qual é o filme:**
+$$\hat r_{ui}=\mu+b_u+b_i$$
+
+- $b_u$: o quanto $u$ costuma dar notas acima ou abaixo da média.
+- $b_i$: o quanto $i$ costuma receber notas acima ou abaixo da média.
+:::
+
+::: {.fragment .callout-important}
+## O primeiro modelo a vencer
+Com os vieses, o RMSE cai para `{python} brl(rmse_vies_test, 3)`. Nenhum outro passo da aula reduz tanto o erro.
+:::
+:::
+
+## Temos uma ferramenta da Aula 6: a SVD
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Se a ideia é resumir uma tabela com poucos fatores, por que não usar o que já sabemos? Toda matriz real admite a decomposição em valores singulares,
+
+$$R=U\Sigma V^T=\sum_{k=1}^r\sigma_k\mathbf{u}_k\mathbf{v}_k^T,$$
+
+e cortar essa soma nos $K$ maiores termos dá a melhor aproximação possível:
+
+::: {.callout-note icon=false}
+## Teorema (Eckart-Young-Mirsky)
+Seja $R\in\mathbb{R}^{M\times N}$ com todas as entradas conhecidas e seja $K<\operatorname{posto}(R)$. Entre todas as matrizes $\hat R$ de posto no máximo $K$, a soma dos $K$ primeiros termos da SVD minimiza $\|R-\hat R\|_F^2=\sum_{u,i}(r_{ui}-\hat r_{ui})^2$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note icon=false}
+## Teorema (Eckart-Young-Mirsky)
+Seja $R\in\mathbb{R}^{M\times N}$ com todas as entradas conhecidas, $R=\sum_{k=1}^r\sigma_k\mathbf{u}_k\mathbf{v}_k^T$, e $K<\operatorname{posto}(R)$. Entre as matrizes de posto no máximo $K$, a soma dos $K$ primeiros termos minimiza $\|R-\hat R\|_F^2$.
+:::
+:::
+
+## O que é cada pedaço de $PQ^T$?
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Escrevemos essa aproximação como $\hat R=PQ^T$, com $P=U_K\Sigma_K^{1/2}$ e $Q=V_K\Sigma_K^{1/2}$. Vale olhar o formato das matrizes, porque ele explica quase tudo.
+
+Como $\hat R$ tem uma linha por usuário e uma coluna por filme, e o produto herda as linhas do fator da esquerda e as colunas do fator da direita, $P$ precisa ter uma linha por usuário e $Q^T$, uma coluna por filme. A linha $u$ de $P$ é o vetor $\mathbf{p}_u$. A coluna $i$ de $Q^T$, que é a linha $i$ de $Q$, é o vetor $\mathbf{q}_i$.
+
+E o $K$? É o tamanho que sobra no meio do produto: o número de colunas de $P$, igual ao número de linhas de $Q^T$. Somos nós que o escolhemos. Cada uma dessas $K$ posições é um **fator**, e usuários e filmes têm um número para cada fator.
+
+Pela regra do produto de matrizes, a célula $(u,i)$ só depende da linha $u$ da esquerda e da coluna $i$ da direita:
+
+$$\hat r_{ui}=\sum_{k=1}^K P_{uk}\,(Q^T)_{ki}=\mathbf{p}_u^T\mathbf{q}_i.$$
+
+Na figura, com números ilustrativos e $K=3$, a conta é $1{,}5\cdot2{,}0+0{,}5\cdot1{,}0+1{,}0\cdot0{,}5=4{,}0$. Fica claro também por que isso é um resumo: no nosso recorte, a tabela tem `{python} milhar(M_users * N_movies)` células, e com $K=$ `{python} K_fat` bastam $(M+N)K=$ `{python} milhar((M_users + N_movies) * K_fat)` números para gerar todas elas.
+:::
+
+::: {.fig-resize style="width: 54%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{43,92,143}
+\definecolor{laranja}{RGB}{217,95,2}
+\definecolor{cinza}{RGB}{127,127,127}
+\begin{tikzpicture}[font=\small]
+  % R chapeu: 6 usuarios x 8 filmes
+  \fill[azul!18] (0,-1.2) rectangle (4.8,-1.8);
+  \fill[laranja!18] (3.0,0) rectangle (3.6,-3.6);
+  \fill[laranja!70] (3.0,-1.2) rectangle (3.6,-1.8);
+  \draw[cinza!60, step=0.6] (0,-3.6) grid (4.8,0);
+  \draw[thick] (0,-3.6) rectangle (4.8,0);
+  \node[font=\scriptsize\bfseries, white] at (3.3,-1.5) {4,0};
+  \node[font=\bfseries] at (2.4,1.0) {$\hat R$: uma nota por par};
+  \node[laranja] at (3.3,0.3) {filme $i$};
+  \node[azul, anchor=east] at (-0.05,-1.5) {usuário $u$};
+  \node at (2.4,-4.0) {$M$ usuários $\times$ $N$ filmes};
+  \node[font=\Large] at (5.45,-1.8) {$\approx$};
+  % P: 6 usuarios x 3 fatores
+  \fill[azul!30] (6.1,-1.2) rectangle (7.9,-1.8);
+  
+  \foreach \y in {-0.6,-1.2,-1.8,-2.4,-3.0} \draw[cinza!60] (6.1,\y) -- (7.9,\y);
+  \foreach \x in {6.7,7.3} \draw[cinza!60] (\x,0) -- (\x,-3.6);
+  \draw[thick] (6.1,-3.6) rectangle (7.9,0);
+  \node[font=\scriptsize] at (6.4,-1.5) {1,5};
+  \node[font=\scriptsize] at (7.0,-1.5) {0,5};
+  \node[font=\scriptsize] at (7.6,-1.5) {1,0};
+  \node[font=\bfseries] at (7.0,1.0) {$P$};
+  \node[azul, anchor=west] at (7.95,-1.5) {$\mathbf{p}_u$};
+  \node at (7.0,-4.0) {$K$ colunas};
+  \node[font=\Large] at (8.95,-0.9) {$\times$};
+  % Q^T: 3 fatores x 8 filmes
+  \fill[laranja!30] (12.4,0) rectangle (13.0,-1.8);
+  \foreach \y in {-0.6,-1.2} \draw[cinza!60] (9.4,\y) -- (14.2,\y);
+  \foreach \x in {10.0,10.6,11.2,11.8,12.4,13.0,13.6} \draw[cinza!60] (\x,0) -- (\x,-1.8);
+  \draw[thick] (9.4,-1.8) rectangle (14.2,0);
+  \node[font=\scriptsize] at (12.7,-0.3) {2,0};
+  \node[font=\scriptsize] at (12.7,-0.9) {1,0};
+  \node[font=\scriptsize] at (12.7,-1.5) {0,5};
+  \node[font=\bfseries] at (11.8,1.0) {$Q^T$};
+  \node[laranja] at (12.7,0.3) {filme $i$};
+  \node[laranja] at (12.7,-2.15) {$\mathbf{q}_i$};
+  \node at (11.0,-2.15) {$K$ linhas};
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **Usuários em $P$, filmes em $Q$:** o produto herda as linhas da esquerda e as colunas da direita.
+- **O que é $K$:** o tamanho que sobra no meio do produto, escolhido por nós. Cada posição é um **fator**.
+:::
+
+::: {.fragment}
+- **A célula:** $\hat r_{ui}=\sum_{k=1}^K P_{uk}(Q^T)_{ki}=\mathbf{p}_u^T\mathbf{q}_i=1{,}5\cdot2{,}0+0{,}5\cdot1{,}0+1{,}0\cdot0{,}5=4{,}0$ (números ilustrativos).
+- **Por que é um resumo:** `{python} milhar(M_users * N_movies)` células geradas por $(M+N)K=$ `{python} milhar((M_users + N_movies) * K_fat)` números, com $K=$ `{python} K_fat`.
+:::
+:::
+
+## A SVD é a PCA da Aula 6
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A ligação com a Aula 6 é direta. Para uma matriz $X\in\mathbb{R}^{n\times d}$ centrada, com $X=U\Sigma V^T$, a covariância amostral é $\frac1n X^TX=\frac1n V\Sigma U^TU\Sigma V^T=V\frac{\Sigma^2}{n}V^T$, usando $U^TU=I$. Portanto, as colunas de $V$ são as direções principais, com autovalores $\sigma_k^2/n$. Aqui $P$ faz o papel das coordenadas $\mathbf{z}_n$, e $Q$, o da matriz de carregamento $\mathbf{W}$, a menos de como dividimos $\Sigma$ entre os dois.
+
+Também herdamos a invariância da PPCA: para qualquer $G$ invertível, $(PG,\ QG^{-T})$ produz o mesmo $PQ^T$. Os dados determinam o subespaço, mas os eixos ficam em aberto. Isso vai importar quando tentarmos dar nome aos eixos.
+:::
+
+::: {.content-visible when-format="revealjs"}
+Seja $X=U\Sigma V^T$ centrada.
+
+::: {.fragment}
+**Passo 1, covariância:** $\quad\frac1n X^TX=\frac1n V\Sigma U^TU\Sigma V^T$
+
+**Passo 2, $U^TU=I$:** $\quad\frac1n X^TX=V\frac{\Sigma^2}{n}V^T$
+
+As colunas de $V$ são as direções principais, com autovalores $\sigma_k^2/n$. $P$ faz o papel de $\mathbf{z}_n$, e $Q$, o de $\mathbf{W}$ (a menos da divisão de $\Sigma$).
+:::
+
+::: {.fragment}
+**Invariância:** para $G$ invertível, $(PG,\ QG^{-T})$ produz o mesmo $PQ^T$. Os dados determinam o subespaço, mas os eixos ficam em aberto.
+:::
+:::
+
+## Tapando os buracos
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O teorema supõe que conhecemos todas as entradas, e nós não conhecemos. A saída mais natural é preencher os buracos e seguir em frente. Mas preencher com quê?
+
+**Tentativa 3: preencher com zero.** É o que acontece por padrão quando guardamos a tabela numa matriz esparsa. O erro de teste vai a `{python} brl(rmse_zero_test, 3)`, `{python} brl(razao_zero, 1)` vezes pior que prever a média. A nota real média nas células de teste é `{python} brl(nota_media_teste)`, e o modelo prevê em média `{python} brl(pred_zero)`.
+
+O motivo fica claro quando escrevemos o que a SVD está minimizando:
+
+$$\|R_0-PQ^T\|_F^2=\underbrace{\sum_{(u,i)\in\Omega}\left(r_{ui}-\mathbf{p}_u^T\mathbf{q}_i\right)^2}_{\text{notas reais}}+\underbrace{\sum_{(u,i)\notin\Omega}\left(0-\mathbf{p}_u^T\mathbf{q}_i\right)^2}_{\text{zeros inventados}},$$
+
+em que $\Omega$ é o conjunto das células com nota. A segunda soma tem cerca de `{python} f"{frac_vazia_treino / (1 - frac_vazia_treino):.0f}"` vezes mais termos que a primeira. O teorema continua valendo, mas o problema que ele resolve é reconstruir uma tabela em que quem não viu um filme lhe deu nota zero, pior que a pior nota da escala.
+
+**Tentativa 4: preencher com a média.** Melhora bastante: `{python} brl(rmse_mean_test, 3)`. Já supera a média pura, mas ainda perde para os vieses, e a matriz, antes esparsa, fica densa, com custo de $\mathcal{O}(MNK)$ por passagem.
+
+**Tentativa 5: preencher os buracos com a previsão dos vieses.** Em vez de fatorar as notas, fatoramos o resíduo $r_{ui}-\mu-b_u-b_i$. Nele, um buraco vale zero, o que significa "nada além do esperado", uma hipótese bem mais razoável que "nota zero". Na hora de prever, somamos os vieses de volta: $\hat r_{ui}=\mu+b_u+b_i+\hat Y_{ui}$, em que $\hat Y$ é a SVD truncada dos resíduos. O erro cai para `{python} brl(rmse_res_test, 3)`, o melhor até aqui. Ainda assim, o método continua gastando esforço para reconstruir células que ninguém avaliou.
+:::
+
+::: {.content-visible when-format="revealjs"}
+O teorema supõe a tabela completa. A saída natural é preencher os buracos. Com quê?
+
+::: {.fragment}
+**Tentativa 3, com zero:** a SVD passa a minimizar
+$$\underbrace{\sum_{(u,i)\in\Omega}\left(r_{ui}-\mathbf{p}_u^T\mathbf{q}_i\right)^2}_{\text{notas reais}}+\underbrace{\sum_{(u,i)\notin\Omega}\left(0-\mathbf{p}_u^T\mathbf{q}_i\right)^2}_{\text{zeros inventados}}$$
+A segunda soma tem cerca de `{python} f"{frac_vazia_treino / (1 - frac_vazia_treino):.0f}"` vezes mais termos. Nota real média no teste: `{python} brl(nota_media_teste)`. Previsão média: `{python} brl(pred_zero)`.
+:::
+
+::: {.fragment}
+**Tentativa 4, com a média:** bem melhor, mas perde para os vieses, e a matriz fica densa ($\mathcal{O}(MNK)$).
+:::
+
+::: {.fragment}
+**Tentativa 5, com a previsão dos vieses:** fatoramos o resíduo $r_{ui}-\mu-b_u-b_i$. Nele, um buraco vale zero, ou seja, "nada além do esperado". Para prever, somamos os vieses de volta: $\hat r_{ui}=\mu+b_u+b_i+\hat Y_{ui}$, com $\hat Y$ a SVD truncada dos resíduos. É o melhor até aqui, mas ainda ajusta células que ninguém avaliou.
+:::
+:::
+
+## As cinco tentativas lado a lado
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A figura reúne as cinco tentativas. Note que uma SVD ingênua erra mais que uma constante, e que os vieses, com uma fórmula de três termos, superam a SVD com a média.
+:::
+
+::: {.content-visible when-format="revealjs"}
+Uma SVD ingênua erra mais que uma constante. Os vieses, com uma fórmula de três termos, superam a SVD com a média.
+:::
+
+::: {.fig-resize style="width: 72%; margin: 0 auto;"}
+```{python}
+#| echo: false
+
+fig, ax = plt.subplots(figsize=(8, 2.9))
+_rot = ["1. Média global", "2. Vieses", "3. SVD, buracos = zero", "4. SVD, buracos = média", "5. SVD no resíduo"]
+_val = [rmse_media_test, rmse_vies_test, rmse_zero_test, rmse_mean_test, rmse_res_test]
+_cor = [COR_CINZA, COR_CINZA, COR_ALERTA, COR_B, COR_A]
+_barras = ax.barh(_rot, _val, color=_cor, height=.55)
+for _b_, _v in zip(_barras, _val):
+    ax.text(_v + .03, _b_.get_y() + _b_.get_height() / 2, brl(_v, 3), va="center")
+ax.set_xlim(0, 2.9)
+ax.set_xlabel("RMSE de teste (menor é melhor)")
+ax.set_title("Baselines no MovieLens")
+ax.invert_yaxis()
+ax.grid(axis="y", visible=False)
+fig.tight_layout()
+plt.show()
+```
+:::
+
+## O que ainda falta
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Os vieses têm um defeito que o RMSE não mostra. Para um usuário fixo, a ordem dos filmes em $\mu+b_u+b_i$ depende só de $b_i$. O $b_u$ desloca todas as previsões da pessoa pelo mesmo valor, sem alterar a ordem. Portanto, **todo mundo recebe a mesma lista**, retirados os filmes já vistos. No nosso recorte, ela começa com *`{python} top_vieses`*.
+
+Esse modelo sabe que um filme é bem avaliado e que você dá notas altas, mas não sabe se você gosta de animação. Recomendar, de fato, é captar esse tipo de coisa. É o que falta: alguma estrutura no que sobra depois de tirar os vieses.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-important}
+## Com os vieses, todo mundo recebe a mesma lista
+Para um usuário fixo, a ordem dos filmes em $\mu+b_u+b_i$ depende só de $b_i$. No nosso recorte, ela começa com *`{python} top_vieses`*.
+:::
+
+::: {.fragment}
+O modelo sabe que o filme é bem avaliado e que você dá notas altas, mas não sabe se você gosta de animação. Falta estrutura no que sobra depois de tirar os vieses.
+:::
+:::
+
+
+# Intuição: Gostos Ocultos
+
+## Por que alguém gosta de um filme?
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Raramente é pelo título ou pelo ano de lançamento. Um filme tem perseguições, é uma comédia leve, tem um roteiro complicado de ficção científica. E cada pessoa se importa mais com umas coisas que com outras.
+
+Imagine que cada filme $i$ tem um vetor $\mathbf{q}_i\in\mathbb{R}^K$, em que a primeira coordenada mede quanto ele tem de ação, a segunda quanto tem de romance, e assim por diante. Cada usuário $u$ tem um vetor $\mathbf{p}_u\in\mathbb{R}^K$ que diz quanto ele aprecia cada uma dessas coisas. Uma forma simples de combinar os dois é o produto interno:
+
+$$\mathbf{p}_u^T\mathbf{q}_i=\sum_{k=1}^K p_{uk}q_{ik}.$$
+
+Se o filme tem muita ação e a pessoa adora ação, esse termo sobe a previsão. Se a pessoa detesta ($p_{u1}<0$), ele a derruba. É a estrutura que faltava: somando esse termo aos vieses, duas pessoas podem receber listas diferentes.
+
+$$\hat r_{ui}=\mu+b_u+b_i+\mathbf{p}_u^T\mathbf{q}_i.$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+- Um filme tem perseguições, é uma comédia leve, tem um roteiro complicado. Cada pessoa se importa mais com umas coisas que com outras.
+- $\mathbf{q}_i\in\mathbb{R}^K$: quanto o filme $i$ tem de cada fator (ação, romance...).
+- $\mathbf{p}_u\in\mathbb{R}^K$: quanto o usuário $u$ aprecia cada fator.
+
+::: {.fragment}
+Muita ação e a pessoa adora ação: o produto sobe a previsão. Se ela detesta ($p_{u1}<0$), derruba.
+$$\mathbf{p}_u^T\mathbf{q}_i=\sum_{k=1}^K p_{uk}q_{ik}$$
+:::
+
+::: {.fragment}
+Somando aos vieses, duas pessoas já podem receber listas diferentes:
+$$\hat r_{ui}=\mu+b_u+b_i+\mathbf{p}_u^T\mathbf{q}_i$$
+:::
+:::
+
+## Ninguém nos deu esses vetores
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Falamos em "quanto o filme tem de ação" para facilitar, mas o MovieLens não informa nada disso. Um usuário é só um **índice** $u$, um filme é só outro índice $i$, e o dado é a tripla "$u$ deu a nota $r_{ui}$ a $i$".
+
+Aí está uma diferença em relação à PCA. Lá, partimos de um vetor de atributos conhecido, $\mathbf{x}_n$, e *calculamos* o código $\mathbf{z}_n$. Aqui, o candidato natural a vetor de atributos seria a linha de $R$, com as notas da pessoa para cada filme. Só que `{python} pct(1 - dens)` desses valores não existem, mesmo no recorte favorável.
+
+A fatoração faz o caminho inverso. $\mathbf{p}_u$ e $\mathbf{q}_i$ são **parâmetros aprendidos**, duas tabelas consultadas pelo índice, com todas as $K$ coordenadas preenchidas. Daí saem três consequências:
+
+- Não precisamos de atributos, basta o histórico de interações.
+- Os eixos não vêm com nome. "Ação" é uma leitura que fazemos depois, quando faz sentido.
+- Quem não tem histórico não tem vetor. Esse é o problema do *cold start*.
+
+Aqui aparece nossa primeira suposição: a de que a tabela completa tem **posto baixo**, ou seja, poucos fatores bastam para explicar os gostos. Sem isso, as células conhecidas não diriam nada sobre as desconhecidas.
+:::
+
+::: {.content-visible when-format="revealjs"}
+**Na PCA:** partimos de atributos conhecidos $\mathbf{x}_n$ e *calculamos* o código $\mathbf{z}_n$. **Aqui:** o dado é só "$u$ deu a nota $r_{ui}$ a $i$". Usuário e filme são **índices**.
+:::
+
+::: {.fig-resize style="width: 46%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{43,92,143}
+\definecolor{laranja}{RGB}{217,95,2}
+\definecolor{cinza}{RGB}{127,127,127}
+\begin{tikzpicture}[>=latex, font=\small, thick,
+  caixa/.style={draw=#1, fill=#1!10, rounded corners=2pt, minimum height=0.8cm, minimum width=2.1cm, align=center}]
+  \node[font=\small\bfseries] at (2.7,2.1) {PCA: o código é calculado};
+  \node[caixa=cinza] (x) at (0,1.1) {$\mathbf{x}_n$\\atributos};
+  \node[caixa=azul] (z) at (2.7,1.1) {$\mathbf{z}_n$\\código};
+  \node[caixa=cinza] (t) at (5.4,1.1) {$\tilde{\mathbf{x}}_n$\\reconstrução};
+  \draw[->] (x) -- (z);
+  \draw[->] (z) -- (t);
+  \node[font=\small\bfseries] at (2.7,-0.2) {Fatoração: o código é uma tabela aprendida};
+  \node[caixa=cinza] (n) at (0,-1.1) {índice $u$};
+  \node[caixa=cinza] (i) at (0,-2.3) {índice $i$};
+  \node[caixa=azul] (zt) at (2.7,-1.1) {linha $u$ de $P$\\$\mathbf{p}_u$};
+  \node[caixa=laranja] (wt) at (2.7,-2.3) {linha $i$ de $Q$\\$\mathbf{q}_i$};
+  \node[caixa=cinza] (r) at (5.4,-1.7) {$\hat r_{ui}=\mathbf{p}_u^T\mathbf{q}_i$};
+  \draw[->] (n) -- (zt);
+  \draw[->] (i) -- (wt);
+  \draw[->] (zt) -- (r);
+  \draw[->] (wt) -- (r);
+\end{tikzpicture}
+```
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O que isso muda
+
+::: {.fragment}
+- As linhas de notas seriam atributos ruins: `{python} pct(1 - dens)` delas não existem, mesmo no recorte.
+- **Consequências:** não precisamos de atributos; os eixos não vêm com nome; quem não tem histórico não tem vetor (*cold start*).
+- **Primeira suposição, posto baixo:** poucos fatores explicam os gostos. Sem isso, as células conhecidas não diriam nada sobre as desconhecidas.
+:::
+:::
+
+## Como é esse espaço na prática?
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Como os filmes viram pontos, podemos desenhá-los. A figura usa a Tentativa 5, a SVD do resíduo, e mostra os dois primeiros fatores. Ninguém informou gêneros, e mesmo assim os extremos fazem algum sentido: um eixo parece separar grandes franquias de filmes mais autorais, e o outro destaca os filmes recentes de super-heróis. Essa leitura é nossa, feita depois de olhar os nomes. Repare também na nuvem perto da origem. Voltaremos a ela no Bloco 5.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- Dois primeiros fatores da SVD do resíduo, aprendidos **sem gêneros**.
+- Um eixo parece separar franquias de filmes autorais, e o outro destaca os super-heróis recentes. A leitura é nossa, feita depois de olhar os nomes.
+- A nuvem perto da origem volta no Bloco 5.
+:::
+
+::: {.fig-resize style="width: 74%; margin: 0 auto;"}
+```{python}
+#| echo: false
+
+fig, ax = plt.subplots(figsize=(9, 4.6))
+_x, _y = Vt_res[0], Vt_res[1]
+ax.scatter(_x, _y, s=9, color=COR_CINZA, alpha=.35, linewidths=0)
+_idx = list(np.argsort(_x)[:3]) + list(np.argsort(_x)[-3:]) + list(np.argsort(_y)[:3]) + list(np.argsort(_y)[-3:])
+_vistos = []
+for _j in dict.fromkeys(_idx):
+    _nome = re.split(r" - |: Or| \(", titulo(nomes[_j]))[0]
+    ax.scatter(_x[_j], _y[_j], s=30, color=COR_A, edgecolor="white", linewidth=.8, zorder=3)
+    _ha = "right" if _x[_j] > 0.02 else "left"
+    _dy = 4
+    for _vx, _vy in _vistos:
+        if abs(_vx - _x[_j]) < .09 and abs(_vy - _y[_j]) < .03:
+            _dy = -11
+    _vistos.append((_x[_j], _y[_j]))
+    ax.annotate(_nome, (_x[_j], _y[_j]), xytext=(-5 if _ha == "right" else 5, _dy),
+                textcoords="offset points", ha=_ha, fontsize=8.5)
+ax.axhline(0, color=COR_CINZA, lw=.6); ax.axvline(0, color=COR_CINZA, lw=.6)
+ax.set_xlabel("fator 1"); ax.set_ylabel("fator 2")
+ax.set_title("Filmes nos dois primeiros fatores (sem usar gêneros)")
+fig.tight_layout()
+plt.show()
+```
+:::
+
+
+# Bloco 1: Aprender Só com o que Foi Observado
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Parar de inventar notas
+
+As tentativas 3 a 5 têm o mesmo problema: todas ajustam valores que nós mesmos inventamos. A saída é simples de dizer. Se uma célula está vazia, ela não entra na conta.
+
+Essa virada ficou conhecida durante o *Netflix Prize* (2006–2009), com o trabalho de Simon Funk (2006), e foi sistematizada por Koren, Bell & Volinsky (2009). Com $\Omega$ o conjunto das células observadas, minimizamos
+
+$$\mathcal{L}(P,Q)=\frac12\sum_{(u,i)\in\Omega}\left(r_{ui}-\mathbf{p}_u^T\mathbf{q}_i\right)^2+\frac\lambda2\sum_{u=1}^M\|\mathbf{p}_u\|^2+\frac\lambda2\sum_{i=1}^N\|\mathbf{q}_i\|^2.$$
+
+Os termos com $\lambda>0$ são necessários porque um usuário com poucas notas tem poucos dados para determinar $K$ coordenadas. Sem esse freio, o modelo decora as notas que viu.
+
+Com isso, perdemos a fórmula fechada: o teorema de Eckart-Young-Mirsky não se aplica a esse problema, e precisaremos de um algoritmo iterativo, assunto do Bloco 2.
+
+## Colocando os vieses de volta
+
+Já vimos que os vieses explicam muita coisa, então faz sentido mantê-los e deixar os fatores cuidarem só do que sobra. O modelo completo é
+
+$$\hat r_{ui}=\mu+b_u+b_i+\mathbf{p}_u^T\mathbf{q}_i,$$
+
+em que $\mu$ é a média global das notas observadas, $b_u$ e $b_i$ são os desvios do usuário e do filme, e $\mathbf{p}_u^T\mathbf{q}_i$ é a interação. A perda fica
+
+$$\mathcal{L}(P,Q,\mathbf{b}_u,\mathbf{b}_i)=\frac12\sum_{(u,i)\in\Omega}\left(r_{ui}-\hat r_{ui}\right)^2+\frac\lambda2\left(\sum_u b_u^2+\sum_i b_i^2+\sum_u\|\mathbf{p}_u\|^2+\sum_i\|\mathbf{q}_i\|^2\right).$$
+
+## O que estamos supondo
+
+Escrever essa perda já nos compromete com três suposições, além do posto baixo:
+
+- **Interação aditiva e bilinear:** os efeitos se somam, e o gosto entra por um produto interno. Não há lugar para contexto nem para a ordem em que os filmes foram vistos.
+- **Ruído Gaussiano com variância constante:** é o que justifica a perda quadrática, embora as notas sejam discretas e limitadas.
+- **A falta não informa o valor:** somar só em $\Omega$ trata as células vazias como se o motivo de estarem vazias não dissesse nada sobre a nota. Já dá para desconfiar dessa, e voltaremos a ela no Bloco 5.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Parar de inventar notas
+
+As tentativas 3 a 5 ajustam valores que nós mesmos inventamos. A saída: **célula vazia não entra na conta** (Funk, 2006; Koren, Bell & Volinsky, 2009).
+
+$$\mathcal{L}(P,Q)=\frac12\sum_{(u,i)\in\Omega}\left(r_{ui}-\mathbf{p}_u^T\mathbf{q}_i\right)^2+\frac\lambda2\sum_{u}\|\mathbf{p}_u\|^2+\frac\lambda2\sum_{i}\|\mathbf{q}_i\|^2$$
+
+::: {.fragment}
+- **Por que $\lambda$:** quem tem poucas notas não determina $K$ coordenadas. Sem esse freio, o modelo decora o que viu.
+- **O que se perde:** Eckart-Young-Mirsky não se aplica. Sem fórmula fechada, precisamos iterar (Bloco 2).
+:::
+
+## Os vieses de volta, e o que estamos supondo
+
+$$\min_{P,Q,\mathbf{b}}\ \frac12\sum_{(u,i)\in\Omega}\left(r_{ui}-\hat r_{ui}\right)^2+\frac\lambda2\left(\|\mathbf{b}_u\|^2+\|\mathbf{b}_i\|^2+\|P\|_F^2+\|Q\|_F^2\right),\quad\hat r_{ui}=\mu+b_u+b_i+\mathbf{p}_u^T\mathbf{q}_i$$
+
+Além do posto baixo, essa perda supõe:
+
+::: {.fragment}
+- **Interação aditiva e bilinear:** os efeitos se somam. Não há lugar para contexto nem para a ordem em que os filmes foram vistos.
+:::
+
+::: {.fragment}
+- **Ruído Gaussiano com variância constante:** justifica a perda quadrática, embora as notas sejam discretas e limitadas.
+:::
+
+::: {.fragment}
+- **A falta não informa o valor:** o motivo de uma célula estar vazia não diria nada sobre a nota. Já dá para desconfiar dessa (Bloco 5).
+:::
+:::
+
+## Pausa 1: Baseline e Dados Faltantes
+
+::: {.callout-tip}
+## Com $\mu = 3{,}5$, $b_u = -0{,}6$ (Carlos, crítico) e $b_i = +0{,}8$ (*Interestelar*), qual é a nota de baseline? E a nota final, se $\mathbf{p}_u^T \mathbf{q}_i = +0{,}5$?
+
+Some os efeitos sistemáticos antes de considerar qualquer afinidade latente. O que cada termo diz sobre Carlos e sobre o filme?
+:::
+
+::: {.callout-tip}
+## O Colapso da SVD e os Vieses
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O Teorema de Eckart-Young-Mirsky garante que a SVD truncada fornece a melhor aproximação de posto $K$ mesmo quando a matriz possui $90\%$ de entradas não observadas preenchidas com NaN.
+- □ Preencher as células vazias de uma matriz de recomendação com zero é equivalente a assumir que a ausência de avaliação representa insatisfação máxima do usuário com o item.
+- □ O preditor de baseline $\mu + b_u + b_i$ consegue capturar o fato de que um usuário generoso tende a dar notas altas mesmo para filmes medianos.
+- □ A regularização $L_2$ nos fatores latentes ($\lambda \|\mathbf{p}_u\|^2$) tem como objetivo principal forçar as coordenadas dos fatores a serem estritamente não-negativas.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 1: Baseline e Dados Faltantes — Resposta
+
+::: {.callout-tip}
+## O Colapso da SVD e os Vieses — Resposta
+
+- ✗ O teorema supõe todas as entradas reais e conhecidas; não se aplica a entradas indefinidas.
+- ✔ Na escala de 0,5 a 5, zero é pior que a pior nota possível, e o modelo passa a prever desinteresse por quase todo o catálogo.
+- ✔ $b_u>0$ eleva de forma aditiva a nota base de todos os itens desse usuário.
+- ✗ A penalidade $L_2$ limita magnitudes para evitar sobreajuste, sem restringir o sinal. Isso é papel da NMF.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** a baseline é $3{,}5-0{,}6+0{,}8=3{,}7$, e a nota final é $3{,}7+0{,}5=4{,}2$. O filme aclamado compensa parte da exigência de Carlos, e a afinidade latente acrescenta meio ponto.
+:::
+
+:::
+
+
+# Bloco 2: Como Treinar: SGD e ALS
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Duas variáveis que se multiplicam
+
+Temos uma perda, mas ela não é convexa, por causa do produto $\mathbf{p}_u^T\mathbf{q}_i$. Um caso mínimo mostra isso. Com um usuário, um filme, $K=1$ e sem regularização, a perda $(1-pq)^2$ vale 0 em $(1,1)$ e em $(-1,-1)$, mas vale 1 no ponto médio $(0,0)$.
+
+Por outro lado, se fixarmos $Q$, o que resta é quadrático em $P$ e, com $\lambda>0$, estritamente convexo. O mesmo vale trocando os papéis. Problemas assim são chamados de **biconvexos**, e cada um dos dois algoritmos clássicos explora essa estrutura de um jeito.
+
+## SGD: uma nota de cada vez (Funk-SVD)
+
+O SGD percorre as notas observadas uma a uma e corrige o modelo um pouco a cada nota. Para cada $(u,i)\in\Omega$, calculamos o erro
+
+$$e_{ui}=r_{ui}-\left(\mu+b_u+b_i+\mathbf{p}_u^T\mathbf{q}_i\right).$$
+
+A perda dessa nota é $\mathcal{L}_{ui}=\frac12 e_{ui}^2+\frac\lambda2\left(b_u^2+b_i^2+\|\mathbf{p}_u\|^2+\|\mathbf{q}_i\|^2\right)$, e seus gradientes são
+
+$$\frac{\partial\mathcal{L}_{ui}}{\partial b_u}=-e_{ui}+\lambda b_u,\quad\frac{\partial\mathcal{L}_{ui}}{\partial b_i}=-e_{ui}+\lambda b_i,\quad\nabla_{\mathbf{p}_u}\mathcal{L}_{ui}=-e_{ui}\mathbf{q}_i+\lambda\mathbf{p}_u,\quad\nabla_{\mathbf{q}_i}\mathcal{L}_{ui}=-e_{ui}\mathbf{p}_u+\lambda\mathbf{q}_i.$$
+
+Andando no sentido oposto, com passo $\gamma$:
+
+$$b_u\leftarrow b_u+\gamma(e_{ui}-\lambda b_u),\qquad b_i\leftarrow b_i+\gamma(e_{ui}-\lambda b_i),$$
+$$\mathbf{p}_u\leftarrow\mathbf{p}_u+\gamma(e_{ui}\mathbf{q}_i-\lambda\mathbf{p}_u),\qquad\mathbf{q}_i\leftarrow\mathbf{q}_i+\gamma(e_{ui}\mathbf{p}_u-\lambda\mathbf{q}_i).$$
+
+Dá para ler a regra em voz alta: se a nota veio acima do previsto ($e_{ui}>0$), aproximamos o gosto do usuário do perfil do filme. Cada atualização custa $\mathcal{O}(K)$, e uma passada completa custa $\mathcal{O}(|\Omega|K)$. O custo depende só das notas conhecidas.
+
+Um cuidado ao ajustar o $\lambda$: aqui a penalidade é aplicada a cada nota, enquanto na perda global ela aparece uma vez por usuário e por filme. Por isso, o $\lambda$ do SGD e o do ALS têm escalas diferentes e não dá para compará-los diretamente.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## SGD: uma nota de cada vez (Funk-SVD)
+
+A perda não é convexa em $(P,Q)$: $(1-pq)^2$ vale 0 em $(1,1)$ e $(-1,-1)$, mas 1 em $(0,0)$. Com um dos fatores fixo, ela é convexa. Os dois algoritmos clássicos exploram isso de jeitos diferentes.
+
+::: {.fragment}
+Para cada nota $(u,i)\in\Omega$:
+
+1. **Erro:** $e_{ui}=r_{ui}-\hat r_{ui}$.
+2. **Vieses:** $\ b_u\leftarrow b_u+\gamma(e_{ui}-\lambda b_u),\quad b_i\leftarrow b_i+\gamma(e_{ui}-\lambda b_i)$
+3. **Fatores:** $\ \mathbf{p}_u\leftarrow\mathbf{p}_u+\gamma(e_{ui}\mathbf{q}_i-\lambda\mathbf{p}_u),\quad\mathbf{q}_i\leftarrow\mathbf{q}_i+\gamma(e_{ui}\mathbf{p}_u-\lambda\mathbf{q}_i)$
+:::
+
+::: {.fragment}
+Em voz alta: se a nota veio acima do previsto, aproximamos o gosto do usuário do perfil do filme.
+:::
+
+::: {.fragment}
+- **Custo:** $\mathcal{O}(|\Omega|K)$ por passada. Depende só das notas conhecidas.
+- **Cuidado:** a penalidade aqui é por nota, e na perda global é por usuário e filme. O $\lambda$ do SGD e o do ALS não são comparáveis.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## ALS: um fator de cada vez
+
+Se fixar $Q$ torna o problema convexo, por que não resolvê-lo exatamente? O **ALS** (*Alternating Least Squares*) alterna: congela $Q$ e resolve para todos os $\mathbf{p}_u$; congela $P$ e resolve para todos os $\mathbf{q}_i$; e repete.
+
+Seja $\mathcal{I}_u$ o conjunto de filmes avaliados por $u$, e $\tilde r_{ui}=r_{ui}-\mu-b_u-b_i$ o resíduo, com os vieses fixos neste passo.
+
+**Passo 1, os termos que dependem de $\mathbf{p}_u$:** $\ \mathcal{L}_u=\frac12\sum_{i\in\mathcal{I}_u}\left(\tilde r_{ui}-\mathbf{q}_i^T\mathbf{p}_u\right)^2+\frac\lambda2\|\mathbf{p}_u\|^2$.
+
+**Passo 2, gradiente:** $\ \nabla_{\mathbf{p}_u}\mathcal{L}_u=-\sum_{i\in\mathcal{I}_u}\mathbf{q}_i\left(\tilde r_{ui}-\mathbf{q}_i^T\mathbf{p}_u\right)+\lambda\mathbf{p}_u$.
+
+**Passo 3, igualando a zero:** $\ \left(\sum_{i\in\mathcal{I}_u}\mathbf{q}_i\mathbf{q}_i^T+\lambda I_K\right)\mathbf{p}_u=\sum_{i\in\mathcal{I}_u}\tilde r_{ui}\mathbf{q}_i$.
+
+**Passo 4, a matriz é definida positiva ($\lambda>0$), logo invertível:**
+
+$$\mathbf{p}_u=\left(\sum_{i\in\mathcal{I}_u}\mathbf{q}_i\mathbf{q}_i^T+\lambda I_K\right)^{-1}\sum_{i\in\mathcal{I}_u}\left(r_{ui}-\mu-b_u-b_i\right)\mathbf{q}_i.$$
+
+Olhando a fórmula: **cada usuário é uma regressão Ridge**, cujos atributos são os perfis dos filmes que ele viu. Do mesmo modo, para cada filme $i$, com $\mathcal{U}_i$ o conjunto de quem o avaliou,
+
+$$\mathbf{q}_i=\left(\sum_{u\in\mathcal{U}_i}\mathbf{p}_u\mathbf{p}_u^T+\lambda I_K\right)^{-1}\sum_{u\in\mathcal{U}_i}\left(r_{ui}-\mu-b_u-b_i\right)\mathbf{p}_u.$$
+
+Como o problema de um usuário não depende dos outros, dá para resolver todos em paralelo. É por isso que o ALS é a implementação usada em ferramentas distribuídas como o MLlib do Spark. Um filme sem nenhuma avaliação fica com $\mathbf{q}_i=\mathbf{0}$, o que é o *cold start* escrito em forma de equação.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## ALS: um fator de cada vez
+
+Fixou $Q$, o problema em $P$ é convexo e tem solução exata. Alternamos entre os dois. Com $\tilde r_{ui}=r_{ui}-\mu-b_u-b_i$ e vieses fixos:
+
+::: {.fragment}
+**Passo 1, termos com $\mathbf{p}_u$:** $\quad\mathcal{L}_u=\frac12\sum_{i\in\mathcal{I}_u}\left(\tilde r_{ui}-\mathbf{q}_i^T\mathbf{p}_u\right)^2+\frac\lambda2\|\mathbf{p}_u\|^2$
+:::
+
+::: {.fragment}
+**Passo 2, gradiente:** $\quad\nabla_{\mathbf{p}_u}\mathcal{L}_u=-\sum_{i\in\mathcal{I}_u}\mathbf{q}_i\left(\tilde r_{ui}-\mathbf{q}_i^T\mathbf{p}_u\right)+\lambda\mathbf{p}_u$
+:::
+
+::: {.fragment}
+**Passo 3, igualando a zero:** $\quad\left(\sum_{i\in\mathcal{I}_u}\mathbf{q}_i\mathbf{q}_i^T+\lambda I_K\right)\mathbf{p}_u=\sum_{i\in\mathcal{I}_u}\tilde r_{ui}\mathbf{q}_i$
+:::
+
+::: {.fragment}
+**Passo 4, matriz definida positiva ($\lambda>0$):** $\quad\mathbf{p}_u=\left(\sum_{i\in\mathcal{I}_u}\mathbf{q}_i\mathbf{q}_i^T+\lambda I_K\right)^{-1}\sum_{i\in\mathcal{I}_u}\tilde r_{ui}\mathbf{q}_i$
+:::
+
+::: {.fragment .callout-important}
+## Cada usuário é uma regressão Ridge
+Os atributos são os perfis dos filmes que ele viu, e os usuários podem ser resolvidos em paralelo (Spark MLlib). Para $\mathbf{q}_i$ vale o mesmo com papéis trocados. Um filme sem avaliações fica com $\mathbf{q}_i=\mathbf{0}$: é o *cold start* em forma de equação.
+:::
+:::
+
+## E na prática, quanto melhorou?
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Agora podemos voltar à comparação das baselines, usando $K=$ `{python} K_fat` e hiperparâmetros escolhidos na validação ($\lambda=$ `{python} lam_als` no ALS e $\lambda=0{,}05$ no SGD). A Funk-SVD chega a `{python} brl(rmse_funk_test, 3)` e o ALS, a `{python} brl(rmse_als_test, 3)`. Os dois superam tudo o que tínhamos antes, inclusive a SVD no resíduo (`{python} brl(rmse_res_test, 3)`).
+
+Mas compare os tamanhos dos ganhos. Da média global aos vieses, o erro caiu de `{python} brl(rmse_media_test, 3)` para `{python} brl(rmse_vies_test, 3)`. Dos vieses aos fatores, foi de `{python} brl(rmse_vies_test, 3)` para `{python} brl(rmse_funk_test, 3)`. O ganho dos fatores é real, porém bem menor. Lembre, no entanto, que é ele que permite listas diferentes para pessoas diferentes.
+
+O painel da direita compara os algoritmos por passagem. O ALS estabiliza em poucas iterações, cada uma mais cara. O SGD precisa de mais épocas, e seu erro de validação ainda estava caindo quando paramos, na época `{python} epocas`. Uma diferença de `{python} brl(rmse_als_test - rmse_funk_test, 3)` entre os dois não nos permite declarar um vencedor.
+:::
+
+::: {.content-visible when-format="revealjs"}
+RMSE de teste, com $K=$ `{python} K_fat` e hiperparâmetros escolhidos na validação.
+
+- **Fatores:** Funk-SVD `{python} brl(rmse_funk_test, 3)` e ALS `{python} brl(rmse_als_test, 3)`. Superam a SVD no resíduo (`{python} brl(rmse_res_test, 3)`).
+- **Tamanho dos ganhos:** média → vieses, de `{python} brl(rmse_media_test, 3)` a `{python} brl(rmse_vies_test, 3)`. Vieses → fatores, de `{python} brl(rmse_vies_test, 3)` a `{python} brl(rmse_funk_test, 3)`. É menos, mas é o que permite listas diferentes.
+- **SGD × ALS:** o ALS estabiliza em poucas iterações. O SGD ainda estava caindo na época `{python} epocas`. A diferença de `{python} brl(rmse_als_test - rmse_funk_test, 3)` não aponta um vencedor.
+:::
+
+::: {.fig-resize style="width: 80%; margin: 0 auto;"}
+```{python}
+#| echo: false
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 3.8), gridspec_kw={"width_ratios": [1.15, 1]})
+metodos = ["SVD (buracos = zero)", "SVD (buracos = média)", "Média global", "Vieses", "SVD no resíduo", "ALS", "Funk-SVD (SGD)"]
+erros = [rmse_zero_test, rmse_mean_test, rmse_media_test, rmse_vies_test, rmse_res_test, rmse_als_test, rmse_funk_test]
+_ord = np.argsort(erros)[::-1]
+cores = {"SVD (buracos = zero)": COR_ALERTA, "SVD (buracos = média)": COR_B, "Média global": COR_CINZA,
+         "Vieses": COR_CINZA, "SVD no resíduo": COR_A, "ALS": COR_VERDE, "Funk-SVD (SGD)": COR_VERDE}
+_nomes = [metodos[k] for k in _ord]
+_barras = axes[0].barh(_nomes, [erros[k] for k in _ord], color=[cores[n] for n in _nomes], height=.55)
+for _b_, _k in zip(_barras, _ord):
+    axes[0].text(erros[_k] + .03, _b_.get_y() + _b_.get_height() / 2, brl(erros[_k], 3), va="center")
+axes[0].set_xlim(0, 2.9)
+axes[0].invert_yaxis()
+axes[0].set_xlabel("RMSE de teste (menor é melhor)")
+axes[0].set_title("Generalização nas notas retidas")
+axes[0].grid(axis="y", visible=False)
+
+axes[1].plot(range(1, len(hist_als) + 1), hist_als, "-o", color=COR_A, lw=2, ms=6, mec="white", label="ALS (iteração)")
+axes[1].plot(range(1, len(hist_sgd) + 1), hist_sgd, "-o", color=COR_B, lw=2, ms=6, mec="white", label="SGD (época)")
+axes[1].set_xlabel("passagens pelos dados")
+axes[1].set_ylabel("RMSE de validação")
+axes[1].set_title("Convergência por passagem")
+axes[1].legend()
+fig.tight_layout()
+plt.show()
+```
+:::
+
+## E se não houvesse $\lambda$?
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Parar de inventar notas resolve um problema e abre outro. Com $K=50$, temos `{python} milhar(params_50)` parâmetros para `{python} milhar(n_treino)` notas de treino. Quase sem regularização ($\lambda=0{,}01$), o erro de treino cai para `{python} brl(treino_50_sem, 3)` e o de teste sobe para `{python} brl(teste_50_sem, 3)`, pior que a média global. Com $\lambda=$ `{python} lam_50`, escolhido na validação, ficam em `{python} brl(treino_50_com, 3)` e `{python} brl(teste_50_com, 3)`. No outro extremo, $\lambda\to\infty$ leva os fatores a zero, e voltamos aos vieses.
+
+Há também uma razão algébrica. No nosso recorte, o usuário menos ativo tem `{python} min_notas_usuario` notas de treino. Na base completa, o usuário mediano tem `{python} f"{med_notas_usuario:.0f}"`, menos notas que fatores em muitas configurações. Nesse caso, $\sum_{i\in\mathcal{I}_u}\mathbf{q}_i\mathbf{q}_i^T$ não é invertível, e só $\lambda>0$ deixa o problema bem definido.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- Com $K=50$, são `{python} milhar(params_50)` parâmetros para `{python} milhar(n_treino)` notas.
+- **Quase sem freio** ($\lambda=0{,}01$): treino `{python} brl(treino_50_sem, 3)`, teste `{python} brl(teste_50_sem, 3)`, pior que a média global.
+- **Com** $\lambda=$ `{python} lam_50` (validação): treino `{python} brl(treino_50_com, 3)`, teste `{python} brl(teste_50_com, 3)`.
+- **Extremos:** $\lambda\to\infty$ volta aos vieses. Quem tem menos notas que fatores (a mediana da base é `{python} f"{med_notas_usuario:.0f}"`) só tem sistema invertível com $\lambda>0$.
+:::
+
+::: {.fig-resize style="width: 58%; margin: 0 auto;"}
+```{python}
+#| echo: false
+
+fig, ax = plt.subplots(figsize=(6.4, 3.3))
+ax.plot(lambdas, [curva_50[l][0] for l in lambdas], "-o", color=COR_A, lw=2, ms=8, mec="white", label="Treino")
+ax.plot(lambdas, [curva_50[l][1] for l in lambdas], "-o", color=COR_B, lw=2, ms=8, mec="white", label="Validação")
+ax.set_xscale("log")
+ax.set_xlabel(r"regularização $\lambda$ (escala log)")
+ax.set_ylabel("RMSE")
+ax.set_title(r"ALS com $K=50$: o papel de $\lambda$")
+ax.legend()
+fig.tight_layout()
+plt.show()
+```
+:::
+
+
+## Pausa 2: Otimização e Atualização
+
+::: {.callout-tip}
+## Com $\gamma = 0{,}05$, $\lambda = 0{,}02$, $\mathbf{p}_u = [0{,}8;\ 0{,}2]^T$, $\mathbf{q}_i = [1{,}0;\ 0{,}5]^T$, $r_{ui} = 5{,}0$ e baseline $3{,}5$, quanto valem $\hat{r}_{ui}$, $e_{ui}$ e o novo $\mathbf{p}_u$?
+
+Depois do cálculo, observe qual coordenada de $\mathbf{p}_u$ cresce mais, e por quê.
+:::
+
+::: {.callout-tip}
+## Dinâmica de Otimização
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ A função de custo da fatoração de matrizes regularizada $\mathcal{L}(P, Q)$ é globalmente convexa em relação a todas as variáveis simultaneamente.
+- □ O algoritmo ALS resolve sistemas lineares exatos de forma alternada, garantindo que o valor da função de perda decresça (ou permaneça constante) a cada iteração.
+- □ No algoritmo SGD de Funk, se a predição para um item for exatamente igual à nota real observada ($e_{ui} = 0$), os fatores latentes $\mathbf{p}_u$ e $\mathbf{q}_i$ não sofrem alteração alguma.
+- □ Em sistemas de recomendação em larga escala, o ALS é preferido sobre o SGD quando o treinamento precisa ser distribuído em dezenas de máquinas via computação em memória (ex.: Spark).
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 2: Otimização e Atualização — Resposta
+
+::: {.callout-tip}
+## Dinâmica de Otimização — Resposta
+
+- ✗ O termo bilinear $\mathbf{p}_u^T\mathbf{q}_i$ torna a perda não-convexa em conjunto.
+- ✔ Cada passo resolve exatamente uma regressão Ridge em um bloco, então a perda não aumenta. Isso não garante mínimo global.
+- ✗ A regularização permanece ativa: $\mathbf{p}_u\leftarrow(1-\gamma\lambda)\mathbf{p}_u$, uma pequena contração.
+- ✔ Fixado $Q$, cada $\mathbf{p}_u$ é um problema independente, fácil de distribuir.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** $\hat r_{ui}=3{,}5+0{,}9=4{,}4$ e $e_{ui}=+0{,}6$. Assim, $\mathbf{p}_u^{\text{novo}}=[0{,}8292;\ 0{,}2148]^T$. A primeira coordenada cresce mais porque é o fator mais forte do filme: a nota acima do previsto reforça o gosto que o filme mais expressa.
+:::
+
+:::
+
+
+# Bloco 3: E se Proibirmos Números Negativos? (NMF)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O incômodo com os sinais
+
+Volte ao mapa de filmes. Os eixos têm valores positivos e negativos, e isso dificulta a leitura. O que quer dizer um filme ter $-0{,}3$ de um fator? Acontece o mesmo em dados bem mais visuais. Na PCA de imagens de rostos (as *eigenfaces* de Turk & Pentland, 1991), os componentes acrescentam luz em algumas regiões e tiram em outras. Nenhum deles sozinho parece um olho ou um nariz, porque a reconstrução depende de cancelamentos entre eles.
+
+Pense em construir um rosto de duas maneiras:
+
+- **Massinha de modelar (PCA/SVD):** começamos com um rosto médio, colocamos massa em um lugar e tiramos de outro até acertar. Cada passo isolado não representa nada de reconhecível.
+- **Blocos de Lego (NMF):** só podemos empilhar peças. Se não dá para tirar, as peças precisam ser, elas mesmas, partes úteis: um bloco para os olhos, outro para o nariz, outro para a boca.
+
+Muitos dados já são não negativos por natureza: pixels, contagens de palavras em documentos, espectrogramas, número de reproduções de uma música. Então é natural perguntar o que acontece quando impomos isso aos fatores.
+
+## A definição
+
+A **fatoração não negativa** (NMF), popularizada por Lee & Seung (1999), aproxima uma matriz $V\in\mathbb{R}_{\ge0}^{M\times N}$ por
+
+$$V\approx WH,\qquad W\in\mathbb{R}_{\ge0}^{M\times K},\quad H\in\mathbb{R}_{\ge0}^{K\times N}.$$
+
+Olhando coluna a coluna, cada dado é uma soma de peças, com pesos que não podem ser negativos:
+
+$$\mathbf{v}_j\approx\sum_{k=1}^K H_{kj}\mathbf{w}_k.$$
+
+Lee & Seung relatam, em imagens de rostos, componentes parecidos com olhos, sobrancelhas, narizes e bocas e, em textos, tópicos com vocabulários coerentes. Mas por que a restrição levaria a isso? Uma observação simples ajuda:
+
+::: {.callout-note icon=false}
+## Proposição (formulação nossa, consequência direta da definição)
+Se $W,H\ge0$ e $(WH)_{ij}=\sum_k W_{ik}H_{kj}=0$, então $W_{ik}H_{kj}=0$ para todo $k$: nenhum fator pode estar ativo ao mesmo tempo na linha $i$ e na coluna $j$.
+
+**Demonstração.** Uma soma de termos não negativos só é zero se todos os termos forem zero. $\square$
+:::
+
+Sem subtração, um fator não pode "desfazer" o excesso de outro. Quando a matriz tem muitos zeros de verdade, reproduzi-los obriga cada fator a atuar só em parte das linhas e das colunas. Isso explica uma tendência, mas não garante que ela sempre apareça, como veremos nos dados.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O incômodo com os sinais
+
+O que quer dizer um filme ter $-0{,}3$ de um fator? Na PCA de rostos, os componentes somam luz aqui e tiram ali, e nenhum parece um olho ou um nariz.
 
 ::: {.columns}
 ::: {.column width="50%"}
-### Usuários e Itens em $\mathbb{R}^K$
-- $\mathbf{p}_u \in \mathbb{R}^K$: Afinidade do usuário $u$ pelos fatores (ex.: ação, drama).
-- $\mathbf{q}_i \in \mathbb{R}^K$: Carga do item $i$ nos fatores.
-- A nota prevista é o produto interno:
-  $$\hat{r}_{ui} = \mathbf{p}_u^T \mathbf{q}_i$$
+### Massinha (PCA/SVD)
+- Colocamos massa em um lugar e tiramos de outro.
+- Cada passo isolado não representa nada reconhecível.
 :::
 
 ::: {.column width="50%"}
-### PCA vs. NMF: A Metáfora
-- **PCA/SVD:** Permite números positivos e negativos. Constrói dados por adições e **subtrações** (cancelamentos).
-- **NMF:** Só permite números $\ge 0$. Constrói dados puramente por **somas de partes** (blocos de Lego).
+### Lego (NMF)
+- Só podemos empilhar peças.
+- Se não dá para tirar, as peças precisam ser partes úteis.
 :::
+:::
+
+::: {.fragment}
+$$V\approx WH,\quad W_{ik}\ge0,\ H_{kj}\ge0,\qquad\text{ou seja,}\quad\mathbf{v}_j\approx\sum_{k=1}^K H_{kj}\mathbf{w}_k$$
+
+Lee & Seung (1999) relatam olhos e bocas em rostos, e tópicos em textos. Faz sentido para dados já não negativos: pixels, contagens, reproduções.
+:::
+
+## Por que a restrição levaria a partes?
+
+::: {.callout-note icon=false}
+## Proposição
+Se $W,H\ge0$ e $(WH)_{ij}=\sum_k W_{ik}H_{kj}=0$, então $W_{ik}H_{kj}=0$ para todo $k$.
+
+**Demonstração.** Uma soma de termos não negativos só é zero se todos forem zero. $\square$
+:::
+
+::: {.fragment}
+- Sem subtração, um fator não pode desfazer o excesso de outro.
+- Muitos zeros de verdade obrigam cada fator a atuar só em parte das linhas e colunas.
+- Isso explica uma tendência, mas não garante que ela apareça. Vejamos nos dados.
+:::
+:::
+
+## Onde dá para ver: MNIST
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Antes de voltar aos filmes, vejamos um caso em que os fatores podem ser literalmente enxergados: 5 mil dígitos do MNIST, com $K=16$. Cada pixel é não negativo, e o fundo é zero de verdade.
+
+As bases da NMF (em laranja) lembram traços e arcos, embora algumas ainda pareçam dígitos inteiros, como o 1 e o 7. As da PCA (em azul e vermelho) misturam regiões positivas e negativas. Em números, `{python} pct(nula_mn)` dos pixels das bases da NMF são praticamente nulos, e `{python} pct(neg_pca_mn)` das cargas da PCA são negativas.
+
+A restrição também limita o ajuste, e dá para dizer quanto. Como $WH$ tem posto no máximo $K$, Eckart-Young-Mirsky impede a NMF de superar a SVD em erro de reconstrução. O erro relativo é `{python} brl(erro_nmf_mn, 3)` na NMF e `{python} brl(erro_svd_mn, 3)` na SVD sem centralização.
+:::
+
+::: {.content-visible when-format="revealjs"}
+**MNIST, $K=16$:** pixels não negativos, fundo zero de verdade.
+
+- **NMF:** traços e arcos, embora algumas bases pareçam dígitos inteiros. `{python} pct(nula_mn)` dos pixels são praticamente nulos.
+- **PCA:** regiões positivas e negativas misturadas. `{python} pct(neg_pca_mn)` das cargas são negativas.
+- **A limitação:** Eckart-Young-Mirsky impede a NMF de superar a SVD em erro: `{python} brl(erro_nmf_mn, 3)` contra `{python} brl(erro_svd_mn, 3)`.
+:::
+
+::: {.fig-resize style="width: 88%; margin: 0 auto;"}
+```{python}
+#| echo: false
+
+fig, axes = plt.subplots(2, 8, figsize=(10, 2.9))
+for _k in range(8):
+    axes[0, _k].imshow(H_mn[_k].reshape(28, 28), cmap="Oranges")
+    _c = pca_mn.components_[_k].reshape(28, 28)
+    _v = np.abs(_c).max()
+    axes[1, _k].imshow(_c, cmap="coolwarm", vmin=-_v, vmax=_v)
+for _a_ in axes.ravel():
+    _a_.set_xticks([]); _a_.set_yticks([]); _a_.grid(False)
+axes[0, 0].set_ylabel("NMF", fontsize=11)
+axes[1, 0].set_ylabel("PCA", fontsize=11)
+fig.suptitle("Oito bases de cada método (na PCA, vermelho é positivo e azul é negativo)", fontsize=11, fontweight="bold")
+fig.tight_layout()
+plt.show()
+```
+:::
+
+## E nos filmes? Quem assiste ao quê
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O MNIST mostrou partes bem visíveis, e gostaríamos de ver algo parecido nos filmes. Para isso, vale fazer outra pergunta. Até aqui, perguntamos quanto alguém gostaria de um filme. Podemos perguntar também o que as pessoas costumam assistir, ou seja, quais são os **padrões de consumo**, tenham elas gostado ou não.
+
+Para responder a isso, basta guardar se houve interação:
+
+$$v_{ui}=\begin{cases}1 & \text{se } u \text{ avaliou } i,\\ 0 & \text{caso contrário.}\end{cases}$$
+
+Esse tipo de dado é chamado de **feedback implícito** (Hu, Koren & Volinsky, 2008), e muitos sistemas reais só têm isso, como cliques ou reproduções. Três coisas mudam em relação ao que fizemos até agora:
+
+- **A nota sai de cena.** Dar 1 ou 5 estrelas vira o mesmo $v_{ui}=1$. Passamos a falar de consumo, e não de gosto, e o RMSE das notas não se aplica. No Bloco 5 veremos uma métrica adequada, o Hit@10.
+- **Os fatores ficam mais fáceis de interpretar.** Filmes assistidos pelas mesmas pessoas tendem a cair no mesmo fator, e o peso de um filme não precisa expressar ao mesmo tempo quem o viu e quanto gostou.
+- **Há novas suposições.** Tratamos "avaliou" como aproximação de "assistiu", e um zero significa só "não interagiu". Pode ser que a pessoa não goste do filme, mas também pode ser que nunca tenha ouvido falar dele.
+:::
+
+::: {.content-visible when-format="revealjs"}
+**Outra pergunta:** em vez de quanto alguém gostaria de um filme, quais são os **padrões de consumo**?
+
+$$v_{ui}=\begin{cases}1 & \text{se } u \text{ avaliou } i,\\ 0 & \text{caso contrário}\end{cases}$$
+
+**Feedback implícito** (Hu, Koren & Volinsky, 2008).
+
+::: {.fragment}
+- **A nota sai de cena:** 1 e 5 estrelas viram $v_{ui}=1$. Falamos de consumo, e não de gosto, e o RMSE das notas não se aplica (métrica no Bloco 5).
+:::
+
+::: {.fragment}
+- **Fatores mais fáceis de interpretar:** filmes assistidos pelas mesmas pessoas tendem a cair no mesmo fator. O peso de um filme não precisa expressar ao mesmo tempo quem o viu e quanto gostou.
+:::
+
+::: {.fragment}
+- **Novas suposições:** "avaliou" aproxima "assistiu", e um zero significa só "não interagiu", o que é diferente de "não gostou".
+:::
+:::
+
+## O que cada fator reúne
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Cada linha da tabela é um fator da NMF com $K=$ `{python} K_nmf`, e estão todos ali, do mais ao menos concentrado. O método não recebeu nenhum gênero. A coluna de gênero foi calculada depois, olhando os 20 filmes mais fortes de cada fator: mostramos o gênero mais comum entre eles e a fração dos 20 que o têm.
+:::
+
+::: {.content-visible when-format="revealjs"}
+Cada linha é um fator. `{python} n_fatores_acao` de ação e `{python} n_fatores_drama` de drama: eles parecem separar públicos, e não só gêneros (leitura nossa).
+:::
+
+::: {style="font-size: 0.75em;"}
+```{python}
+#| echo: false
+#| output: asis
+
+print("| Fator | Filmes mais fortes | Gênero mais comum | Dos 20 mais fortes, têm esse gênero |")
+print("|:---:|:---|:---|:---:|")
+for _n, _f in enumerate(tabela_fatores, 1):
+    print(f"| {_n} | {_f['filmes']} | {_f['genero']} | {pct(_f['frac'])} |")
+print()
+print(': {tbl-colwidths="[6,64,14,16]"}')
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Repare que `{python} n_fatores_acao` fatores têm ação como gênero mais comum, e `{python} n_fatores_drama` têm drama. Se os fatores fossem simplesmente gêneros, bastaria um de cada. Eles parecem separar públicos: os filmes da Marvel ficam em fatores diferentes de *Jason Bourne*, e os dramas de grande bilheteria, em fatores diferentes dos mais autorais. Essa leitura é nossa, e os gêneros são só uma forma externa de conferi-la.
+:::
+
+## E se usássemos as notas?
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Podemos aplicar a mesma NMF às notas, medindo o erro só em $\Omega$, como na Funk-SVD, com a regularização escolhida na validação (NMF **com máscara**). É um problema legítimo, mas os fatores recebem outra tarefa: reproduzir o valor da nota.
+
+Veja o que isso exige. A menor nota possível é 0,5 e a média é `{python} brl(mu_emp)`. Em toda célula observada, a soma $\sum_k W_{uk}H_{ki}$ precisa chegar a esse nível, então um par observado nunca pode ter todos os fatores desligados. Além disso, como esse modelo não tem vieses, o nível geral das notas também precisa sair dos fatores. Na matriz binária é diferente: toda célula com zero, que são `{python} pct(1 - dens)` delas, pede justamente que os fatores se desliguem, como os fundos do MNIST.
+
+Para comparar os dois casos usando todos os fatores, olhamos três medidas:
+
+- **Fatores ativos por célula:** quantos fatores respondem por pelo menos 5% da previsão, em média nas células observadas. Quanto menor, mais cada previsão se apoia em poucas peças.
+- **Concentração de gênero:** o gênero mais comum nos 20 filmes mais fortes de cada fator, como na tabela anterior, em média sobre os fatores. Uma seleção aleatória de filmes serve de referência, e ela fica longe de zero porque alguns gêneros são muito frequentes por si só.
+- **Cargas praticamente nulas:** a fração das entradas de $H$ abaixo de 0,1% do maior valor da matriz. Quanto maior, mais filmes cada fator ignora.
+:::
+
+::: {.content-visible when-format="revealjs"}
+NMF nas notas, só em $\Omega$ (**com máscara**): os fatores também precisam reproduzir o valor da nota.
+
+- **Nota mínima 0,5, média `{python} brl(mu_emp)`:** em toda célula observada, $\sum_k W_{uk}H_{ki}$ precisa chegar a esse nível, e sem vieses o nível geral também sai dos fatores.
+- **Na matriz binária:** os `{python} pct(1 - dens)` de zeros pedem que os fatores se desliguem.
+
+## Comparando os dois dados
+
+::: {.fragment}
+**Medidas:** *fatores ativos* (com pelo menos 5% da previsão, em média por célula observada); *concentração* (como na tabela anterior, em média sobre os fatores); *cargas nulas* (entradas de $H$ abaixo de 0,1% do maior valor).
+:::
+:::
+
+| Dado fatorado | Menor valor a reproduzir | Fatores ativos por célula | Concentração de gênero | Cargas praticamente nulas |
+|:---|:---:|:---:|:---:|:---:|
+| Binário (feedback implícito) | 0 | `{python} brl(ativos_imp, 1)` de `{python} K_nmf` | `{python} pct(conc_imp)` | `{python} pct(nula_imp, 1)` |
+| Notas com máscara | 0,5 | `{python} brl(ativos_not, 1)` de `{python} K_nmf` | `{python} pct(conc_not)` | `{python} pct(nula_not, 1)` |
+| Referência: filmes aleatórios | — | — | `{python} pct(conc_ale)` | — |
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Com as notas, cada previsão usa mais fatores, e quase nenhuma carga é nula: os fatores se sobrepõem bem mais. Os gêneros ainda aparecem, com concentração acima da referência aleatória, mas abaixo da do dado binário. Ligar isso ao piso das notas e à Proposição é uma leitura nossa, apoiada nessas medidas. O ponto prático é que a positividade sozinha não produz fatores que ignoram parte do catálogo: para isso, ajudam os zeros que a matriz traz para o ajuste.
+:::
+
+# Bloco 4: Como Treinar a NMF
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Qual erro minimizar?
+
+Até agora medimos o erro ao quadrado, que é a escolha natural quando supomos ruído Gaussiano:
+
+$$\mathcal{L}_{\text{Fro}}(W,H)=\frac12\|V-WH\|_F^2=\frac12\sum_{i,j}\left(v_{ij}-(WH)_{ij}\right)^2 \qquad \text{s.t.} \quad W,H \geq 0.$$
+
+Mas muitos dados da NMF são contagens, como palavras em documentos ou reproduções de músicas. Para esses casos, costuma-se usar a divergência de Kullback-Leibler generalizada:
+
+$$\mathcal{D}_{KL}(V\parallel WH)=\sum_{i,j}\left(v_{ij}\ln\frac{v_{ij}}{(WH)_{ij}}-v_{ij}+(WH)_{ij}\right).$$
+
+Minimizá-la equivale a maximizar a log-verossimilhança de um modelo em que cada $v_{ij}$ segue uma Poisson independente com média $(WH)_{ij}$ (ESL §14.6, eq. 14.73). Ou seja, escolher a perda é escolher uma suposição sobre como os dados foram gerados.
+
+## Como manter tudo positivo?
+
+Com um gradiente comum, $W\leftarrow W-\gamma\nabla_W\mathcal{L}$, um passo grande leva entradas para valores negativos. Poderíamos cortá-las em zero, mas Lee & Seung (2001) propuseram outra saída: escolher o passo de modo que o gradiente vire uma multiplicação. Usando $\odot$ e $\oslash$ para produto e divisão entrada a entrada:
+
+**Passo 1, gradiente em relação a $H$:** $\ \nabla_H\mathcal{L}=W^TWH-W^TV$.
+
+**Passo 2, descida com passo por coordenada:** $\ H\leftarrow H-\boldsymbol\eta\odot\left(W^TWH-W^TV\right)$.
+
+**Passo 3, escolhendo $\boldsymbol\eta=H\oslash\left(W^TWH\right)$:** $\ H\leftarrow H-H\oslash\left(W^TWH\right)\odot\left(W^TWH-W^TV\right)$.
+
+**Passo 4, simplificando:** o termo $H$ se cancela e sobra a regra multiplicativa. A de $W$ sai por simetria:
+
+$$H_{kj}\leftarrow H_{kj}\frac{(W^TV)_{kj}}{(W^TWH)_{kj}},\qquad W_{ik}\leftarrow W_{ik}\frac{(VH^T)_{ik}}{(WHH^T)_{ik}}.$$
+
+Para a KL, as regras são:
+
+$$H_{kj}\leftarrow H_{kj}\frac{\sum_i W_{ik}\,v_{ij}/(WH)_{ij}}{\sum_i W_{ik}},\qquad W_{ik}\leftarrow W_{ik}\frac{\sum_j H_{kj}\,v_{ij}/(WH)_{ij}}{\sum_j H_{kj}}.$$
+
+Repare no que aconteceu. Cada entrada é multiplicada por uma razão de números não negativos, então não há como ficar negativa, e nenhuma projeção é necessária. Quando a reconstrução acerta, $WH=V$, a razão vale 1 e nada muda. Lee & Seung também provam que a perda nunca aumenta sob essas regras. Um detalhe prático: uma entrada que chega a zero fica em zero para sempre, e por isso começamos com valores positivos.
+
+## A resposta não é única
+
+Lembra da invariância por $G$ na SVD? Ela também existe aqui, de forma mais restrita. Dada uma fatoração $V=WH$ e uma matriz invertível $A$,
+
+$$V=(WA)(A^{-1}H)=\tilde W\tilde H,$$
+
+e essa é outra NMF válida sempre que $WA\ge0$ e $A^{-1}H\ge0$. Se $A$ só permuta e reescala os fatores, nada de importante muda. Mas se houver folga entre o cone gerado pelos dados e as fronteiras do ortante, existe uma infinidade de soluções realmente diferentes (Donoho & Stodden, 2004; ESL §14.6, p. 554).
+
+Na prática, a solução pode depender da inicialização. Penalidades de esparsidade ($L_1$) sobre $W$ ou $H$ podem reduzir a ambiguidade, sem garantir unicidade em geral. Também não vale reaproveitar uma solução ao mudar $K$: ao contrário da SVD, as soluções não são aninhadas.
+
+Isso não nos diz quanto o problema pesa num caso concreto, então vale medir. No MovieLens implícito, duas inicializações aleatórias dão fatores pareados com cosseno médio de `{python} brl(cos_medio)` (mínimo de `{python} brl(cos_min)`). Aqui a ambiguidade foi pequena, mas isso é um resultado destes dados. No trabalho final, repitam o teste nos seus.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Qual erro minimizar?
+
+- **Frobenius** (ruído Gaussiano): 
+    $$\ \mathcal{L}_{\text{Fro}}=\frac12\|V-WH\|_F^2 \qquad \text{s.t.} \quad W,H \geq 0.$$
+
+::: {.fragment}
+- **KL generalizada** (contagens, como palavras ou reproduções):
+  $$\mathcal{D}_{KL}(V\parallel WH)=\sum_{i,j}\left(v_{ij}\ln\frac{v_{ij}}{(WH)_{ij}}-v_{ij}+(WH)_{ij}\right)$$
 :::
 
 ::: {.fragment .callout-note}
-## O Princípio Construtivo
-A não-negatividade na NMF transforma dimensões matemáticas abstratas em partes físicas interpretáveis!
-:::
-:::
-
----
-
-# Bloco 1: O Colapso da SVD Clássica e a Fatoração Regularizada
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-## A SVD Clássica e o Teorema de Eckart-Young-Mirsky
-
-Recorde da Aula 5 de Álgebra Linear que qualquer matriz densa $R \in \mathbb{R}^{M \times N}$ admite a Decomposição em Valores Singulares:
-
-$$R = U \Sigma V^T = \sum_{k=1}^r \sigma_k \mathbf{u}_k \mathbf{v}_k^T$$
-
-Pelo Teorema de Eckart-Young-Mirsky, a melhor aproximação de posto $K < r$ em norma de Frobenius é obtida truncando a soma nos $K$ primeiros valores singulares:
-
-$$\hat{R}^{(K)} = P Q^T, \quad \text{onde } P = U_K \Sigma_K^{1/2} \in \mathbb{R}^{M \times K} \quad \text{e} \quad Q = V_K \Sigma_K^{1/2} \in \mathbb{R}^{N \times K}$$
-
-Essa projeção minimiza a soma de todos os erros quadráticos: $\min_{\operatorname{posto}(\hat{R}) \le K} \|R - \hat{R}\|_F^2 = \sum_{u=1}^M \sum_{i=1}^N (r_{ui} - \hat{r}_{ui})^2$.
-
-### Por Que a SVD Clássica Falha em Matrizes de Recomendação?
-
-Para calcular autovalores e valores singulares, a formulação analítica da SVD exige conhecer **todas** as entradas da matriz $R$. Como $99\%$ dos valores estão ausentes, os praticantes historicamente tentavam duas abordagens ingênuas de imputação:
-
-1. **Imputação por Zero ($r_{ui} = 0$ se não observado):**
-   Assume que todo filme não assistido recebeu nota zero. Como os dados observados variam entre 1 e 5 estrelas, preencher a matriz com zeros desloca artificialmente a média de notas para perto de zero e faz com que os fatores latentes gastem quase toda a sua energia tentando reconstruir a ausência de interação, destruindo as previsões para os filmes verdadeiramente relevantes.
-2. **Imputação pela Média ($r_{ui} = \bar{r}$ se não observado):**
-   Preencher todas as lacunas com a média global ou média do usuário remove a variância discriminativa. A matriz torna-se excessivamente densa, o custo computacional explode para $\mathcal{O}(MN \cdot K)$ e a SVD sobreajusta aos valores fictícios imputados.
+## Leitura probabilística (ESL §14.6)
+Minimizar a KL equivale a maximizar a log-verossimilhança de um modelo em que cada $v_{ij}$ segue uma Poisson independente com média $(WH)_{ij}$. Escolher a perda é escolher uma suposição sobre os dados.
 :::
 
-::: {.content-visible when-format="revealjs"}
-## Por Que a SVD Clássica Colapsa?
+## Como manter tudo positivo?
 
-- **Eckart-Young-Mirsky:** $\min \|R - P Q^T\|_F^2$ exige conhecer **todas** as entradas de $R$.
-- Se preenchermos os dados faltantes com **Zeros**:
-  - Assume que o usuário detestou todos os filmes que não assistiu.
-  - Puxa as predições para baixo; distorce completamente o espaço latente.
-- Se preenchermos com a **Média**:
-  - Elimina a variância real; torna a matriz artificialmente densa.
-  - Custo computacional colossal ($\mathcal{O}(MNK)$).
+Um gradiente comum pode gerar negativos. Lee & Seung (2001) escolhem o passo para que o gradiente vire uma multiplicação ($\odot$, $\oslash$: entrada a entrada).
 
-::: {.fragment .callout-important}
-## A Lição do Netflix Prize (2006–2009)
-Não devemos imputar dado algum. Devemos otimizar o modelo **exclusivamente sobre o subconjunto de entradas observadas** $\Omega$!
-:::
-:::
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-## A Formulação Regularizada sobre Entradas Observadas
-
-A virada conceitual definitiva ocorreu durante a competição do *Netflix Prize* (2006–2009), popularizada pelo trabalho de Simon Funk (2006) e formalizada por Koren, Bell & Volinsky (2009).
-
-Definimos o conjunto de índices observados como:
-
-$$\Omega = \{(u, i) \mid r_{ui} \text{ foi avaliado pelo usuário } u\}$$
-
-Em vez de tentar reconstruir a matriz inteira, minimizamos a perda quadrática **apenas sobre as coordenadas conhecidas $(u, i) \in \Omega$**, adicionando regularização de Tikhonov ($L_2$) para impedir que usuários ou itens com poucas avaliações sobreajustem:
-
-$$\mathcal{L}(P, Q) = \frac{1}{2}\sum_{(u, i) \in \Omega} (r_{ui} - \mathbf{p}_u^T \mathbf{q}_i)^2 + \frac{\lambda}{2}\sum_{u=1}^M \|\mathbf{p}_u\|_2^2 + \frac{\lambda}{2}\sum_{i=1}^N \|\mathbf{q}_i\|_2^2$$
-
-onde $\lambda > 0$ é o hiperparâmetro de regularização e $\mathbf{p}_u, \mathbf{q}_i \in \mathbb{R}^K$.
-
-### Preditores de Linha de Base (*Baseline Predictors*): Capturando os Vieses
-
-Em sistemas reais, a maior parte da variação numérica das notas não decorre de preferências refinadas de gênero, mas sim de **efeitos sistemáticos de linha de base**:
-*   Alguns usuários são sistematicamente generosos (sua nota média é 4,5); outros são extremamente críticos (sua nota média é 2,0).
-*   Alguns filmes são amplamente aclamados pela crítica e pelo público (como *O Poderoso Chefão*); outros são unanimemente considerados fracos.
-
-Para isolar esses efeitos independentes da interação, decompomos a predição em:
-
-$$\hat{r}_{ui} = \mu + b_u + b_i + \mathbf{p}_u^T \mathbf{q}_i$$
-
-onde:
-*   $\mu \in \mathbb{R}$ é a **média global** de todas as avaliações observadas no dataset;
-*   $b_u \in \mathbb{R}$ é o **viés do usuário** $u$ (desvio sistemático em relação à média);
-*   $b_i \in \mathbb{R}$ é o **viés do item** $i$ (desvio sistemático do filme em relação à média);
-*   $\mathbf{p}_u^T \mathbf{q}_i$ é a **interação residual** no espaço latente.
-
-A função de perda completa torna-se:
-
-$$\mathcal{L}(P, Q, \mathbf{b}_u, \mathbf{b}_i) = \frac{1}{2}\sum_{(u, i) \in \Omega} \left(r_{ui} - (\mu + b_u + b_i + \mathbf{p}_u^T \mathbf{q}_i)\right)^2 + \frac{\lambda}{2}\left( \sum_u b_u^2 + \sum_i b_i^2 + \sum_u \|\mathbf{p}_u\|_2^2 + \sum_i \|\mathbf{q}_i\|_2^2 \right)$$
-:::
-
-::: {.content-visible when-format="revealjs"}
-## Preditores de Linha de Base (Baseline Predictors)
-
-$$\hat{r}_{ui} = \mu + b_u + b_i + \mathbf{p}_u^T \mathbf{q}_i$$
-
-::: {.columns}
-::: {.column width="50%"}
-### Efeitos Sistemáticos
-- $\mu$: Média global do catálogo.
-- $b_u$: Viés do usuário $u$ (usuário crítico vs. generoso).
-- $b_i$: Viés do item $i$ (filme aclamado vs. impopular).
-:::
-
-::: {.column width="50%"}
-### Interação Latente Residual
-- $\mathbf{p}_u^T \mathbf{q}_i$: Afinidade genuína entre o perfil do usuário e a assinatura do filme após remover os vieses!
-:::
+::: {.fragment}
+**Passo 1, gradiente:** $\quad\nabla_H\mathcal{L}=W^TWH-W^TV$
 :::
 
 ::: {.fragment}
-### Função de Perda Regularizada
-$$\min_{P, Q, \mathbf{b}} \frac{1}{2}\sum_{(u, i) \in \Omega} (r_{ui} - \hat{r}_{ui})^2 + \frac{\lambda}{2}\left(\|\mathbf{b}_u\|^2 + \|\mathbf{b}_i\|^2 + \|P\|_F^2 + \|Q\|_F^2\right)$$
-:::
-:::
-
----
-
-# Pausa Ativa 1
-
-::: {.callout-note icon=false title="Pausa Ativa 1: O Colapso da SVD e a Estrutura dos Vieses"}
-Considere uma base de streaming onde a média global de notas é $\mu = 3{,}5$. O usuário Carlos é bastante crítico e seu viés estimado é $b_u = -0{,}6$. O filme *Interestelar* é muito popular e seu viés é $b_i = +0{,}8$. 
-
-1. **Pergunta Aberta:** Qual é a nota de linha de base (*baseline*) prevista para Carlos assistir a *Interestelar* antes de considerarmos qualquer afinidade latente? Se o produto interno entre os fatores latentes de Carlos e do filme for $\mathbf{p}_u^T \mathbf{q}_i = +0{,}5$, qual será a nota final prevista $\hat{r}_{ui}$?
-
-2. **Teste Conceitual (Verdadeiro ou Falso):**
-   * (A) O Teorema de Eckart-Young-Mirsky garante que a SVD truncada fornece a melhor aproximação de posto $K$ mesmo quando a matriz possui $90\%$ de entradas não observadas preenchidas com NaN.
-   * (B) Preencher as células vazias de uma matriz de recomendação com zero é equivalente a assumir que a ausência de avaliação representa insatisfação máxima do usuário com o item.
-   * (C) O preditor de linha de base $\mu + b_u + b_i$ consegue capturar o fato de que um usuário generoso tende a dar notas altas mesmo para filmes medianos.
-   * (D) A regularização $L_2$ nos fatores latentes ($\lambda \|\mathbf{p}_u\|^2$) tem como objetivo principal forçar as coordenadas dos fatores a serem estritamente não-negativas.
-:::
-
-::: {.content-visible when-format="revealjs"}
-## Pausa Ativa 1: Linha de Base e Dados Faltantes
-
-- **Cenário:** Média global $\mu = 3{,}5$. Carlos tem $b_u = -0{,}6$. *Interestelar* tem $b_i = +0{,}8$.
-- **Pergunta:** Calcule a nota baseline. Se $\mathbf{p}_u^T \mathbf{q}_i = +0{,}5$, qual é a previsão final?
-
-::: {.fragment}
-### Julgue os itens (V ou F):
-- (A) Eckart-Young-Mirsky é válido mesmo com $90\%$ de dados ausentes (NaN).
-- (B) Imputar zero nas células vazias assume que o usuário detestou o item não visto.
-- (C) Preditores de linha de base isolam efeitos de usuários críticos e filmes consagrados.
-- (D) A penalização $\lambda \|\mathbf{p}_u\|^2$ força os fatores latentes a serem não-negativos.
-:::
-:::
-
----
-
-# Bloco 2: Algoritmos de Otimização: SGD e ALS
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-## A Não-Convexidade Conjunta da Fatoração Matricial
-
-A função de perda $\mathcal{L}(P, Q)$ envolve o produto $\mathbf{p}_u^T \mathbf{q}_i$. Essa estrutura gera uma propriedade matemática singular:
-*   Se fixarmos $Q$, a perda torna-se uma soma de termos puramente quadráticos em $P$ — portanto, **estritamente convexa em $P$**.
-*   Se fixarmos $P$, a perda é análogo-simétrica e **estritamente convexa em $Q$**.
-*   Contudo, em relação ao par conjunto $(P, Q)$, a função é **não-convexa** e pode admitir múltiplos mínimos locais e pontos de sela.
-
-Problemas dessa natureza são chamados de **biconvexos**. Para otimizá-los na prática industrial, duas famílias de algoritmos dominam a literatura: o **Stochastic Gradient Descent (SGD)** e os **Mínimos Quadrados Alternados (*Alternating Least Squares* - ALS)**.
-
----
-
-## 1. O Algoritmo Funk-SVD via SGD
-
-O SGD opera percorrendo as avaliações observadas individualmente. Para cada par $(u, i) \in \Omega$:
-
-1. Calcula o erro residual de predição:
-   $$e_{ui} := r_{ui} - \hat{r}_{ui} = r_{ui} - (\mu + b_u + b_i + \mathbf{p}_u^T \mathbf{q}_i)$$
-
-2. Toma a derivada parcial da perda instantânea $\mathcal{L}_{ui} = \frac{1}{2} e_{ui}^2 + \frac{\lambda}{2}(b_u^2 + b_i^2 + \|\mathbf{p}_u\|^2 + \|\mathbf{q}_i\|^2)$:
-   $$\frac{\partial \mathcal{L}_{ui}}{\partial b_u} = -e_{ui} + \lambda b_u, \quad \frac{\partial \mathcal{L}_{ui}}{\partial b_i} = -e_{ui} + \lambda b_i$$
-   $$\nabla_{\mathbf{p}_u} \mathcal{L}_{ui} = -e_{ui} \mathbf{q}_i + \lambda \mathbf{p}_u, \quad \nabla_{\mathbf{q}_i} \mathcal{L}_{ui} = -e_{ui} \mathbf{p}_u + \lambda \mathbf{q}_i$$
-
-3. Atualiza os parâmetros na direção oposta ao gradiente com passo de aprendizado $\gamma$:
-   $$b_u \leftarrow b_u + \gamma (e_{ui} - \lambda b_u)$$
-   $$b_i \leftarrow b_i + \gamma (e_{ui} - \lambda b_i)$$
-   $$\mathbf{p}_u \leftarrow \mathbf{p}_u + \gamma (e_{ui} \mathbf{q}_i - \lambda \mathbf{p}_u)$$
-   $$\mathbf{q}_i \leftarrow \mathbf{q}_i + \gamma (e_{ui} \mathbf{p}_u - \lambda \mathbf{q}_i)$$
-
-*Complexidade Computacional:* Cada iteração sobre um par $(u, i)$ custa apenas $\mathcal{O}(K)$ operações. Uma época completa sobre todo o histórico custa $\mathcal{O}(|\Omega| \cdot K)$, sendo perfeitamente viável mesmo quando o catálogo possui centenas de milhões de avaliações!
-:::
-
-::: {.content-visible when-format="revealjs"}
-## O Algoritmo Funk-SVD via SGD
-
-Para cada avaliação observada $(u, i) \in \Omega$:
-1. **Erro residual:** $e_{ui} = r_{ui} - \hat{r}_{ui}$.
-2. **Atualização dos Vieses:**
-   $$b_u \leftarrow b_u + \gamma (e_{ui} - \lambda b_u), \quad b_i \leftarrow b_i + \gamma (e_{ui} - \lambda b_i)$$
-3. **Atualização dos Fatores Latentes:**
-   $$\mathbf{p}_u \leftarrow \mathbf{p}_u + \gamma (e_{ui} \mathbf{q}_i - \lambda \mathbf{p}_u)$$
-   $$\mathbf{q}_i \leftarrow \mathbf{q}_i + \gamma (e_{ui} \mathbf{p}_u - \lambda \mathbf{q}_i)$$
-
-::: {.fragment .callout-tip}
-## Vantagem do SGD
-Custo por época: $\mathcal{O}(|\Omega| \cdot K)$. Depende apenas das entradas **conhecidas**, ignorando as bilhões de células vazias!
-:::
-:::
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-## 2. O Algoritmo Alternating Least Squares (ALS)
-
-Embora o SGD seja ágil e fácil de implementar, ele é intrinsecamente sequencial. O algoritmo **Alternating Least Squares (ALS)** explora a biconvexidade do problema para possibilitar paralelização massiva:
-
-> **Dinâmica do ALS:**
-> 1. Congela a matriz de itens $Q$ e resolve exatamente para todos os vetores de usuários $\mathbf{p}_u$ em paralelo.
-> 2. Congela a matriz de usuários $P$ e resolve exatamente para todos os vetores de itens $\mathbf{q}_i$ em paralelo.
-> 3. Repete o processo alternado até convergência.
-
-### Solução Fechada Condicional
-Seja $\mathcal{I}_u$ o conjunto de itens avaliados pelo usuário $u$, e $Q_{\mathcal{I}_u} \in \mathbb{R}^{|\mathcal{I}_u| \times K}$ a submatriz com os fatores desses itens. Fixando $Q$, a minimização em relação a $\mathbf{p}_u$ é uma regressão Ridge independente para cada usuário:
-
-$$\mathbf{p}_u = \left( \sum_{i \in \mathcal{I}_u} \mathbf{q}_i \mathbf{q}_i^T + \lambda I_K \right)^{-1} \sum_{i \in \mathcal{I}_u} (r_{ui} - \mu - b_u - b_i) \mathbf{q}_i$$
-
-Analogamente, para cada item $i$ com usuários $\mathcal{U}_i$:
-
-$$\mathbf{q}_i = \left( \sum_{u \in \mathcal{U}_i} \mathbf{p}_u \mathbf{p}_u^T + \lambda I_K \right)^{-1} \sum_{u \in \mathcal{U}_i} (r_{ui} - \mu - b_u - b_i) \mathbf{p}_u$$
-
-*Aplicações em Grande Escala:* Como a atualização de cada usuário $u$ é totalmente desacoplada dos demais usuários, o ALS é o algoritmo padrão implementado em frameworks de processamento distribuído (como Apache Spark GraphX e MLlib).
-:::
-
-::: {.content-visible when-format="revealjs"}
-## Alternating Least Squares (ALS)
-
-::: {.columns}
-::: {.column width="50%"}
-### Ideia Central
-- Fixa $Q$ $\to$ O problema em $P$ vira Mínimos Quadrados linear ordinário!
-- Fixa $P$ $\to$ O problema em $Q$ vira Mínimos Quadrados linear ordinário!
-- Alterna entre $P$ e $Q$ até convergir.
-:::
-
-::: {.column width="50%"}
-### Solução Fechada por Usuário
-$$\mathbf{p}_u = \left(\sum_{i \in \mathcal{I}_u} \mathbf{q}_i \mathbf{q}_i^T + \lambda I\right)^{-1} \sum_{i \in \mathcal{I}_u} \tilde{r}_{ui} \mathbf{q}_i$$
-- Cada usuário $u$ pode ser computado em paralelo em nós distintos de um cluster!
-:::
+**Passo 2, descida:** $\quad H\leftarrow H-\boldsymbol\eta\odot\left(W^TWH-W^TV\right)$
 :::
 
 ::: {.fragment}
-### Comparação Prática
-*   **SGD:** Mais rápido em uma única máquina; ótimo para fluxos contínuos de dados.
-*   **ALS:** Mais robusto a dados implícitos (sem nota explícita) e imbatível em computação distribuída massiva (Spark).
-:::
-:::
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-## Validação Numérica no Cenário-Fio
-
-Abaixo comparamos o erro quadrático médio (RMSE) nas avaliações **não observadas de teste** entre a SVD clássica com imputação por zero, imputação por média e a Fatoração Regularizada com Vieses (Funk-SVD):
-:::
-
-```{python}
-#| echo: false
-#| fig-align: center
-
-fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
-
-# Painel 1: Heatmap da matriz observada vs prevista
-im0 = axes[0].imshow(R_obs, cmap="YlGnBu", aspect="auto", vmin=1, vmax=5)
-axes[0].set_title(f"Matriz de Treino ({sparsity_pct:.0f}% Faltante)")
-axes[0].set_xlabel("Itens (Filmes)")
-axes[0].set_ylabel("Usuários")
-plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04, label="Nota")
-
-# Painel 2: Comparação de RMSE no conjunto de teste (não observado)
-metodos = ["SVD (Zero Imp.)", "SVD (Média Imp.)", "Funk-SVD (Regularizada)"]
-erros = [rmse_zero_test, rmse_mean_test, rmse_funk_test]
-cores = [COR_ALERTA, COR_B, COR_VERDE]
-
-bars = axes[1].bar(metodos, erros, color=cores, width=0.55, edgecolor="black", alpha=0.85)
-axes[1].set_ylabel("RMSE nas Notas Não Observadas")
-axes[1].set_title("Desempenho de Generalização Fora da Amostra")
-axes[1].grid(axis="y", ls=":", alpha=0.7)
-
-for bar, err in zip(bars, erros):
-    axes[1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.05, f"{err:.2f}",
-                 ha="center", va="bottom", fontweight="bold", fontsize=10)
-
-axes[1].set_ylim(0, max(erros) + 0.6)
-plt.tight_layout()
-plt.show()
-```
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-Os resultados confirmam o diagnóstico: a SVD com imputação por zero atinge um erro catastrófico ($\text{RMSE} \approx 2{,}9$). A imputação pela média ameniza o problema, mas a **Funk-SVD com vieses atinge o menor erro**, reconstruindo com precisão as preferências latentes genuínas.
-:::
-
-::: {.content-visible when-format="revealjs"}
-## Desempenho Comparado de Generalização
-
-```{python}
-#| echo: false
-#| fig-align: center
-plt.figure(figsize=(8, 3.8))
-bars = plt.bar(metodos, erros, color=cores, width=0.5, edgecolor="black", alpha=0.85)
-plt.ylabel("RMSE nas Notas Não Observadas")
-plt.title("Erro Fora da Amostra (Generalização)")
-plt.grid(axis="y", ls=":", alpha=0.7)
-for bar, err in zip(bars, erros):
-    plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.06, f"{err:.2f}",
-             ha="center", va="bottom", fontweight="bold")
-plt.ylim(0, max(erros) + 0.6)
-plt.tight_layout()
-plt.show()
-```
-
-- **SVD com Zero:** Desastre total (RMSE elevado).
-- **Funk-SVD:** Extrai os fatores latentes reais e alcança o menor erro nas avaliações ocultas.
-:::
-
----
-
-# Pausa Ativa 2
-
-::: {.callout-note icon=false title="Pausa Ativa 2: Dinâmica de Otimização no Espaço Latente"}
-Considere o treinamento de uma Funk-SVD com taxa de aprendizado $\gamma = 0{,}05$ e fator de regularização $\lambda = 0{,}02$. O usuário $u$ possui $\mathbf{p}_u = [0{,}8, 0{,}2]^T$ e avaliou o filme $i$ com nota real $r_{ui} = 5{,}0$. O filme possui $\mathbf{q}_i = [1{,}0, 0{,}5]^T$. Suponha que a linha de base prevista seja $\mu + b_u + b_i = 3{,}5$.
-
-1. **Pergunta Aberta:** Calcule a predição atual $\hat{r}_{ui}$, o erro residual $e_{ui}$ e o novo vetor atualizado $\mathbf{p}_u^{\text{novo}}$. Como a atualização modifica a afinidade do usuário com o fator de maior peso no filme?
-
-2. **Teste Conceitual (Verdadeiro ou Falso):**
-   * (A) A função de custo da fatoração de matrizes regularizada $\mathcal{L}(P, Q)$ é globalmente convexa em relação a todas as variáveis simultaneamente.
-   * (B) O algoritmo ALS resolve sistemas lineares exatos de forma alternada, garantindo que o valor da função de perda decresça (ou permaneça constante) a cada iteração.
-   * (C) No algoritmo SGD de Funk, se a predição para um item for exatamente igual à nota real observada ($e_{ui} = 0$), os fatores latentes $\mathbf{p}_u$ e $\mathbf{q}_i$ não sofrem alteração alguma.
-   * (D) Em sistemas de recomendação em larga escala, o ALS é preferido sobre o SGD quando o treinamento precisa ser distribuído em dezenas de máquinas via computação em memória (ex.: Spark).
-:::
-
-::: {.content-visible when-format="revealjs"}
-## Pausa Ativa 2: Otimização e Atualização
-
-- **Cenário:** $\gamma = 0{,}05$, $\lambda = 0{,}02$. $\mathbf{p}_u = [0{,}8, 0{,}2]^T$, $\mathbf{q}_i = [1{,}0, 0{,}5]^T$. Nota real $r_{ui} = 5{,}0$. Linha de base $= 3{,}5$.
-- **Pergunta:** Calcule $\hat{r}_{ui}$, o erro $e_{ui}$ e o novo vetor $\mathbf{p}_u$.
-
-::: {.fragment}
-### Julgue os itens (V ou F):
-- (A) A perda conjunta $\mathcal{L}(P, Q)$ é estritamente convexa no espaço total de parâmetros.
-- (B) O ALS garante decrescimento monotônico da função de perda a cada passo de alternância.
-- (C) Se o erro for nulo ($e_{ui} = 0$), os fatores latentes permanecem rigorosamente estáticos.
-- (D) O ALS é especialmente vantajoso para arquiteturas de computação distribuída em cluster.
-:::
-:::
-
----
-
-# Bloco 3: Fatoração de Matrizes Não-Negativa (NMF)
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-## A Patologia dos Cancelamentos Subtrativos na PCA/SVD
-
-Tanto a PCA quanto a SVD e os modelos de fatores latentes operam em espaços vetoriais onde as coordenadas podem assumir valores positivos e negativos arbitrários. No entanto, em muitos domínios práticos de Aprendizado Não Supervisionado, **os dados originais são estritamente não-negativos**:
-*   **Imagens:** Intensidades de brilho de pixels ($v_{ij} \in [0, 255]$);
-*   **Textos:** Frequências de palavras em documentos (matriz termo-documento com contagens inteiras $\ge 0$);
-*   **Áudio:** Espectrogramas de potência e magnitudes de frequência ($\ge 0$);
-*   **Consumo e Bioinformática:** Número de reproduções de faixas ou níveis de expressão gênica.
-
-Quando aplicamos PCA a um banco de imagens de rostos (as famosas *Eigenfaces* de Turk & Pentland, 1991), o primeiro autovetor captura uma média iluminada de todo o rosto, e os autovetores seguintes contêm valores positivos e negativos que atuam **adicionando luz em certas áreas e subtraindo em outras**.
-
-Essa dependência de cancelamentos subtrativos cria representações **holísticas**: nenhum autovetor isolado representa uma parte anatômica inteligível (um olho, um nariz ou um queixo). Eles são apenas oscilações matemáticas ortogonais globais.
-
----
-
-## O Princípio Construtivo da NMF
-
-Em 1999, Daniel D. Lee e H. Sebastian Seung publicaram na revista *Nature* um artigo seminal que alterou profundamente a representação não supervisionada de dados positivos: *"Learning the parts of objects by non-negative matrix factorization"*.
-
-A **Fatoração de Matrizes Não-Negativa (NMF)** busca aproximar uma matriz não-negativa $V \in \mathbb{R}_{\ge 0}^{M \times N}$ como o produto de duas matrizes também estritamente não-negativas de baixo posto $K \ll \min(M, N)$:
-
-$$V \approx W H, \quad \text{onde } W \in \mathbb{R}_{\ge 0}^{M \times K} \quad \text{e} \quad H \in \mathbb{R}_{\ge 0}^{K \times N}$$
-
-### A Geometria da Aditividade Pura (*Parts-Based Representation*)
-
-Escrevendo a aproximação coluna a coluna, cada vetor de dados $\mathbf{v}_j \in \mathbb{R}_{\ge 0}^M$ (por exemplo, a $j$-ésima imagem ou documento) é reconstruído como:
-
-$$\mathbf{v}_j \approx \sum_{k=1}^K H_{kj} \mathbf{w}_k$$
-
-onde $\mathbf{w}_k \in \mathbb{R}_{\ge 0}^M$ é a $k$-ésima coluna de $W$, e $H_{kj} \ge 0$ é o coeficiente de ativação.
-
-> **O Princípio Aditivo:** Como $H_{kj} \ge 0$ e $\mathbf{w}_k \ge 0$, **subtrair componentes é estritamente impossível**. O modelo não pode gerar um olho adicionando um rosto inteiro e subtraindo a boca. Para minimizar o erro de reconstrução, as colunas $\mathbf{w}_k$ são forçadas a se especializar em **partes fundamentais localizadas** que só aparecem somadas quando ativadas!
-
-Na decomposição de imagens faciais, a NMF descobre espontaneamente protótipos de olhos, sobrancelhas, narizes e bocas. Na análise de textos, a NMF descobre tópicos puros contendo vocabulários temáticos coerentes.
-:::
-
-::: {.content-visible when-format="revealjs"}
-## Fatoração Não-Negativa (NMF)
-
-$$V \approx W H, \quad \text{com } W_{ik} \ge 0 \quad \text{e} \quad H_{kj} \ge 0$$
-
-::: {.columns}
-::: {.column width="50%"}
-### PCA / SVD: Cancelamentos
-- Permite sinais negativos.
-- Constrói dados adicionando e subtraindo padrões globais.
-- Autovetores são "fantasmas" holísticos sem significado físico local.
-:::
-
-::: {.column width="50%"}
-### NMF: Partes Aditivas
-- **Subtrações são proibidas!**
-- Cada amostra é uma combinação linear positiva:
-  $$\mathbf{v}_j \approx \sum_{k=1}^K H_{kj} \mathbf{w}_k$$
-- Força a emergência de **partes anatômicas ou tópicos temáticos**.
-:::
-:::
-
-::: {.fragment .callout-tip}
-## O Princípio de Lee & Seung (Nature, 1999)
-A restrição de não-negatividade induz esparsidade natural e decomposição por partes (*parts-based representation*).
-:::
-:::
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-## Comparação Visual: Bases da NMF vs. Bases da PCA
-
-Abaixo ilustramos a reconstrução de padrões bidimensionais comparando as bases aprendidas pela NMF e pela PCA:
-:::
-
-```{python}
-#| echo: false
-#| fig-align: center
-
-fig, axes = plt.subplots(2, 4, figsize=(11, 4.5))
-
-# Linha 1: 4 Componentes NMF (bases em matriz 3x3)
-for k in range(4):
-    ax = axes[0, k]
-    im = ax.imshow(H_nmf_basis[k].reshape(3, 3), cmap="Oranges", vmin=0)
-    ax.set_title(f"NMF Parte {k+1}", fontsize=10)
-    ax.axis("off")
-    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-
-# Linha 2: 4 Componentes PCA (bases em matriz 3x3 com valores positivos e negativos)
-vmax_pca = max(abs(H_pca_basis.min()), abs(H_pca_basis.max()))
-for k in range(4):
-    ax = axes[1, k]
-    im = ax.imshow(H_pca_basis[k].reshape(3, 3), cmap="coolwarm", vmin=-vmax_pca, vmax=vmax_pca)
-    ax.set_title(f"PCA Eixo {k+1}", fontsize=10)
-    ax.axis("off")
-    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-
-axes[0, 0].text(-1.2, 1.5, r"Bases NMF" + "\n" + r"(Partes $\geq 0$)", rotation=90, va="center", ha="center", fontweight="bold", fontsize=11, color=COR_B)
-axes[1, 0].text(-1.2, 1.5, r"Bases PCA" + "\n" + r"(Sinais $\pm$)", rotation=90, va="center", ha="center", fontweight="bold", fontsize=11, color=COR_A)
-
-plt.tight_layout()
-plt.show()
-```
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-Observe como as bases da NMF (em tons de laranja) isolam blocos localizados limpos e não-negativos correspondentes às partes geradoras reais (linhas e colunas puras). Já as bases da PCA (em azul e vermelho) misturam valores positivos e negativos indistintos em todo o domínio, confirmando sua natureza holística.
-:::
-
-::: {.content-visible when-format="revealjs"}
-## Bases NMF vs. Bases PCA
-
-```{python}
-#| echo: false
-#| fig-align: center
-fig, axes = plt.subplots(2, 4, figsize=(9.5, 3.8))
-for k in range(4):
-    ax = axes[0, k]
-    ax.imshow(H_nmf_basis[k].reshape(3, 3), cmap="Oranges", vmin=0)
-    ax.set_title(f"NMF {k+1}", fontsize=9)
-    ax.axis("off")
-
-for k in range(4):
-    ax = axes[1, k]
-    ax.imshow(H_pca_basis[k].reshape(3, 3), cmap="coolwarm", vmin=-vmax_pca, vmax=vmax_pca)
-    ax.set_title(f"PCA {k+1}", fontsize=9)
-    ax.axis("off")
-plt.tight_layout()
-plt.show()
-```
-
-- **NMF (Laranja):** Valores estritamente $\ge 0$. Localizados, esparsos, partes isoladas.
-- **PCA (Azul/Vermelho):** Positivos e negativos misturados. Variações holísticas globais.
-:::
-
----
-
-# Pausa Ativa 3
-
-::: {.callout-note icon=false title="Pausa Ativa 3: A Geometria da Não-Negatividade"}
-Considere uma matriz de contagens de palavras em documentos onde cada entrada $v_{ij}$ indica a frequência da palavra $i$ no documento $j$.
-
-1. **Pergunta Aberta:** Se aplicarmos PCA a essa matriz, é possível que a reconstrução de um documento preveja que a palavra "ciência" aparece $-4{,}2$ vezes? Como a restrição da NMF impede esse absurdo físico e estatístico?
-
-2. **Teste Conceitual (Verdadeiro ou Falso):**
-   * (A) A restrição de não-negatividade na NMF é estritamente redutível a aplicar PCA e em seguida truncar todos os valores negativos para zero.
-   * (B) Na NMF, os vetores de base aprendidos $W$ são necessariamente ortogonais entre si, assim como os autovetores da PCA.
-   * (C) Em processamento de imagens, a NMF tende a descobrir características esparsas e localizadas (como olhos e bocas) porque proíbe cancelamentos destrutivos entre os fatores.
-   * (D) Se a matriz original $V$ contiver elementos negativos, a NMF padrão pode ser aplicada diretamente sem qualquer transformação prévia.
-:::
-
-::: {.content-visible when-format="revealjs"}
-## Pausa Ativa 3: PCA vs. NMF
-
-- **Cenário:** Matriz de contagens de termos em documentos.
-- **Pergunta:** Por que a PCA pode prever contagens negativas de palavras e como a NMF resolve isso?
-
-::: {.fragment}
-### Julgue os itens (V ou F):
-- (A) A NMF equivale a rodar PCA e truncar os valores negativos para zero ($\max(0, x)$).
-- (B) Assim como na PCA, as colunas da matriz $W$ na NMF são mutuamente ortogonais.
-- (C) A NMF aprende partes esparsas e locais porque não permite subtrações.
-- (D) A NMF clássica lida naturalmente com matrizes que possuem números negativos.
-:::
-:::
-
----
-
-# Bloco 4: Funções de Custo, Regras Multiplicativas e Não-Unicidade
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-## Funções de Perda para NMF
-
-Para ajustar $V \approx W H$ com restrições $W \ge 0, H \ge 0$, precisamos de uma medida de discrepância entre duas matrizes não-negativas. Duas funções de perda consagradas dominam a literatura:
-
-### 1. Distância Euclidiana de Frobenius
-Minimiza a soma dos erros quadráticos usuais:
-
-$$\mathcal{L}_{\text{Fro}}(W, H) = \frac{1}{2}\|V - W H\|_F^2 = \frac{1}{2}\sum_{i=1}^M \sum_{j=1}^N \left(v_{ij} - (W H)_{ij}\right)^2$$
-
-Essa função corresponde à suposição de ruído gaussiano aditivo em torno da aproximação não-negativa.
-
-### 2. Divergência de Kullback-Leibler Generalizada (I-Divergence)
-Quando os dados $v_{ij}$ representam contagens discretas (como palavras em documentos ou fótons em sensores), a divergência de Kullback-Leibler generalizada (ou $I$-divergence) é estatisticamente superior:
-
-$$\mathcal{D}_{KL}(V \parallel W H) = \sum_{i=1}^M \sum_{j=1}^N \left( v_{ij} \ln \frac{v_{ij}}{(W H)_{ij}} - v_{ij} + (W H)_{ij} \right)$$
-
-Conforme demonstrado no ESL (§14.6, eq. 14.73), minimizar essa divergência equivale exatamente a maximizar a log-verossimilhança de um modelo em que cada elemento $v_{ij}$ segue uma **distribuição de Poisson** independente com média dada por $(W H)_{ij}$.
-
----
-
-## As Regras de Atualização Multiplicativas de Lee & Seung (2001)
-
-Se tentássemos aplicar a descida do gradiente padrão $W \leftarrow W - \gamma \nabla_W \mathcal{L}$, um passo excessivo arremessaria as entradas para valores negativos, exigindo projeções bruscas $\max(0, W_{ik})$ que frequentemente travam a convergência.
-
-Para contornar esse obstáculo, Lee & Seung (2001) derivaram as célebres **Regras de Atualização Multiplicativas**:
-
-### Atualizações para a Perda de Frobenius:
-Tomando o gradiente em relação a $H$: $\nabla_H \mathcal{L} = W^T(W H - V) = W^T W H - W^T V$. Decompondo o gradiente em componentes positiva e negativa, escolhe-se uma taxa de aprendizado adaptativa dependente do ponto que cancela a soma aditiva:
-
-$$H_{kj} \leftarrow H_{kj} \frac{(W^T V)_{kj}}{(W^T W H)_{kj}}$$
-
-$$W_{ik} \leftarrow W_{ik} \frac{(V H^T)_{ik}}{(W H H^T)_{ik}}$$
-
-### Atualizações para a Divergência KL:
-$$H_{kj} \leftarrow H_{kj} \frac{\sum_{i=1}^M W_{ik} \frac{v_{ij}}{(W H)_{ij}}}{\sum_{i=1}^M W_{ik}}$$
-
-$$W_{ik} \leftarrow W_{ik} \frac{\sum_{j=1}^N H_{kj} \frac{v_{ij}}{(W H)_{ij}}}{\sum_{j=1}^N H_{kj}}$$
-
-> **A Elegância Multiplicativa:** Observe que cada atualização consiste em multiplicar o valor anterior por uma razão de matrizes puramente positivas. Se as matrizes iniciais forem estritamente positivas ($W^{(0)} > 0, H^{(0)} > 0$), **todos os fatores multiplicativos são não-negativos**, garantindo que as matrizes permaneçam no cone não-negativo em todas as iterações sem a necessidade de nenhuma etapa de projeção!
-:::
-
-::: {.content-visible when-format="revealjs"}
-## As Regras Multiplicativas de Lee & Seung (2001)
-
-::: {.callout-important}
-## Atualização Multiplicativa (Perda de Frobenius)
-$$H_{kj} \leftarrow H_{kj} \frac{(W^T V)_{kj}}{(W^T W H)_{kj}}, \quad W_{ik} \leftarrow W_{ik} \frac{(V H^T)_{ik}}{(W H H^T)_{ik}}$$
+**Passo 3, $\boldsymbol\eta=H\oslash\left(W^TWH\right)$:** $\quad H\leftarrow H-H\oslash\left(W^TWH\right)\odot\left(W^TWH-W^TV\right)$
 :::
 
 ::: {.fragment}
-### Por que essas regras são geniais?
-1. **Preservação Automática da Não-Negatividade:** Multiplicar um número $\ge 0$ por uma razão positiva **nunca gera números negativos**. Sem projeções artificiais!
-2. **Ponto Fixo Ótimo:** Quando $W H = V$, o numerador se iguala ao denominador, a razão torna-se 1, e o algoritmo para suavemente.
-3. **Convergência Monotônica:** Lee & Seung provaram que a perda é não-crescente sob essas regras.
+**Passo 4, simplificando:** o termo $H$ se cancela. A regra de $W$ sai por simetria:
+$$H_{kj}\leftarrow H_{kj}\frac{(W^TV)_{kj}}{(W^TWH)_{kj}},\qquad W_{ik}\leftarrow W_{ik}\frac{(VH^T)_{ik}}{(WHH^T)_{ik}}$$
 :::
-:::
-
-::: {.content-visible when-format="html" unless-format="revealjs"}
-## O Dilema da Não-Unicidade (Donoho & Stodden, 2004)
-
-Embora a NMF seja amplamente celebrada pela interpretabilidade de seus componentes, David Donoho e Victoria Stodden demonstraram em 2004 um resultado teórico crítico que impõe cautela na interpretação dos fatores latentes: **a fatoração NMF não é, em geral, única**.
-
-Dada uma decomposição válida $V = W H$, considere qualquer matriz invertível $A \in \mathbb{R}^{K \times K}$. Podemos inserir $A A^{-1} = I$ entre os fatores:
-
-$$V = (W A) (A^{-1} H) = \tilde{W} \tilde{H}$$
-
-Para que $(\tilde{W}, \tilde{H})$ seja uma nova fatoração NMF válida, basta que:
-
-$$\tilde{W} = W A \ge 0 \quad \text{e} \quad \tilde{H} = A^{-1} H \ge 0$$
-
-### Quando a Decomposição é Única?
-*   Se $A$ for uma matriz de permutação e escalonamento diagonal (matriz monomial), a decomposição apenas troca a ordem dos fatores e suas escalas absolutas — uma ambiguidade trivial e inofensiva.
-*   Contudo, conforme detalhado no ESL (§14.6, p. 554), se houver "espaço aberto" entre o cone convexo formado pelas colunas dos dados e as fronteiras do ortante não-negativo, **existem infinitas matrizes $A$ contínuas** que satisfazem as restrições!
-
-Isso significa que a solução encontrada pelas regras multiplicativas pode depender sensivelmente dos valores de inicialização $W^{(0)}$ e $H^{(0)}$. Para mitigar essa indefinição geométrica na prática, adicionam-se penalidades de esparsidade ($L_1$) sobre $H$ ou $W$, forçando os fatores a colarem nas arestas extremas do cone de dados.
-:::
-
-::: {.content-visible when-format="revealjs"}
-## O Dilema da Não-Unicidade (Donoho & Stodden, 2004)
-
-Seja $V = W H$. Inserindo uma matriz invertível $A$:
-$$V = (W A)(A^{-1} H) = \tilde{W} \tilde{H}$$
 
 ::: {.fragment}
-### A Questão da Identificabilidade
-- Se $W A \ge 0$ e $A^{-1} H \ge 0$, temos outra fatoração NMF perfeitamente válida!
-- Se houver espaço vazio entre os dados e os eixos coordenados, **existem infinitas soluções geometricamente distintas**.
+- **Fica não negativo:** multiplicamos por uma razão de números não negativos, sem projeção. Entrada zero fica em zero, então começamos com valores positivos.
+- **Para no lugar certo:** com $WH=V$, a razão vale 1. A perda nunca aumenta (Lee & Seung, 2001).
+:::
+
+## A resposta não é única
+
+Dada $V=WH$ e $A$ invertível:
+$$V=(WA)(A^{-1}H)=\tilde W\tilde H$$
+
+::: {.fragment}
+- É outra NMF válida sempre que $WA\ge0$ e $A^{-1}H\ge0$.
+- Se $A$ só permuta e reescala, nada importante muda. Se houver folga entre os dados e os eixos, há infinitas soluções realmente diferentes (Donoho & Stodden, 2004).
+- Na prática, a solução pode depender da inicialização. $L_1$ pode reduzir a ambiguidade, sem garantir unicidade, e trocar $K$ exige reajustar tudo.
 :::
 
 ::: {.fragment .callout-warning}
-## Consequência Prática
-A solução encontrada depende da inicialização.
-Para garantir fatores únicos e robustos, a literatura moderna aplica **regularização de esparsidade $L_1$** (Sparse NMF), forçando os vetores a ancorarem nas bordas do cone de dados.
+## Vale medir
+No MovieLens implícito, duas inicializações dão cosseno médio de `{python} brl(cos_medio)` (mínimo `{python} brl(cos_min)`). Aqui a ambiguidade foi pequena, mas isso é um resultado destes dados. No trabalho final, repitam o teste nos seus.
 :::
 :::
 
----
 
-# Pausa Ativa 4
+# Bloco 5: O que Fazer com o Espaço Aprendido
 
-::: {.callout-note icon=false title="Pausa Ativa 4: Regras Multiplicativas e Não-Unicidade"}
-Considere uma matriz $V \in \mathbb{R}_{\ge 0}^{3 \times 2}$ aproximada por NMF com $K = 2$.
+## Treinamos. E agora, como ler isso?
 
-1. **Pergunta Aberta:** Se na iteração atual tivermos $W_{ik} > 0$ e a reconstrução subestimar sistematicamente a entrada correspondente ($(WH)_{ij} < v_{ij}$), o termo multiplicativo de atualização de $W$ será maior ou menor que 1? O que acontecerá com o valor de $W_{ik}$ na próxima iteração?
+::: {.content-visible when-format="html" unless-format="revealjs"}
+No trabalho final, vocês vão terminar o treino com duas tabelas de números e a vontade de dizer o que elas significam. Quatro cuidados ajudam:
 
-2. **Teste Conceitual (Verdadeiro ou Falso):**
-   * (A) As regras multiplicativas de Lee & Seung garantem que se uma coordenada de $W$ ou $H$ for inicializada com zero, ela permanecerá identicamente zero em todas as iterações subsequentes.
-   * (B) Minimizar a divergência de Kullback-Leibler generalizada na NMF equivale a maximizar a verossimilhança de um modelo de contagens sob distribuição de Poisson independente.
-   * (C) O Teorema de Donoho & Stodden (2004) prova que a decomposição da NMF é matematicamente única para qualquer matriz não-negativa arbitrária.
-   * (D) Se multiplicarmos um fator latente $W_{:k}$ por uma constante escalar $c > 0$ e dividirmos a linha correspondente $H_{k:}$ por $c$, o produto reconstruído $WH$ permanece inalterado.
-:::
+1. **Desconfie de um eixo sozinho.** Pela invariância por $G$, o modelo determina as previsões $\mathbf{p}_u^T\mathbf{q}_i$, e os eixos ficam em aberto. Olhar os extremos de um eixo sugere uma hipótese, que precisa ser conferida com algo que o modelo não viu, como os gêneros.
+2. **A direção indica semelhança.** O cosseno entre $\mathbf{q}_i$ e $\mathbf{q}_j$ mede se dois filmes são avaliados de modo parecido pelo mesmo público. A regularização $L_2$ tende a equilibrar as escalas de $P$ e $Q$, sobrando principalmente a ambiguidade de rotação, à qual o cosseno é invariante (inferência nossa). Na tabela, *Moana* e *Thor* têm vizinhos coerentes. *La La Land* tem cossenos menores e vizinhos mais variados, porque a semelhança é de padrão de avaliação, e esse padrão nem sempre coincide com o gênero.
+3. **A norma indica quanta informação há.** Lembra da nuvem no centro do mapa? São, em boa parte, filmes com poucas notas, encolhidos pela regularização. A correlação de Spearman entre $\|\mathbf{q}_i\|$ e o número de avaliações é `{python} brl(spear_norma)`. Norma grande não significa filme bom. A aprovação geral está em $b_i$.
+4. **Um usuário é um ponto, e dá para colocar um novo no mapa.** Basta uma etapa do ALS, sem retreinar nada: $\mathbf{p}=\left(\sum_i\mathbf{q}_i\mathbf{q}_i^T+\lambda I\right)^{-1}\sum_i(r_i-\mu-b_i)\mathbf{q}_i$, tomando $b_u=0$.
 
-::: {.content-visible when-format="revealjs"}
-## Pausa Ativa 4: Regras e Não-Unicidade
+Vamos testar esse último ponto com um usuário fictício que dá nota 5 a filmes populares de animação, separando duas perguntas: quais filmes mais **sobem** por causa da parte latente, $\mathbf{q}_i^T\mathbf{p}$, e quais ficam **no topo** da lista final.
 
-- **Cenário:** Atualização multiplicativa com $(WH)_{ij} < v_{ij}$.
-- **Pergunta:** O fator de multiplicação é maior ou menor que 1? O que ocorre com os pesos?
+- **Com 3 notas,** a direção já parece certa: `{python} pct(novo_3["anim"])` dos que mais sobem são de animação. Mas o efeito é pequeno ($\|\mathbf{p}\|=$ `{python} brl(novo_3["norma"])`, subida máxima de `{python} brl(novo_3["maior"])`, enquanto $b_i$ tem desvio-padrão de `{python} brl(dp_bi)`), e `{python} novo_3["iguais"]` dos 5 primeiros coincidem com o ranking só por vieses. Esse é o *cold start* em números: com pouco histórico, $\lambda$ segura o usuário perto da origem.
+- **Com 30 notas,** $\|\mathbf{p}\|$ sobe para `{python} brl(novo_30["norma"])`, e o resultado surpreende. O que mais sobe já não é animação, e sim filmes de grande público de outros gêneros, e `{python} novo_30["iguais"]` de 5 ainda coincidem com os vieses. O fator aprendeu quem assiste ao quê junto. Quem vê muita animação popular também vê esses filmes, e isso é diferente de aprender um gênero.
 
-::: {.fragment}
-### Julgue os itens (V ou F):
-- (A) Se uma coordenada for inicializada com zero nas regras multiplicativas, ela nunca mais sairá de zero.
-- (B) A perda por Divergência KL generalizada equivale a um modelo de Poisson para contagens.
-- (C) A fatoração NMF é matematicamente única para toda matriz de dados não-negativa.
-- (D) Escalar uma coluna de $W$ por $c > 0$ e dividir a linha de $H$ por $c$ preserva o produto $WH$.
-:::
-:::
-
----
-
-# Pausa Ativa 5
-
-::: {.callout-note icon=false title="Pausa Ativa 5: Síntese e Comparação Arquitetural"}
-Analise o quadro comparativo geral dos três métodos fundamentais de decomposição matricial estudados:
-
-1. **Pergunta Aberta:** Em um sistema de streaming musical que monitora o número de reproduções de cada faixa por usuário (dados contínuos não-negativos esparsos), quando seria preferível usar a Funk-SVD com vieses e quando seria preferível usar a NMF?
-
-2. **Teste Conceitual (Verdadeiro ou Falso):**
-   * (A) A SVD clássica de Eckart-Young-Mirsky pode ser vista como um caso particular de modelo de fatores latentes onde a matriz não possui entradas faltantes e não há regularização.
-   * (B) A Funk-SVD requer que a matriz de dados seja estritamente não-negativa, pois avaliações de usuários não podem ser normalizadas ou subtraídas pela média.
-   * (C) A NMF substitui a ortogonalidade estrita da PCA pela não-negatividade de seus fatores, trocando desacoplamento espectral por interpretabilidade física aditiva.
-   * (D) O algoritmo ALS (Mínimos Quadrados Alternados) é aplicável tanto à fatoração com dados faltantes (Funk-SVD) quanto à NMF (restringindo as soluções aos mínimos quadrados não-negativos — NNLS).
+Se todo mundo no seu trabalho estiver recebendo listas parecidas, a causa pode ser a escala de $b_i$, mesmo com estrutura latente presente. Vale inspecionar a parte latente em separado.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Pausa Ativa 5: Síntese Comparativa
+1. **Desconfie de um eixo sozinho.** O modelo determina $\mathbf{p}_u^T\mathbf{q}_i$, e os eixos ficam em aberto ($G$). Confira com algo que ele não viu, como os gêneros.
+2. **A direção indica semelhança** de padrão de avaliação, que nem sempre coincide com o gênero. Veja *La La Land*.
+3. **A norma indica quanta informação há:** Spearman de `{python} brl(spear_norma)` entre $\|\mathbf{q}_i\|$ e nº de avaliações. A nuvem do mapa é isso. A aprovação geral está em $b_i$.
+:::
 
-- **Cenário:** Streaming musical com contagens de reproduções não-negativas e dados faltantes.
-- **Pergunta:** Quando usar Funk-SVD e quando usar NMF?
+| Filme | Vizinhos em $\mathbf{q}_i$ (cosseno) |
+|:---|:---|
+| *Moana* | `{python} viz_moana` |
+| *Thor: Ragnarok* | `{python} viz_thor` |
+| *La La Land* | `{python} viz_lalaland` |
 
+::: {.content-visible when-format="revealjs"}
+## Colocando um usuário novo no mapa
+
+Basta uma etapa do ALS, sem retreinar: $\mathbf{p}=\left(\sum_i\mathbf{q}_i\mathbf{q}_i^T+\lambda I\right)^{-1}\sum_i(r_{i}-\mu-b_i)\mathbf{q}_i$, com $b_u=0$. Usuário fictício: nota 5 em animação popular.
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+| Notas | $\|\mathbf{p}\|$ | Mais sobem com a parte latente ($\mathbf{q}_i^T\mathbf{p}$) | 5 primeiras recomendações | Iguais aos vieses |
+|:---:|:---:|:---|:---|:---:|
+| 3 | `{python} brl(novo_3["norma"])` | `{python} novo_3["sobem"]` | `{python} novo_3["rec"]` | `{python} novo_3["iguais"]` de 5 |
+| 30 | `{python} brl(novo_30["norma"])` | `{python} novo_30["sobem"]` | `{python} novo_30["rec"]` | `{python} novo_30["iguais"]` de 5 |
+:::
+
+::: {.content-visible when-format="revealjs"}
+| Notas | $\|\mathbf{p}\|$ | Mais sobem com a parte latente ($\mathbf{q}_i^T\mathbf{p}$) | Top 5 igual aos vieses |
+|:---:|:---:|:---|:---:|
+| 3 | `{python} brl(novo_3["norma"])` | `{python} novo_3["sobem"]` | `{python} novo_3["iguais"]` de 5 |
+| 30 | `{python} brl(novo_30["norma"])` | `{python} novo_30["sobem"]` | `{python} novo_30["iguais"]` de 5 |
+
+: {tbl-colwidths="[8,8,66,18]"}
+:::
+
+::: {.content-visible when-format="revealjs"}
 ::: {.fragment}
-### Julgue os itens (V ou F):
-- (A) A SVD clássica é um caso especial de fatores latentes sem regularização e sem dados faltantes.
-- (B) A Funk-SVD exige que as notas e os fatores latentes sejam estritamente não-negativos.
-- (C) A NMF troca a ortogonalidade da PCA pela não-negatividade para ganhar interpretabilidade.
-- (D) O princípio de alternância do ALS pode ser estendido para NMF resolvendo passos NNLS.
+- **3 notas:** direção certa (`{python} pct(novo_3["anim"])` de animação entre os que sobem), mas efeito pequeno (subida máxima de `{python} brl(novo_3["maior"])`; $b_i$ com desvio-padrão de `{python} brl(dp_bi)`). É o *cold start* em números.
+- **30 notas:** sobem filmes de grande público de outros gêneros. O fator aprendeu quem assiste ao quê junto, o que é diferente de aprender um gênero.
 :::
 :::
 
----
+## Tudo o que supusemos até aqui
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Ao longo da aula fomos acumulando suposições. Vale reuni-las, com um jeito de examinar cada uma no MovieLens.
+
+Antes, uma observação sobre $\lambda$. Se $r_{ui}$ é Gaussiana em torno de $\hat r_{ui}$ com variância $\sigma^2$, e os fatores têm priori $\mathcal{N}(\mathbf{0},\sigma_p^2 I)$, o log da posterior é $-\frac{1}{2\sigma^2}\sum_{\Omega}e_{ui}^2-\frac{1}{2\sigma_p^2}\left(\sum_u\|\mathbf{p}_u\|^2+\sum_i\|\mathbf{q}_i\|^2\right)+\text{const}$. Multiplicando por $-\sigma^2$, chegamos à perda da aula, com $\lambda=\sigma^2/\sigma_p^2$ (PMF; Salakhutdinov & Mnih). Então a regularização também é uma suposição: a razão entre o ruído das notas e a variância que admitimos para os gostos. Ao contrário da PPCA, que integra $\mathbf{z}$, aqui os dois fatores recebem só uma estimativa pontual.
+:::
+
+::: {.content-visible when-format="revealjs"}
+**$\lambda$ também é uma suposição.** Com $r_{ui}$ Gaussiana (variância $\sigma^2$) e fatores $\mathcal{N}(\mathbf{0},\sigma_p^2 I)$, o MAP dá $\lambda=\sigma^2/\sigma_p^2$ (PMF; Salakhutdinov & Mnih). Ao contrário da PPCA, que integra $\mathbf{z}$, aqui a estimativa é pontual.
+:::
+
+| Suposição | Onde aparece | Quando pode falhar | Como examinar |
+|:---|:---|:---|:---|
+| **Posto baixo** | $K\ll\min(M,N)$ | Gostos de nicho somem | Curva de validação por $K$ |
+| **Interação bilinear e aditiva** | $\mu+b_u+b_i+\mathbf{p}_u^T\mathbf{q}_i$ | Contexto, ordem, sequência de consumo | Erro por grupo de usuários e filmes |
+| **Ruído Gaussiano homogêneo** | Perda quadrática | Notas discretas e limitadas | Resíduo por nível de nota |
+| **A falta não informa o valor** | Soma só em $\Omega$ | Pessoas veem o que esperam gostar | Ver a seguir |
+| **Preferências estáveis** | Um $\mathbf{p}_u$ por usuário | Gostos e catálogo mudam | Partição temporal; Aula 11 |
+| **Zero = não interagiu** (NMF implícita) | $v_{ui}=0$ | Ausência não é desinteresse | Comparar com notas explícitas |
+
+## Por que aquela célula está vazia?
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Esta é a suposição mais difícil de examinar. Pense em como você escolhe filmes: em geral, assiste ao que espera gostar. Quando isso acontece, a falta depende do valor que está faltando, o que é chamado de MNAR (*missing not at random*; Marlin et al., 2007).
+
+A Aula 9 ajuda a enxergar a estrutura. Gosto e popularidade influenciam o evento "avaliou", que é um **colisor**, e todo o nosso dado está condicionado a "avaliou = 1". O grafo é uma ilustração nossa, e não um modelo estimado.
+
+No MovieLens, filmes mais avaliados têm nota média maior (Spearman de `{python} brl(spear_pop)`). Isso é compatível com a seleção, mas filmes bons também atraem público, e sem as notas das células vazias os dados não têm como separar as duas explicações. Por isso usamos uma simulação em que todas as notas são conhecidas (800 usuários, 400 itens, posto 5, cerca de 15% observados). Quando a falta depende da nota, o erro nas notas retidas **subestima** o erro nas células nunca vistas, que são justamente as que queremos preencher. E coletar mais dados do mesmo jeito não corrige isso.
+
+Portanto, os RMSE desta aula, e os do seu trabalho final, medem o desempenho nas células observadas.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- Em geral, você assiste ao que espera gostar. Assim, a falta depende do valor faltante: MNAR (Marlin et al., 2007).
+- "Avaliou" é um **colisor** (Aula 9), e todo dado está condicionado a "avaliou = 1" (grafo ilustrativo).
+- No MovieLens, filmes mais avaliados têm nota maior (Spearman `{python} brl(spear_pop)`). Pode ser seleção, ou filmes bons atraem público. Os dados não separam as duas coisas, então simulamos.
+:::
+
+::: {.fig-resize style="width: 36%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{43,92,143}
+\definecolor{laranja}{RGB}{217,95,2}
+\definecolor{cinza}{RGB}{127,127,127}
+\begin{tikzpicture}[>=latex, font=\small, thick,
+  no/.style={draw=#1, fill=#1!10, rounded corners=2pt, minimum height=0.75cm, minimum width=2.2cm, align=center}]
+  \node[no=azul] (g) at (0,1.5) {gosto};
+  \node[no=azul] (p) at (5,1.5) {popularidade};
+  \node[no=laranja] (a) at (2.5,0) {avaliou $=1$};
+  \node[no=cinza] (n) at (-1.2,0) {nota};
+  \draw[->] (g) -- (a);
+  \draw[->] (p) -- (a);
+  \draw[->] (g) -- (n);
+\end{tikzpicture}
+```
+:::
+
+| Simulação: mecanismo de falta | Média real | Média observada | RMSE nas notas retidas | RMSE nas nunca observadas |
+|:---|:---:|:---:|:---:|:---:|
+| Sorteio uniforme | `{python} brl(media_real_sim)` | `{python} brl(sim["alea"]["obs"])` | `{python} brl(sim["alea"]["ret"])` | `{python} brl(sim["alea"]["nunca"])` |
+| Depende da nota | `{python} brl(media_real_sim)` | `{python} brl(sim["nota"]["obs"])` | `{python} brl(sim["nota"]["ret"])` | `{python} brl(sim["nota"]["nunca"])` |
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+Quando a falta depende da nota, o erro nas notas retidas **subestima** o erro nas células nunca vistas. Coletar mais dados do mesmo jeito não corrige isso.
+:::
+:::
+
+## RMSE baixo não garante boa lista
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Até aqui medimos o erro da nota, mas o que a pessoa vê é uma lista. Uma métrica de lista é o **Hit@10**: recomendamos a cada usuário os 10 filmes com maior pontuação, entre os que ele ainda não avaliou no treino nem na validação, e contamos a fração de usuários com pelo menos um filme de teste com nota 4 ou mais nessa lista. Na figura, os modelos estão na ordem do RMSE, com hiperparâmetros escolhidos para o RMSE e $K=$ `{python} K_fat`.
+:::
+
+::: {.content-visible when-format="revealjs"}
+**Hit@10:** fração dos usuários com ao menos um filme de teste com nota $\ge4$ entre os 10 recomendados.
+:::
+
+::: {.fig-resize style="width: 62%; margin: 0 auto;"}
+```{python}
+#| echo: false
+
+_n = [a[0] for a in aval_lista]
+_y = np.arange(len(_n))
+_destaque = {"Funk-SVD": COR_VERDE, "SVD, buracos = zero": COR_ALERTA}
+_cor = [_destaque.get(n, "#b8b8b8") for n in _n]
+fig, axes = plt.subplots(1, 2, figsize=(10.5, 4), sharey=True)
+for _a_, _yy, _ec in zip(axes, [0, 1], [0, 0]):
+    _a_.grid(axis="y", visible=False)
+    for _s in ["top", "right", "left"]:
+        _a_.spines[_s].set_visible(False)
+    _a_.tick_params(axis="y", length=0)
+for _k, (_nome, _r_, _h) in enumerate(aval_lista):
+    if _r_ is None:
+        axes[0].text(.03, _k, "não prevê nota", va="center", color=COR_CINZA, fontsize=9.5, style="italic")
+    else:
+        axes[0].barh(_k, _r_, color=_cor[_k], height=.62)
+        axes[0].text(_r_ + .04, _k, brl(_r_, 3), va="center", fontsize=9.5)
+    axes[1].barh(_k, 100 * _h, color=_cor[_k], height=.62)
+    axes[1].text(100 * _h + 1.5, _k, pct(_h), va="center", fontsize=9.5)
+axes[0].set_yticks(_y, _n)
+axes[0].invert_yaxis()
+axes[0].set_xlim(0, 2.9)
+axes[0].set_xlabel("RMSE de teste (menor é melhor)")
+axes[0].set_title("Erro da nota")
+axes[1].set_xlim(0, 100)
+axes[1].set_xlabel(f"Hit@10, % dos usuários (maior é melhor)\ntracejado: lista aleatória, {pct(hit_aleatorio)}")
+axes[1].set_title("Qualidade da lista")
+axes[1].axvline(100 * hit_aleatorio, color=COR_CINZA, lw=1, ls="--")
+fig.tight_layout()
+plt.show()
+```
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A ordem quase se inverte. A SVD com zeros, o pior RMSE da aula, dá a melhor lista. A Funk-SVD, o melhor RMSE, fica bem abaixo de simplesmente recomendar o que é popular. E veja a NMF nas notas: com RMSE quase igual ao da Funk-SVD (`{python} brl(rmse_nmf_not, 3)` contra `{python} brl(rmse_funk_test, 3)`), seu Hit@10 é `{python} pct(hit_lista["NMF nas notas"])`, contra `{python} pct(hit_lista["Funk-SVD"])`. Esse número também é sensível à regularização: variando $\lambda$, vai de `{python} pct(hit_nmf_min)` a `{python} pct(hit_nmf_max)`.
+
+Uma explicação provável é que prever a nota e ordenar o catálogo são tarefas diferentes. Quem treina só em $\Omega$ nunca aprende quais filmes a pessoa chegaria a ver, e um filme bem avaliado por poucos pode ir ao topo. Os zeros ensinam justamente isso, como vimos com o dado binário: a NMF binária, que nem usa notas, também vai bem. Resultado parecido aparece em Cremonesi, Koren & Turrin (2010).
+
+Isso não faz da SVD com zeros o melhor recomendador. O teste só contém filmes que as pessoas escolheram avaliar, a mesma seleção da seção anterior, e isso favorece quem aprende quem assiste ao quê. As duas métricas respondem a perguntas diferentes, então o trabalho final deve reportar as duas, vencer primeiro os vieses e a popularidade, e repetir com outras sementes e outros $K$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment .callout-important}
+## Para o trabalho final
+RMSE quase igual (Funk-SVD e NMF nas notas) pode gerar listas bem diferentes. Mas o teste só tem filmes que as pessoas escolheram avaliar. Reportem as duas métricas e vençam primeiro os vieses e a popularidade.
+:::
+:::
+
 
 # Fechamento e Ponte para a Aula 11
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-## Síntese das 4 Perguntas Centrais
+## Retomando as 5 perguntas
 
-Encerramos a Aula 10 com as quatro perguntas estruturantes plenamente respondidas:
+1. **Baselines:** a média já dá uma referência, e os vieses trazem o maior ganho da aula, mas dão a mesma lista para todos. Preencher os buracos para usar a SVD resolve o problema errado: com zeros, ficamos `{python} brl(razao_zero, 1)` vezes pior que a média.
+2. **Modelo:** somamos aos vieses um produto interno entre o vetor do usuário e o do filme, $\mu+b_u+b_i+\mathbf{p}_u^T\mathbf{q}_i$, e ajustamos só nas células observadas, com regularização $L_2$.
+3. **Treino:** a perda é biconvexa. O SGD corrige uma nota por vez, a $\mathcal{O}(|\Omega|K)$ por passada. O ALS resolve uma regressão Ridge por usuário e por filme, fácil de paralelizar. No MovieLens, os dois ficaram praticamente juntos.
+4. **NMF:** sem negativos não há cancelamento. Com zeros reais, como no MNIST e no feedback implícito, os fatores tendem a virar partes. Com notas e máscara, os fatores se sobrepõem bem mais, e o erro de reconstrução nunca fica abaixo do da SVD.
+5. **Leitura e suposições:** desconfie de um eixo sozinho, leia a direção como semelhança de avaliação e a norma como quantidade de informação. Os modelos supõem posto baixo, interação bilinear, ruído Gaussiano, falta ignorável e gostos estáveis, e os RMSE valem para as células observadas.
 
-1. **O Colapso da SVD Clássica:** A SVD truncada clássica minimiza o erro sobre todas as células, colapsando diante de matrizes reais de recomendação com mais de $99\%$ de entradas faltantes. Imputar zeros deturpa as preferências, e imputar médias destrói a variabilidade. A solução correta é otimizar exclusivamente sobre as coordenadas observadas $(u, i) \in \Omega$ com regularização $L_2$.
-2. **Espaço Latente e Vieses:** Usuários e itens são mapeados em um espaço latente comum $\mathbb{R}^K$. A nota prevista combina efeitos principais de linha de base ($\mu + b_u + b_i$) com a afinidade residual bilinear ($\mathbf{p}_u^T \mathbf{q}_i$), permitindo isolar tendências sistemáticas de usuários generosos ou filmes aclamados.
-3. **SGD vs. ALS:** A perda é biconvexa. O SGD de Funk atualiza os parâmetros em tempo linear $\mathcal{O}(|\Omega| \cdot K)$ a cada nota observada, enquanto o ALS desacopla a otimização em sistemas lineares independentes de Ridge Regression, viabilizando paralelização massiva em clusters distribuídos.
-4. **A Geometria Construtiva da NMF:** A restrição $W \ge 0, H \ge 0$ impede cancelamentos subtrativos. Ao proibir a subtração, a NMF obriga o modelo a aprender protótipos correspondentes a partes físicas e temáticas puramente aditivas (*parts-based representation*), resolvendo a falta de interpretabilidade das *eigenfaces* da PCA.
+### Os métodos lado a lado
 
-### Quadro-Resumo Comparativo
-
-| Dimensão | SVD Clássica | Funk-SVD (Recomendação) | NMF (Fatoração Não-Negativa) |
+| | SVD clássica | Funk-SVD | NMF |
 | :--- | :---: | :---: | :---: |
-| **Entrada Requerida** | Matriz densa completa | Matriz esparsa (dados faltantes) | Matriz densa ou esparsa $V \ge 0$ |
-| **Restrições nos Fatores** | Ortogonalidade ($U^T U = I$) | Regularização $L_2$ ($\lambda \|\mathbf{p}\|^2$) | Não-negatividade ($W \ge 0, H \ge 0$) |
-| **Interpretação das Bases** | Eixos de variância máxima | Afinidade e atributos conceituais | Partes físicas aditivas / Tópicos |
-| **Cancelamentos Subtrativos** | Sim (Sinais $\pm$) | Sim (Sinais $\pm$) | **Não (Somente somas)** |
-| **Algoritmo Canônico** | Decomposição Espectral / Lanczos | SGD estocástico / ALS | Regras Multiplicativas / HALS |
-| **Unicidade da Solução** | Única a menos de sinal | Não-convexa (mínimos locais) | Não-única (rotações cônicas) |
+| **Entrada** | Matriz completa | Matriz com células faltantes | $V\ge0$, densa ou esparsa |
+| **O que restringe os fatores** | Ortogonalidade ($U^TU=I$) | Regularização $L_2$ | Não negatividade |
+| **Como ler as bases** | Eixos de variância máxima | Afinidades, a conferir | Partes ou tópicos, quando há zeros reais |
+| **Há cancelamento?** | Sim | Sim | Não |
+| **Como treinar** | Decomposição espectral, Lanczos | SGD, ALS | Regras multiplicativas, HALS |
+| **Solução** | Única a menos de sinal (com $\sigma_k$ distintos) | Problema não convexo, mínimos locais | Em geral não única |
 
-### Ponte para a Aula 11: O Desafio dos Dados Vivos em Produção
+### O que fica em aberto
 
-Nesta aula, aprendemos a extrair estruturas latentes profundas e a prever preferências em matrizes massivas. Contudo, em ambientes reais de produção, **o comportamento dos usuários e a distribuição dos itens não são estáticos**: tendências mudam, novos públicos entram na plataforma e a distribuição dos dados de teste afasta-se silenciosamente da distribuição em que o modelo foi treinado.
+- ***Cold start*:** sem histórico, a fatoração não tem o que dizer. Na prática, é combinada com atributos de usuários e filmes.
+- **Avaliação offline:** a seleção afeta toda métrica histórica, e os dados de um sistema em produção dependem das recomendações que ele próprio fez.
+- ***Matrix completion*:** em que condições as notas observadas determinam a matriz? Há resultados teóricos (Candès & Recht, 2009), com hipóteses sobre posto e amostragem que os dados reais raramente garantem.
 
-Como detectar com rigor estatístico que a distribuição populacional de entrada sofreu uma mutação não supervisionada (*data drift* / *domain shift*) sem dispor de novos rótulos de verdade fundamental?
+### Ponte para a Aula 11
 
-Na **Aula 11: Alinhamento de Distribuições e Detecção de Domain Shift (Data Drift)**, investigaremos testes de hipóteses de duas amostras em alta dimensão e a formulação da **Maximum Mean Discrepancy (MMD)** em Espaços de Hilbert de Núcleo Reprodutor (RKHS).
+Tudo aqui supôs que os gostos ficam parados. Na prática, surgem novos públicos, a moda muda, e os dados de hoje deixam de se parecer com os dados do treino. Como perceber isso, de forma estatisticamente justificada, sem esperar por novos rótulos?
+
+Na **Aula 11**, veremos testes de duas amostras em alta dimensão e a **Maximum Mean Discrepancy (MMD)**, usada para detectar *data drift* e *domain shift*.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Resumo Geral da Aula 10
+## Retomando as 5 perguntas
 
-| Método | Entradas | Restrições | Natureza das Bases |
+1. **Baselines:** os vieses dão o maior ganho, mas a mesma lista para todos. Preencher os buracos resolve o problema errado: com zeros, `{python} brl(razao_zero, 1)` vezes pior que a média.
+2. **Modelo:** $\mu+b_u+b_i+\mathbf{p}_u^T\mathbf{q}_i$, ajustado só nas células observadas, com $L_2$.
+3. **Treino:** a perda é biconvexa. SGD: uma nota por vez, $\mathcal{O}(|\Omega|K)$ por passada. ALS: Ridge por usuário e por filme, paralelizável.
+4. **NMF:** sem cancelamento. Com zeros reais, tende a dar partes. O erro nunca fica abaixo do da SVD.
+5. **Leitura e suposições:** desconfie de um eixo sozinho, direção é semelhança, norma é informação. Os RMSE valem para as células observadas.
+
+## Os métodos lado a lado
+
+| | Entrada | O que restringe os fatores | Como ler as bases |
 | :--- | :---: | :---: | :---: |
-| **SVD Clássica** | Densa (sem NaNs) | Ortogonalidade | Holística ($\pm$, cancelamentos) |
-| **Funk-SVD** | Esparsa com NaNs | Regularização $L_2$ + Vieses | Fatores de preferência bilinear |
-| **NMF** | Não-negativa ($V \ge 0$) | Não-negatividade ($W, H \ge 0$) | **Partes aditivas puras (Lego)** |
+| **SVD clássica** | Matriz completa | Ortogonalidade | Eixos de variância máxima, com cancelamentos |
+| **Funk-SVD** | Células faltantes | $L_2$ e vieses | Afinidades, a conferir |
+| **NMF** | $V\ge0$ | Não negatividade | Partes, quando há zeros reais |
 
 ::: {.fragment}
-### Próxima Aula: Aula 11
-- E quando o comportamento dos usuários muda ao longo do tempo?
-- **Detecção de Domain Shift e Data Drift via Maximum Mean Discrepancy (MMD)**.
-:::
+**Em aberto:** *cold start*, avaliação offline com seleção, teoria de *matrix completion* (Candès & Recht, 2009).
 :::
 
-::: {.content-visible when-format="html" unless-format="revealjs"}
----
+::: {.fragment}
+### Próxima aula
+Tudo aqui supôs que os gostos ficam parados. Como perceber que os dados mudaram, sem novos rótulos? **Aula 11: detecção de *data drift* e *domain shift* com a MMD.**
+:::
 
-## Materiais Complementares
-
-*   [Exercícios da Aula 10](exercicios.qmd)
-*   [Soluções Comentadas](soluções.qmd)
-*   [Guia Pedagógico das Pausas Ativas](_02-respostas-pausas.md)
+::: {.fragment}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
 :::
