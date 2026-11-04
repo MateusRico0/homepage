@@ -21,8 +21,9 @@ Na segunda metade da aula, investigamos uma das restrições geométricas mais p
 **Estratégia Pedagógica:** A (Outside-In) — Do desafio prático do *Netflix Prize* e do colapso da SVD em dados esparsos $\to$ Formulação de fatores latentes regularizados $\to$ Dinâmica algorítmica (SGD vs ALS) $\to$ A virada geométrica da não-negatividade na NMF $\to$ Regras multiplicativas e interpretabilidade por partes.
 
 **Datasets e Cenários-Fio:**
-1. *Matriz de Avaliações de Filmes (Estilo MovieLens)*: Matriz controlada $M \times N$ de usuários e filmes com esparsidade intencional de $80\%$, contrastando a predição da SVD clássica com imputação versus o modelo de fatores latentes regularizado com vieses.
-2. *Decomposição de Imagens de Faces e Tópicos de Texto (Lee & Seung / Olivetti)*: Demonstração da emergência de partes semânticas locais (olhos, narizes, bocas ou vocabulário temático não-negativo) na NMF contra os autovetores globais e fantasmagóricos da PCA.
+1. *MovieLens* (`ashraq/movielens_ratings`, base do trabalho final): 990.425 notas com 0,14% de densidade, restritas a um núcleo de 2000 usuários × 1000 filmes (14,1%), declarado como cenário favorável. Partição 80/10/10; hiperparâmetros escolhidos na validação. Contrasta SVD com imputação, linha de base, ALS e Funk-SVD; o feedback implícito serve à NMF.
+2. *MNIST* (`ylecun/mnist`): bases da NMF × PCA em pixels. A referência a faces permanece como relato de Lee & Seung (1999).
+3. *Simulação controlada*: só para isolar o efeito da falta não aleatória, em que todas as notas são conhecidas.
 
 ---
 
@@ -37,7 +38,7 @@ Na segunda metade da aula, investigamos uma das restrições geométricas mais p
      2. Como decompor avaliações em um espaço latente compartilhado de usuários e itens enriquecido por vieses estruturais?
      3. Como o SGD estocástico e o ALS resolvem a não-convexidade da fatoração matricial?
      4. Por que a restrição de não-negatividade na NMF transforma combinações matemáticas abstratas em partes físicas aditivas e interpretáveis?
-   - *Pausa Ativa 1.*
+   - *Pausa 1.*
 
 2. **Intuição — O Espaço dos Gostos Ocultos e os Blocos de Montar** (~8 min)
    - *Os Fatores Latentes:* Filmes e usuários não habitam mundos separados; ambos podem ser projetados em um mesmo espaço vetorial de "dimensões conceituais ocultas" (ex.: grau de ação, teor de comédia, sofisticação dramática). A nota prevista é o produto interno entre o perfil de gosto do usuário e a assinatura do filme.
@@ -57,7 +58,7 @@ Na segunda metade da aula, investigamos uma das restrições geométricas mais p
      - $\mu$: média global de todas as avaliações do catálogo;
      - $b_u$: viés do usuário $u$ (usuários sistematicamente críticos vs generosos);
      - $b_i$: viés do item $i$ (obras-primas aclamadas vs produções fracas).
-   - *Pausa Ativa 2.*
+   - *Pausa 2.*
 
 4. **Bloco 2: Algoritmos de Otimização: SGD de Funk vs. Mínimos Quadrados Alternados (ALS)** (~18 min)
    - Não-Convexidade Conjunta: A função de custo é quadrática separadamente em $P$ e em $Q$, mas é **não-convexa conjuntamente** devido ao termo bilinear $\mathbf{p}_u^T \mathbf{q}_i$.
@@ -73,7 +74,7 @@ Na segunda metade da aula, investigamos uma das restrições geométricas mais p
        $$\mathbf{p}_u = \left(\sum_{i \in \mathcal{I}_u} \mathbf{q}_i \mathbf{q}_i^T + \lambda I\right)^{-1} \sum_{i \in \mathcal{I}_u} r_{ui} \mathbf{q}_i$$
      - Fixando $P$, atualizam-se os vetores $\mathbf{q}_i$ de forma análoga.
      - Vantagem: Paralelização maciça em clusters de computação distribuída (ex.: Apache Spark).
-   - *Pausa Ativa 3.*
+   - *Pausa 3.*
 
 5. **Bloco 3: Fatoração de Matrizes Não-Negativa (NMF) e a Decomposição em Partes** (~20 min)
    - A Limitação Semântica da SVD/PCA:
@@ -86,7 +87,7 @@ Na segunda metade da aula, investigamos uma das restrições geométricas mais p
    - O Princípio Aditivo (*Parts-Based Representation*):
      - Como $W_{ik} \ge 0$ e $H_{kj} \ge 0$, cada dado $\mathbf{v}_j \approx \sum_{k=1}^K H_{kj} \mathbf{w}_k$ é uma **combinação cônica estritamente aditiva** dos protótipos. É impossível subtrair atributos.
      - Consequência: a NMF aprende partes localizadas e esparsas (olhos, bocas, tópicos focados).
-   - *Pausa Ativa 4.*
+   - *Pausa 4.*
 
 6. **Bloco 4: Funções de Perda, Regras Multiplicativas de Lee & Seung e Não-Unicidade** (~17 min)
    - Funções de Custo para NMF:
@@ -100,10 +101,15 @@ Na segunda metade da aula, investigamos uma das restrições geométricas mais p
    - O Dilema da Não-Unicidade e Identificabilidade (Donoho & Stodden, 2004; ESL §14.6):
      - Para qualquer matriz invertível $A$ tal que $A \ge 0$ e $A^{-1} \ge 0$ (matrizes monomiais: permutação e escalonamento diagonal), temos $V \approx (W A)(A^{-1} H)$.
      - Além disso, na presença de espaço aberto entre o cone dos dados e os eixos coordenados, existem múltiplos cones convexos geradores igualmente válidos.
-   - *Pausa Ativa 5.*
+   - *Pausa 5.*
 
-7. **Fechamento** (~5 min)
-   - *Retomando as 4 Perguntas:* Síntese conceitual das respostas estruturadas ao longo da aula.
+7. **Bloco 5: Como Ler o Espaço Latente e o Que os Modelos Supõem** (~12 min)
+   - Quatro leituras: eixo isolado é hipótese ($G$); direção indica semelhança de padrão de avaliação (vizinhos por cosseno); norma indica quantidade de sinal; usuário novo é uma etapa do ALS (3 × 30 notas).
+   - Suposições: posto baixo, interação bilinear, ruído Gaussiano ($\lambda=\sigma^2/\sigma_p^2$), falta ignorável (MNAR com o colisor da Aula 9), preferências estáveis, zero como "não interagiu". RMSE × Hit@10.
+   - Termina com a Pausa 5, de síntese.
+
+8. **Fechamento** (~5 min)
+   - *Retomando as 5 Perguntas:* Síntese conceitual das respostas estruturadas ao longo da aula.
    - *Quadro Comparativo:* SVD Clássica vs. Fatores Latentes Regularizados (Funk) vs. NMF.
    - *Ponte para a Aula 11:* Matrizes e representações em grande escala são sensíveis a mudanças na distribuição dos dados de produção $\to$ **Aula 11: Alinhamento de Distribuições e Detecção de Domain Shift (Data Drift)**.
    - Links para Exercícios e Soluções.
@@ -136,3 +142,22 @@ Deslocamentos página impressa → PDF: `esl.pdf` +19; `prml.pdf` +20.
 **Trechos:**
 > "Non-negative matrix factorization is distinguished from other methods by its use of non-negativity constraints. These constraints lead to a parts-based representation because they allow only additive, not subtractive, combinations... We prove that the Euclidean distance $\|V - WH\|$ and the divergence $D(V \parallel WH)$ are non-increasing under the multiplicative update rules." (1999 / 2001)
 
+---
+
+## Ordem final da aula (substitui a sequência de blocos acima onde houver diferença)
+
+1. **Revisão e Introdução:** o problema (prever células vazias), ligação com as Aulas 6 e 9, ideia central, roteiro.
+2. **Problema Motivador, as soluções óbvias:** média, vieses, SVD (com SVD = PCA), buracos com zero, com média e resíduo com zero; os vieses dão a mesma lista para todos.
+3. **Intuição:** gostos ocultos, índice × vetor de atributos, mapa latente, suposição de posto baixo.
+4. **Bloco 1:** objetivo só em $\Omega$, vieses de volta, suposições do modelo. Pausa 1.
+5. **Bloco 2:** SGD, ALS, comparação no MovieLens, papel de $\lambda$. Pausa 2.
+6. **Bloco 3:** motivação pelos sinais, massinha × Lego (movida da Intuição), NMF, MNIST, filmes e zeros. Pausa 3.
+7. **Bloco 4:** Frobenius × KL, regras multiplicativas, não unicidade. Pausa 4.
+8. **Bloco 5:** leitura do espaço, usuário novo, quadro de suposições, MNAR, Hit@10. Pausa 5.
+9. **Fechamento.**
+
+## Revisão para a aula (dados reais e leitura do espaço latente)
+
+Mantida a linha da aula (colapso da SVD, Funk-SVD, SGD × ALS, NMF, KL e não unicidade). Acrescentados: Problema Motivador e figuras no MovieLens; índice × vetor de características; mapa latente; elo SVD–PCA; derivações do ALS e da regra multiplicativa; proposição dos zeros (formulação nossa); Bloco 5. Corrigidos: RMSE fixo no texto, link para arquivo oculto, referência à "Aula 5 de Álgebra Linear", Pausas fora do modelo, afirmações sobre imputação e partes, e o uso de $L_1$ como garantia de unicidade.
+
+**Inferido, não copiado de fonte:** proposição dos zeros e sua leitura como mecanismo das partes; grafo gosto → avaliou ← popularidade; o cosseno como leitura robusta à rotação; a explicação da inversão entre RMSE e Hit@10. **A verificar no PDF (citados de memória, sem trecho):** Salakhutdinov & Mnih (PMF), Hu, Koren & Volinsky (2008), Marlin et al. (2007), Candès & Recht (2009), Cremonesi, Koren & Turrin (2010).

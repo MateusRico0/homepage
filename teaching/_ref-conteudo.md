@@ -106,6 +106,7 @@ Todos carregam com `load_dataset(repo_id)`, sem token. O kernel `homepage` (`uv 
 | Default of Credit Card Clients — `Lancer73/uci-credit-card-default` | 30.000 (train/val/test) | Crédito, binária, histórico de pagamento (árvores, ensembles) | — |
 | German Credit — `AiresPucrs/german-credit-data` | 1.000 | Crédito, categóricos + numéricos (NB com tipos mistos) | Pequeno |
 | Credit Card Fraud — `dazzle-nu/CIS435-CreditCardFraudDetection` | ~1,05 M | Anomalia com atributos interpretáveis | Subamostrar; descartar `Unnamed: 0`, `Unnamed: 23`, `6006`; muito desbalanceado |
+| MovieLens — `ashraq/movielens_ratings` | 891.382 treino + 99.043 validação | Recomendação, notas de 0,5 a 5 com título e gênero (NSup 10) | Concatenar os splits e remover pares repetidos; muito esparso (0,14%), usar um núcleo de usuários e filmes |
 | MNIST — `ylecun/mnist` | 60.000 treino + 10.000 teste | Imagens 28×28 (autoencoders, VAE, geração) | `load_dataset("ylecun/mnist", split="train").with_format("numpy")`; `np.asarray(ds["image"], dtype=np.float32).reshape(-1, 784) / 255` |
 
 ```python

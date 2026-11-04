@@ -1,10 +1,10 @@
-# Respostas e Guia Docente — Pausas Ativas da Aula 10
+# Respostas e Guia Docente — Pausas da Aula 10
 
-Este documento reúne as resoluções detalhadas, a justificativa analítica de cada afirmação de Verdadeiro/Falso e diretrizes didáticas para condução das cinco Pausas Ativas da **Aula 10: Sistemas de Recomendação: Fatoração de Matrizes (SVD e NMF)**.
+Este documento reúne as resoluções detalhadas, a justificativa analítica de cada afirmação de Verdadeiro/Falso e diretrizes didáticas para condução das cinco Pausas da **Aula 10: Sistemas de Recomendação: Fatoração de Matrizes (SVD e NMF)**.
 
 ---
 
-## Pausa Ativa 1: O Colapso da SVD e a Estrutura dos Vieses
+## Pausa 1: O Colapso da SVD e a Estrutura dos Vieses
 
 ### 1. Resolução da Pergunta Aberta
 *Cenário:* Média global $\mu = 3{,}5$, viés de Carlos $b_u = -0{,}6$, viés do filme *Interestelar* $b_i = +0{,}8$.
@@ -26,7 +26,7 @@ Afinidade residual latente $\mathbf{p}_u^T \mathbf{q}_i = +0{,}5$.
 
 ---
 
-## Pausa Ativa 2: Dinâmica de Otimização no Espaço Latente
+## Pausa 2: Dinâmica de Otimização no Espaço Latente
 
 ### 1. Resolução da Pergunta Aberta
 *Cenário:* $\gamma = 0{,}05$, $\lambda = 0{,}02$.
@@ -53,7 +53,7 @@ $\mathbf{p}_u = [0{,}8, 0{,}2]^T$, $\mathbf{q}_i = [1{,}0, 0{,}5]^T$, $r_{ui} = 
 
 ---
 
-## Pausa Ativa 3: A Geometria da Não-Negatividade
+## Pausa 3: A Geometria da Não-Negatividade
 
 ### 1. Resolução da Pergunta Aberta
 *Cenário:* Matriz termo-documento com frequências de palavras.
@@ -63,12 +63,12 @@ $\mathbf{p}_u = [0{,}8, 0{,}2]^T$, $\mathbf{q}_i = [1{,}0, 0{,}5]^T$, $r_{ui} = 
 ### 2. Gabarito Comentado dos Testes Conceituais (V/F)
 *   **(A) Falso.** Truncar os autovetores negativos da PCA para zero destrói a ortogonalidade, invalida as propriedades de máxima variância e não minimiza o erro de reconstrução sob a restrição de positividade. A NMF é formulada como um problema de otimização restrita resolvido do zero.
 *   **(B) Falso.** As colunas de $W$ na NMF formam as arestas de um cone convexo gerador e não precisam ser ortogonais entre si. Fatores com sobreposição parcial (ex.: palavras que aparecem em tópicos correlacionados) são permitidos e frequentes.
-*   **(C) Verdadeiro.** Como a NMF proíbe cancelamentos subtrativos, um fator não pode apagar o excesso gerado por outro fator. Para representar eficientemente os dados, cada fator latente é forçado a modelar componentes compactos e espacialmente localizados.
+*   **(C) Verdadeiro.** Como a NMF proíbe cancelamentos subtrativos, um fator não pode apagar o excesso gerado por outro fator. Para representar eficientemente os dados, cada fator latente tende a modelar componentes compactos e localizados. É uma tendência, não uma garantia: nas notas com máscara do MovieLens, em que nenhum zero entra no ajuste, os fatores se sobrepõem bem mais e quase nenhuma carga fica nula.
 *   **(D) Falso.** A formulação padrão da NMF assume e exige que todos os elementos da matriz original $V$ sejam não-negativos ($v_{ij} \ge 0$). Se houver números negativos, as regras multiplicativas tornam-se indefinidas ou matematicamente inválidas.
 
 ---
 
-## Pausa Ativa 4: Regras Multiplicativas e Não-Unicidade
+## Pausa 4: Regras Multiplicativas e Não-Unicidade
 
 ### 1. Resolução da Pergunta Aberta
 *Cenário:* Atualização multiplicativa com $(WH)_{ij} < v_{ij}$.
@@ -85,7 +85,7 @@ $\mathbf{p}_u = [0{,}8, 0{,}2]^T$, $\mathbf{q}_i = [1{,}0, 0{,}5]^T$, $r_{ui} = 
 
 ---
 
-## Pausa Ativa 5: Síntese e Comparação Arquitetural
+## Pausa 5: Síntese e Comparação Arquitetural
 
 ### 1. Resolução da Pergunta Aberta
 *Cenário:* Streaming musical com matriz de contagens de reproduções esparsa.
