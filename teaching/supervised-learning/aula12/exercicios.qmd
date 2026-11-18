@@ -1,0 +1,106 @@
+---
+title: "Exercícios — Aula 12: Redes Neurais e Aprendizado de Representação"
+subtitle: "Supervised Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado das questões de Verdadeiro/Falso está em
+[`soluções.qmd`](soluções.qmd). Encontrou um erro numa questão? Corrija
+diretamente neste arquivo e abra um *pull request*.
+:::
+
+## Contexto e notação
+
+Considere um Perceptron Multicamadas (*Multilayer Perceptron* - MLP) com $L$ camadas parametrizado por matrizes de pesos $W^{(l)} \in \mathbb{R}^{n_l \times n_{l-1}}$ e vetores de bias $\mathbf{b}^{(l)} \in \mathbb{R}^{n_l}$, para $l = 1, \dots, L$.
+
+A entrada inicial da rede é denotada por $\mathbf{z}^{(0)} = \mathbf{x} \in \mathbb{R}^{n_0}$.
+Para cada camada oculta $l \in \{1, \dots, L-1\}$, a propagação direta (*forward pass*) calcula:
+$$\mathbf{a}^{(l)} = W^{(l)} \mathbf{z}^{(l-1)} + \mathbf{b}^{(l)} \in \mathbb{R}^{n_l}$$
+$$\mathbf{z}^{(l)} = h(\mathbf{a}^{(l)}) \in \mathbb{R}^{n_l}$$
+onde $\mathbf{a}^{(l)}$ é o vetor de ativações pré-sinápticas, $h(\cdot)$ é uma função de ativação não-linear aplicada elemento a elemento (como a ReLU $\max(0, a)$, a $\tanh$ ou a Sigmoide) e $\mathbf{z}^{(l)}$ é o vetor de ativações pós-sinápticas (as variáveis latentes da representação aprendida).
+
+Na camada de saída $L$, a predição é gerada através de uma função de ativação final $g(\cdot)$ alinhada com a família de distribuições assumida:
+$$\mathbf{a}^{(L)} = W^{(L)} \mathbf{z}^{(L-1)} + \mathbf{b}^{(L)}, \quad \hat{\mathbf{y}} = g(\mathbf{a}^{(L)})$$
+
+Para um problema de classificação multiclasse com $K$ classes mutualmente exclusivas, o alvo é um vetor *one-hot* $\mathbf{y} \in \{0, 1\}^K$ ($\sum_{k=1}^K y_k = 1$), a ativação final é a função **Softmax**:
+$$\hat{y}_k = p(y = k \mid \mathbf{x}) = \frac{e^{a_k^{(L)}}}{\sum_{j=1}^K e^{a_j^{(L)}}}$$
+e a perda empírica para uma instância é a **Entropia Cruzada Categórica** (negativo da log-verossimilhança multinomial):
+$$\mathcal{L}(\mathbf{w}) = -\sum_{k=1}^K y_k \ln \hat{y}_k$$
+
+A **sensibilidade de erro** (*error signal*) no neurônio $j$ da camada $l$ é definida formalmente por:
+$$\delta_j^{(l)} = \frac{\partial \mathcal{L}}{\partial a_j^{(l)}}$$
+
+---
+
+## Questões discursivas
+
+1. **A Propriedade da Ligação Canônica na Camada de Saída (Softmax + Entropia Cruzada).**
+   Considere a perda de entropia cruzada multiclasse $\mathcal{L} = -\sum_{k=1}^K y_k \ln \hat{y}_k$, onde $\hat{y}_k = \frac{e^{a_k}}{\sum_{j=1}^K e^{a_j}}$ para $k = 1, \dots, K$.
+   a) Mostre que a derivada da função Softmax $\frac{\partial \hat{y}_k}{\partial a_i}$ é dada por $\hat{y}_i(1 - \hat{y}_i)$ quando $k = i$, e por $-\hat{y}_k \hat{y}_i$ quando $k \neq i$. Expresse esse resultado de forma unificada utilizando o Delta de Kronecker $\delta_{ki}$.
+   b) Utilizando a regra da cadeia $\frac{\partial \mathcal{L}}{\partial a_i} = \sum_{k=1}^K \frac{\partial \mathcal{L}}{\partial \hat{y}_k} \frac{\partial \hat{y}_k}{\partial a_i}$ e a propriedade de que $\sum_{k=1}^K y_k = 1$, demonstre que:
+      $$\delta_i = \frac{\partial \mathcal{L}}{\partial a_i} = \hat{y}_i - y_i$$
+   c) Suponha que, em vez da entropia cruzada, tivéssemos adotado a perda de erro quadrático médio (MSE) para classificação binária com saída sigmoide $\hat{y} = \sigma(a)$: $\mathcal{L}_{\text{MSE}} = \frac{1}{2}(\hat{y} - y)^2$. Calcule $\frac{\partial \mathcal{L}_{\text{MSE}}}{\partial a}$ e explique por que essa escolha sofre de saturação de gradiente (*vanishing gradient*) quando o modelo comete um erro severo ($\hat{y} \approx 0$ com $y = 1$), contrastando com a robustez da ligação canônica.
+
+2. **Derivação Matricial da Retropropagação de Erro (*Backpropagation*).**
+   Considere o MLP geral com $L$ camadas definido na notação inicial.
+   a) Aplique a regra da cadeia multivariada para expandir a sensibilidade $\delta_j^{(l)} = \frac{\partial \mathcal{L}}{\partial a_j^{(l)}}$ em função das sensibilidades da camada seguinte $\{\delta_k^{(l+1)}\}_{k=1}^{n_{l+1}}$, demonstrando a equação de recorrência escalar da retropropagação:
+      $$\delta_j^{(l)} = h'(a_j^{(l)}) \sum_{k=1}^{n_{l+1}} W_{kj}^{(l+1)} \delta_k^{(l+1)}$$
+   b) Escreva a equação do item (a) em notação puramente matricial-vetorial vetorizada para a camada $l$, explicitando o produto matricial e o produto de Hadamard (elemento a elemento) $\odot$.
+   c) Deduza as fórmulas dos gradientes da função de perda em relação à matriz de pesos $\nabla_{W^{(l)}} \mathcal{L}$ e ao vetor de bias $\nabla_{\mathbf{b}^{(l)}} \mathcal{L}$ em termos do vetor de sensibilidade $\boldsymbol{\delta}^{(l)}$ e do vetor de ativação da camada anterior $\mathbf{z}^{(l-1)}$.
+   d) Analise o custo computacional em operações de ponto flutuante (FLOPs) para executar um passo de forward e backward em uma rede com $P = \sum_{l=1}^L (n_l \cdot n_{l-1} + n_l)$ parâmetros, justificando por que a complexidade é rigorosamente linear $\mathcal{O}(P)$ (Teorema de Baur-Strassen).
+
+---
+
+## Questões de Verdadeiro/Falso
+
+Julgue V ou F para cada um dos itens abaixo. A pontuação de cada teste é computada pelo critério de blocos de 4 afirmações.
+
+::: {.callout-note icon=false}
+## Teste 1 — Redes Neurais como Composição Encadeada de GLMs e Teorema de Cybenko
+
+* ( ) Em uma rede neural profunda com funções de ativação não lineares nas camadas ocultas, cada camada oculta atua como uma transformação adaptativa de atributos $\mathbf{z} = \boldsymbol{\phi}(\mathbf{x}; W)$ cujos parâmetros são ajustados conjuntamente com a tarefa preditiva.
+* ( ) Se substituirmos todas as funções de ativação ocultas não lineares por funções de identidade lineares ($h(a) = a$), a rede com $L$ camadas mantém sua capacidade expressiva não-linear inalterada graças ao aumento da profundidade.
+* ( ) O Teorema da Aproximação Universal (Cybenko, 1989) garante que qualquer função contínua sobre um compacto pode ser aproximada com precisão arbitrária por uma rede com uma única camada oculta e número finito de neurônios sigmoides.
+* ( ) Embora redes com 1 camada oculta sejam aproximadores universais, redes profundas conseguem representar funções complexas particionando o espaço em um número exponencial de regiões lineares com uma quantidade polinomial de parâmetros.
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — Teoria da Verossimilhança, Funções de Perda e Camada de Saída
+
+* ( ) A escolha da função de perda de erro quadrático médio (MSE) para saídas contínuas decorre da estimativa de máxima verossimilhança sob a premissa de ruído gaussiano homocedástico.
+* ( ) A função de ativação Softmax garante que todas as probabilidades preditas $\hat{y}_k$ sejam estritamente não-negativas e somem 1, parametrizando uma distribuição Categórica multinomial.
+* ( ) Sob a combinação de Softmax na saída com a perda de Entropia Cruzada Categórica, a derivada da perda em relação à ativação pré-sináptica $a_k$ sofre saturação exponencial quando o erro de classificação é severo.
+* ( ) Para um problema de classificação multirrótulo (*multi-label*), onde cada exemplo pode pertencer a múltiplas categorias de forma independente, a camada de saída deve empregar $K$ ativações sigmoides independentes em vez da função Softmax.
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — O Algoritmo de Retropropagação (*Backpropagation*)
+
+* ( ) O vetor de sensibilidade de erro $\boldsymbol{\delta}^{(l)}$ em uma camada oculta é calculado propagando as sensibilidades da camada posterior através do transposto da matriz de pesos: $\boldsymbol{\delta}^{(l)} = ((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}) \odot h'(\mathbf{a}^{(l)})$.
+* ( ) Se um neurônio com função de ativação ReLU opera na região inativa ($a_j^{(l)} < 0$), sua derivada local é nula ($h'(a_j^{(l)}) = 0$), impedindo a retropropagação de gradientes através desse neurônio naquela iteração.
+* ( ) O algoritmo de retropropagação requer tempo de execução exponencial $\mathcal{O}(2^L)$ em relação ao número de camadas $L$, inviabilizando o treinamento de redes profundas sem heurísticas de poda.
+* ( ) O gradiente da função de perda em relação à matriz de pesos $W^{(l)}$ é dado pelo produto externo vetorial entre o vetor de sensibilidade da camada corrente $\boldsymbol{\delta}^{(l)}$ e o vetor de ativação transposto da camada anterior $(\mathbf{z}^{(l-1)})^T$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — Regularização em Redes Profundas: Weight Decay e Dropout
+
+* ( ) O decaimento de pesos clássico ($L_2$ Regularization) penaliza a soma dos quadrados dos pesos e equivale probabilisticamente à inferência MAP sob uma distribuição a priori Gaussiana centrada na origem.
+* ( ) Durante a fase de treinamento, o Dropout zera aleatoriamente neurônios com probabilidade $p_{\text{drop}}$, atuando de forma equivalente ao treinamento conjunto de um ensemble implícito de $2^D$ sub-redes com compartilhamento de pesos.
+* ( ) No momento do teste e inferência com o modelo final, o Dropout continua ativado estocasticamente para garantir que as predições do ensemble mantenham variância de amostragem.
+* ( ) O Dropout reduz a co-adaptação excessiva entre neurônios ocultos, forçando cada detector a aprender características úteis que independem da presença exata de neurônios vizinhos específicos.
+:::
+

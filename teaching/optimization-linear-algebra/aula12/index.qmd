@@ -1,0 +1,1631 @@
+---
+title: "Aula 12: Momento, Curvatura e Métodos Acelerados"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-10-25"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: python3
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all .slides-link aria-label="Ver slides da aula" title="Ver slides da aula"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Voltar à lista de aulas" title="Voltar à lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — simulação de bacia elíptica e trajetórias comparadas
+# =====================================================================
+import numpy as np
+import matplotlib.pyplot as plt
+import warnings
+warnings.filterwarnings("ignore")
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({"figure.dpi": 120, "font.size": 11})
+
+COR_A     = "#0085CA"   # azul institucional — elemento principal
+COR_B     = "#FF5E00"   # laranja — contraste / ênfase
+COR_C     = "#E03C31"   # vermelho — alerta / erro / ruído
+COR_NEU   = "#5D6D7E"   # neutro escuro
+COR_VERDE = "#1B9E77"   # verde — confirmação / ótimo
+
+# Matriz Hessiana 2D mal-condicionada (kappa = 20)
+# f(w1, w2) = 0.5 * (20 * w1^2 + 1 * w2^2)
+H_bowl = np.array([[20.0, 0.0], [0.0, 1.0]])
+w_init = np.array([2.5, 3.5])
+n_iters = 25
+
+# 1. Gradiente Descendente Clássico (GD)
+# Com alpha_gd = 0.08:
+# Na direção de alta curvatura (w1), 1 - 20 * 0.08 = -0.60: ziguezague transversal persistente.
+# Na direção de baixa curvatura (w2), avanço lento: após 25 passos ainda está em w2 ≈ 0.44, rastejando longe do ótimo.
+w = w_init.copy()
+traj_gd = [w.copy()]
+alpha_gd = 0.08
+for _ in range(n_iters):
+    g = H_bowl @ w
+    w = w - alpha_gd * g
+    traj_gd.append(w.copy())
+traj_gd = np.array(traj_gd)
+
+# 2. Momento de Polyak (Heavy-Ball)
+# Com alpha_p = 0.0766 e beta_p = 0.656:
+# Acelera fortemente pelo vale com overshoot característico (cruza w2 = 0 até w2 ≈ -0.18), retornando
+# e convergindo com média dos últimos 3 pontos a ~0.0002 do ótimo.
+w = w_init.copy()
+v = np.zeros(2)
+traj_polyak = [w.copy()]
+alpha_p = 0.0766
+beta_p = 0.656
+for _ in range(n_iters):
+    g = H_bowl @ w
+    v = beta_p * v - alpha_p * g
+    w = w + v
+    traj_polyak.append(w.copy())
+traj_polyak = np.array(traj_polyak)
+
+# 3. Gradiente Acelerado de Nesterov (NAG)
+# Com alpha_nag = 0.060 e beta_nag = 0.640:
+# O gradiente antecipado no ponto w + beta*v detecta a subida adiante e aciona a frenagem preditiva,
+# descendo velozmente sem sofrer overshoot e estabilizando a média dos últimos 3 pontos a ~0.00015 do ótimo.
+w = w_init.copy()
+v = np.zeros(2)
+traj_nag = [w.copy()]
+alpha_nag = 0.060
+beta_nag = 0.640
+for _ in range(n_iters):
+    w_ahead = w + beta_nag * v
+    g_ahead = H_bowl @ w_ahead
+    v = beta_nag * v - alpha_nag * g_ahead
+    w = w + v
+    traj_nag.append(w.copy())
+traj_nag = np.array(traj_nag)
+
+# 4. Otimizador Adam
+# Com alpha_adam = 0.288, b1 = 0.60, b2 = 0.98:
+# O 2º momento equaliza a curvatura dos eixos e o 1º momento guia a descida direta,
+# posicionando a média dos últimos 3 pontos a ~0.0008 do ótimo sem ziguezague transversal.
+w = w_init.copy()
+m = np.zeros(2)
+v_a = np.zeros(2)
+traj_adam = [w.copy()]
+alpha_adam = 0.288
+b1, b2, eps = 0.60, 0.98, 1e-8
+for t in range(1, n_iters + 1):
+    g = H_bowl @ w
+    m = b1 * m + (1.0 - b1) * g
+    v_a = b2 * v_a + (1.0 - b2) * (g ** 2)
+    m_hat = m / (1.0 - b1 ** t)
+    v_hat = v_a / (1.0 - b2 ** t)
+    w = w - alpha_adam * m_hat / (np.sqrt(v_hat) + eps)
+    traj_adam.append(w.copy())
+traj_adam = np.array(traj_adam)
+```
+
+# Revisão e Introdução
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Revisão Cuidadosa: O Que a Aula 11 Deixou Pronto
+
+Na **Aula 11**, investigamos os métodos de segunda ordem e o precondicionamento diagonal. Demonstramos por que o Método de Newton exato ($\Delta\mathbf{w}_{\text{nt}} = -H^{-1}\nabla f$), apesar de sua elegante convergência quadrática local e invariância afim, é proibitivo em modelos contemporâneos de aprendizado de máquina devido ao seu custo computacional cúbico ($\mathcal{O}(d^3)$), memória quadrática ($\mathcal{O}(d^2)$) e atração fatal por pontos de sela.
+
+Como resposta a essas limitações, introduzimos o **Precondicionamento Diagonal**, restringindo a transformação métrica a matrizes diagonais $D = \text{diag}(s_1, \dots, s_d) \succ 0$. Essa simplificação desacoplou o espaço em $d$ atualizações unidimensionais de complexidade linear $\mathcal{O}(d)$. Com o **AdaGrad** e o **RMSProp**, vimos que é possível estimar a escala de curvatura de cada coordenada utilizando exclusivamente a magnitude dos gradientes de primeira ordem passados:
+$$v_{t, i} = \beta_2 v_{t-1, i} + (1 - \beta_2) g_{t, i}^2 \implies w_{t+1, i} = w_{t, i} - \frac{\alpha}{\sqrt{v_{t, i}} + \epsilon} g_{t, i}$$
+
+Entretanto, uma limitação severa permaneceu sem solução: **o RMSProp opera sem memória de direção vetorial**. Suas atualizações dependem estritamente do gradiente instantâneo $\mathbf{g}_t$. Quando a superfície de erro forma um vale estreito cujos eixos de curvatura não coincidem perfeitamente com os eixos das variáveis originais, ou quando o gradiente sofre oscilações transversais bruscas sob ruído estocástico (SGD), o RMSProp é incapaz de manter velocidade ao longo do vale, repetindo ziguezagues desnecessários.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Da Aula 11: O Que Já Temos
+
+::: {.columns}
+::: {.column width="50%"}
+**Conquistas da Aula 11:**
+
+- Precondicionamento diagonal substitui $\mathcal{O}(d^3)$ por $\mathcal{O}(d)$.
+- **AdaGrad** acumula $\sum g^2$, adaptando-se a atributos esparsos.
+- **RMSProp** adota Média Móvel Exponencial (EMA) e cura o congelamento precoce:
+  $$w_{i, k+1} = w_{i, k} - \frac{\alpha}{\sqrt{v_{t, i}} + \epsilon} g_{t, i}$$
+:::
+
+::: {.column width="50%"}
+**A Limitação que Restou:**
+
+- O RMSProp normaliza a **magnitude escalar** de cada coordenada, mas **ignora a inércia direcional**!
+- O passo depende exclusivamente do vetor $\mathbf{g}_t$ instantâneo.
+- Em vales estreitos com curvaturas cruzadas, o algoritmo ainda oscila lateralmente e perde tração ao longo da calha plana!
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Ideia Central: Da Bússola Instantânea à Inércia Mecânica
+
+Na física clássica, uma partícula sem massa imersa em meio viscoso extremo segue estritamente a força resultante aplicada: ela para no instante exato em que a força cessa e muda de direção imediatamente se a inclinação virar para o lado. Esse é o comportamento do Gradiente Descendente padrão e do RMSProp.
+
+Por outro lado, uma **esfera pesada de massa $m$** possui **inércia mecânica** (quantidade de movimento linear $\mathbf{p} = m \mathbf{v}$). Quando essa esfera rola morro abaixo em uma ravina elíptica:
+1. As forças laterais opostas exercidas pelas paredes íngremes alternam de sentido a cada oscilação, cancelando-se mutuamente na média temporal.
+2. A força descendente que aponta ao longo da calha suave do vale é pequena, mas atua continuamente no mesmo sentido.
+3. Como resultado, a esfera **acumula velocidade na direção longitudinal útil** e praticamente ignora as oscilações transversais!
+
+Esta aula formaliza matematicamente essa intuição física e constrói os métodos acelerados de primeira ordem mais influentes da história da computação:
+1. O **Momento de Polyak (*Heavy-Ball*)**, que atinge a aceleração espectral de Chebyshev em formas quadráticas.
+2. O **Gradiente Acelerado de Nesterov (NAG)**, que antecipa o terreno e alcança a cota teórica ótima de convergência.
+3. O **Otimizador Adam**, a fusão definitiva do primeiro momento (inércia) com o segundo momento adaptativo (escala).
+4. O **AdamW**, a correção estrutural do *weight decay* que viabilizou o treinamento estável de Grandes Modelos de Linguagem (Transformers).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Ideia Central: Inércia e Curvatura
+
+::: {.fragment}
+
+- **Otimizadores sem inércia (GD / RMSProp):** Partículas pontuais sem massa. Ziguezagueiam de parede em parede toda vez que o gradiente aponta transversalmente.
+:::
+::: {.fragment}
+
+- **Otimizadores com momento (Polyak / Nesterov):** Esferas pesadas dotadas de massa e velocidade linear $\mathbf{v}_k$. As forças laterais oscilantes cancelam-se ($\sum \mathbf{g}_{\perp} \approx \mathbf{0}$), enquanto o avanço na calha soma-se construtivamente ($\sum \mathbf{g}_{\parallel} > 0$).
+:::
+::: {.fragment .callout-important}
+## A Pergunta Central
+Como incorporar inércia física a métodos de primeira ordem para reduzir a complexidade de convergência de $\mathcal{O}(1 - 1/\kappa)$ para $\mathcal{O}(1 - 2/\sqrt{\kappa})$, e como unificar essa inércia com escalas adaptativas de modo matematicamente rigoroso?
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Roteiro da Aula
+
+Nesta aula, responderemos a quatro perguntas centrais:
+1. **A Física da Inércia:** Como a analogia de uma esfera pesada rolando sob atrito viscoso deduz analiticamente o Momento de Polyak e reduz o tempo de convergência em formas quadráticas de $\kappa$ para $\sqrt{\kappa}$?
+2. **A Antecipação de Nesterov:** Qual é o mecanismo geométrico do gradiente avaliado no ponto antecipado (*look-ahead*) e por que ele atinge a cota inferior ótima $\mathcal{O}(1/k^2)$ para métodos convexos de 1ª ordem?
+3. **A Grande Síntese do Adam:** Como unificar o primeiro momento direcional com o segundo momento de escala e por que a correção de viés de inicialização é indispensável nos passos transitórios iniciais?
+4. **A Cirurgia do AdamW:** Por que a penalidade clássica $L_2$ falha estruturalmente dentro de otimizadores adaptativos e por que o desacoplamento do decaimento de pesos tornou-se obrigatório no aprendizado profundo moderno?
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Roteiro da Aula
+
+1. **A Física da Inércia e o Momento de Polyak:** Sistema dinâmico de 2ª ordem e aceleração espectral de $\kappa$ para $\sqrt{\kappa}$.
+2. **Gradiente Acelerado de Nesterov (NAG):** O gradiente antecipado (*look-ahead*), frenagem preventiva e a cota teórica ótima $\mathcal{O}(1/k^2)$.
+3. **A Grande Síntese: Otimizador Adam:** Integração do 1º e 2º momentos com correção exata de viés de inicialização.
+4. **A Cirurgia do AdamW:** A patologia da regularização $L_2$ adaptativa e a solução por desacoplamento do *weight decay*.
+:::
+
+# Intuição — A Esfera Pesada no Vale Estreito
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Dinâmica de Forças em uma Ravina Elíptica
+
+Imagine uma paisagem topográfica descrita pela forma quadrática:
+$$f(w_1, w_2) = \frac{1}{2}\left(100 w_1^2 + w_2^2\right)$$
+Nesse vale, o número de condição é $\kappa = 100/1 = 100$. As curvas de nível são elipses muito alongadas: a coordenada $w_1$ tem paredes cem vezes mais íngremes do que a coordenada $w_2$.
+
+Ao soltar um otimizador clássico sem inércia em um ponto inicial afastado como $\mathbf{w}_0 = (2{,}5, 3{,}5)^T$, o gradiente instantâneo aponta quase inteiramente na direção perpendicular à calha ($\nabla f = [250, 3{,}5]^T$). O passo arremessa o ponto para a encosta oposta. No passo seguinte, o gradiente inverte o sinal na direção transversal e aponta para trás. O otimizador fica aprisionado em um ziguezague de altíssima amplitude lateral, enquanto o progresso ao longo da calha suave rasteja a passos microscópicos.
+
+Ao introduzir uma **velocidade inercial** $\mathbf{v}_k$, a cada nova iteração somamos apenas uma fração do novo gradiente ao vetor velocidade acumulado:
+$$\mathbf{v}_{k+1} = \beta \mathbf{v}_k - \alpha \nabla f(\mathbf{w}_k)$$
+
+- Na direção transversal ($w_1$), os gradientes oscilam entre $+g_1$ e $-g_1$. A média exponencial ponderada dessas oscilações tende a zero. O ziguezague é rapidamente amortecido!
+- Na direção longitudinal ($w_2$), os gradientes sempre apontam no mesmo sentido negativo. A soma geométrica das componentes acumula velocidade terminal de cruzeiro:
+  $$v_{\text{terminal}} \approx -\alpha \nabla f_2 \sum_{j=0}^\infty \beta^j = -\frac{\alpha}{1 - \beta} \nabla f_2$$
+  Para o valor típico $\beta = 0{,}9$, a velocidade efetiva ao longo do vale é multiplicada por um fator de $\frac{1}{1 - 0{,}9} = 10\times$!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Visualização: Otimizadores na Bacia Elíptica ($\kappa = 20$)
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(8.5, 4.8))
+
+w1_vals = np.linspace(-3.2, 3.2, 200)
+w2_vals = np.linspace(-4.2, 4.2, 200)
+W1, W2 = np.meshgrid(w1_vals, w2_vals)
+Z = 0.5 * (H_bowl[0, 0] * W1**2 + H_bowl[1, 1] * W2**2)
+
+contours = ax.contour(W1, W2, Z, levels=[0.2, 1.0, 3.0, 8.0, 18.0, 35.0, 65.0], colors="#CBD5E1", linewidths=1.2)
+ax.plot(traj_gd[:, 0], traj_gd[:, 1], 'o-', color=COR_C, markersize=3.5, linewidth=1.5, label="GD (Ziguezague e avanço lento)")
+ax.plot(traj_polyak[:, 0], traj_polyak[:, 1], 's-', color=COR_B, markersize=3.5, linewidth=1.5, label="Polyak Heavy-Ball (Inércia + overshoot)")
+ax.plot(traj_nag[:, 0], traj_nag[:, 1], '^-', color=COR_VERDE, markersize=3.5, linewidth=1.5, label="Nesterov NAG (Freio ativo sem overshoot)")
+ax.plot(traj_adam[:, 0], traj_adam[:, 1], 'd-', color=COR_A, markersize=3.5, linewidth=1.8, label="Adam (Escalas adaptadas + momento suave)")
+
+ax.plot(0, 0, '*', color="#DC2626", markersize=14, label="Ótimo $\mathbf{w}^\star$")
+ax.set_title("Dinâmica de Trajetórias na Bacia Elíptica (25 iterações)", fontsize=12, pad=10)
+ax.set_xlabel("$w_1$ (Alta Curvatura, $\lambda_1 = 20$)")
+ax.set_ylabel("$w_2$ (Baixa Curvatura, $\lambda_2 = 1$)")
+ax.legend(loc="upper right", framealpha=0.92, fontsize=9.5)
+ax.set_xlim(-3.0, 3.0)
+ax.set_ylim(-1.0, 4.5)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+# Bloco 1: A Física da Inércia e o Momento de Polyak
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Da Equação Diferencial de Newton ao Algoritmo de Polyak
+
+A analogia física do momento não é apenas uma metáfora intuitiva; ela decorre rigorosamente da discretização temporal de uma equação diferencial ordinária de segunda ordem.
+
+Considere uma partícula de massa $m$ deslocando-se sobre uma superfície de energia potencial $f(\mathbf{w})$ imersa em um fluido com coeficiente de atrito viscoso $\gamma > 0$. Pela Segunda Lei de Newton ($F = m a$):
+$$m \frac{d^2 \mathbf{w}(t)}{dt^2} = -\gamma \frac{d\mathbf{w}(t)}{dt} - \nabla f(\mathbf{w}(t))$$
+Reorganizando os termos:
+$$m \ddot{\mathbf{w}}(t) + \gamma \dot{\mathbf{w}}(t) + \nabla f(\mathbf{w}(t)) = \mathbf{0}$$
+
+- Se a massa for nula ($m \to 0$, regime de Aristóteles ou dinâmica sobredumpada):
+  $$\gamma \dot{\mathbf{w}}(t) = -\nabla f(\mathbf{w}(t)) \implies \dot{\mathbf{w}}(t) = -\frac{1}{\gamma} \nabla f(\mathbf{w}(t))$$
+  Discretizando com passo $\Delta t$:
+  $$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k)$$
+  Recuperamos exatamente o **Gradiente Descendente clássico**!
+
+- Se a massa for não-nula ($m > 0$):
+  Definindo a velocidade $\mathbf{v}(t) = \dot{\mathbf{w}}(t)$, aproximamos as derivadas temporais por diferenças finitas:
+  $$\mathbf{v}_{k+1} = \beta \mathbf{v}_k - \alpha \nabla f(\mathbf{w}_k)$$
+  $$\mathbf{w}_{k+1} = \mathbf{w}_k + \mathbf{v}_{k+1}$$
+  onde o coeficiente de amortecimento $\beta \in [0, 1)$ sintetiza a conservação da velocidade passada sob atrito e $\alpha > 0$ representa a força motriz do gradiente. Essa formulação foi proposta pioneiramente pelo matemático soviético Boris Polyak em 1964 sob o nome de **Método da Esfera Pesada (*Heavy-Ball Method*)**.
+
+Substituindo a primeira equação na segunda, podemos eliminar a variável explícita $\mathbf{v}$ e expressar o método como uma recorrência de dois passos no tempo:
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k) + \beta (\mathbf{w}_k - \mathbf{w}_{k-1})$$
+
+### Representação Geométrica: GD (Aula 8) vs. Momento de Polyak (Aula 12)
+
+Para compreender intuitivamente o funcionamento mecânico do momento, observe a decomposição vetorial de um único passo de atualização:
+
+::: {.fig-resize style="width: 90%; margin: 1.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{vermelho}{RGB}{224,60,49}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{cinza}{RGB}{93,109,126}
+
+\begin{tikzpicture}[>=latex, font=\small, thick]
+  % 1. Painel Esquerdo: Gradiente Descendente (Aula 8)
+  \begin{scope}[xshift=0cm]
+    \node[anchor=south, font=\bfseries, text=azul] at (2.2, 2.5) {Gradiente Descendente (Aula 8)};
+    \draw[cinza!40, rounded corners=6pt, fill=cinza!5] (-0.8, -1.2) rectangle (5.2, 2.3);
+    
+    \coordinate (W0) at (0.2, 1.4);
+    \coordinate (W1) at (4.0, -0.4);
+    
+    \draw[->, line width=2pt, vermelho] (W0) -- (W1) 
+      node[midway, sloped, above=2pt, font=\footnotesize\bfseries] {$-\alpha \nabla f(\mathbf{w}_k)$};
+      
+    \filldraw[azul] (W0) circle (3pt) node[above left, font=\bfseries] {$\mathbf{w}_k$};
+    \filldraw[vermelho] (W1) circle (3pt) node[below right, font=\bfseries] {$\mathbf{w}_{k+1}$};
+    
+    \node[align=center, font=\scriptsize, text=cinza] at (2.2, -0.6) 
+      {Partícula pontual sem massa ($m=0$)\\\textbf{Seguimento 100\% passivo} do vetor local};
+  \end{scope}
+
+  % 2. Painel Direito: Momento de Polyak (Aula 12)
+  \begin{scope}[xshift=7.0cm]
+    \node[anchor=south, font=\bfseries, text=azul] at (2.5, 2.5) {Momento de Polyak (Aula 12)};
+    \draw[cinza!40, rounded corners=6pt, fill=cinza!5] (-0.8, -1.2) rectangle (5.8, 2.3);
+    
+    \coordinate (PW0) at (0.2, 1.4);
+    \coordinate (PINER) at (3.8, 1.4);
+    \coordinate (PGRAD) at (1.0, -0.2);
+    \coordinate (PW1) at (4.6, -0.2);
+    
+    \draw[dashed, cinza!80, line width=0.8pt] (PINER) -- (PW1);
+    \draw[dashed, cinza!80, line width=0.8pt] (PGRAD) -- (PW1);
+    
+    \draw[->, line width=1.6pt, laranja] (PW0) -- (PINER) 
+      node[midway, above=2pt, font=\footnotesize\bfseries, text=laranja] {$\beta \mathbf{v}_k$ (Inércia)};
+      
+    \draw[->, line width=1.6pt, vermelho] (PW0) -- (PGRAD) 
+      node[midway, sloped, below=2pt, font=\footnotesize\bfseries, text=vermelho] {$-\alpha \nabla f(\mathbf{w}_k)$};
+      
+    \draw[->, line width=2.2pt, verde] (PW0) -- (PW1) 
+      node[midway, sloped, above=2pt, font=\footnotesize\bfseries, text=verde!80!black] {$\mathbf{w}_{k+1} = \mathbf{w}_k + \mathbf{v}_{k+1}$};
+      
+    \filldraw[azul] (PW0) circle (3pt) node[above left, font=\bfseries] {$\mathbf{w}_k$};
+    \filldraw[verde!80!black] (PW1) circle (3pt) node[right, font=\bfseries] {$\mathbf{w}_{k+1}$};
+    
+    \node[align=center, font=\scriptsize, text=cinza] at (2.5, -0.6) 
+      {Esfera com inércia física ($m > 0$)\\\textbf{Regra do paralelogramo} (inércia + impulso)};
+  \end{scope}
+\end{tikzpicture}
+```
+:::
+
+No **Gradiente Descendente da Aula 8**, a partícula não possui massa nem memória: o deslocamento é forçado a seguir estritamente a direção do gradiente local instantâneo ($-\alpha \nabla f(\mathbf{w}_k)$). Em uma encosta íngreme de um vale, esse vetor aponta quase perpendicularmente ao fundo, arremessando a partícula contra a encosta oposta.
+
+No **Momento de Polyak da Aula 12**, a atualização resulta da **regra do paralelogramo** entre dois vetores concorrentes:
+1. O **vetor de inércia** $\beta \mathbf{v}_k = \beta(\mathbf{w}_k - \mathbf{w}_{k-1})$, que mantém a direção e velocidade herdadas do passado;
+2. O **vetor de força do gradiente** $-\alpha \nabla f(\mathbf{w}_k)$, que empurra a partícula morro abaixo.
+
+| Dimensão de Análise | Gradiente Descendente (Aula 8) | Momento de Polyak (Aula 12) |
+| :--- | :--- | :--- |
+| **Equação de Recorrência** | $\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k)$ | $\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k) + \beta(\mathbf{w}_k - \mathbf{w}_{k-1})$ |
+| **Ordem do Sistema Dinâmico** | 1ª ordem (estado = posição atual $\mathbf{w}_k$) | 2ª ordem (estado = posição atual $\mathbf{w}_k$ + velocidade $\mathbf{v}_k$) |
+| **Comportamento em Vales Estreitos** | Ziguezague transversal severo; rastejamento longitudinal | Amortecimento transversal ($\sum \mathbf{g}_\perp \approx \mathbf{0}$); cruzeiro longitudinal ($\frac{1}{1-\beta}$) |
+| **Taxa Assintótica em Quadráticas** | $\rho_{\text{GD}} \approx 1 - \frac{2}{\kappa}$ | $\rho_{\text{Polyak}} \approx 1 - \frac{2}{\sqrt{\kappa}}$ (Aceleração de Chebyshev) |
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Física do Momento: Equação Diferencial de 2ª Ordem
+
+::: {.columns}
+::: {.column width="50%"}
+**A Dinâmica Contínua de Newton:**
+
+Uma partícula de massa $m$ rolando sob atrito viscoso $\gamma$:
+$$m \ddot{\mathbf{w}}(t) + \gamma \dot{\mathbf{w}}(t) + \nabla f(\mathbf{w}(t)) = \mathbf{0}$$
+
+- **Caso sem massa ($m \to 0$):**
+  $$\dot{\mathbf{w}} = -\frac{1}{\gamma}\nabla f(\mathbf{w}) \implies \mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k)$$
+  É o Gradiente Descendente euclidiano puro.
+:::
+
+::: {.column width="50%"}
+**Discretização com Massa ($m > 0$):**
+
+Método da Esfera Pesada (**Polyak Heavy-Ball**, 1964):
+$$\mathbf{v}_{k+1} = \beta \mathbf{v}_k - \alpha \nabla f(\mathbf{w}_k)$$
+$$\mathbf{w}_{k+1} = \mathbf{w}_k + \mathbf{v}_{k+1}$$
+
+Eliminando $\mathbf{v}$, obtemos a recorrência de dois passos:
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k) + \underbrace{\beta (\mathbf{w}_k - \mathbf{w}_{k-1})}_{\text{Termo de Inércia}}$$
+:::
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Funcionamento Geométrico: GD vs. Momento de Polyak
+
+::: {.columns}
+::: {.column width="50%"}
+**Gradiente Descendente (Aula 8):**
+
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k)$$
+
+::: {.fig-resize style="width: 95%; margin: 0.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{vermelho}{RGB}{224,60,49}
+\begin{tikzpicture}[>=latex, font=\small, thick]
+  \coordinate (A) at (0, 0);
+  \coordinate (B) at (3.5, -0.8);
+  \filldraw[azul] (A) circle (2.5pt) node[left, font=\bfseries] {$\mathbf{w}_k$};
+  \filldraw[vermelho] (B) circle (2.5pt) node[right, font=\bfseries] {$\mathbf{w}_{k+1}$};
+  \draw[->, line width=1.8pt, vermelho] (A) -- (B) node[midway, sloped, above=2pt, font=\scriptsize\bfseries] {$-\alpha \nabla f(\mathbf{w}_k)$};
+\end{tikzpicture}
+```
+:::
+
+- Partícula pontual sem massa ($m = 0$).
+- Movimento 100% subserviente ao gradiente local.
+- Oscila de parede em parede em vales estreitos.
+:::
+
+::: {.column width="50%"}
+**Momento de Polyak (Aula 12):**
+
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k) + \beta \mathbf{v}_k$$
+
+::: {.fig-resize style="width: 95%; margin: 0.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{vermelho}{RGB}{224,60,49}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{cinza}{RGB}{93,109,126}
+\begin{tikzpicture}[>=latex, font=\small, thick, scale=0.85]
+  \coordinate (W) at (0, 0);
+  \coordinate (I) at (2.8, 0);
+  \coordinate (G) at (0.8, -1.0);
+  \coordinate (R) at (3.6, -1.0);
+  \draw[dashed, cinza!70] (I) -- (R);
+  \draw[dashed, cinza!70] (G) -- (R);
+  \draw[->, line width=1.4pt, laranja] (W) -- (I) node[midway, above=1pt, font=\tiny\bfseries] {$\beta \mathbf{v}_k$};
+  \draw[->, line width=1.4pt, vermelho] (W) -- (G) node[midway, sloped, below=1pt, font=\tiny\bfseries] {$-\alpha \nabla f$};
+  \draw[->, line width=1.8pt, verde] (W) -- (R) node[midway, sloped, above=1pt, font=\tiny\bfseries] {$\mathbf{w}_{k+1}$};
+  \filldraw[azul] (W) circle (2.2pt) node[left, font=\scriptsize\bfseries] {$\mathbf{w}_k$};
+  \filldraw[verde!80!black] (R) circle (2.2pt) node[right, font=\scriptsize\bfseries] {$\mathbf{w}_{k+1}$};
+\end{tikzpicture}
+```
+:::
+
+- Esfera pesada com quantidade de movimento ($m > 0$).
+- Soma vetorial: inércia passada + impulso local.
+- Amortece ziguezague e acelera pelo vale!
+:::
+:::
+:::
+
+## Análise Espectral e a Aceleração de Chebyshev
+
+Por que o termo de inércia $\beta(\mathbf{w}_k - \mathbf{w}_{k-1})$ acelera dramaticamente a convergência? A resposta está na álgebra linear do sistema dinâmico gerado em uma forma quadrática.
+
+### Relembrando a Aula 8: A Matriz de Transição de 1ª Ordem do GD
+
+Na **Aula 8**, investigamos a dinâmica de convergência do Gradiente Descendente clássico em uma perda quadrática $f(\mathbf{w}) = \frac{1}{2}\mathbf{w}^T H \mathbf{w}$ com minimizador $\mathbf{w}^\star = \mathbf{0}$ e Hessiana $H \succ 0$. Definindo o vetor de erro $\mathbf{e}_k = \mathbf{w}_k - \mathbf{w}^\star$, a iteração do GD gerava:
+$$\mathbf{e}_{k+1} = \mathbf{e}_k - \alpha H \mathbf{e}_k = (I - \alpha H)\mathbf{e}_k$$
+
+A matriz $T_{\text{GD}} = (I - \alpha H) \in \mathbb{R}^{d \times d}$ era a **matriz de transição do erro** — um sistema dinâmico linear discreto de **primeira ordem**, onde o estado futuro $\mathbf{e}_{k+1}$ dependia unicamente do estado atual $\mathbf{e}_k$.
+
+Pelo Teorema Espectral (Aula 4), projetando o erro na base ortonormal de autovetores $\{\mathbf{u}_i\}$ da Hessiana ($H \mathbf{u}_i = \lambda_i \mathbf{u}_i$), o sistema desacoplava em $d$ dinâmicas escalares 1D independentes:
+$$e_{k+1, i} = (1 - \alpha \lambda_i) e_{k, i}$$
+Cada modo espectral contraía com taxa escalar $(1 - \alpha \lambda_i)$. A necessidade de garantir estabilidade no pior caso ($\lambda_{\max}$) e convergência no modo mais lento ($\lambda_{\min}$) impunha o gargalo assintótico ditado pelo número de condição $\kappa = \lambda_{\max}/\lambda_{\min}$:
+$$\rho_{\text{GD}} = \frac{\kappa - 1}{\kappa + 1} \approx 1 - \frac{2}{\kappa}$$
+
+### Do GD ao Momento: A Recorrência de 2ª Ordem e a Matriz $2 \times 2$
+
+Ao introduzir a inércia física no Método da Esfera Pesada de Polyak:
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k) + \beta (\mathbf{w}_k - \mathbf{w}_{k-1})$$
+Subtraindo $\mathbf{w}^\star = \mathbf{0}$ e utilizando $\nabla f(\mathbf{w}_k) = H \mathbf{e}_k$:
+$$\mathbf{e}_{k+1} = \mathbf{e}_k - \alpha H \mathbf{e}_k + \beta (\mathbf{e}_k - \mathbf{e}_{k-1}) = (1 + \beta - \alpha H)\mathbf{e}_k - \beta \mathbf{e}_{k-1}$$
+
+Ao contrário do GD da Aula 8, esta é uma **equação de diferenças de 2ª ordem**: o novo erro $\mathbf{e}_{k+1}$ depende de **dois passos temporais** ($\mathbf{e}_k$ e $\mathbf{e}_{k-1}$).
+
+Projetando essa equação sobre a base de autovetores $\{\mathbf{u}_i\}$ da Hessiana, desacoplamos o problema em $d$ recorrências escalares independentes para cada coordenada espectral $e_{k, i} = \mathbf{u}_i^T \mathbf{e}_k$:
+$$e_{k+1, i} = (1 + \beta - \alpha \lambda_i) e_{k, i} - \beta e_{k-1, i}$$
+
+Para analisar a estabilidade de uma recorrência de 2ª ordem, recorremos ao procedimento canônico de álgebra linear e sistemas dinâmicos: **aumentar o vetor de estado**, definindo o vetor conjunto $\mathbf{z}_{k, i} = \begin{bmatrix} e_{k, i} \\ e_{k-1, i} \end{bmatrix} \in \mathbb{R}^2$ (que agrupa o erro atual e a memória do erro anterior, equivalente a posição e velocidade).
+
+Montamos o sistema matricial de 1ª ordem em dimensão 2:
+1. A primeira linha expressa a dinâmica da recorrência: $e_{k+1, i} = (1 + \beta - \alpha \lambda_i) e_{k, i} - \beta e_{k-1, i}$;
+2. A segunda linha expressa a identidade temporal trivial: $e_{k, i} = 1 \cdot e_{k, i} + 0 \cdot e_{k-1, i}$.
+
+Unificando em notação matricial:
+$$\begin{bmatrix} e_{k+1, i} \\ e_{k, i} \end{bmatrix} = \underbrace{\begin{bmatrix} 1 + \beta - \alpha \lambda_i & -\beta \\ 1 & 0 \end{bmatrix}}_{T_i} \begin{bmatrix} e_{k, i} \\ e_{k-1, i} \end{bmatrix}$$
+Denotamos $T_i \in \mathbb{R}^{2 \times 2}$ como a **matriz de transição de estados do modo espectral $i$**.
+
+A evolução do erro ao longo de $k$ passos é dada pela potência da matriz:
+$$\begin{bmatrix} e_{k, i} \\ e_{k-1, i} \end{bmatrix} = T_i^k \begin{bmatrix} e_{0, i} \\ e_{-1, i} \end{bmatrix}$$
+
+A taxa assintótica de contração do erro é governada pelo **raio espectral** de $T_i$: $\rho(T_i) = \max\{|\mu_1|, |\mu_2|\}$.
+O polinômio característico de $T_i$ é:
+$$\det(\mu I - T_i) = \mu^2 - (1 + \beta - \alpha \lambda_i)\mu + \beta = 0$$
+O discriminante é $\Delta(\lambda_i) = (1 + \beta - \alpha \lambda_i)^2 - 4\beta$.
+
+Quando $\Delta(\lambda_i) \le 0$, as duas raízes são **complexas conjugadas**. Pela propriedade fundamental do produto dos autovalores (o termo independente da equação mônica, correspondente a $\det(T_i)$):
+$$\mu_1 \mu_2 = |\mu|^2 = \det(T_i) = \beta \implies |\mu| = \sqrt{\beta}$$
+**Resultado Notável:** Sempre que as raízes forem complexas conjugadas, a taxa de contração espectral é exatamente $\sqrt{\beta}$, **rigorosamente idêntica para qualquer autovalor $\lambda_i$ pertencente àquele intervalo!**
+
+Polyak (1964) provou que a calibração ótima que força $\Delta(\lambda) \le 0$ para todos os autovalores no espectro $[\lambda_{\min}, \lambda_{\max}]$ e minimiza $\beta$ é dada por:
+$$\alpha^\star = \frac{4}{(\sqrt{\lambda_{\max}} + \sqrt{\lambda_{\min}})^2}, \quad \beta^\star = \left(\frac{\sqrt{\kappa} - 1}{\sqrt{\kappa} + 1}\right)^2$$
+onde $\kappa = \frac{\lambda_{\max}}{\lambda_{\min}}$ é o número de condição.
+
+Sob essa escolha ótima, o raio espectral de contração é:
+$$\rho_{\text{Polyak}} = \sqrt{\beta^\star} = \frac{\sqrt{\kappa} - 1}{\sqrt{\kappa} + 1} \approx 1 - \frac{2}{\sqrt{\kappa}}$$
+
+Compare esse resultado com o Gradiente Descendente clássico sob passo ótimo:
+$$\rho_{\text{GD}} = \frac{\kappa - 1}{\kappa + 1} \approx 1 - \frac{2}{\kappa}$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Da Aula 8 ao Momento: A Matriz de Transição
+
+::: {.columns}
+::: {.column width="50%"}
+**Relembrando a Aula 8 (GD Puro):**
+
+- Sistema dinâmico de **1ª ordem** (sem memória):
+  $$\mathbf{e}_{k+1} = (I - \alpha H)\mathbf{e}_k$$
+
+- Na base de autovetores $\mathbf{u}_i$ ($H\mathbf{u}_i = \lambda_i \mathbf{u}_i$):
+  $$e_{k+1, i} = \underbrace{(1 - \alpha \lambda_i)}_{T_{\text{GD}, i} \, (1 \times 1)} e_{k, i}$$
+
+- Cada modo espectral decai a taxas diferentes:
+  $$\rho_{\text{GD}} = \frac{\kappa - 1}{\kappa + 1} \approx 1 - \frac{2}{\kappa}$$
+:::
+
+::: {.column width="50%"}
+**Momento de Polyak (Recorrência de 2ª Ordem):**
+
+- Inércia $\beta(\mathbf{w}_k - \mathbf{w}_{k-1})$ gera dependência de **dois passos**:
+  $$e_{k+1, i} = (1 + \beta - \alpha \lambda_i) e_{k, i} - \beta e_{k-1, i}$$
+
+- Estado aumentado $\begin{bmatrix} e_{k, i} \\ e_{k-1, i} \end{bmatrix}$ (posição + memória):
+  $$\begin{bmatrix} e_{k+1, i} \\ e_{k, i} \end{bmatrix} = \underbrace{\begin{bmatrix} 1 + \beta - \alpha \lambda_i & -\beta \\ 1 & 0 \end{bmatrix}}_{T_i \, (2 \times 2)} \begin{bmatrix} e_{k, i} \\ e_{k-1, i} \end{bmatrix}$$
+:::
+:::
+
+## Análise Espectral: De $\kappa$ para $\sqrt{\kappa}$
+
+::: {.columns}
+::: {.column width="50%"}
+**Operador de Transição Linear $2 \times 2$:**
+
+- Polinômio característico $\det(\mu I - T_i) = 0$:
+  $$\mu^2 - (1 + \beta - \alpha \lambda_i)\mu + \beta = 0$$
+
+- Quando as raízes são complexas conjugadas ($\Delta \le 0$):
+  $$|\mu|^2 = \det(T_i) = \beta \implies |\mu| = \sqrt{\beta}$$
+  **Todas as direções decaem com taxa uniforme $\sqrt{\beta}$!**
+:::
+
+::: {.column width="50%"}
+**O Salto de Velocidade de Polyak:**
+
+Sob os parâmetros analíticos ótimos ($\alpha^\star, \beta^\star$):
+$$\rho_{\text{Polyak}} = \sqrt{\beta^\star} = \frac{\sqrt{\kappa} - 1}{\sqrt{\kappa} + 1} \approx 1 - \frac{2}{\sqrt{\kappa}}$$
+
+**Exemplo com $\kappa = 10.000$ ($\sqrt{\kappa} = 100$):**
+
+- **GD Puro (Aula 8):** $\rho \approx 0{,}9998 \implies \mathbf{11.500}$ iterações para reduzir o erro em $10\times$.
+- **Polyak (Aula 12):** $\rho \approx 0{,}9800 \implies \mathbf{115}$ iterações para reduzir o erro em $10\times$.
+- **Aceleração exata de $100\times$ ($\sqrt{\kappa}$)!**
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 1: O Dilema das Oscilações Transversais e a Inércia
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 1
+Uma partícula está em uma ravina elíptica $f(w_1, w_2) = \frac{1}{2}(100 w_1^2 + w_2^2)$. O gradiente instantâneo no ponto inicial é $\mathbf{g}_0 = (100 w_1, w_2)^T$. Suponha que ao longo das iterações $k$, as derivadas parciais na direção transversal alternem de sinal: $g_{k, 1} \in \{+10, -10, +10, -10, \dots\}$, enquanto na calha longitudinal avancem com sinal constante: $g_{k, 2} \approx 1$.
+
+1. O que acontece com o deslocamento útil do Gradiente Descendente sob taxa escalar segura $\alpha = 0{,}02$?
+2. Como a soma geométrica do momento $\mathbf{v}_{k+1} = \beta \mathbf{v}_k - \alpha \mathbf{g}_k$ cancela as oscilações transversais e amplifica a velocidade longitudinal para $\beta = 0{,}9$?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- ( ) Na presença de gradientes oscilatórios transversais, a soma ponderada por $\beta$ cancela as amplitudes de sinais opostos, enquanto componentes consistentes somam-se até o fator $\frac{1}{1-\beta}$.
+- ( ) O momento clássico de Polyak modifica a geometria da função de perda ao alterar a matriz Hessiana local para $H^{1/2}$.
+- ( ) Aumentar o coeficiente de momento $\beta$ sem reduzir a taxa de aprendizado $\alpha$ pode desestabilizar o sistema dinâmico e induzir oscilações caóticas.
+- ( ) Em superfícies de custo estocásticas (SGD com mini-batches), o vetor momento atua como uma média móvel suave que atenua as flutuações amostrais.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 1: Dinâmica de Inércia
+
+::: {.callout-tip}
+## Pergunta de Fixação
+Em uma ravina elíptica ($\kappa = 100$), o gradiente transversal oscila de sinal ($\pm 10$), enquanto o longitudinal é constante ($+1$).
+
+- Por que o GD clássico é obrigado a adotar um passo minúsculo ($\alpha < 0{,}02$)?
+- Por que o momento com $\beta = 0{,}9$ cancela o ziguezague e amplifica a velocidade longitudinal em $10\times$?
+:::
+
+::: {.fragment}
+
+- [x] O momento atua como um **filtro passa-baixas**: gradientes opostos cancelam-se na soma temporal.
+- [ ] O momento altera a Hessiana original da função de perda.
+- [x] Elevações excessivas de $\beta$ podem levar o raio espectral de $T_i$ para fora do círculo unitário ($|\mu| > 1$).
+- [x] No SGD com mini-batches, o momento amortece o ruído amostral de alta variância.
+:::
+:::
+
+# Bloco 2: O Gradiente Acelerado de Nesterov (NAG)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Problema do *Overshoot* no Momento Clássico
+
+Apesar de sua aceleração em vales longos, o Momento de Polyak sofre de um vício mecânico conhecido: o **excesso de velocidade (*overshoot*)**.
+
+Como a regra de Polyak calcula o gradiente na posição presente $\mathbf{w}_k$ e simplesmente adiciona a inércia herdada $\beta \mathbf{v}_k$, a partícula atinge a região do fundo da bacia com velocidade máxima. Sem mecanismos de frenagem ativa, ela passa direto pelo mínimo, começa a subir a encosta oposta e só desacelera após o gradiente da subida acumular força contrária suficiente. Em vales com curvas sinuosas ou ravinas não-quadráticas, Polyak frequentemente descreve voltas em espiral amplas antes de estabilizar.
+
+Em 1983, o matemático ucraniano Yurii Nesterov propôs uma modificação conceitual extraordinariamente elegante: **em vez de avaliar o gradiente onde estamos, devemos avaliá-lo no ponto onde a inércia já nos levará**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Falha de Polyak: O *Overshoot* Cego
+
+::: {.columns}
+::: {.column width="50%"}
+**Momento Clássico (Polyak):**
+
+$$\mathbf{v}_{k+1} = \beta \mathbf{v}_k - \alpha \nabla f(\mathbf{w}_k)$$
+$$\mathbf{w}_{k+1} = \mathbf{w}_k + \mathbf{v}_{k+1}$$
+
+- Calcula o gradiente no ponto **atual** $\mathbf{w}_k$.
+- Aplica a inércia de forma cega.
+- Ao atingir o fundo do vale, a alta velocidade acumulada arremessa a partícula morro acima (*overshoot*).
+:::
+
+::: {.column width="50%"}
+**A Ideia de Nesterov (NAG, 1983):**
+
+$$\mathbf{w}_{\text{ahead}} = \mathbf{w}_k + \beta \mathbf{v}_k$$
+$$\mathbf{v}_{k+1} = \beta \mathbf{v}_k - \alpha \nabla f(\mathbf{w}_{\text{ahead}})$$
+$$\mathbf{w}_{k+1} = \mathbf{w}_k + \mathbf{v}_{k+1}$$
+
+- Dá o salto de inércia **primeiro**.
+- Inspeciona o terreno **lá na frente**.
+- Se o ponto antecipado começar a subir a encosta oposta, o gradiente já freia a velocidade preventivamente!
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Mecânica do Ponto Antecipado (*Look-Ahead*)
+
+O algoritmo do **Gradiente Acelerado de Nesterov (NAG)** opera em duas etapas conceituais por iteração:
+1. **Salto de Inércia Prévia (*Look-Ahead*):**
+   Projetamos onde a partícula chegaria impulsionada unicamente pelo seu momento atual:
+   $$\mathbf{w}_{\text{ahead}} = \mathbf{w}_k + \beta \mathbf{v}_k$$
+2. **Correção de Direção com Gradiente Antecipado:**
+   Avaliamos a derivada no ponto futuro $\mathbf{w}_{\text{ahead}}$ e atualizamos a velocidade:
+   $$\mathbf{v}_{k+1} = \beta \mathbf{v}_k - \alpha \nabla f(\mathbf{w}_{\text{ahead}})$$
+   $$\mathbf{w}_{k+1} = \mathbf{w}_k + \mathbf{v}_{k+1}$$
+
+**Por que isso age como um sistema de freio inteligente?**
+
+- Se a partícula estiver descendo em direção ao vale, $\mathbf{w}_{\text{ahead}}$ estará ainda mais abaixo na encosta; o gradiente antecipado aponta no mesmo sentido, acelerando o movimento.
+- Quando a partícula se aproxima do fundo da ravina, o salto de inércia $\beta \mathbf{v}_k$ leva $\mathbf{w}_{\text{ahead}}$ para a encosta ascendente oposta. A inclinação lá é positiva ($\nabla f > \mathbf{0}$), gerando uma força contrária que desacelera a velocidade $\mathbf{v}_{k+1}$ **antes** mesmo de a partícula passar pelo ponto ótimo!
+- Esse mecanismo de amortecimento preditivo suprime drasticamente as oscilações em torno do mínimo sem reduzir a taxa de aprendizado.
+
+### Representação Geométrica: Polyak vs. Nesterov (NAG)
+
+A diferença estrutural entre o Momento de Polyak e o Gradiente Acelerado de Nesterov pode ser visualizada comparando os passos no plano:
+
+::: {.fig-resize style="width: 90%; margin: 1.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{vermelho}{RGB}{224,60,49}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{cinza}{RGB}{93,109,126}
+
+\begin{tikzpicture}[>=latex, font=\small, thick]
+  % 1. Polyak
+  \begin{scope}[xshift=0cm]
+    \node[anchor=south, font=\bfseries, text=azul] at (2.5, 2.5) {Momento de Polyak (Heavy-Ball)};
+    \draw[cinza!40, rounded corners=6pt, fill=cinza!5] (-0.8, -1.2) rectangle (5.8, 2.3);
+    
+    \coordinate (PW0) at (0, 1.2);
+    \coordinate (PINER) at (3.5, 1.2);
+    \coordinate (PW1) at (3.5, -0.4);
+    
+    \draw[->, line width=1.6pt, laranja] (PW0) -- (PINER) 
+      node[midway, above=2pt, font=\footnotesize\bfseries, text=laranja] {$\beta \mathbf{v}_k$ (Inércia)};
+    \draw[->, line width=1.6pt, vermelho] (PINER) -- (PW1) 
+      node[midway, right=2pt, font=\footnotesize\bfseries, text=vermelho] {$-\alpha \nabla f(\mathbf{w}_k)$};
+    \draw[->, line width=2.0pt, verde] (PW0) -- (PW1) 
+      node[midway, sloped, below=2pt, font=\footnotesize\bfseries, text=verde!80!black] {Passo total};
+      
+    \filldraw[azul] (PW0) circle (3pt) node[above left, font=\bfseries] {$\mathbf{w}_k$};
+    \filldraw[verde!80!black] (PW1) circle (3pt) node[below right, font=\bfseries] {$\mathbf{w}_{k+1}$};
+    
+    \node[align=center, font=\scriptsize, text=cinza] at (2.5, -0.7) 
+      {Gradiente avaliado na \textbf{posição atual} $\mathbf{w}_k$\\(Ignora se a frente há subida)};
+  \end{scope}
+
+  % 2. NAG
+  \begin{scope}[xshift=7.0cm]
+    \node[anchor=south, font=\bfseries, text=azul] at (2.5, 2.5) {Gradiente Acelerado de Nesterov (NAG)};
+    \draw[cinza!40, rounded corners=6pt, fill=cinza!5] (-0.8, -1.2) rectangle (5.8, 2.3);
+    
+    \coordinate (NW0) at (0, 1.2);
+    \coordinate (NAHEAD) at (4.0, 1.2);
+    \coordinate (NW1) at (3.0, -0.4);
+    
+    \draw[->, line width=1.6pt, laranja] (NW0) -- (NAHEAD) 
+      node[midway, above=2pt, font=\footnotesize\bfseries, text=laranja] {$\beta \mathbf{v}_k$ (Salto Prévio)};
+    \draw[->, line width=1.6pt, vermelho] (NAHEAD) -- (NW1) 
+      node[midway, sloped, above=2pt, font=\footnotesize\bfseries, text=vermelho] {$-\alpha \nabla f(\mathbf{w}_{\text{ahead}})$};
+    \draw[->, line width=2.0pt, verde] (NW0) -- (NW1) 
+      node[midway, sloped, below=2pt, font=\footnotesize\bfseries, text=verde!80!black] {Passo total};
+      
+    \filldraw[azul] (NW0) circle (3pt) node[above left, font=\bfseries] {$\mathbf{w}_k$};
+    \filldraw[laranja!90!black] (NAHEAD) circle (2.5pt) node[above right, font=\footnotesize\bfseries] {$\mathbf{w}_{\text{ahead}}$};
+    \filldraw[verde!80!black] (NW1) circle (3pt) node[below left, font=\bfseries] {$\mathbf{w}_{k+1}$};
+    
+    \node[align=center, font=\scriptsize, text=cinza] at (2.5, -0.7) 
+      {Gradiente avaliado \textbf{adiante} $\mathbf{w}_{\text{ahead}}$\\(Detecta a encosta e aciona freio preditivo)};
+  \end{scope}
+\end{tikzpicture}
+```
+:::
+
+O mecanismo intuitivo de amortecimento e controle de velocidade pode ser visualizado no perfil de corte transversal do vale:
+
+::: {.fig-resize style="width: 85%; margin: 1.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{vermelho}{RGB}{224,60,49}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{cinza}{RGB}{93,109,126}
+
+\begin{tikzpicture}[>=latex, font=\small, thick, scale=1.0]
+  % Perfil parabólico do vale
+  \draw[cinza!50, line width=1.5pt, domain=-4:4, smooth, variable=\x] 
+    plot ({\x}, {0.22*\x*\x});
+    
+  \node[font=\footnotesize\bfseries, text=cinza] at (-3.0, 3.2) {Encosta Descendente};
+  \node[font=\footnotesize\bfseries, text=cinza] at (3.0, 3.2) {Encosta Ascendente Oposta};
+  \node[font=\footnotesize\bfseries, text=vermelho] at (0, -0.4) {Fundo do Vale ($\mathbf{w}^\star$)};
+  \filldraw[vermelho] (0, 0) circle (2.5pt);
+
+  % Posição atual w_k
+  \coordinate (WK) at (-2.2, 1.06);
+  \filldraw[azul] (WK) circle (3.5pt) node[above left, font=\bfseries, text=azul] {$\mathbf{w}_k$};
+  
+  % Salto de inércia para w_ahead
+  \coordinate (WAHEAD) at (1.8, 0.71);
+  \draw[->, dashed, line width=1.5pt, laranja] (WK) to[bend left=12] 
+    node[midway, above, font=\footnotesize\bfseries, text=laranja] {Salto de inércia $\beta \mathbf{v}_k$} (WAHEAD);
+  \filldraw[laranja] (WAHEAD) circle (3pt) node[above right, font=\bfseries, text=laranja] {$\mathbf{w}_{\text{ahead}}$};
+  
+  % Gradiente antecipado em w_ahead aponta subindo a curva, então -alpha grad aponta morro abaixo (contra a velocidade!)
+  \draw[->, line width=2.0pt, vermelho] (WAHEAD) -- (0.6, 0.12) 
+    node[midway, below right, font=\footnotesize\bfseries, text=vermelho] {$-\alpha \nabla f(\mathbf{w}_{\text{ahead}})$ (Freio Preditivo!)};
+    
+  % Posição final estabilizada w_{k+1}
+  \coordinate (WK1) at (0.2, 0.01);
+  \filldraw[verde!80!black] (WK1) circle (3.5pt) node[below, font=\bfseries, text=verde!80!black] {$\mathbf{w}_{k+1}$};
+  \draw[->, line width=1.8pt, verde!80!black] (WK) to[bend right=8] (WK1);
+  
+  \node[draw=verde!80!black, fill=verde!10, rounded corners=4pt, font=\scriptsize, align=center] at (0, -1.0) 
+    {\textbf{Resultado:} Como $\mathbf{w}_{\text{ahead}}$ já atinge a encosta oposta, o gradiente $-\nabla f$ aponta para trás,\\freando a partícula \textbf{antes} que ela ultrapasse o ponto ótimo!};
+\end{tikzpicture}
+```
+:::
+
+| Dimensão de Comparação | Momento de Polyak (1964) | Gradiente Acelerado de Nesterov (1983) |
+| :--- | :--- | :--- |
+| **Ponto de Avaliação do Gradiente** | Na posição atual: $\nabla f(\mathbf{w}_k)$ | No ponto antecipado pela inércia: $\nabla f(\mathbf{w}_k + \beta \mathbf{v}_k)$ |
+| **Sequência de Operações** | Gradiente no ponto $\to$ Combinação com momento $\to$ Salto | Salto inercial prévio $\to$ Gradiente antecipado $\to$ Correção |
+| **Comportamento no Fundo do Vale** | *Overshoot* severo e oscilações ao redor do vale | Frenagem preventiva com amortecimento adaptativo |
+| **Cota Teórica Convexa Geral** | Subótimo em convexas gerais (pode oscilar sem parar) | Atinge a cota ótima inultrapassável $\mathcal{O}(1/k^2)$ |
+| **Custo Computacional** | $\mathcal{O}(d)$ (1 gradiente + 2 operações vetoriais) | $\mathcal{O}(d)$ (1 gradiente + 2 operações vetoriais) |
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Geometria Comparada: Polyak vs. Nesterov
+
+::: {.columns}
+::: {.column width="50%"}
+**Momento de Polyak (Heavy-Ball):**
+
+::: {.fig-resize style="width: 95%; margin: 0.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{vermelho}{RGB}{224,60,49}
+\definecolor{verde}{RGB}{27,158,119}
+\begin{tikzpicture}[>=latex, font=\small, thick, scale=0.85]
+  \coordinate (W) at (0, 1.0);
+  \coordinate (I) at (2.6, 1.0);
+  \coordinate (R) at (2.6, -0.3);
+  \draw[->, line width=1.4pt, laranja] (W) -- (I) node[midway, above, font=\tiny\bfseries] {$\beta \mathbf{v}_k$};
+  \draw[->, line width=1.4pt, vermelho] (I) -- (R) node[midway, right, font=\tiny\bfseries] {$-\alpha \nabla f(\mathbf{w}_k)$};
+  \draw[->, line width=1.8pt, verde] (W) -- (R) node[midway, sloped, below, font=\tiny\bfseries] {$\mathbf{w}_{k+1}$};
+  \filldraw[azul] (W) circle (2.2pt) node[left, font=\scriptsize\bfseries] {$\mathbf{w}_k$};
+  \filldraw[verde!80!black] (R) circle (2.2pt) node[below, font=\scriptsize\bfseries] {$\mathbf{w}_{k+1}$};
+\end{tikzpicture}
+```
+:::
+
+- Mede gradiente **onde está** ($\mathbf{w}_k$).
+- Aplica inércia herdada cegamente.
+- Arremessado morro acima (*overshoot*).
+:::
+
+::: {.column width="50%"}
+**Gradiente Acelerado de Nesterov (NAG):**
+
+::: {.fig-resize style="width: 95%; margin: 0.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{vermelho}{RGB}{224,60,49}
+\definecolor{verde}{RGB}{27,158,119}
+\begin{tikzpicture}[>=latex, font=\small, thick, scale=0.85]
+  \coordinate (W) at (0, 1.0);
+  \coordinate (A) at (3.2, 1.0);
+  \coordinate (R) at (2.4, -0.3);
+  \draw[->, line width=1.4pt, laranja] (W) -- (A) node[midway, above, font=\tiny\bfseries] {$\beta \mathbf{v}_k$ (Salto)};
+  \draw[->, line width=1.4pt, vermelho] (A) -- (R) node[midway, sloped, above, font=\tiny\bfseries] {$-\alpha \nabla f(\mathbf{w}_{\text{ahead}})$};
+  \draw[->, line width=1.8pt, verde] (W) -- (R) node[midway, sloped, below, font=\tiny\bfseries] {$\mathbf{w}_{k+1}$};
+  \filldraw[azul] (W) circle (2.2pt) node[left, font=\scriptsize\bfseries] {$\mathbf{w}_k$};
+  \filldraw[laranja] (A) circle (2.2pt) node[right, font=\tiny\bfseries] {$\mathbf{w}_{\text{ahead}}$};
+  \filldraw[verde!80!black] (R) circle (2.2pt) node[below, font=\scriptsize\bfseries] {$\mathbf{w}_{k+1}$};
+\end{tikzpicture}
+```
+:::
+
+- Dá o salto de inércia **primeiro** ($\mathbf{w}_{\text{ahead}}$).
+- Mede gradiente **lá na frente**.
+- Freio preditivo antes de subir a encosta!
+:::
+:::
+
+::: {.fragment .callout-note}
+## Custo Computacional Idêntico: $\mathcal{O}(d)$
+Ambos exigem exatamente **uma única avaliação de gradiente** e **duas operações vetoriais de dimensão $d$** por passo.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Cota Teórica Ótima de Nesterov: $\mathcal{O}(1/k^2)$
+
+O impacto do método de Nesterov transcende a intuição geométrica da física: ele estabeleceu o limite teórico fundamental da complexidade em otimização contínua.
+
+Em seu célebre teorema de 1983, Yurii Nesterov investigou a classe de problemas convexos com gradiente Lipschitz-contínuo ($L$-suaves), onde:
+$$\|\nabla f(\mathbf{x}) - \nabla f(\mathbf{y})\| \le L \|\mathbf{x} - \mathbf{y}\|$$
+
+Ele provou duas proposições históricas:
+1. **Cota Inferior de Complexidade:** Nenhum algoritmo de primeira ordem (que gere iterações via combinações lineares de gradientes passados) pode garantir uma convergência mais rápida que $\Omega(1/k^2)$ no pior caso:
+   $$f(\mathbf{w}_k) - f^\star \ge \frac{3L \|\mathbf{w}_0 - \mathbf{w}^\star\|^2}{32 (k + 1)^2}$$
+2. **Subotimalidade do Gradiente Descendente:** O GD clássico converge com taxa de apenas $\mathcal{O}(1/k)$.
+3. **Otimalidade do NAG:** Ao adotar uma sequência dinâmica de coeficientes de momento $\beta_k = \frac{k-1}{k+2}$, o Gradiente Acelerado de Nesterov atinge rigorosamente a taxa:
+   $$f(\mathbf{w}_k) - f^\star \le \frac{2L \|\mathbf{w}_0 - \mathbf{w}^\star\|^2}{(k + 1)^2} = \mathcal{O}\left(\frac{1}{k^2}\right)$$
+   atingindo a fronteira física inultrapassável de eficiência matemática para métodos de primeira ordem!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Cota Teórica Ótima de Nesterov
+
+::: {.columns}
+::: {.column width="50%"}
+**Limitações do Gradiente Descendente:**
+
+Para funções convexas $L$-suaves gerais:
+$$f(\mathbf{w}_k) - f^\star \le \mathcal{O}\left(\frac{1}{k}\right)$$
+Para atingir erro $\epsilon = 10^{-4}$, são necessárias $\approx \mathbf{10.000}$ iterações!
+:::
+
+::: {.column width="50%"}
+**A Aceleração Ótima de Nesterov (NAG):**
+
+Com sequência dinâmica $\beta_k = \frac{k-1}{k+2}$:
+$$f(\mathbf{w}_k) - f^\star \le \mathcal{O}\left(\frac{1}{k^2}\right)$$
+Para atingir o mesmo erro $\epsilon = 10^{-4}$, são necessárias apenas $\approx \mathbf{100}$ iterações!
+:::
+:::
+
+::: {.fragment .callout-tip}
+## Teorema de Complexidade de Nesterov (1983)
+A taxa $\mathcal{O}(1/k^2)$ é a cota inferior matemática absoluta para métodos de 1ª ordem em funções convexas gerais. Nenhum método puramente baseado em gradientes pode ser assintoticamente mais rápido!
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 2: Aceleradores de Nesterov e Amortecimento
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 2
+Considere uma função 1D parabólica $f(w) = \frac{1}{2}w^2$. Uma partícula está em $w_k = 2$ com velocidade residual negativa $v_k = -3$, sob $\alpha = 0{,}5$ e $\beta = 0{,}9$.
+1. Onde a regra de Polyak posiciona $w_{k+1}$ e qual é a sua nova velocidade $v_{k+1}$?
+2. Onde a regra de Nesterov avalia o ponto antecipado $w_{\text{ahead}}$ e qual é o ponto final $w_{k+1}$ gerado com a frenagem preventiva?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- ( ) O gradiente de Nesterov avaliado em $\mathbf{w}_k + \beta \mathbf{v}_k$ detecta subidas da função antes que a partícula as atinja, aplicando força contrária que amortece o *overshoot*.
+- ( ) O NAG atinge a cota assintótica ótima $\mathcal{O}(1/k^2)$ para funções convexas $L$-suaves gerais, provada matematicamente por Nesterov.
+- ( ) Avaliar o gradiente antecipado em Nesterov exige duas passagens completas de retropropagação (*backpropagation*) por iteração, duplicando o custo em relação ao GD.
+- ( ) Em problemas não-convexos com ruído estocástico severo de mini-batch, antecipar a posição pode occasionalmente amplificar a instabilidade amostral.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 2: Polyak vs. Nesterov
+
+::: {.callout-tip}
+## Pergunta de Fixação
+Em $f(w) = \frac{1}{2}w^2$, com $w_k = 2$ e $v_k = -3$ ($\alpha = 0{,}5, \beta = 0{,}9$):
+
+- Polyak calcula gradiente em $w = 2 \implies v_{k+1} = -3{,}7 \implies w_{k+1} = -1{,}7$ (*overshoot* severo!).
+- Nesterov antecipa para $w_{\text{ahead}} = 2 - 2{,}7 = -0{,}7$. A inclinação lá é negativa, freando para $v_{k+1} = -2{,}35 \implies w_{k+1} = -0{,}35$.
+:::
+
+::: {.fragment}
+
+- [x] O gradiente antecipado atua como um sistema de freios inteligente antes de curvas.
+- [x] NAG atinge a cota teórica inultrapassável $\mathcal{O}(1/k^2)$ para funções convexas gerais.
+- [ ] O NAG requer duas etapas de retropropagação por iteração. *(Falso: requer apenas uma avaliação de gradiente em $\mathbf{w}_{\text{ahead}}$!)*
+- [x] No SGD com mini-batches ruidosos, avaliar gradientes em pontos projetados pode sensivelmente elevar a variância da estimativa.
+:::
+:::
+
+# Bloco 3: A Grande Síntese — O Otimizador Adam
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Fusão Perfeita: Momento com Escala Adaptativa
+
+Até este ponto do curso, desenvolvemos dois pilares fundamentais e complementares da otimização contemporânea:
+1. **O Momento Direcional (Polyak / Nesterov):** Acumula uma média móvel de primeira ordem dos gradientes ($\mathbf{m}_t$), fornecendo **inércia mecânica** que cancela ruídos de alta frequência transversais e acelera ao longo de vales planos.
+2. **O Precondicionamento Diagonal (RMSProp):** Acumula uma média móvel de segunda ordem dos quadrados dos gradientes ($\mathbf{v}_t$), fornecendo **equalização de escala** que impede passos explosivos em coordenadas íngremes e acelera coordenadas suaves.
+
+Em 2014, Diederik Kingma e Jimmy Ba publicaram um dos artigos mais citados da história da ciência da computação: **"Adam: A Method for Stochastic Optimization"** (*Adaptive Moment Estimation*).
+
+A arquitetura do Adam une esses dois motores em uma estrutura vetorial elegante:
+$$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t \quad \text{(1º momento — média/velocidade)}$$
+$$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^2 \quad \text{(2º momento não-centrado — variância/curvatura)}$$
+onde $\mathbf{g}_t = \nabla f_i(\mathbf{w}_t)$ é o gradiente estocástico avaliado no mini-batch e as operações de quadrado e divisão são elemento a elemento (vetoriais).
+
+### A Arquitetura do Adam: Fluxo de Dados e Síntese de Motores
+
+O funcionamento do Adam pode ser compreendido como um pipeline modular de processamento que sintetiza o aprendizado acumulado desde a Aula 8:
+
+::: {.fig-resize style="width: 85%; margin: 1.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{vermelho}{RGB}{224,60,49}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{cinza}{RGB}{93,109,126}
+
+\begin{tikzpicture}[>=latex, font=\small, thick]
+  % Entrada: Gradiente
+  \node[draw=azul, fill=azul!10, rounded corners=6pt, inner sep=6pt, align=center, line width=1.2pt] 
+    (G) at (0, 4.5) {\textbf{Gradiente Estocástico $\mathbf{g}_t = \nabla \mathcal{L}_i(\mathbf{w}_t)$}\\\footnotesize(Avaliado no mini-batch atual)};
+
+  % Canal Esquerdo: 1º Momento (Polyak)
+  \node[draw=laranja, fill=laranja!10, rounded corners=5pt, inner sep=5pt, align=center, text width=4.5cm] 
+    (M) at (-3.2, 2.7) {\textbf{1º Momento: Inércia (Polyak)}\\\footnotesize$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1-\beta_1)\mathbf{g}_t$\\\scriptsize Filtra ruído e dá tração longitudinal};
+
+  \node[draw=laranja!80!black, fill=laranja!20, rounded corners=5pt, inner sep=5pt, align=center, text width=4.5cm] 
+    (MHAT) at (-3.2, 0.9) {\textbf{Correção de Viés: 1º Momento}\\\footnotesize$\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}$\\\scriptsize Compensa a inicialização em zero};
+
+  % Canal Direito: 2º Momento (RMSProp)
+  \node[draw=azul, fill=azul!10, rounded corners=5pt, inner sep=5pt, align=center, text width=4.5cm] 
+    (V) at (3.2, 2.7) {\textbf{2º Momento: Escala (RMSProp)}\\\footnotesize$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1-\beta_2)\mathbf{g}_t^2$\\\scriptsize Estima curvatura diagonal por eixo};
+
+  \node[draw=azul!80!black, fill=azul!20, rounded corners=5pt, inner sep=5pt, align=center, text width=4.5cm] 
+    (VHAT) at (3.2, 0.9) {\textbf{Correção de Viés: 2º Momento}\\\footnotesize$\hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1 - \beta_2^t}$\\\scriptsize Previne passo explosivo em $t=1$};
+
+  % Fusão: Divisão Adaptativa
+  \node[draw=verde, fill=verde!10, rounded corners=6pt, inner sep=6pt, align=center, text width=7.0cm, line width=1.2pt] 
+    (DIV) at (0, -0.9) {\textbf{Quociente Adaptativo por Coordenada}\\\footnotesize$\mathbf{u}_t = \frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$\\\scriptsize Direção da inércia reescalada pela incerteza local};
+
+  % Saída: Atualização
+  \node[draw=verde!80!black, fill=verde!25, rounded corners=6pt, inner sep=6pt, align=center, text width=7.0cm, line width=1.4pt] 
+    (W) at (0, -2.5) {\textbf{Atualização dos Parâmetros}\\\large$\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha \mathbf{u}_t$};
+
+  % Conexões
+  \draw[->, line width=1.4pt, laranja] (G.south) -| (M.north);
+  \draw[->, line width=1.4pt, azul] (G.south) -| (V.north);
+  \draw[->, line width=1.4pt, laranja] (M) -- (MHAT);
+  \draw[->, line width=1.4pt, azul] (V) -- (VHAT);
+  \draw[->, line width=1.4pt, laranja] (MHAT.south) |- (DIV.west);
+  \draw[->, line width=1.4pt, azul] (VHAT.south) |- (DIV.east);
+  \draw[->, line width=1.6pt, verde!80!black] (DIV) -- (W);
+\end{tikzpicture}
+```
+:::
+
+#### Genealogia dos Otimizadores de Primeira Ordem
+
+| Otimizador | Referência | Direção do Passo | Escala por Coordenada | Memória Temporal | Correção de Viés |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **SGD Puro** | Aula 8 | Gradiente instantâneo $\mathbf{g}_t$ | Escalar fixo $\alpha$ | Nenhuma | Não se aplica |
+| **Polyak (Heavy-Ball)** | Aula 12 | 1º momento exponencial $\mathbf{m}_t$ | Escalar fixo $\alpha$ | Média móvel dos gradientes | Ausente |
+| **RMSProp** | Aula 11 | Gradiente instantâneo $\mathbf{g}_t$ | Adaptativa $\frac{\alpha}{\sqrt{\mathbf{v}_t} + \epsilon}$ | Média móvel dos quadrados | Ausente |
+| **Adam** | Aula 12 | 1º momento corrigido $\hat{\mathbf{m}}_t$ | Adaptativa $\frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$ | 1º e 2º momentos integrados | Presente ($\frac{1}{1-\beta_1^t}$, $\frac{1}{1-\beta_2^t}$) |
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Síntese do Adam: Unindo os Dois Motores
+
+::: {.columns}
+::: {.column width="50%"}
+**1º Motor: Inércia Direcional (Polyak)**
+
+$$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t$$
+
+- Média móvel exponencial dos gradientes (1º momento).
+- Filtra oscilações ortogonais e fornece inércia ao longo do vale.
+- Valor canônico: $\beta_1 = 0{,}9$.
+:::
+
+::: {.column width="50%"}
+**2º Motor: Escalas Adaptativas (RMSProp)**
+
+$$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^2$$
+
+- Média móvel exponencial dos quadrados dos gradientes (2º momento).
+- Equaliza as escalas de curvatura por coordenada.
+- Valor canônico: $\beta_2 = 0{,}999$.
+:::
+:::
+
+::: {.fragment .callout-important}
+## A Pergunta Matemática
+Como $\mathbf{m}_0 = \mathbf{0}$ e $\mathbf{v}_0 = \mathbf{0}$, os valores iniciais de $\mathbf{m}_t$ e $\mathbf{v}_t$ são drasticamente subestimados nas primeiras iterações. Como corrigir esse viés de largada?
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Arquitetura do Adam: Síntese de Motores
+
+::: {.fig-resize style="width: 85%; margin: 0 auto 0.8rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{verde}{RGB}{27,158,119}
+\begin{tikzpicture}[>=latex, font=\scriptsize, thick]
+  \node[draw=azul, fill=azul!10, rounded corners=4pt, inner sep=4pt, align=center] (G) at (0, 0) {$\mathbf{g}_t$};
+  \node[draw=laranja, fill=laranja!15, rounded corners=4pt, inner sep=4pt, align=center] (M) at (3.0, 0.7) {1º Mom.: $\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1-\beta_1^t}$};
+  \node[draw=azul, fill=azul!15, rounded corners=4pt, inner sep=4pt, align=center] (V) at (3.0, -0.7) {2º Mom.: $\hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1-\beta_2^t}$};
+  \node[draw=verde, fill=verde!20, rounded corners=4pt, inner sep=4pt, align=center, line width=1.1pt] (OUT) at (7.5, 0) {Passo: $-\frac{\alpha \hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$};
+  
+  \draw[->, line width=1.2pt, laranja] (G.east) -- ++(0.5,0) |- (M.west);
+  \draw[->, line width=1.2pt, azul] (G.east) -- ++(0.5,0) |- (V.west);
+  \draw[->, line width=1.2pt, laranja] (M.east) -| ++(0.5,-0.7) -- (OUT.west);
+  \draw[->, line width=1.2pt, azul] (V.east) -| ++(0.5,0.7) -- (OUT.west);
+\end{tikzpicture}
+```
+:::
+
+::: {.columns}
+::: {.column width="50%"}
+**Herança de Polyak (Aula 12):**
+
+- Inércia direcional $\mathbf{m}_t$.
+- Cancela ruído e acelera em vales.
+- Suaviza a direção das atualizações.
+:::
+
+::: {.column width="50%"}
+**Herança do RMSProp (Aula 11):**
+
+- Escala adaptativa $\mathbf{v}_t$.
+- Equaliza eixos íngremes e suaves.
+- Torna o passo invariante à escala do gradiente.
+:::
+:::
+
+::: {.fragment .callout-tip}
+## O Salto do Adam
+A união da **inércia temporal** com o **precondicionamento diagonal**, combinada com a **correção analítica de viés**, criou o otimizador mais robusto da história do aprendizado de máquina!
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Dedução Analítica da Correção de Viés de Inicialização
+
+Tanto $\mathbf{m}_t$ quanto $\mathbf{v}_t$ são inicializados como vetores de zeros: $\mathbf{m}_0 = \mathbf{0}$ e $\mathbf{v}_0 = \mathbf{0}$. Como consequência, durante as primeiras dezenas ou centenas de iterações, essas médias móveis permanecem fortemente enviesadas em direção à origem.
+
+Vejamos a dedução analítica rigorosa para o primeiro momento $\mathbf{m}_t$. Expandindo a recorrência a partir de $\mathbf{m}_0 = \mathbf{0}$:
+$$\mathbf{m}_1 = (1 - \beta_1) \mathbf{g}_1$$
+$$\mathbf{m}_2 = \beta_1 \mathbf{m}_1 + (1 - \beta_1) \mathbf{g}_2 = \beta_1(1 - \beta_1)\mathbf{g}_1 + (1 - \beta_1)\mathbf{g}_2$$
+Para uma iteração geral $t$:
+$$\mathbf{m}_t = (1 - \beta_1) \sum_{i=1}^t \beta_1^{t-i} \mathbf{g}_i$$
+
+Desejamos calcular a esperança matemática $\mathbb{E}[\mathbf{m}_t]$ e relacioná-la com a verdadeira esperança do gradiente $\mathbb{E}[\mathbf{g}_t]$. Assumindo que os gradientes provêm de uma distribuição estocástica localmente estacionária ($\mathbb{E}[\mathbf{g}_i] \approx \mathbb{E}[\mathbf{g}_t]$ para os passos recentes):
+$$\mathbb{E}[\mathbf{m}_t] = \mathbb{E}\left[(1 - \beta_1) \sum_{i=1}^t \beta_1^{t-i} \mathbf{g}_i\right] = (1 - \beta_1) \sum_{i=1}^t \beta_1^{t-i} \mathbb{E}[\mathbf{g}_i] \approx \mathbb{E}[\mathbf{g}_t] (1 - \beta_1) \sum_{i=1}^t \beta_1^{t-i}$$
+
+A soma finita é a soma dos termos de uma progressão geométrica de razão $\beta_1$ com $t$ termos:
+$$\sum_{i=1}^t \beta_1^{t-i} = \sum_{j=0}^{t-1} \beta_1^j = \frac{1 - \beta_1^t}{1 - \beta_1}$$
+
+Substituindo de volta na esperança:
+$$\mathbb{E}[\mathbf{m}_t] = \mathbb{E}[\mathbf{g}_t] (1 - \beta_1) \left(\frac{1 - \beta_1^t}{1 - \beta_1}\right) = \mathbb{E}[\mathbf{g}_t] (1 - \beta_1^t)$$
+
+O estimador empírico $\mathbf{m}_t$ é enviesado por um fator multiplicativo de $(1 - \beta_1^t)$! Para construir um **estimador não-viesado** $\hat{\mathbf{m}}_t$ tal que $\mathbb{E}[\hat{\mathbf{m}}_t] = \mathbb{E}[\mathbf{g}_t]$, devemos dividir por esse fator:
+$$\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}$$
+
+Pelo mesmo procedimento idêntico aplicado ao segundo momento:
+$$\hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1 - \beta_2^t}$$
+
+**Por que essa correção é crítica?**
+Para o valor canônico $\beta_2 = 0{,}999$, no primeiro passo ($t = 1$):
+$$1 - \beta_2^1 = 1 - 0{,}999 = 0{,}001 = 10^{-3}$$
+Sem a correção de viés, $v_1 = 0{,}001 g_1^2 \implies \sqrt{v_1} \approx 0{,}0316 |g_1|$. O denominador seria trinta vezes menor do que deveria, fazendo com que o passo inicial fosse multiplicado artificialmente por mais de $\mathbf{30\times}$! Esse salto espúrio na primeira iteração frequentemente desestabiliza os pesos iniciais de redes profundas. A correção divide $v_1$ por $0{,}001$, restaurando a escala unitária exata.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Dedução da Correção de Viés de Inicialização
+
+::: {.columns}
+::: {.column width="50%"}
+**Expansão Geométrica da Média:**
+
+Como $\mathbf{m}_0 = \mathbf{0}$, expandindo a recorrência:
+$$\mathbf{m}_t = (1 - \beta_1) \sum_{i=1}^t \beta_1^{t-i} \mathbf{g}_i$$
+Tomando a esperança matemática:
+$$\mathbb{E}[\mathbf{m}_t] = \mathbb{E}[\mathbf{g}_t] (1 - \beta_1) \underbrace{\sum_{j=0}^{t-1} \beta_1^j}_{\frac{1 - \beta_1^t}{1 - \beta_1}} = \mathbb{E}[\mathbf{g}_t] (1 - \beta_1^t)$$
+:::
+
+::: {.column width="50%"}
+**Os Estimadores Corrigidos:**
+
+Dividindo pelos fatores normalizadores:
+$$\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}, \quad \hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1 - \beta_2^t}$$
+
+- Em $t=1$ com $\beta_2 = 0{,}999$:
+  $$1 - \beta_2^1 = 0{,}001$$
+  Sem correção, o passo inicial é inflacionado em $\mathbf{31{,}6\times}$, explodindo o treinamento!
+
+- Quando $t \to \infty$, $\beta^t \to 0$ e os denominadores convergem suavemente para 1.
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Algoritmo Completo do Adam
+
+Reunindo todos os componentes, o algoritmo do Adam é expresso pelas seguintes etapas a cada iteração $t$:
+
+```python
+# Algoritmo Adam (Kingma & Ba, 2014)
+g_t = gradiente_estocastico(w)
+m_t = beta1 * m_prev + (1.0 - beta1) * g_t
+v_t = beta2 * v_prev + (1.0 - beta2) * (g_t ** 2)
+
+# Correções de viés analíticas
+m_hat = m_t / (1.0 - beta1 ** t)
+v_hat = v_t / (1.0 - beta2 ** t)
+
+# Atualização de parâmetros por coordenada
+w = w - alpha * m_hat / (np.sqrt(v_hat) + epsilon)
+```
+
+**Valores Padrão Canônicos Recomendados:**
+
+- Taxa de aprendizado base: $\alpha = 0{,}001$ ($10^{-3}$).
+- Decaimento do primeiro momento: $\beta_1 = 0{,}9$.
+- Decaimento do segundo momento: $\beta_2 = 0{,}999$.
+- Constante de estabilidade numérica: $\epsilon = 10^{-8}$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Algoritmo Adam: Formulação Final
+
+::: {.callout-note}
+## Regra Vetorial de Atualização do Adam
+$$\mathbf{w}_{t+1} = \mathbf{w}_t - \frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \odot \hat{\mathbf{m}}_t$$
+:::
+
+::: {.columns}
+::: {.column width="50%"}
+**Hiperparâmetros Canônicos:**
+
+- $\alpha = 10^{-3}$ (taxa de aprendizado base)
+- $\beta_1 = 0{,}9$ (inércia / 1º momento)
+- $\beta_2 = 0{,}999$ (escala / 2º momento)
+- $\epsilon = 10^{-8}$ (estabilidade numérica)
+:::
+
+::: {.column width="50%"}
+**Propriedades de Destaque:**
+
+- Invariante a reescalonamentos homogêneos de gradientes.
+- Passos limitados aproximadamente por $|\Delta w_i| \le \alpha$.
+- Excelente robustez empírica em arquiteturas heterogêneas e dados esparsos.
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 3: A Síntese do Adam e a Correção de Viés
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 3
+Inicializamos o Adam com $\beta_1 = 0{,}9$, $\beta_2 = 0{,}999$, $\epsilon = 10^{-8}$ e inicializadores zerados $m_0 = 0$, $v_0 = 0$. Suponha que no passo $t=1$ o gradiente seja $g_1 = 5{,}0$.
+1. Qual seria o passo $\Delta w_1$ sem as correções de viés?
+2. Como a divisão por $1 - \beta_1^1$ e $1 - \beta_2^1$ restaura a proporção correta $\Delta w_1 = -\alpha \cdot 1{,}0$?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- ( ) O Adam unifica o momento direcional de 1º momento ($m_t$) com a normalização adaptativa de 2º momento ($v_t$).
+- ( ) A correção de viés é indispensável nos passos iniciais porque $m_0 = \mathbf{0}$ e $v_0 = \mathbf{0}$ subestimam as magnitudes das médias móveis.
+- ( ) O fator de correção de viés do segundo momento $\frac{1}{1 - \beta_2^t}$ permanece significativamente maior do que 1 por centenas de iterações quando $\beta_2 = 0{,}999$.
+- ( ) Na ausência da correção de viés do segundo momento, o passo nos passos iniciais seria artificialmente atenuado, paralisando o modelo na largada.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 3: Otimizador Adam
+
+::: {.callout-tip}
+## Pergunta de Fixação
+Em $t=1$, com $g_1 = 5{,}0$ e $\beta_2 = 0{,}999$:
+
+- Sem correção: $v_1 = 0{,}001 \times 25 = 0{,}025 \implies \sqrt{v_1} = 0{,}158$. O passo escala com $\frac{0{,}5}{0{,}158} \alpha \approx 3{,}16 \alpha$.
+- Com correção: $\hat{v}_1 = \frac{0{,}025}{0{,}001} = 25 \implies \sqrt{\hat{v}_1} = 5{,}0$. O passo é exatamente $\frac{5{,}0}{5{,}0}\alpha = 1{,}0\alpha$.
+:::
+
+::: {.fragment}
+
+- [x] O Adam sintetiza inércia direcional com escalas adaptativas por coordenada.
+- [x] A correção de viés elimina a distorção decorrente da inicialização em zero.
+- [x] Com $\beta_2 = 0{,}999$, são necessárias centenas de passos para que $1 - \beta_2^t \approx 1$.
+- [ ] Sem correção, o passo inicial ficaria minúsculo. *(Falso: $\sqrt{v_t}$ seria minúsculo no denominador, tornando o passo **gigantesco**!)*
+:::
+:::
+
+# Bloco 4: A Cirurgia Crítica — Do $L_2$ Regularization ao AdamW
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Armadilha Histórica da Regularização $L_2$ em Otimizadores Adaptativos
+
+Durante anos após a publicação do Adam, pesquisadores e praticantes observaram um fenômeno intrigante: embora o Adam convergisse muito mais rápido do que o SGD com momento durante o treinamento, modelos treinados com SGD frequentemente exibiam **melhor capacidade de generalização e menor erro de teste** em visão computacional e processamento de linguagem natural.
+
+Em 2017 (com versão final em 2019 no ICLR), Ilya Loshchilov e Frank Hutter desvendaram o mistério no artigo seminal **"Decoupled Weight Decay Regularization"**: havia um equívoco conceitual profundo na forma como a regularização de pesos vinha sendo implementada em todas as bibliotecas de Deep Learning (PyTorch, TensorFlow, Caffe).
+
+No Gradiente Descendente clássico, regularização $L_2$ e decaimento de pesos (*weight decay*) são rigorosamente equivalentes:
+
+- Adicionar penalidade $L_2$ à função de perda:
+  $$\mathcal{L}_{\text{reg}}(\mathbf{w}) = \mathcal{L}(\mathbf{w}) + \frac{\lambda}{2}\|\mathbf{w}\|^2 \implies \nabla \mathcal{L}_{\text{reg}}(\mathbf{w}) = \nabla \mathcal{L}(\mathbf{w}) + \lambda \mathbf{w}$$
+
+- Passo do GD clássico:
+  $$\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha \nabla \mathcal{L}_{\text{reg}}(\mathbf{w}_t) = \mathbf{w}_t - \alpha \nabla \mathcal{L}(\mathbf{w}_t) - \alpha \lambda \mathbf{w}_t = (1 - \alpha \lambda)\mathbf{w}_t - \alpha \nabla \mathcal{L}(\mathbf{w}_t)$$
+  A multiplicação por $(1 - \alpha \lambda)$ contrai o peso a cada passo por uma fração constante e homogênea.
+
+**O que acontece quando fazemos isso dentro do Adam?**
+Se simplesmente somamos $\lambda \mathbf{w}_t$ ao gradiente que entra no Adam, esse termo é incorporado ao primeiro momento e ao segundo momento:
+$$\tilde{\mathbf{g}}_t = \mathbf{g}_t + \lambda \mathbf{w}_t$$
+Na atualização dos parâmetros, o termo de regularização passa a ser dividido pelo desvio adaptativo:
+$$w_{t+1, i} \approx w_{t, i} - \frac{\alpha}{\sqrt{\hat{v}_{t, i}} + \epsilon} \hat{m}_{t, i} - \frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}} + \epsilon} w_{t, i}$$
+
+A taxa efetiva de contração do peso é:
+$$\gamma_{i}^{\text{efetiva}} = \frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}} + \epsilon}$$
+Essa fórmula revela a patologia: **a força da regularização é inversamente proporcional à magnitude dos gradientes daquele parâmetro!**
+1. Parâmetros com gradientes frequentes e volumosos ($\sqrt{\hat{v}_i}$ grande) recebem regularização quase nula!
+2. Parâmetros associados a atributos raros ou gradientes nulos ($\sqrt{\hat{v}_i} \approx 0$) recebem uma penalidade brutal inflacionada por $1/\epsilon$!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Patologia do $L_2$ Tradicional no Adam
+
+::: {.columns}
+::: {.column width="50%"}
+**No SGD Clássico (Equivalência Perfeita):**
+
+$$\mathbf{w}_{t+1} = (1 - \alpha \lambda)\mathbf{w}_t - \alpha \nabla \mathcal{L}(\mathbf{w}_t)$$
+
+- Penalidade $L_2$ na perda $\equiv$ decaimento de peso multiplicativo.
+- Contração uniforme por fator $(1 - \alpha \lambda)$ em todos os pesos.
+:::
+
+::: {.column width="50%"}
+**No Adam com $L_2$ na Perda (Patologia):**
+
+$$w_{t+1, i} \approx \left(1 - \frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}} + \epsilon}\right) w_{t, i} - \frac{\alpha \hat{m}_{t, i}}{\sqrt{\hat{v}_{t, i}} + \epsilon}$$
+
+- A regularização é dividida por $\sqrt{\hat{v}_{t, i}}$!
+- Pesos com gradientes grandes quase não sofrem decaimento.
+- Pesos esparsos sofrem penalidade destrutiva.
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Solução Elegante: AdamW
+
+Para restaurar a integridade da regularização sem renunciar às vantagens do precondicionamento adaptativo, Loshchilov & Hutter propuseram **desacoplar estritamente** o decaimento de pesos da fração adaptativa de gradientes:
+
+$$\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha \lambda \mathbf{w}_t - \frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \odot \hat{\mathbf{m}}_t$$
+onde $\hat{\mathbf{m}}_t$ e $\hat{\mathbf{v}}_t$ são alimentados **exclusivamente** pelo gradiente da perda de tarefa $\mathbf{g}_t = \nabla \mathcal{L}(\mathbf{w}_t)$, sem conter a penalidade $\lambda \mathbf{w}_t$.
+
+Essa simples alteração algorítmica:
+1. Garante que todos os pesos decaiam a uma taxa proporcional constante por época, restaurando a semântica da prior Bayesiana Gaussiana.
+2. Equalizou a performance de generalização do Adam com a do SGD em benchmarks rigorosos de visão computacional.
+3. Tornou-se o **padrão absoluto da indústria** para o pré-treinamento de todos os modelos de linguagem modernos (como GPT-3/4, LLaMA, Mistral, BERT).
+
+### Representação Esquemática: Adam ($L_2$ Acoplado) vs. AdamW (Desacoplado)
+
+O equívoco histórico desvendado por Loshchilov & Hutter (2019) pode ser visualizado comparando o ponto de injeção da regularização no fluxo computacional:
+
+::: {.fig-resize style="width: 92%; margin: 1.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{vermelho}{RGB}{224,60,49}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{cinza}{RGB}{93,109,126}
+
+\begin{tikzpicture}[>=latex, font=\small, thick]
+  % 1. Painel Esquerdo: Adam Clássico com L2 Acoplado
+  \begin{scope}[xshift=0cm]
+    \node[anchor=south, font=\bfseries, text=vermelho] at (2.2, 5.0) {Adam Clássico com $L_2$ Acoplado};
+    \draw[cinza!30, rounded corners=6pt, fill=cinza!5] (-0.8, -1.8) rectangle (5.2, 4.8);
+    
+    \node[draw=cinza, fill=white, rounded corners=4pt, font=\scriptsize] (L1) at (0.8, 4.0) {Perda $\mathcal{L}(\mathbf{w})$};
+    \node[draw=vermelho, fill=vermelho!10, rounded corners=4pt, font=\scriptsize] (REG1) at (3.6, 4.0) {$\lambda \mathbf{w}_t$};
+    
+    \node[draw=vermelho, circle, inner sep=2pt, font=\bfseries, line width=1.2pt] (PLUS) at (2.2, 3.0) {$+$};
+    \node[font=\tiny, text=vermelho, anchor=west] at (2.5, 3.0) {Mistura na perda!};
+    
+    \node[draw=vermelho, fill=vermelho!10, rounded corners=5pt, text width=4.0cm, align=center, font=\scriptsize] 
+      (CORE1) at (2.2, 1.8) {\textbf{Núcleo do Adam}\\\scriptsize$\hat{\mathbf{m}}_t$ e $\hat{\mathbf{v}}_t$ contaminados por $\lambda \mathbf{w}_t$};
+      
+    \node[draw=cinza!80, fill=white, rounded corners=5pt, text width=4.0cm, align=center, font=\scriptsize] 
+      (STEP1) at (2.2, 0.4) {$\mathbf{w}_t - \frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} (\hat{\mathbf{m}}_t + \lambda \mathbf{w}_t)$};
+      
+    \node[draw=vermelho, fill=vermelho!20, rounded corners=5pt, text width=4.4cm, align=center, font=\scriptsize] 
+      (WARN1) at (2.2, -1.0) {\textbf{Patologia:}\\\footnotesize Decaimento efetivo $\propto \frac{\alpha \lambda}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$\\\scriptsize Pesos frequentes: quase sem $L_2$\\\scriptsize Pesos esparsos: sobrepenalizados!};
+      
+    \draw[->] (L1) |- (PLUS);
+    \draw[->, vermelho] (REG1) |- (PLUS);
+    \draw[->, line width=1.2pt] (PLUS) -- (CORE1);
+    \draw[->, line width=1.2pt] (CORE1) -- (STEP1);
+    \draw[->, line width=1.2pt, vermelho] (STEP1) -- (WARN1);
+  \end{scope}
+
+  % 2. Painel Direito: AdamW com Weight Decay Desacoplado
+  \begin{scope}[xshift=7.0cm]
+    \node[anchor=south, font=\bfseries, text=verde!80!black] at (2.5, 5.0) {AdamW: Weight Decay Desacoplado};
+    \draw[cinza!30, rounded corners=6pt, fill=cinza!5] (-0.8, -1.8) rectangle (5.8, 4.8);
+    
+    \node[draw=cinza, fill=white, rounded corners=4pt, font=\scriptsize] (L2) at (1.2, 4.0) {Perda $\mathcal{L}(\mathbf{w})$};
+    \node[draw=verde!80!black, fill=verde!10, rounded corners=4pt, font=\scriptsize] (REG2) at (4.0, 4.0) {Decaimento $\alpha \lambda \mathbf{w}_t$};
+    
+    \node[draw=azul, fill=azul!10, rounded corners=5pt, text width=3.8cm, align=center, font=\scriptsize] 
+      (CORE2) at (1.2, 2.5) {\textbf{Núcleo do Adam Puro}\\\scriptsize$\hat{\mathbf{m}}_t, \hat{\mathbf{v}}_t$ baseados apenas em $\nabla \mathcal{L}$};
+      
+    \node[draw=verde!80!black, circle, inner sep=2pt, font=\bfseries, line width=1.2pt] (MINUS) at (2.5, 1.0) {$-$};
+    
+    \node[draw=verde!80!black, fill=verde!15, rounded corners=5pt, text width=4.5cm, align=center, font=\scriptsize, line width=1.1pt] 
+      (STEP2) at (2.5, -0.1) {\textbf{Atualização Desacoplada:}\\\footnotesize$\mathbf{w}_{t+1} = \underbrace{(1 - \alpha \lambda)\mathbf{w}_t}_{\text{Decaimento puro}} - \underbrace{\frac{\alpha \hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t}+\epsilon}}_{\text{Passo adaptativo}}$};
+      
+    \node[draw=verde!80!black, fill=verde!20, rounded corners=5pt, text width=4.5cm, align=center, font=\scriptsize] 
+      (BENEFIT) at (2.5, -1.1) {\textbf{Propriedade Ótima:}\\\scriptsize Contração uniforme em todos os pesos\\independente da frequência dos gradientes!};
+      
+    \draw[->, line width=1.2pt] (L2) -- (CORE2);
+    \draw[->, line width=1.2pt] (CORE2) |- (MINUS);
+    \draw[->, line width=1.2pt, verde!80!black] (REG2) |- (MINUS);
+    \draw[->, line width=1.4pt, verde!80!black] (MINUS) -- (STEP2);
+    \draw[->, line width=1.2pt, verde!80!black] (STEP2) -- (BENEFIT);
+  \end{scope}
+\end{tikzpicture}
+```
+:::
+
+| Aspecto | Regularização $L_2$ no Adam (Clássico) | Weight Decay Desacoplado (AdamW) |
+| :--- | :--- | :--- |
+| **Ponto de Injeção** | Na função de perda / gradiente: $\mathbf{g}_t + \lambda \mathbf{w}_t$ | Diretamente na atualização do peso: $(1 - \alpha \lambda)\mathbf{w}_t$ |
+| **Interação com a Escala Adaptativa** | Acoplada: o decaimento é dividido por $\sqrt{\hat{\mathbf{v}}_t} + \epsilon$ | Desacoplada: o decaimento é independente de $\hat{\mathbf{v}}_t$ |
+| **Impacto em Parâmetros Frequentes** | Decaimento atenuado ($\sqrt{\hat{v}} \gg 1 \implies \text{decaimento} \to 0$) | Decaimento pleno e constante ($\alpha \lambda$) |
+| **Impacto em Parâmetros Esparsos** | Decaimento superdimensionado ($\sqrt{\hat{v}} \approx 0 \implies \text{decaimento} \gg 1$) | Decaimento equilibrado ($\alpha \lambda$) |
+| **Impacto Prático em LLMs / Transformers** | Subotimal: sub-regulariza embeddings frequentes e explode raros | Padrão da indústria: indispensável para treinar GPT, LLaMA e BERT |
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Cirurgia do AdamW: Decaimento Desacoplado
+
+::: {.callout-tip}
+## Regra de Atualização do AdamW (Loshchilov & Hutter, 2019)
+$$\mathbf{w}_{t+1} = \underbrace{(1 - \alpha \lambda) \mathbf{w}_t}_{\text{Decaimento Puro Desacoplado}} - \underbrace{\frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \odot \hat{\mathbf{m}}_t}_{\text{Passo Adaptativo com Gradiente Puro}}$$
+:::
+
+::: {.columns}
+::: {.column width="50%"}
+**Por Que Funciona:**
+
+- $\hat{\mathbf{m}}_t$ e $\hat{\mathbf{v}}_t$ recebem apenas $\nabla \mathcal{L}(\mathbf{w}_t)$.
+- O decaimento de peso não é distorcido pela curvatura de segunda ordem.
+- Contração idêntica para pesos frequentes e esparsos.
+:::
+
+::: {.column width="50%"}
+**O Impacto na IA Moderna:**
+
+- Eliminou a disparidade histórica de generalização entre Adam e SGD.
+- É o otimizador obrigatório no treinamento de **Transformers e LLMs** (GPT, LLaMA, DeepSeek).
+:::
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Funcionamento Esquematizado: Adam ($L_2$) vs. AdamW
+
+::: {.columns}
+::: {.column width="50%"}
+**Adam com $L_2$ Acoplado (Distortivo):**
+
+::: {.fig-resize style="width: 95%; margin: 0.5rem auto;"}
+```{.tikz}
+\definecolor{vermelho}{RGB}{224,60,49}
+\definecolor{cinza}{RGB}{93,109,126}
+\begin{tikzpicture}[>=latex, font=\scriptsize, thick]
+  \node[draw=cinza, rounded corners=3pt, inner sep=3pt] (G) at (0, 0) {$\mathbf{g}_t + \lambda \mathbf{w}_t$};
+  \node[draw=vermelho, fill=vermelho!15, rounded corners=3pt, inner sep=4pt] (A) at (2.6, 0) {Adam Core};
+  \node[draw=cinza, rounded corners=3pt, inner sep=3pt] (W) at (4.8, 0) {$\mathbf{w}_{t+1}$};
+  \draw[->] (G) -- (A);
+  \draw[->] (A) -- (W);
+\end{tikzpicture}
+```
+:::
+
+$$\Delta w_i \propto \frac{\hat{m}_i + \lambda w_i}{\sqrt{\hat{v}_i} + \epsilon}$$
+
+- O decaimento é dividido por $\sqrt{\hat{v}_i}$.
+- **Gradiente grande:** quase sem decaimento!
+- **Gradiente raro:** decaimento inflacionado!
+:::
+
+::: {.column width="50%"}
+**AdamW Desacoplado (Cirúrgico):**
+
+::: {.fig-resize style="width: 95%; margin: 0.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{cinza}{RGB}{93,109,126}
+\begin{tikzpicture}[>=latex, font=\scriptsize, thick]
+  \node[draw=cinza, rounded corners=3pt, inner sep=3pt] (G) at (0, 0) {$\mathbf{g}_t$};
+  \node[draw=azul, fill=azul!15, rounded corners=3pt, inner sep=4pt] (A) at (1.8, 0) {Adam Puro};
+  \node[draw=verde!80!black, fill=verde!15, rounded corners=3pt, inner sep=3pt] (WD) at (3.8, 0) {$-\alpha \lambda \mathbf{w}_t$};
+  \node[draw=cinza, rounded corners=3pt, inner sep=3pt] (W) at (5.5, 0) {$\mathbf{w}_{t+1}$};
+  \draw[->] (G) -- (A);
+  \draw[->] (A) -- (WD);
+  \draw[->] (WD) -- (W);
+\end{tikzpicture}
+```
+:::
+
+$$w_{t+1} = (1 - \alpha \lambda) w_t - \frac{\alpha \hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}$$
+
+- Contração homogênea $(1 - \alpha \lambda)$.
+- Padrão ouro absoluto para Transformers e LLMs!
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 4: A Cirurgia do AdamW
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 4
+1. Por que no Gradiente Descendente euclidiano puro a regularização $L_2$ ($\frac{\lambda}{2}\|\mathbf{w}\|^2$) e o decaimento de pesos multiplicativo ($(1 - \alpha\lambda)\mathbf{w}$) são identicamente equivalentes?
+2. O que acontece com a taxa efetiva de decaimento de um peso associado a uma palavra muito frequente (com $\hat{v}_i = 100$) em relação a um peso associado a uma palavra rara ($\hat{v}_i = 0{,}01$) no Adam clássico com $L_2$?
+3. Como o AdamW restaura o decaimento homogêneo?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- ( ) No GD euclidiano clássico, adicionar $\frac{\lambda}{2}\|\mathbf{w}\|^2$ à perda equivale a contrair o peso por $(1 - \alpha\lambda)$ a cada passo.
+- ( ) No Adam com $L_2$ clássico, atributos com gradientes frequentes sofrem maior decaimento relativo de magnitude do que atributos com gradientes esparsos.
+- ( ) O AdamW subtrai o termo $\alpha \lambda \mathbf{w}_t$ fora da fração adaptativa de segunda ordem.
+- ( ) O sucesso do AdamW em modelos como Transformers deve-se à regularização homogênea de tokens raros e frequentes no vocabulário.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 4: Adam com $L_2$ vs. AdamW
+
+::: {.callout-tip}
+## Pergunta de Fixação
+
+- Palavra frequente: $\sqrt{\hat{v}} = 10 \implies$ decaimento efetivo $\frac{\alpha\lambda}{10}$ (penalidade reduzida a 10%).
+- Palavra rara: $\sqrt{\hat{v}} = 0{,}1 \implies$ decaimento efetivo $\frac{\alpha\lambda}{0{,}1} = 10 \alpha\lambda$ (penalidade inflacionada em 1000%).
+- O AdamW aplica decaimento constante $\alpha \lambda \mathbf{w}_t$ a ambos!
+:::
+
+::: {.fragment}
+
+- [x] No GD clássico, $L_2$ na perda e decaimento multiplicativo de pesos são algebricamente indistinguíveis.
+- [ ] No Adam clássico, atributos frequentes sofrem maior decaimento. *(Falso: sofrem **menor** decaimento porque $\sqrt{\hat{v}}$ está no denominador!)*
+- [x] O AdamW desacopla o termo de decaimento da escala adaptativa $\sqrt{\hat{v}_t}$.
+- [x] O AdamW é essencial em LLMs para evitar regularização excessiva em parâmetros de ativação esparsa.
+:::
+:::
+
+# Fechamento
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Retomando as 4 Perguntas da Aula
+
+1. **A Física da Inércia:** Como a analogia de uma esfera pesada rolando sob atrito viscoso deduz o Momento de Polyak?
+   *Resposta:* A discretização de Euler da equação diferencial de segunda ordem ($m\ddot{\mathbf{w}} + \gamma\dot{\mathbf{w}} + \nabla f = \mathbf{0}$) gera o sistema dinâmico linear $2 \times 2$ por modo espectral. Quando as raízes do polinômio característico são complexas conjugadas, todos os autovalores decaem com taxa uniforme $|\mu| = \sqrt{\beta}$, reduzindo a contração assintótica de $\mathcal{O}(1 - 1/\kappa)$ para a aceleração de Chebyshev $\mathcal{O}(1 - 2/\sqrt{\kappa})$.
+2. **A Antecipação de Nesterov:** Qual é a mecânica do vetor antecipado (*look-ahead*)?
+   *Resposta:* Ao saltar primeiro na direção da inércia ($\mathbf{w}_k + \beta \mathbf{v}_k$) e avaliar o gradiente adiante, o NAG detecta subidas da função antes que a partícula as atinja, agindo como freio preditivo que elimina o *overshoot* e alcança a cota inferior matemática ótima $\mathcal{O}(1/k^2)$ para funções convexas $L$-suaves.
+3. **A Grande Síntese do Adam:** Como unificar inércia direcional com escalas adaptativas?
+   *Resposta:* O Adam combina o primeiro momento exponencial $\mathbf{m}_t$ (velocidade direcional que cancela ruído transversal) com o segundo momento $\mathbf{v}_t$ (curvatura diagonal que equaliza coordenadas). A correção analítica de viés divide por $(1 - \beta_1^t)$ e $(1 - \beta_2^t)$, prevenindo passos desestabilizadores nos estágios iniciais de treino.
+4. **A Cirurgia do AdamW:** Por que a regularização $L_2$ tradicional falha em otimizadores adaptativos?
+   *Resposta:* Somar $\lambda \mathbf{w}$ ao gradiente dentro do Adam faz com que a taxa de decaimento seja dividida por $\sqrt{\hat{v}_t}$, suprimindo a regularização em parâmetros frequentes e punindo excessivamente pesos esparsos. O AdamW desacopla a subtração $\alpha \lambda \mathbf{w}_t$ da fração adaptativa, restaurando a contração homogênea indispensável para a generalização de Transformers e redes neurais profundas.
+
+## Síntese Comparativa: A Árvore Genealógica dos Otimizadores de Primeira Ordem
+
+Para consolidar as conexões estabelecidas ao longo da disciplina — desde o Gradiente Descendente euclidiano da Aula 8 e os métodos de escala adaptativa da Aula 11 até os aceleradores com inércia e o AdamW —, apresentamos a genealogia estrutural dos métodos de primeira ordem:
+
+| Otimizador | Referência / Origem | Regra de Atualização / Mecânica Central | Inércia | Escala Adaptativa | Memória | Cota / Desempenho em $\kappa \gg 1$ |
+| :--- | :--- | :--- | :---: | :---: | :---: | :--- |
+| **GD Clássico** | Cauchy (1847), Aula 8 | $\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k)$ | Não | Não | $\mathcal{O}(d)$ | $\rho \approx 1 - \frac{2}{\kappa}$ (Ziguezague severo) |
+| **Polyak (Heavy-Ball)** | Polyak (1964), Bloco 1 | $\mathbf{v}_{k+1} = \beta \mathbf{v}_k - \alpha \nabla f(\mathbf{w}_k)$<br>$\mathbf{w}_{k+1} = \mathbf{w}_k + \mathbf{v}_{k+1}$ | Sim ($\mathbf{v}_k$) | Não | $2d$ | $\rho \approx 1 - \frac{2}{\sqrt{\kappa}}$ (Aceleração espectral) |
+| **Nesterov (NAG)** | Nesterov (1983), Bloco 2 | $\mathbf{w}_{\text{ahead}} = \mathbf{w}_k + \beta \mathbf{v}_k$<br>$\mathbf{v}_{k+1} = \beta \mathbf{v}_k - \alpha \nabla f(\mathbf{w}_{\text{ahead}})$ | Sim (*look-ahead*) | Não | $2d$ | $\mathcal{O}(1/k^2)$ (Cota inferior ótima de Nesterov) |
+| **RMSProp** | Hinton (2012), Aula 11 | $\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1-\beta_2)\mathbf{g}_t^2$<br>$\mathbf{w}_{t+1} = \mathbf{w}_t - \frac{\alpha}{\sqrt{\mathbf{v}_t}+\epsilon} \odot \mathbf{g}_t$ | Não | Sim ($\mathbf{v}_t$) | $2d$ | Equaliza curvatura diagonal, mas oscila sem inércia |
+| **Adam** | Kingma & Ba (2014), Bloco 3 | $\mathbf{w}_{t+1} = \mathbf{w}_t - \frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t}+\epsilon} \odot \hat{\mathbf{m}}_t$<br>(com correções de viés $1-\beta^t$) | Sim ($\mathbf{m}_t$) | Sim ($\mathbf{v}_t$) | $3d$ | Síntese adaptativa completa com amortecimento inicial |
+| **AdamW** | Loshchilov & Hutter (2019), Bloco 4 | $\mathbf{w}_{t+1} = (1 - \alpha \lambda)\mathbf{w}_t - \frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t}+\epsilon} \odot \hat{\mathbf{m}}_t$<br>(weight decay desacoplado) | Sim ($\mathbf{m}_t$) | Sim ($\mathbf{v}_t$) | $3d$ | Padrão ouro na IA moderna e Transformers |
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Síntese: A Evolução dos Otimizadores de 1ª Ordem
+
+| Otimizador | Inércia Direcional | Escalas Adaptativas | Custo por Passo | Desempenho em $\kappa \gg 1$ |
+| :--- | :---: | :---: | :---: | :--- |
+| **GD Clássico** | Não | Não | $\mathcal{O}(d)$ | Ziguezague severo ($\rho \approx 1 - 2/\kappa$) |
+| **Polyak (Heavy-Ball)** | Sim ($\mathbf{v}_k$) | Não | $\mathcal{O}(d)$ | Aceleração espectral ($\rho \approx 1 - 2/\sqrt{\kappa}$) |
+| **Nesterov (NAG)** | Sim (*look-ahead*) | Não | $\mathcal{O}(d)$ | Cota ótima $\mathcal{O}(1/k^2)$ com frenagem ativa |
+| **RMSProp** | Não | Sim ($\mathbf{v}_t$) | $\mathcal{O}(d)$ | Equaliza eixos, mas oscila sem inércia |
+| **Adam** | Sim ($\mathbf{m}_t$) | Sim ($\mathbf{v}_t$) | $\mathcal{O}(d)$ | Síntese adaptativa com correção de viés |
+| **AdamW** | Sim ($\mathbf{m}_t$) | Sim ($\mathbf{v}_t$) | $\mathcal{O}(d)$ | Padrão ouro moderno com weight decay desacoplado |
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Que Fica em Aberto
+
+O **AdamW** consolidou-se como o cavalo de batalha do aprendizado profundo moderno. Ele resolve o descompasso de escalas entre coordenadas e neutraliza ruídos estocásticos ortogonais.
+
+No entanto, repare em uma limitação conceitual persistente: **o AdamW trata cada parâmetro de peso como se fosse um escalar isolado em um vetor unidimensional**.
+Em redes neurais e modelos de linguagem, os parâmetros organizam-se naturalmente em **matrizes e tensores bidimensionais de pesos** ($W \in \mathbb{R}^{d_{\text{out}} \times d_{\text{in}}}$). Existe uma correlação estruturada rica entre as linhas e colunas dessas transformações lineares que a diagonalização do AdamW simplesmente descarta.
+
+Na **Aula 13: Precondicionamento Estruturado e Ortogonalização Matricial**, investigaremos como sair da limitação das aproximações puramente diagonais:
+
+- O otimizador **Shampoo** (Gupta et al., 2018), que constrói precondicionadores estruturados via produtos de Kronecker das matrizes de covariância de linhas e colunas.
+- A **Ortogonalização Matricial via Decomposição Polar** e as iterações polinomiais de **Newton-Schulz** executadas massivamente em Tensor Cores de GPUs.
+- O otimizador **Muon** (Jordan et al., 2024), que revoluciona o treinamento de LLMs ao transformar atualizações de gradiente em matrizes ortogonais normalizadas.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Ponte para a Aula 13: Da Diagonal à Estrutura Matricial
+
+::: {.columns}
+::: {.column width="50%"}
+**O Que Vimos Hoje (Aula 12):**
+
+- Inércia direcional com momento de Polyak e antecipação de Nesterov.
+- Síntese adaptativa do Adam com correção analítica de viés.
+- Desacoplamento do *weight decay* com o AdamW.
+- **Limitação persistente:** O AdamW ainda trata cada peso como um escalar diagonal isolado!
+:::
+
+::: {.column width="50%"}
+**O Próximo Passo (Aula 13):**
+
+- Pesos de redes profundas são **matrizes e tensores** ($W \in \mathbb{R}^{d_{\text{out}} \times d_{\text{in}}}$).
+- Precondicionamento tensorial via produtos de Kronecker (**Shampoo**).
+- Ortogonalização de matrizes via iterações de **Newton-Schulz**:
+  $$X_{k+1} = \frac{1}{2}X_k (3I - X_k^T X_k)$$
+
+- O revolucionário otimizador **Muon** para LLMs!
+:::
+:::
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::

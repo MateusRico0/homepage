@@ -1,0 +1,179 @@
+---
+title: "Soluções dos Exercícios — Aula 12: Momento, Curvatura e Métodos Acelerados"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+
+::: {.callout-note icon=false}
+Este documento contém as deduções matemáticas integrais e o gabarito analítico comentado de todas as questões propostas em [`exercicios.qmd`](exercicios.qmd).
+:::
+
+---
+
+## Soluções das Questões Discursivas
+
+### Questão 1: Análise Espectral do Operador de Polyak e Dedução do Raio Espectral de Chebyshev
+
+**Enunciado Resumido:** Seja $f(\mathbf{w}) = \frac{1}{2}\mathbf{w}^T H \mathbf{w}$ com $H \succ 0$ e autovalores $\lambda_i \in [\lambda_{\min}, \lambda_{\max}]$. Analisar a dinâmica do erro $\mathbf{e}_k = \mathbf{w}_k - \mathbf{w}^\star$ sob o método de Polyak (*Heavy-Ball*), deduzir o raio espectral de Chebyshev e comparar com o Gradiente Descendente.
+
+#### Item (a): Decomposição Espectral e Sistema Dinâmico de 2ª Ordem
+Como $f(\mathbf{w})$ é uma forma quadrática com minimizador $\mathbf{w}^\star = \mathbf{0}$, temos $\nabla f(\mathbf{w}_k) = H \mathbf{w}_k = H \mathbf{e}_k$. A regra de atualização de Polyak é:
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha H \mathbf{w}_k + \beta (\mathbf{w}_k - \mathbf{w}_{k-1})$$
+Subtraindo $\mathbf{w}^\star$ de ambos os lados:
+$$\mathbf{e}_{k+1} = (1 + \beta) \mathbf{e}_k - \alpha H \mathbf{e}_k - \beta \mathbf{e}_{k-1} = [(1 + \beta)I - \alpha H]\mathbf{e}_k - \beta \mathbf{e}_{k-1}$$
+Pelo Teorema Espectral para matrizes simétricas, existe uma base ortonormal de autovetores $\{\mathbf{u}_1, \dots, \mathbf{u}_d\}$ tal que $H \mathbf{u}_i = \lambda_i \mathbf{u}_i$. Projetando o vetor de erro nessa base ($e_{k, i} = \mathbf{u}_i^T \mathbf{e}_k$):
+$$e_{k+1, i} = (1 + \beta - \alpha \lambda_i) e_{k, i} - \beta e_{k-1, i}$$
+Definindo o vetor de estado aumentado $\mathbf{z}_{k, i} = \begin{bmatrix} e_{k, i} \\ e_{k-1, i} \end{bmatrix} \in \mathbb{R}^2$, obtemos o sistema linear de 1ª ordem equivalente em dimensão 2:
+$$\begin{bmatrix} e_{k+1, i} \\ e_{k, i} \end{bmatrix} = \begin{bmatrix} 1 + \beta - \alpha \lambda_i & -\beta \\ 1 & 0 \end{bmatrix} \begin{bmatrix} e_{k, i} \\ e_{k-1, i} \end{bmatrix}$$
+que denotamos por $\mathbf{z}_{k+1, i} = T_i \mathbf{z}_{k, i}$. $\blacksquare$
+
+---
+
+#### Item (b): Polinômio Característico e Raio Espectral Uniforme $\sqrt{\beta}$
+A equação característica da matriz $T_i$ é obtida pelo determinante:
+$$\det(\mu I - T_i) = \det \begin{bmatrix} \mu - (1 + \beta - \alpha \lambda_i) & \beta \\ -1 & \mu \end{bmatrix} = \mu^2 - (1 + \beta - \alpha \lambda_i)\mu + \beta = 0$$
+O discriminante dessa equação de segundo grau é:
+$$\Delta(\lambda_i) = (1 + \beta - \alpha \lambda_i)^2 - 4\beta$$
+Quando $\Delta(\lambda_i) \le 0$, as duas raízes $\mu_1, \mu_2$ são números complexos conjugados:
+$$\mu_{1, 2} = \frac{(1 + \beta - \alpha \lambda_i) \pm i \sqrt{4\beta - (1 + \beta - \alpha \lambda_i)^2}}{2}$$
+O módulo ao quadrado de qualquer uma das raízes complexas conjugadas é dado pelo produto das raízes (termo independente da equação mônica):
+$$|\mu|^2 = \mu_1 \mu_2 = \beta \implies |\mu| = \sqrt{\beta}$$
+**Conclusão fundamental:** Enquanto o discriminante permanecer não-positivo ($\Delta(\lambda_i) \le 0$), o raio espectral de contração é identicamente $\sqrt{\beta}$ para **todas** as direções espectrais, independentemente do valor individual do autovalor $\lambda_i$! $\blacksquare$
+
+---
+
+#### Item (c): Minimização do Raio Espectral e Fórmulas de Polyak
+Para que a contração seja a mais rápida possível, desejamos minimizar $\beta$ sob a restrição de que $\Delta(\lambda_i) \le 0$ para todo $\lambda_i \in [\lambda_{\min}, \lambda_{\max}]$.
+A condição $\Delta(\lambda) \le 0$ equivale a:
+$$-2\sqrt{\beta} \le 1 + \beta - \alpha \lambda \le 2\sqrt{\beta}$$
+Como a função $g(\lambda) = 1 + \beta - \alpha \lambda$ é estritamente decrescente em $\lambda$, seu valor máximo ocorre em $\lambda_{\min}$ e seu valor mínimo ocorre em $\lambda_{\max}$. Para otimizar o intervalo sem violar a condição nos extremos, impomos igualdade em ambos os limites:
+$$\begin{cases}
+1 + \beta - \alpha \lambda_{\min} = 2\sqrt{\beta} & (1) \\
+1 + \beta - \alpha \lambda_{\max} = -2\sqrt{\beta} & (2)
+\end{cases}$$
+Subtraindo a equação (2) da equação (1):
+$$\alpha (\lambda_{\max} - \lambda_{\min}) = 4\sqrt{\beta} \implies \alpha = \frac{4\sqrt{\beta}}{\lambda_{\max} - \lambda_{\min}}$$
+Somando as equações (1) e (2):
+$$2(1 + \beta) - \alpha(\lambda_{\max} + \lambda_{\min}) = 0 \implies 1 + \beta = \frac{\alpha}{2}(\lambda_{\max} + \lambda_{\min})$$
+Substituindo $\alpha$ nessa expressão:
+$$1 + \beta = \frac{2\sqrt{\beta}(\lambda_{\max} + \lambda_{\min})}{\lambda_{\max} - \lambda_{\min}} = 2\sqrt{\beta} \frac{\kappa + 1}{\kappa - 1}$$
+onde $\kappa = \frac{\lambda_{\max}}{\lambda_{\min}}$. Dividindo ambos os lados por $\sqrt{\beta}$:
+$$\sqrt{\beta} + \frac{1}{\sqrt{\beta}} = 2 \frac{\kappa + 1}{\kappa - 1}$$
+Essa equação quadrática em $\sqrt{\beta}$ admite como raiz estritamente menor que 1:
+$$\sqrt{\beta^\star} = \frac{\sqrt{\kappa} - 1}{\sqrt{\kappa} + 1} \implies \beta^\star = \left(\frac{\sqrt{\kappa} - 1}{\sqrt{\kappa} + 1}\right)^2$$
+Substituindo $\sqrt{\beta^\star}$ de volta na expressão de $\alpha$:
+$$\alpha^\star = \frac{4 \frac{\sqrt{\kappa}-1}{\sqrt{\kappa}+1}}{\lambda_{\min}(\kappa - 1)} = \frac{4 (\sqrt{\kappa}-1)}{\lambda_{\min}(\sqrt{\kappa}-1)(\sqrt{\kappa}+1)^2} = \frac{4}{\lambda_{\min}(\sqrt{\kappa}+1)^2} = \frac{4}{(\sqrt{\lambda_{\max}} + \sqrt{\lambda_{\min}})^2}$$
+deduzindo exatamente os parâmetros analíticos ótimos de Polyak (1964). $\blacksquare$
+
+---
+
+#### Item (d): Comparação Quantitativa de Taxa de Convergência para $\kappa = 10.000$
+O raio espectral do operador de Polyak sob os parâmetros ótimos é:
+$$\rho^\star_{\text{Polyak}} = \sqrt{\beta^\star} = \frac{\sqrt{\kappa} - 1}{\sqrt{\kappa} + 1}$$
+Para $\kappa = 10.000 \implies \sqrt{\kappa} = 100$:
+$$\rho^\star_{\text{Polyak}} = \frac{100 - 1}{100 + 1} = \frac{99}{101} \approx 0{,}980198$$
+No Gradiente Descendente clássico com taxa ótima $\alpha = \frac{2}{\lambda_{\max} + \lambda_{\min}}$:
+$$\rho^\star_{\text{GD}} = \frac{\kappa - 1}{\kappa + 1} = \frac{10.000 - 1}{10.000 + 1} = \frac{9.999}{10.001} \approx 0{,}999800$$
+Número de iterações $k$ para contrair o erro por um fator de $10\times$ ($\rho^k \le 0{,}1 \implies k \ge \frac{\ln(0{,}1)}{\ln(\rho)}$):
+
+- **Gradiente Descendente:**
+  $$k_{\text{GD}} \ge \frac{-2{,}302585}{\ln(0{,}999800)} \approx \frac{-2{,}302585}{-0{,}000200} \approx \mathbf{11.512\text{ iterações}}$$
+
+- **Momento de Polyak (*Heavy-Ball*):**
+  $$k_{\text{Polyak}} \ge \frac{-2{,}302585}{\ln(0{,}980198)} \approx \frac{-2{,}302585}{-0{,}020001} \approx \mathbf{115\text{ iterações}}$$
+
+**Conclusão:** O Momento de Polyak é aproximadamente **$100\times$ mais rápido** que o Gradiente Descendente para atingir a mesma precisão, correspondendo exatamente ao fator de aceleração $\sqrt{\kappa} = \sqrt{10.000} = 100$. $\blacksquare$
+
+---
+
+### Questão 2: A Cirurgia do Weight Decay — Por que Adam com $L_2$ Difere Estruturalmente do AdamW
+
+**Enunciado Resumido:** Analisar a diferença fundamental entre a penalidade $L_2$ adicionada à perda versus o decaimento de pesos desacoplado (*weight decay*) do AdamW.
+
+#### Item (a): Gradiente da Perda Regularizada
+Dada a função de custo com regularização $L_2$:
+$$\mathcal{L}_{\text{reg}}(\mathbf{w}) = \mathcal{L}(\mathbf{w}) + \frac{\lambda}{2} \|\mathbf{w}\|^2$$
+Aplicando a regra da soma para o operador gradiente:
+$$\tilde{\mathbf{g}}_t = \nabla \mathcal{L}_{\text{reg}}(\mathbf{w}_t) = \nabla \mathcal{L}(\mathbf{w}_t) + \nabla \left(\frac{\lambda}{2} \mathbf{w}_t^T \mathbf{w}_t\right) = \nabla \mathcal{L}(\mathbf{w}_t) + \lambda \mathbf{w}_t = \mathbf{g}_t + \lambda \mathbf{w}_t$$
+onde $\mathbf{g}_t = \nabla \mathcal{L}(\mathbf{w}_t)$ é o gradiente da perda de treino original. $\blacksquare$
+
+---
+
+#### Item (b): Taxa Efetiva de Decaimento no Adam Clássico
+No Adam tradicional com $L_2$, o gradiente composto $\tilde{\mathbf{g}}_t$ alimenta o acumulador de primeiro momento e de segundo momento:
+$$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \tilde{\mathbf{g}}_t$$
+$$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \tilde{\mathbf{g}}_t^2$$
+Para analisar o efeito no decaimento do peso na coordenada $i$, consideremos a média estacionária de longo prazo onde $\hat{\mathbf{m}}_t \approx \mathbf{g}_t + \lambda \mathbf{w}_t$. A equação de atualização do parâmetro é:
+$$w_{t+1, i} = w_{t, i} - \frac{\alpha}{\sqrt{\hat{v}_{t, i}} + \epsilon} \hat{m}_{t, i} \approx w_{t, i} - \frac{\alpha}{\sqrt{\hat{v}_{t, i}} + \epsilon} \left(g_{t, i} + \lambda w_{t, i}\right)$$
+Reagrupando os termos proporcionais a $w_{t, i}$:
+$$w_{t+1, i} \approx \left(1 - \frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}} + \epsilon}\right) w_{t, i} - \frac{\alpha}{\sqrt{\hat{v}_{t, i}} + \epsilon} g_{t, i}$$
+Portanto, a taxa efetiva de contração (*shrinkage*) do peso $w_{t, i}$ por iteração é:
+$$\gamma_{t, i}^{\text{efetivo}} = \frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}} + \epsilon}$$
+que depende inversamente da escala da curvatura acumulada $\sqrt{\hat{v}_{t, i}}$. $\blacksquare$
+
+---
+
+#### Item (c): Patologia da Regularização Inversamente Proporcional à Curvatura
+A dependência $\gamma_{t, i} \propto \frac{1}{\sqrt{\hat{v}_{t, i}}}$ gera uma contradição pedagógica e prática grave:
+1. **Parâmetros com gradientes volumosos e frequentes** (por exemplo, palavras comuns em NLP, camadas iniciais ou componentes com alta curvatura): possuem $\hat{v}_{t, i} \gg 1$. Como consequência, o denominador $\sqrt{\hat{v}_{t, i}}$ é enorme, tornando a penalidade de regularização $\frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}}}$ praticamente nula! Esses parâmetros quase não sofrem contração de norma.
+2. **Parâmetros com gradientes esparsos ou diminutos** (palavras raras em embeddings, nós pouco ativados): possuem $\hat{v}_{t, i} \approx 0$. O denominador é reduzido a $\epsilon \approx 10^{-8}$, fazendo com que a taxa de regularização efetiva exploda, contraindo agressiva e desproporcionalmente justamente os parâmetros que menos foram atualizados pelos dados!
+Isso distorce por completo o objetivo original da regularização $L_2$ (que é impor uma prior Gaussiana uniforme com penalidade homogênea em todos os parâmetros). $\blacksquare$
+
+---
+
+#### Item (d): A Formulação do AdamW e o Regime com Gradiente Nulo
+O algoritmo **AdamW** (Loshchilov & Hutter, 2019) restaura a integridade da penalidade desacoplando o decaimento de pesos da fração adaptativa:
+$$\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha \lambda \mathbf{w}_t - \frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \odot \hat{\mathbf{m}}_t$$
+onde $\hat{\mathbf{m}}_t$ e $\hat{\mathbf{v}}_t$ são alimentados **exclusivamente** pelo gradiente da perda de treino $\mathbf{g}_t = \nabla \mathcal{L}(\mathbf{w}_t)$, sem conter $\lambda \mathbf{w}_t$.
+
+No regime onde o gradiente da perda de treino é nulo ($\nabla \mathcal{L}(\mathbf{w}) = \mathbf{0}$):
+Temos $\mathbf{g}_t = \mathbf{0} \implies \hat{\mathbf{m}}_t = \mathbf{0}$, de modo que a regra de atualização reduz-se exatamente a:
+$$\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha \lambda \mathbf{w}_t = (1 - \alpha \lambda) \mathbf{w}_t$$
+Após $K$ iterações sob esse regime:
+$$\mathbf{w}_{t+K} = (1 - \alpha \lambda)^K \mathbf{w}_t$$
+Essa é a contração exponencial clássica e perfeitamente uniforme da regularização $L_2$, independente da escala da matriz de covariância dos gradientes, comprovando analiticamente por que o desacoplamento do AdamW cura a patologia histórica do Deep Learning. $\blacksquare$
+
+---
+
+## Gabarito Comentado das Questões de Verdadeiro/Falso
+
+### Teste 1 — Dinâmica de Inércia e o Momento de Polyak
+
+* **(A) Verdadeiro.** A velocidade $\mathbf{v}_k$ acumula a soma geométrica dos gradientes passados $\sum_{j=0}^k \beta^{k-j} \mathbf{g}_j$. Para componentes que oscilam entre valores positivos e negativos em passos sucessivos, a soma cancela as amplitudes, agindo rigorosamente como um filtro passa-baixas temporal.
+* **(B) Verdadeiro.** O raio espectral de contração de Polyak sob parâmetros ótimos é $\frac{\sqrt{\kappa}-1}{\sqrt{\kappa}+1} \approx 1 - \frac{2}{\sqrt{\kappa}}$, enquanto no GD clássico é $\frac{\kappa-1}{\kappa+1} \approx 1 - \frac{2}{\kappa}$. A dependência da raiz quadrada de $\kappa$ representa uma aceleração quadrática em problemas mal-condicionados.
+* **(C) Falso.** Para que as raízes do polinômio característico $\mu^2 - (1 + \beta - \alpha\lambda)\mu + \beta = 0$ sejam complexas conjugadas (garantindo módulo uniforme $|\mu| = \sqrt{\beta}$), o discriminante deve ser **não-positivo** ($\Delta(\lambda) \le 0$). Se $\Delta > 0$, as raízes são reais e distintas, fazendo com que uma delas tenha módulo estritamente maior que $\sqrt{\beta}$.
+* **(D) Verdadeiro.** Embora o método de Polyak com passo fixo convirja aceleradamente em formas quadráticas, Lessard et al. (2016) demonstraram formalmente que o método Heavy-Ball com parâmetros constantes pode oscilar indefinidamente ou divergir mesmo em funções estritamente convexas suaves não-quadráticas se a curvatura variar ao longo do domínio.
+
+### Teste 2 — O Gradiente Acelerado de Nesterov (NAG)
+
+* **(A) Verdadeiro.** O salto de inércia prévio para $\mathbf{w}_k + \beta \mathbf{v}_k$ permite inspecionar o terreno adiante. Se a inércia estiver prestes a subir a encosta oposta do vale, o gradiente antecipado detecta a subida e aponta em sentido contrário, reduzindo a velocidade e amortecendo o *overshoot*.
+* **(B) Verdadeiro.** Em seu artigo seminal de 1983, Yurii Nesterov provou que qualquer método iterativo baseado em combinações lineares de gradientes de 1ª ordem não pode convergir mais rápido que $\Omega(1/k^2)$ para funções convexas $L$-suaves no pior caso, e que o NAG atinge exatamente essa cota assintótica ótima $\mathcal{O}(1/k^2)$.
+* **(C) Falso.** O cálculo do gradiente em $\mathbf{w}_k + \beta \mathbf{v}_k$ requer apenas uma única avaliação da função e uma única passagem de retropropagação por iteração. O custo computacional por passo é identicamente $\mathcal{O}(d)$, exatamente igual ao GD padrão.
+* **(D) Verdadeiro.** Em otimização estocástica (SGD com mini-batches ruidosos), antecipar a posição com base em uma velocidade ruidosa pode avaliar o gradiente em regiões espúrias do espaço, aumentando a sensibilidade ao ruído estocástico amostral.
+
+### Teste 3 — A Síntese do Otimizador Adam
+
+* **(A) Verdadeiro.** O Adam realiza exatamente essa síntese: o primeiro momento $\mathbf{m}_t$ fornece inércia direcional amortecendo ruídos transversais (inspirado em Polyak), enquanto o segundo momento $\mathbf{v}_t$ fornece a normalização de escala por coordenada (inspirado no RMSProp).
+* **(B) Verdadeiro.** Como $\mathbf{m}_0 = \mathbf{0}$, a expansão recursiva resulta em $\mathbb{E}[\mathbf{m}_t] = \mathbb{E}[\mathbf{g}_t](1 - \beta_1^t)$. Como $\beta_1 \in (0, 1)$, para $t$ pequeno $(1 - \beta_1^t) \ll 1$, gerando estimativas severamente subestimadas. A divisão pelo fator normalizador elimina esse viés de largada.
+* **(C) Verdadeiro.** Com $\beta_2 = 0{,}999$, no passo $t = 100$ temos $\beta_2^{100} \approx 0{,}9048$, de modo que $1 - \beta_2^{100} \approx 0{,}0952$ e $\frac{1}{1 - \beta_2^{100}} \approx 10{,}5$. São necessárias centenas de passos para que $(1 - \beta_2^t)$ se aproxime satisfatoriamente de 1.
+* **(D) Falso.** Na ausência de correção de viés, para $t=1$ temos $v_1 = (1 - \beta_2) g_1^2 = 0{,}001 g_1^2$. A raiz quadrada no denominador seria $\sqrt{v_1} \approx 0{,}0316 |g_1|$, que é um valor **artificialmente minúsculo**, fazendo com que o passo $\frac{\alpha}{\sqrt{v_1}}$ seja **gigantesco** ($\approx 31{,}6 \alpha$), provocando **explosão** ou divergência nos passos iniciais, e não paralisia.
+
+### Teste 4 — Regularização $L_2$ vs. Weight Decay Desacoplado (AdamW)
+
+* **(A) Verdadeiro.** No Gradiente Descendente euclidiano com taxa uniforme $\alpha$, $\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha (\nabla \mathcal{L} + \lambda \mathbf{w}_t) = (1 - \alpha\lambda)\mathbf{w}_t - \alpha \nabla \mathcal{L}(\mathbf{w}_t)$, tornando a regularização $L_2$ algebricamente indistinguível do decaimento multiplicativo de pesos.
+* **(B) Falso.** No Adam clássico com $L_2$ na perda, a taxa de decaimento efetiva é $\frac{\alpha \lambda}{\sqrt{\hat{v}_t} + \epsilon}$. Parâmetros com gradientes volumosos e frequentes possuem $\hat{v}_t$ grande, sofrendo **menor** decaimento relativo de magnitude; parâmetros com gradientes esparsos sofrem maior penalidade.
+* **(C) Verdadeiro.** O AdamW aplica a subtração $\alpha \lambda \mathbf{w}_t$ diretamente à variável de peso após a etapa de gradiente adaptativo, mantendo a taxa de contração homogênea em todas as coordenadas independentemente da intensidade de seus gradientes.
+* **(D) Verdadeiro.** Em Transformers e modelos de linguagem, palavras ou conceitos raros no vocabulário recebem gradientes esparsos. Com o AdamW, seus pesos decaem a uma taxa constante por época idêntica à dos tokens frequentes, prevenindo overfitting em parâmetros sub-otimizados e estabilizando a generalização.
+
