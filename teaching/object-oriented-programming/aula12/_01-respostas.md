@@ -25,6 +25,7 @@ revela que a causa real da fragilidade não é "faltam mais `if`s" — é a
 ausência de um único lugar responsável por decidir o fluxo.
 
 **V/F resolvido:**
+
 - ✗ No `Pedido` do antipadrão, inserir um novo estado exige editar apenas o método `pagar()`, já que é o único que decide a transição de "NOVO" para "PAGO".
 - ✔ Um teste unitário que verifica "cancelar um pedido já pago dispara estorno" precisa, antes de chamar `cancelar()`, montar um `Pedido` cujo campo `status` já esteja manualmente ajustado para `"PAGO"`.
 - ✗ Se o tipo do campo `status` fosse trocado de `String` para um `enum` Java, isso sozinho eliminaria a necessidade de abrir `pagar()`, `cancelar()` e `enviar()` ao adicionar um estado novo.
@@ -53,6 +54,7 @@ diferencia os dois é *quem* decide qual implementação está ativa e
 *quando* essa decisão acontece — não o número de métodos da interface.
 
 **V/F resolvido:**
+
 - ✗ Em um `CalculadoraDeFrete` que usa Strategy, é o próprio objeto `FreteExpresso` injetado que decide, sozinho e sem intervenção externa, substituir-se por `FreteGratis` durante a execução do sistema.
 - ✔ Num `Pedido` usando State, é fisicamente o objeto `EstadoNovo` — e não um código cliente externo chamando `pedido.setEstrategia(new EstadoPago())` — quem invoca a transição para `EstadoPago` como consequência de `pagar()` ter sido chamado.
 - ✗ Se um `ConcreteState` do padrão State fosse instanciado e injetado manualmente por código cliente externo antes de qualquer operação de negócio ocorrer no Contexto, essa prática ainda preservaria integralmente a intenção arquitetural original do State Pattern.
@@ -81,6 +83,7 @@ automatizado, substituir o legado real por um objeto simulado (*mock*)
 sem alterar o `LogAdapter` — vantagem que a herança anularia.
 
 **V/F resolvido:**
+
 - ✔ Um `LogAdapter` construído por composição (Object Adapter) continua funcionando corretamente mesmo que o objeto injetado no construtor seja, na verdade, uma subclasse de `LogServicoLegado` lançada pelo fornecedor depois que o `LogAdapter` já havia sido escrito.
 - ✔ Um `LogAdapter` que estendesse `LogServicoLegado` (Class Adapter) precisaria ser reescrito ou duplicado para conseguir adaptar especificamente uma nova subclasse do legado, mesmo que essa subclasse só adicionasse um método novo sem alterar `registrarLogNoArquivo`.
 - ✔ Trocar `LogServicoLegado legado` por uma injeção via construtor no `LogAdapter` (em vez de herança) é o que permite substituir, em um teste automatizado, o legado real por uma versão simulada (*mock*) sem alterar o código do `LogAdapter`.

@@ -22,6 +22,7 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 | `aula09` | 9 — Teoria de ensembles e redução de variância | A | California Housing (8 atributos) | publicada |
 | `aula10` | 10 — Gradient Boosting e otimização numérica no espaço de funções | A | California Housing (8 atributos) | publicada |
 | `aula11` | 11 — Máquinas de Vetores de Suporte (SVM) | A | Breast Cancer Wisconsin (2D e 30 atributos) | publicada |
+| `aula12` | 12 — Redes Neurais e Aprendizado de Representação | A | Breast Cancer Wisconsin (2D e 30 atributos) + Two Moons | publicada |
 
 ## Fio condutor (o que cada aula deixa para a seguinte)
 
@@ -37,6 +38,7 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 - **9:** Bagging como média bootstrap; preservação de viés ($\mathbb{E}[\bar{T}] = \mathbb{E}[T]$); derivação da variância correlacionada $\rho \sigma^2 + \frac{1-\rho}{B}\sigma^2$; Random Forests (Breiman, 2001) e descorrelação via subamostragem de $m \le p$ variáveis por nó; avaliação Out-of-Bag ($(1 - 1/N)^N \to 1/e \approx 36{,}8\%$); MDI (viés de alta cardinalidade) vs. MDA (permutação OOB). **Ponte:** Bagging reduz variância partindo de árvores profundas; a Aula 10 ataca o viés via Boosting sequencial no espaço de funções.
 - **10:** AdaBoost como FSAM sob perda exponencial ($L=e^{-yf}$); dedução de $\alpha_m$ e pesos; Friedman (2001) e Gradient Boosting Machine: resíduos como gradiente negativo no espaço de funções ($r_{im} = -\frac{\partial L}{\partial f}$); pseudo-resíduos para $L_2$, $L_1$ (mediana), Huber e Deviance binária ($y - p$); busca linear na folha terminal ($\gamma_{jm}$); encolhimento $\nu \le 0{,}1$ (*shrinkage*); teorema de ordem de interação de árvores ($K \le J - 1$); interpretabilidade pós-ajuste (importância relativa e PDP) e modelos intrinsecamente explicáveis (EBM / $GA^2M$). **Ponte:** de comitês aditivos de milhares de regras ortogonais locais para a busca de um único hiperplano ótimo de margem máxima via formulação dual e truque do kernel nas Máquinas de Vetores de Suporte (SVM, Aula 11).
 - **11:** Ruptura com a modelagem global de $p(y \mid \mathbf{x})$; hiperplano afim e margem geométrica canônica $\gamma = \frac{2}{\|\mathbf{w}\|}$; formulação primal quadrática e dual de Wolfe; condições KKT e folga complementar provando a esparsidade dos vetores de suporte ($\alpha_i > 0$); margem suave (*Soft Margin*) com variáveis de folga $\xi_i \ge 0$, restrições em caixa $0 \le \alpha_i \le C$ e equivalência analítica com a minimização da perda Hinge regularizada; Truque do Kernel (*Kernel Trick*) via Teorema de Mercer e catálogo de kernels (Linear, Polinomial, RBF Gaussiano com projeção em espaço de Hilbert de dimensão infinita $\ell^2$); Calibração de Platt (1999) via regressão logística out-of-fold para escores de margem e Support Vector Regression ($\varepsilon$-SVR) com tubo de tolerância. **Ponte:** a SVM utiliza kernels analíticos fixados a priori pelo engenheiro; a Aula 12 introduz a aprendizagem profunda de representações não lineares a partir dos próprios dados via Redes Neurais Artificiais e Backpropagation.
+- **12:** Ruptura com a engenharia manual de atributos; Redes Neurais como hierarquia encadeada de GLMs; Teorema da Aproximação Universal (Cybenko, 1989; Hornik, 1991) e parcimônia exponencial de particionamento da profundidade (Montúfar et al., 2014); camada de saída via Máxima Verossimilhança (MSE $\to$ Gaussiana; BCE $\to$ Bernoulli; Softmax $\to$ Multinomial); cancelamento de não-linearidades via ligação canônica ($\delta_k = \hat{y}_k - y_k$); derivação matricial da retropropagação via sensibilidades $\boldsymbol{\delta}^{(l)} = ((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}) \odot h'(\mathbf{a}^{(l)})$ e gradientes $\nabla_W \mathcal{L} = \boldsymbol{\delta} \mathbf{z}^T$ em tempo linear $\mathcal{O}(|W|)$ (Teorema de Baur-Strassen); regularização via Weight Decay ($L_2$ MAP) e Dropout como ensemble implícito de $2^D$ sub-redes; síntese terminal e encerramento do curso de Aprendizado Supervisionado.
 
 ## Dicionário de notações
 
@@ -90,6 +92,11 @@ Estado aprovado + notações, para dar continuidade entre aulas. O histórico de
 | $k(\mathbf{x}, \mathbf{z}), \mathcal{H}$ | função kernel e espaço de Hilbert de projeção implícita | 11 |
 | $\gamma$ (RBF) | largura de banda do Kernel Gaussiano $\frac{1}{2\sigma^2}$ | 11 |
 | $\varepsilon$ (SVR) | raio do tubo de insensibilidade da Support Vector Regression | 11 |
+| $W^{(l)}, \mathbf{b}^{(l)}$ | matriz de pesos sinápticos e vetor de bias da camada $l$ | 12 |
+| $\mathbf{a}^{(l)}, \mathbf{z}^{(l)}$ | vetores de ativações pré-sinápticas e pós-sinápticas (variáveis latentes) | 12 |
+| $h(\cdot)$ | função de ativação não linear oculta (ReLU, $\tanh$, Sigmoide) | 12 |
+| $\delta_j^{(l)}$ | sensibilidade de erro $\frac{\partial \mathcal{L}}{\partial a_j^{(l)}}$ na camada $l$ | 12 |
+| $p_{\text{drop}}$ | probabilidade de descarte estocástico de neurônios no Dropout | 12 |
 
 ## Pendências
 
