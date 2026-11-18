@@ -1,0 +1,129 @@
+---
+title: "Exercícios — Aula 11: Detecção de Drift e Alinhamento de Distribuições: Teste de Duas Amostras e MMD"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "today"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado das questões de Verdadeiro/Falso está em
+[`soluções.qmd`](soluções.qmd). Encontrou um erro numa questão? Corrija
+diretamente neste arquivo e abra um *pull request*.
+:::
+
+## Contexto e notação
+
+As questões usam as definições abaixo. Todas as questões são originais.
+
+- **Problema de duas amostras.** $X=\{\mathbf{x}_1,\dots,\mathbf{x}_n\}$ são observações i.i.d. de uma distribuição $P$ (referência, por exemplo os dados de treino), e $Y=\{\mathbf{y}_1,\dots,\mathbf{y}_m\}$ são observações i.i.d. de uma distribuição $Q$ (por exemplo os dados de produção), com $X$ independente de $Y$. Testa-se $H_0: P=Q$ contra $H_1: P\ne Q$. Aqui $\mathbf{y}_j$ é um ponto da segunda amostra, e não um rótulo.
+- **Nível e poder.** Um teste tem nível $\alpha$ se a probabilidade de rejeitar $H_0$ quando $P=Q$ (alarme falso) é no máximo $\alpha$. O poder contra um par $(P,Q)$ com $P\neq Q$ é a probabilidade de rejeitar $H_0$ sob esse par.
+- **Teste de permutação.** Dada uma estatística $T$, calcula-se $T_0=T(X,Y)$. Juntam-se as amostras ($N=n+m$ pontos) e, $B$ vezes, sorteiam-se $n$ pontos para o papel de $X$ e os demais para o de $Y$, obtendo $T_1,\dots,T_B$. O p-valor é
+$$\hat p=\frac{1+\#\{b\in\{1,\dots,B\}:\ T_b\ge T_0\}}{B+1},$$
+e rejeita-se $H_0$ se $\hat p\le\alpha$. Sob $H_0$, com observações i.i.d., vale $\Pr(\hat p\le\alpha)\le\alpha$ para qualquer estatística $T$.
+- **MMD.** Para uma classe $\mathcal{F}$ de funções, $\mathrm{MMD}[\mathcal{F},P,Q]=\sup_{f\in\mathcal{F}}\big(\mathbb{E}_P[f(\mathbf{x})]-\mathbb{E}_Q[f(\mathbf{y})]\big)$.
+- **Kernel e espaço de atributos.** Um kernel é $k(\mathbf{x},\mathbf{x}')=\langle\phi(\mathbf{x}),\phi(\mathbf{x}')\rangle_{\mathcal{H}}$, em que $\phi$ leva cada ponto a um espaço de atributos $\mathcal{H}$ com produto interno. O kernel Gaussiano de largura $\sigma>0$ é $k(\mathbf{x},\mathbf{x}')=\exp\big(-\|\mathbf{x}-\mathbf{x}'\|^2/(2\sigma^2)\big)$. A classe usada é $\mathcal{F}=\{f(\mathbf{x})=\langle\mathbf{w},\phi(\mathbf{x})\rangle_{\mathcal{H}}:\|\mathbf{w}\|_{\mathcal{H}}\le1\}$, e $\boldsymbol\mu_P=\mathbb{E}_P[\phi(\mathbf{x})]$ é a média de $P$ em $\mathcal{H}$.
+- **MMD em termos do kernel.** Com $\mathbf{x},\mathbf{x}'\sim P$ e $\mathbf{y},\mathbf{y}'\sim Q$, todos independentes,
+$$\mathrm{MMD}^2[\mathcal{F},P,Q]=\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}^2=\mathbb{E}[k(\mathbf{x},\mathbf{x}')]-2\,\mathbb{E}[k(\mathbf{x},\mathbf{y})]+\mathbb{E}[k(\mathbf{y},\mathbf{y}')].$$
+- **Função testemunha.** A função que atinge o supremo satisfaz $f^\star(\mathbf{t})\propto\mathbb{E}_P[k(\mathbf{x},\mathbf{t})]-\mathbb{E}_Q[k(\mathbf{y},\mathbf{t})]$.
+- **Kernel característico.** Um kernel é característico se $\mathrm{MMD}[\mathcal{F},P,Q]=0$ implica $P=Q$. O kernel Gaussiano é característico para todo $\sigma>0$.
+- **Estimadores.** O estimador viesado $\widehat{\mathrm{MMD}}_b^2$ usa médias sobre todos os pares, incluindo os pares de um ponto consigo mesmo. O estimador não viesado é
+$$\widehat{\mathrm{MMD}}_u^2=\frac{1}{n(n-1)}\sum_{i\ne i'}k(\mathbf{x}_i,\mathbf{x}_{i'})-\frac{2}{nm}\sum_{i=1}^n\sum_{j=1}^m k(\mathbf{x}_i,\mathbf{y}_j)+\frac{1}{m(m-1)}\sum_{j\ne j'}k(\mathbf{y}_j,\mathbf{y}_{j'}).$$
+- **Heurística da mediana.** $\sigma$ é a mediana das distâncias entre os pares de pontos da amostra conjunta.
+- **Tipos de mudança.** Com $c$ a classe de uma entrada $\mathbf{x}$, $p$ a distribuição de treino e $q$ a de produção: *covariate shift* é $q(\mathbf{x},c)=q(\mathbf{x})\,p(c\mid\mathbf{x})$; *label shift* é $q(\mathbf{x},c)=q(c)\,p(\mathbf{x}\mid c)$; *concept shift* é uma mudança em $p(c\mid\mathbf{x})$.
+
+## Questões discursivas
+
+1. **O p-valor do teste de permutação.**
+   (a) Mostre que o menor valor possível de $\hat p$ é $1/(B+1)$. Um sistema de monitoramento faz $K=20$ testes e exige de cada um o nível $\alpha/K$, com $\alpha=0{,}05$ (correção de Bonferroni). Qual é o menor número de permutações $B$ com o qual algum teste pode rejeitar?
+   (b) Suponha que o p-valor fosse definido sem o "$1+$" no numerador e no denominador, isto é, $\tilde p=\#\{b:T_b\ge T_0\}/B$. Considere uma estatística $T$ que ignora os dados e devolve um número sorteado de uma distribuição contínua. Calcule $\Pr(\tilde p=0)$ e conclua que, para $\alpha<1/(B+1)$, o teste que rejeita quando $\tilde p\le\alpha$ não tem nível $\alpha$.
+   (c) As leituras de produção são medidas consecutivas de um sensor, e cada leitura é fortemente correlacionada com a anterior. Explique qual hipótese da garantia de nível é violada e por que o teste pode rejeitar com frequência maior que $\alpha$ mesmo quando a distribuição de cada leitura é igual à de referência.
+
+2. **MMD com atributos explícitos.** Em uma dimensão, considere o mapa de atributos $\phi(x)=(x,x^2)$ e a classe $\mathcal{F}=\{f(x)=\mathbf{w}^T\phi(x):\|\mathbf{w}\|\le1\}$.
+   (a) Para $P=\mathcal{N}(0,1)$ e $Q=\mathcal{N}(0,s^2)$, calcule $\mathrm{MMD}[\mathcal{F},P,Q]$ em função de $s$ e escreva a função testemunha a menos de uma constante positiva. Interprete o sinal da testemunha para $s>1$.
+   (b) Seja $Q'$ uma distribuição de Laplace com média 0 e variância 1. Mostre que $\mathrm{MMD}[\mathcal{F},P,Q']=0$, embora $P\ne Q'$. Proponha um atributo a acrescentar a $\phi$ para que a MMD entre $P$ e $Q'$ seja positiva, sabendo que $\mathbb{E}_P[x^4]=3$ e $\mathbb{E}_{Q'}[x^4]=6$.
+   (c) Usando a expressão da MMD em termos do kernel com o kernel linear $k(\mathbf{x},\mathbf{x}')=\mathbf{x}^T\mathbf{x}'$ em $\mathbb{R}^d$, mostre que $\mathrm{MMD}^2=\|\mathbb{E}_P[\mathbf{x}]-\mathbb{E}_Q[\mathbf{y}]\|^2$. Indique onde a independência entre $\mathbf{x}$ e $\mathbf{x}'$ é usada.
+
+3. **Viés do estimador da MMD.** Considere um kernel com $k(\mathbf{x},\mathbf{x})=1$ para todo $\mathbf{x}$, como o Gaussiano, e o estimador viesado
+$$\widehat{\mathrm{MMD}}_b^2=\frac{1}{n^2}\sum_{i,i'}k(\mathbf{x}_i,\mathbf{x}_{i'})-\frac{2}{nm}\sum_{i,j}k(\mathbf{x}_i,\mathbf{y}_j)+\frac{1}{m^2}\sum_{j,j'}k(\mathbf{y}_j,\mathbf{y}_{j'}).$$
+   (a) Separando os termos com $i=i'$ dos termos com $i\ne i'$, mostre que $\mathbb{E}\big[\widehat{\mathrm{MMD}}_b^2\big]=\mathrm{MMD}^2+\frac1n\big(1-\mathbb{E}[k(\mathbf{x},\mathbf{x}')]\big)+\frac1m\big(1-\mathbb{E}[k(\mathbf{y},\mathbf{y}')]\big)$.
+   (b) Mostre que o estimador $\widehat{\mathrm{MMD}}_u^2$ é não viesado.
+   (c) Explique por que $\widehat{\mathrm{MMD}}_u^2$ assume valores negativos quando $P=Q$, e por que $\widehat{\mathrm{MMD}}_b^2$ nunca é negativo.
+   (d) No teste de permutação, usar $\widehat{\mathrm{MMD}}_b^2$ no lugar de $\widehat{\mathrm{MMD}}_u^2$ compromete o nível do teste? Justifique.
+
+## Questões de Verdadeiro/Falso
+
+Em cada teste, julgue os quatro itens como verdadeiros ou falsos.
+
+::: {.callout-note icon=false}
+## Teste 1 — Nível e poder
+
+- □ Um teste que nunca rejeita $H_0$, quaisquer que sejam os dados, tem nível $\alpha$ para todo $\alpha\in(0,1)$.
+- □ Fixado $\alpha=0{,}05$, aumentar o tamanho das duas amostras reduz a probabilidade de alarme falso do teste de permutação.
+- □ Duas estatísticas diferentes usadas no teste de permutação, sobre os mesmos dados, têm a mesma garantia de nível, mas podem ter poderes muito diferentes.
+- □ Um poder de 5% contra uma alternativa, em um teste de nível 5%, indica que a estatística distingue bem essa alternativa de $H_0$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — Mecânica do teste de permutação
+
+- □ Com $B=199$ permutações, se exatamente 4 dos valores permutados são maiores ou iguais a $T_0$, o p-valor é $0{,}025$.
+- □ Em cada repetição do teste de permutação, sorteiam-se $N$ pontos com reposição da amostra conjunta.
+- □ Se as amostras têm tamanhos diferentes ($n\ne m$), a garantia de nível do teste de permutação deixa de valer.
+- □ Para comparar os vetores latentes produzidos por um autoencoder no treino e em produção, o teste de permutação pode ser aplicado sem nenhuma hipótese sobre a forma da distribuição desses vetores, desde que as observações sejam independentes.
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — MMD e classes de funções
+
+- □ Se $\mathcal{F}$ contém apenas a função constante $f(\mathbf{x})=1$, então $\mathrm{MMD}[\mathcal{F},P,Q]=0$ para quaisquer $P$ e $Q$.
+- □ Se $\mathcal{F}\subset\mathcal{F}'$, então $\mathrm{MMD}[\mathcal{F},P,Q]\le\mathrm{MMD}[\mathcal{F}',P,Q]$.
+- □ Com $\mathcal{F}$ igual à classe das funções lineares $f(\mathbf{x})=\mathbf{w}^T\mathbf{x}$ com $\|\mathbf{w}\|\le1$, $\mathrm{MMD}[\mathcal{F},P,Q]=0$ implica $P=Q$.
+- □ A restrição $\|\mathbf{w}\|\le1$ pode ser removida da classe de funções lineares sem alterar o valor da MMD, porque o supremo é atingido por um vetor de norma 1.
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — Kernel e função testemunha
+
+- □ Aplicar a mesma rotação aos pontos das duas amostras não altera o valor do estimador da MMD com kernel Gaussiano.
+- □ Se $P=Q$, a diferença $\mathbb{E}_P[k(\mathbf{x},\mathbf{t})]-\mathbb{E}_Q[k(\mathbf{y},\mathbf{t})]$ é zero para todo $\mathbf{t}$.
+- □ O kernel polinomial $k(\mathbf{x},\mathbf{x}')=(1+\mathbf{x}^T\mathbf{x}')^2$ é característico, porque seu espaço de atributos inclui termos de segunda ordem.
+- □ Como a função testemunha com kernel Gaussiano é uma diferença de dois estimadores de densidade por kernel, o teste baseado na MMD só é válido se a largura $\sigma$ tender a zero quando o tamanho da amostra cresce.
+:::
+
+::: {.callout-note icon=false}
+## Teste 5 — Estimadores e custo
+
+- □ O estimador viesado $\widehat{\mathrm{MMD}}_b^2$ é não negativo para quaisquer amostras, pois é o quadrado da distância entre as médias empíricas no espaço de atributos.
+- □ Sob $H_0$, o estimador não viesado tem esperança zero, e por isso exatamente metade dos seus valores é negativa.
+- □ Com kernel Gaussiano, $P=Q$ e $n=m$, o viés de $\widehat{\mathrm{MMD}}_b^2$ é $\frac{2}{n}\big(1-\mathbb{E}[k(\mathbf{x},\mathbf{x}')]\big)$, que tende a zero quando $n$ cresce.
+- □ Calcular a estatística em $B$ permutações exige recalcular a matriz de kernel $B$ vezes.
+:::
+
+::: {.callout-note icon=false}
+## Teste 6 — Largura do kernel e dimensão
+
+- □ Com amostras fixas de pontos distintos, $\widehat{\mathrm{MMD}}_u^2$ com kernel Gaussiano tende a zero quando $\sigma\to0$, quaisquer que sejam $P$ e $Q$.
+- □ Se o teste com a largura dada pela heurística da mediana não rejeita $H_0$, nenhuma outra largura levaria à rejeição com os mesmos dados.
+- □ Para $P=\mathcal{N}(\mathbf{0},I_d)$ e $Q=\mathcal{N}(\delta\mathbf{e}_1,I_d)$, a divergência de Kullback-Leibler entre $Q$ e $P$ não depende de $d$, e mesmo assim o poder do teste com kernel Gaussiano e largura mediana diminui quando $d$ cresce com $n$ fixo.
+- □ Escolher $\sigma$ em uma metade dos dados, maximizando a estatística, e aplicar o teste de permutação na outra metade com esse $\sigma$ fixo preserva o nível do teste.
+:::
+
+::: {.callout-note icon=false}
+## Teste 7 — Interpretação do teste e alinhamento
+
+- □ Em um *label shift*, a distribuição das entradas $q(\mathbf{x})$ em geral difere de $p(\mathbf{x})$, e um teste de duas amostras nas entradas pode rejeitar $H_0$.
+- □ Se o teste com a MMD rejeita $H_0$ entre os dados de treino e os de produção, a acurácia do classificador em produção é necessariamente menor que no treino.
+- □ Usar a MMD como penalidade para aproximar as representações de treino e de produção em uma rede neural supõe que a proporção das classes seja a mesma nos dois conjuntos; se não for, o alinhamento pode aproximar pontos de classes diferentes.
+- □ Em um teste de duas amostras por classificador, uma acurácia de validação de 50% demonstra que $P=Q$.
+:::

@@ -1,0 +1,1742 @@
+---
+title: "Aula 11: Detecção de Drift e Alinhamento de Distribuições: Teste de Duas Amostras e MMD"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-11-11"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: homepage
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all .slides-link aria-label="Ver slides da aula" title="Ver slides da aula"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Voltar à lista de aulas" title="Voltar à lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+import urllib.request
+import warnings
+import zipfile
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.colors import LinearSegmentedColormap
+from scipy.stats import ks_2samp
+from sklearn.datasets import make_moons
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
+from sklearn.mixture import GaussianMixture
+from sklearn.model_selection import cross_val_score
+
+warnings.filterwarnings("ignore")
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({"figure.dpi": 125, "font.size": 11, "axes.titlesize": 12, "axes.titleweight": "bold",
+                     "legend.frameon": True, "legend.framealpha": 0.9})
+COR_A = "#2b5c8f"; COR_B = "#d95f02"; COR_NEU = "#7570b3"; COR_CINZA = "#7f7f7f"; COR_VERDE = "#1b9e77"; COR_ALERTA = "#e7298a"
+# Mapa divergente para a testemunha: laranja onde Q tem mais massa, azul onde P tem mais
+CMAP_PQ = LinearSegmentedColormap.from_list("pq", [COR_B, "white", COR_A])
+
+
+def brl(val, dec=2):
+    return f"{val:.{dec}f}".replace(".", ",")
+
+
+def pct(val, dec=0):
+    return f"{100 * val:.{dec}f}".replace(".", ",") + "%"
+
+
+def milhar(val):
+    return f"{int(val):,}".replace(",", ".")
+
+
+ALFA = 0.05
+
+# --- Gas Sensor Array Drift (UCI): baixado uma vez, lido direto do .zip ---
+CACHE = Path.home() / ".cache" / "mc847" / "gas-sensor-drift"
+URL = "https://archive.ics.uci.edu/static/public/224/gas+sensor+array+drift+dataset.zip"
+GASES = {1: "Etanol", 2: "Etileno", 3: "Amônia", 4: "Acetaldeído", 5: "Acetona", 6: "Tolueno"}
+MESES = {1: "1–2", 2: "3–10", 3: "11–13", 4: "14–15", 5: "16", 6: "17–20", 7: "21", 8: "22–23", 9: "24 e 30", 10: "36"}
+
+
+def carregar_gas():
+    zpath = CACHE / "gas-sensor-array-drift.zip"
+    if not zpath.exists():
+        CACHE.mkdir(parents=True, exist_ok=True)
+        urllib.request.urlretrieve(URL, zpath)
+    lotes = {}
+    with zipfile.ZipFile(zpath) as zf:
+        for b in range(1, 11):
+            X, y = [], []
+            for linha in zf.read(f"Dataset/batch{b}.dat").decode().splitlines():
+                campos = linha.split()
+                y.append(int(campos[0].split(";")[0]))
+                X.append([float(c.split(":")[1]) for c in campos[1:]])
+            lotes[b] = (np.array(X), np.array(y))
+    return lotes
+
+
+bruto = carregar_gas()
+n_total = sum(len(y) for _, y in bruto.values())
+n_lote = {b: len(y) for b, (_, y) in bruto.items()}
+d_gas = bruto[1][0].shape[1]
+
+# Lote 1 dividido ao meio: 1a = referência (treino), 1b = controle (produção sem drift).
+# Padronização, classificador e PCA usam só a metade 1a.
+_p = np.random.default_rng(0).permutation(n_lote[1])
+_ia, _ib = _p[: n_lote[1] // 2], _p[n_lote[1] // 2:]
+mu_ref, sd_ref = bruto[1][0][_ia].mean(0), bruto[1][0][_ia].std(0)
+LIM = 10.0
+
+
+def escala_ref(X):
+    """Padroniza com média e desvio da referência e trunca em +-LIM desvios."""
+    return np.clip((X - mu_ref) / sd_ref, -LIM, LIM)
+
+
+z_max_bruto = max(np.abs((X - mu_ref) / sd_ref).max() for X, _ in bruto.values())
+frac_trunc = max((np.abs((X - mu_ref) / sd_ref) > LIM).mean() for X, _ in bruto.values())
+Zg = {b: escala_ref(X) for b, (X, _) in bruto.items()}
+yg = {b: y for b, (_, y) in bruto.items()}
+X_ref, y_ref = Zg[1][_ia], yg[1][_ia]
+X_ctl, y_ctl = Zg[1][_ib], yg[1][_ib]
+n_ref, n_ctl = len(y_ref), len(y_ctl)
+mix = {b: np.bincount(yg[b], minlength=7)[1:] / n_lote[b] for b in Zg}
+
+clf = LogisticRegression(max_iter=5000).fit(X_ref, y_ref)
+acc_ctl = clf.score(X_ctl, y_ctl)
+acc = {b: clf.score(Zg[b], yg[b]) for b in range(2, 11)}
+pca_ref = PCA(10).fit(X_ref)
+var_pca2 = pca_ref.explained_variance_ratio_[:2].sum()
+
+
+# --- Teste de permutação vetorizado: cada linha de S marca quem fica na 1ª amostra ---
+def indicadores(n, N, B, rng):
+    S = np.zeros((B, N))
+    S[np.arange(B)[:, None], np.argsort(rng.random((B, N)), axis=1)[:, :n]] = 1.
+    return S
+
+
+def est_media(S, Z):
+    """Distância entre os vetores de médias."""
+    n = S.sum(1, keepdims=True)
+    m = S.shape[1] - n
+    return np.linalg.norm(S @ Z / n - (1 - S) @ Z / m, axis=1)
+
+
+def est_ks(S, Z):
+    """Maior estatística de Kolmogorov-Smirnov entre os atributos."""
+    n = S.sum(1, keepdims=True)
+    m = S.shape[1] - n
+    out = np.zeros(len(S))
+    for j in range(Z.shape[1]):
+        o = np.argsort(Z[:, j])
+        F = np.cumsum(S[:, o], 1) / n - np.cumsum(1 - S[:, o], 1) / m
+        out = np.maximum(out, np.abs(F).max(1))
+    return out
+
+
+def est_mcov(S, Z):
+    """Diferença de médias mais diferença de covariâncias (normas ao quadrado)."""
+    n = S.sum(1, keepdims=True)
+    m = S.shape[1] - n
+    T = 1 - S
+    Z2 = (Z[:, :, None] * Z[:, None, :]).reshape(len(Z), -1)
+    ma, mb = S @ Z / n, T @ Z / m
+    ca = S @ Z2 / n - (ma[:, :, None] * ma[:, None, :]).reshape(len(S), -1)
+    cb = T @ Z2 / m - (mb[:, :, None] * mb[:, None, :]).reshape(len(S), -1)
+    return ((ma - mb) ** 2).sum(1) + ((ca - cb) ** 2).sum(1)
+
+
+def est_mmd(S, K):
+    """Estimador não viesado da MMD^2 a partir da matriz de kernel da amostra conjunta."""
+    n = S.sum(1)
+    m = S.shape[1] - n
+    T = 1 - S
+    SK, TK, dg = S @ K, T @ K, np.diag(K)
+    xx, yy, xy = (SK * S).sum(1) - S @ dg, (TK * T).sum(1) - T @ dg, (SK * T).sum(1)
+    return xx / (n * (n - 1)) + yy / (m * (m - 1)) - 2 * xy / (n * m)
+
+
+def est_mmd_b(S, K):
+    """Estimador viesado: quadrado da distância entre as médias empíricas no espaço de atributos."""
+    n = S.sum(1)
+    m = S.shape[1] - n
+    T = 1 - S
+    SK = S @ K
+    return (SK * S).sum(1) / n ** 2 + ((T @ K) * T).sum(1) / m ** 2 - 2 * (SK * T).sum(1) / (n * m)
+
+
+def teste(est, dado, n, B=500, seed=0):
+    """Teste de permutação: os n primeiros pontos de `dado` formam a 1ª amostra."""
+    rng = np.random.default_rng(seed)
+    N = len(dado)
+    S0 = np.zeros((1, N))
+    S0[0, :n] = 1.
+    obs = est(S0, dado)[0]
+    nula = est(indicadores(n, N, B, rng), dado)
+    return dict(obs=obs, p=(1 + np.sum(nula >= obs)) / (1 + B), nula=nula, lim=np.quantile(nula, 1 - ALFA))
+
+
+def dist2(A, B):
+    return np.maximum((A ** 2).sum(1)[:, None] + (B ** 2).sum(1)[None, :] - 2 * A @ B.T, 0)
+
+
+def sigma_mediana(D2):
+    """Heurística da mediana: sigma = mediana das distâncias entre pares da amostra conjunta."""
+    return float(np.sqrt(np.median(D2[np.triu_indices_from(D2, 1)])))
+
+
+def k_gauss(D2, sigma):
+    return np.exp(-D2 / (2 * sigma ** 2))
+
+
+def teste_mmd(X, Y, B=500, seed=0, sigma=None, fator=1.):
+    Z = np.vstack([X, Y])
+    D2 = dist2(Z, Z)
+    s = (sigma_mediana(D2) if sigma is None else sigma) * fator
+    K = k_gauss(D2, s)
+    t = teste(est_mmd, K, len(X), B, seed)
+    t.update(sigma=s, K=K)
+    return t
+
+
+def amostra(X, n, rng):
+    return X[rng.permutation(len(X))[:n]]
+
+
+# --- Linha do tempo do gás: referência 1a contra o controle 1b e contra cada lote ---
+N_SUB, B_TL = 500, 999
+_rng = np.random.default_rng(1)
+idx_tl = {b: _rng.permutation(n_lote[b])[:N_SUB] for b in range(2, 11)}
+tl = {"1b": teste_mmd(X_ref, X_ctl, B=B_TL, seed=1)}
+for b in range(2, 11):
+    tl[b] = teste_mmd(X_ref, Zg[b][idx_tl[b]], B=B_TL, seed=b)
+mmd_b_ctl = est_mmd_b(np.r_[np.ones(n_ref), np.zeros(n_ctl)][None, :], tl["1b"]["K"])[0]
+for t in tl.values():
+    t.pop("K")
+N_TESTES = 10
+alfa_bonf = ALFA / N_TESTES
+n_rej_tl = sum(tl[b]["p"] <= alfa_bonf for b in range(2, 11))
+p_min_tl = 1 / (1 + B_TL)
+
+# Calibração: divisões aleatórias do lote 1 (H0 verdadeira por construção)
+R_CAL = 200
+_rej = []
+for s in range(R_CAL):
+    _q = np.random.default_rng(100 + s).permutation(n_lote[1])
+    _rej.append(teste_mmd(Zg[1][_q[:n_ref]], Zg[1][_q[n_ref:]], B=199, seed=s)["p"] <= ALFA)
+frac_rej_calib = np.mean(_rej)
+
+# --- Comparações simples no gás ---
+Z_ctl = np.vstack([X_ref, X_ctl])
+Z_l2 = np.vstack([X_ref, Zg[2][idx_tl[2]]])
+tm_ctl = teste(est_media, Z_ctl, n_ref, 999, 0)
+tm_l2 = teste(est_media, Z_l2, n_ref, 999, 0)
+ks_rej_ctl = sum(ks_2samp(X_ref[:, j], X_ctl[:, j]).pvalue <= ALFA / d_gas for j in range(d_gas))
+ks_rej_l2 = sum(ks_2samp(X_ref[:, j], Zg[2][idx_tl[2]][:, j]).pvalue <= ALFA / d_gas for j in range(d_gas))
+
+# --- Quatro pares sintéticos em 2D: P = N(0, I) contra quatro alternativas ---
+N_SIN = 500
+PARES = {"media": "(a) média deslocada", "variancia": "(b) variância maior",
+         "correlacao": "(c) correlação", "xis": "(d) mistura"}
+
+
+def par_sintetico(nome, n, rng):
+    X = rng.normal(size=(n, 2))
+    if nome == "media":
+        Y = rng.normal(size=(n, 2)) + np.array([0.5, 0.])
+    elif nome == "variancia":
+        Y = 1.5 * rng.normal(size=(n, 2))
+    elif nome == "correlacao":
+        Y = rng.normal(size=(n, 2)) @ np.linalg.cholesky(np.array([[1, .6], [.6, 1]])).T
+    else:  # mistura de duas Gaussianas com correlação +0,9 e -0,9
+        r = np.where(rng.random(n) < .5, .9, -.9)
+        u, v = rng.normal(size=n), rng.normal(size=n)
+        Y = np.c_[u, r * u + np.sqrt(1 - r ** 2) * v]
+    return X, Y
+
+
+pares = {nome: par_sintetico(nome, N_SIN, np.random.default_rng(20 + i)) for i, nome in enumerate(PARES)}
+cov_xis = np.cov(pares["xis"][1].T)
+
+R_SIN, B_POD = 100, 99
+poder_sin = {e: {} for e in ("media", "ks", "mcov", "gauss", "poli")}
+for _ip, _nome in enumerate(PARES):
+    _rj = {e: [] for e in poder_sin}
+    _rj_meio = []
+    for s in range(R_SIN):
+        _X, _Y = par_sintetico(_nome, N_SIN, np.random.default_rng(1000 * (_ip + 1) + s))
+        _Z = np.vstack([_X, _Y])
+        _D2 = dist2(_Z, _Z)
+        _sm = sigma_mediana(_D2)
+        _rj["media"].append(teste(est_media, _Z, N_SIN, B_POD, s)["p"] <= ALFA)
+        _rj["ks"].append(teste(est_ks, _Z, N_SIN, B_POD, s)["p"] <= ALFA)
+        _rj["mcov"].append(teste(est_mcov, _Z, N_SIN, B_POD, s)["p"] <= ALFA)
+        _rj["gauss"].append(teste(est_mmd, k_gauss(_D2, _sm), N_SIN, B_POD, s)["p"] <= ALFA)
+        _rj["poli"].append(teste(est_mmd, (1 + _Z @ _Z.T) ** 2, N_SIN, B_POD, s)["p"] <= ALFA)
+        if _nome == "xis":
+            _rj_meio.append(teste(est_mmd, k_gauss(_D2, _sm / 2), N_SIN, B_POD, s)["p"] <= ALFA)
+    for e in poder_sin:
+        poder_sin[e][_nome] = np.mean(_rj[e])
+poder_xis_meio = np.mean(_rj_meio)
+tm_xis = teste(est_media, np.vstack(pares["xis"]), N_SIN, 999, 0)
+
+# --- Gaussiana contra Laplace, mesma média e mesma variância ---
+_rng = np.random.default_rng(3)
+N_GL, SIG_GL = 2000, 0.5
+_g, _l = _rng.normal(size=200_000), _rng.laplace(scale=1 / np.sqrt(2), size=200_000)
+mom_gl = {k: ((_g ** k).mean(), (_l ** k).mean()) for k in (1, 2, 4)}
+xg, xl = _g[:N_GL], _l[:N_GL]
+t_gl = teste_mmd(xg[:, None], xl[:, None], B=999, seed=0, sigma=SIG_GL)
+t_gl.pop("K")
+
+
+def testemunha(T, X, Y, sigma):
+    """Testemunha não normalizada: média de k(x_i, t) menos média de k(y_j, t)."""
+    return k_gauss(dist2(T, X), sigma).mean(1) - k_gauss(dist2(T, Y), sigma).mean(1)
+
+
+_fg = testemunha(xg[:, None], xg[:, None], xl[:, None], SIG_GL)
+_fl = testemunha(xl[:, None], xg[:, None], xl[:, None], SIG_GL)
+mmd_b_gl = np.sqrt(_fg.mean() - _fl.mean())        # ||mu_X - mu_Y|| (estimador viesado)
+
+# --- Mapa phi(x) = (x, x^2): três pares em 1D ---
+_rng = np.random.default_rng(8)
+N_PHI = 400
+pares_phi = {
+    "Médias diferentes": (_rng.normal(size=N_PHI), _rng.normal(size=N_PHI) + 1.),
+    "Variâncias diferentes": (_rng.normal(size=N_PHI), 1.6 * _rng.normal(size=N_PHI)),
+    "Gaussiana e Laplace": (xg, xl),
+}
+mmd_phi = {k: np.hypot(a.mean() - b.mean(), (a ** 2).mean() - (b ** 2).mean()) for k, (a, b) in pares_phi.items()}
+
+# --- Os dois estimadores sob H0: X, Y ~ N(0, I_2), sigma = 1 ---
+_rng = np.random.default_rng(4)
+N_H0, R_H0 = 100, 2000
+_S0 = np.r_[np.ones(N_H0), np.zeros(N_H0)][None, :]
+h0_b, h0_u = np.zeros(R_H0), np.zeros(R_H0)
+for r in range(R_H0):
+    _K = k_gauss(dist2(*(2 * [_rng.normal(size=(2 * N_H0, 2))])), 1.)
+    h0_b[r], h0_u[r] = est_mmd_b(_S0, _K)[0], est_mmd(_S0, _K)[0]
+_Zb = _rng.normal(size=(3000, 2))
+_Kb = k_gauss(dist2(_Zb, _Zb), 1.)
+Ek_h0 = (_Kb.sum() - np.trace(_Kb)) / (3000 * 2999)       # E k(x, x') por Monte Carlo
+vies_teo = (2 / N_H0) * (1 - Ek_h0)
+frac_neg_h0 = (h0_u < 0).mean()
+
+# --- Largura do kernel: duas luas contra amostras de uma mistura de 2 Gaussianas (Aula 5) ---
+N_LUAS = 800
+Xm, _ = make_moons(n_samples=N_LUAS, noise=0.06, random_state=0)
+Ym = GaussianMixture(2, covariance_type="full", random_state=0, n_init=5).fit(Xm).sample(N_LUAS)[0]
+_Zm = np.vstack([Xm, Ym])
+D2_luas = dist2(_Zm, _Zm)
+sig_luas = sigma_mediana(D2_luas)
+FATORES = np.geomspace(0.03, 8, 25)
+curva_luas = [teste(est_mmd, k_gauss(D2_luas, f * sig_luas), N_LUAS, 199, 0) for f in FATORES]
+FATOR_ESTREITO = 0.2
+t_luas_med = teste(est_mmd, k_gauss(D2_luas, sig_luas), N_LUAS, 999, 0)
+t_luas_est = teste(est_mmd, k_gauss(D2_luas, FATOR_ESTREITO * sig_luas), N_LUAS, 999, 0)
+
+# --- Poder contra dimensão: N(0, I_d) contra deslocamento delta numa única coordenada ---
+DIMS = (1, 2, 5, 10, 20, 50, 100, 200)
+DELTAS = (0.5, 0.75)
+N_DIM, R_DIM = 100, 100
+poder_dim = {}
+for _dl in DELTAS:
+    poder_dim[_dl] = []
+    for _d in DIMS:
+        _rj = []
+        for s in range(R_DIM):
+            _r = np.random.default_rng(10_000 + 97 * _d + s)
+            _X, _Y = _r.normal(size=(N_DIM, _d)), _r.normal(size=(N_DIM, _d))
+            _Y[:, 0] += _dl
+            _rj.append(teste_mmd(_X, _Y, B=B_POD, seed=s)["p"] <= ALFA)
+        poder_dim[_dl].append(np.mean(_rj))
+
+# --- MMD por gás: lote 1 inteiro contra cada lote, só leituras do mesmo gás ---
+_rng = np.random.default_rng(5)
+mmd_gas = np.full((6, 9), np.nan)
+p_gas = np.full((6, 9), np.nan)
+for _g in GASES:
+    for b in range(2, 11):
+        _Bm = Zg[b][yg[b] == _g]
+        if len(_Bm) >= 20:
+            _t = teste_mmd(Zg[1][yg[1] == _g], amostra(_Bm, 300, _rng), B=999, seed=b)
+            mmd_gas[_g - 1, b - 2], p_gas[_g - 1, b - 2] = _t["obs"], _t["p"]
+n_comp_gas = int(np.isfinite(p_gas).sum())
+n_rej_gas = int((p_gas[np.isfinite(p_gas)] <= ALFA / n_comp_gas).sum())
+
+# --- Só a mistura muda: leituras do controle 1b restritas a dois gases ---
+GASES_PRIOR = (1, 2)
+_sel = np.isin(y_ctl, GASES_PRIOR)
+X_prior, y_prior = X_ctl[_sel], y_ctl[_sel]
+n_prior = int(_sel.sum())
+t_prior = teste_mmd(X_ref, X_prior, B=999, seed=0)
+t_prior.pop("K")
+acc_prior = clf.score(X_prior, y_prior)
+acc_prior_al = clf.score((X_prior - X_prior.mean(0)) / X_prior.std(0), y_prior)
+
+# --- Alinhamento: padronizar cada lote com a própria média e o próprio desvio ---
+al, acc_al = {}, {}
+for b in range(2, 11):
+    _Zal = (Zg[b] - Zg[b].mean(0)) / Zg[b].std(0)
+    al[b] = teste_mmd(X_ref, _Zal[idx_tl[b]], B=B_TL, seed=b)
+    al[b].pop("K")
+    acc_al[b] = clf.score(_Zal, yg[b])
+n_al_melhor = sum(acc_al[b] > acc[b] for b in al)
+n_al_rej = sum(al[b]["p"] <= alfa_bonf for b in al)
+b_al_max = max(al, key=lambda b: acc_al[b] - acc[b])
+b_al_min = min(al, key=lambda b: acc_al[b] - acc[b])
+razao_al = [tl[b]["obs"] / al[b]["obs"] for b in al]
+
+# --- Significância contra relevância: deslocamento pequeno e fixo, n crescente ---
+DELTA_N, NS, R_N = 0.15, (100, 200, 400, 800, 1600), 50
+poder_n, mmd_n_med, mmd_n_sd = [], [], []
+for _n in NS:
+    _ps, _ms = [], []
+    for s in range(R_N):
+        _r = np.random.default_rng(50_000 + 7 * _n + s)
+        _X, _Y = _r.normal(size=(_n, 2)), _r.normal(size=(_n, 2))
+        _Y[:, 0] += DELTA_N
+        _t = teste_mmd(_X, _Y, B=B_POD, seed=s)
+        _ps.append(_t["p"] <= ALFA)
+        _ms.append(_t["obs"])
+    poder_n.append(np.mean(_ps)); mmd_n_med.append(np.mean(_ms)); mmd_n_sd.append(np.std(_ms))
+
+# --- Teste por classificador: regressão logística tentando dizer de qual amostra veio o ponto ---
+def c2st(X, Y):
+    Z, lab = np.vstack([X, Y]), np.r_[np.zeros(len(X)), np.ones(len(Y))]
+    return cross_val_score(LogisticRegression(max_iter=5000), Z, lab, cv=5).mean()
+
+
+c2st_ctl = c2st(X_ref, X_ctl)
+c2st_l2 = c2st(X_ref, amostra(Zg[2], n_ref, np.random.default_rng(7)))
+```
+
+# Revisão e Introdução
+
+## O problema: um classificador que perde acurácia com o tempo
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O conjunto de dados desta aula é o *Gas Sensor Array Drift Dataset* (Vergara, 2012, repositório da UCI). Uma placa com 16 sensores químicos é exposta a seis gases: etanol, etileno, amônia, acetaldeído, acetona e tolueno. Cada sensor fornece 8 números por medição, o que dá `{python} d_gas` atributos por leitura. A tarefa é identificar o gás. São `{python} milhar(n_total)` leituras, coletadas ao longo de 36 meses e organizadas em 10 lotes cronológicos.
+
+Treinamos um classificador (regressão logística) com leituras do lote 1, que cobre os dois primeiros meses, e o aplicamos aos lotes seguintes sem retreinar. O lote 1 foi dividido ao meio: a metade **1a**, com `{python} n_ref` leituras, é o treino, e a metade **1b**, com `{python} n_ctl` leituras, serve de controle. Na metade 1b, o classificador acerta `{python} pct(acc_ctl, 1)` das leituras.
+
+O painel da esquerda mostra a acurácia nos lotes seguintes: `{python} pct(acc[2], 1)` no lote 2 e `{python} pct(acc[10], 1)` no lote 10. Os gases são os mesmos. Os sensores se degradam com o uso, e a resposta deles ao mesmo gás muda. Esse fenômeno é chamado de *drift*. Os outros painéis mostram as leituras projetadas nas duas primeiras componentes principais da metade 1a (Aula 6), que explicam `{python} pct(var_pca2)` da variância dela. A metade 1b coincide com a 1a. Nos lotes 3 e 10, boa parte das leituras fica fora da região ocupada pelo treino.
+
+Calcular a acurácia exige o rótulo de cada leitura, e em produção os rótulos normalmente não estão disponíveis. O que está disponível são as leituras $\mathbf{x}$. A pergunta da aula é: usando só as leituras, é possível detectar que os dados de produção deixaram de seguir a distribuição dos dados de treino, com controle sobre a probabilidade de alarme falso?
+
+Pré-processamento: os atributos foram padronizados com a média e o desvio padrão da metade 1a e truncados em $\pm$ `{python} brl(LIM, 0)` desvios, porque há leituras extremas nos lotes posteriores (uma delas a `{python} milhar(z_max_bruto)` desvios da média do treino). No lote mais afetado, o truncamento altera `{python} pct(frac_trunc, 1)` dos valores.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Dados:** *Gas Sensor Array Drift* (Vergara, 2012, UCI). 16 sensores químicos, `{python} d_gas` atributos por leitura, 6 gases, `{python} milhar(n_total)` leituras em 36 meses, 10 lotes cronológicos.
+- **Classificador:** regressão logística treinada na metade **1a** do lote 1 (`{python} n_ref` leituras). Na metade **1b** (controle), acerta `{python} pct(acc_ctl, 1)`.
+
+::: {.fragment}
+- **Sem retreinar:** `{python} pct(acc[2], 1)` no lote 2 e `{python} pct(acc[10], 1)` no lote 10. Os sensores se degradam e a resposta ao mesmo gás muda (*drift*).
+- **Projeção em 2 componentes principais de 1a:** a metade 1b coincide com o treino. Nos lotes 3 e 10, boa parte das leituras fica fora da região do treino.
+:::
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, axes = plt.subplots(1, 4, figsize=(14, 3.5), gridspec_kw={"width_ratios": [1.5, 1, 1, 1]})
+ax = axes[0]
+rot = ["1b"] + [str(b) for b in range(2, 11)]
+vals = [acc_ctl] + [acc[b] for b in range(2, 11)]
+ax.bar(rot, vals, color=[COR_A] + [COR_B] * 9)
+ax.axhline(1 / 6, color=COR_CINZA, ls="--", lw=1.2, label="acaso (1/6)"); ax.legend(fontsize=8, loc="upper right")
+ax.set_xlabel("lote (o treino é a metade 1a)"); ax.set_ylabel("acurácia"); ax.set_ylim(0, 1)
+ax.set_title("Acurácia do classificador por lote")
+P_ref = pca_ref.transform(X_ref)[:, :2]
+for ax, (nome, Y) in zip(axes[1:], (("metade 1b", X_ctl), ("lote 3", Zg[3][idx_tl[3]]), ("lote 10", Zg[10][idx_tl[10]]))):
+    PY = pca_ref.transform(Y)[:, :2]
+    ax.scatter(PY[:, 0], PY[:, 1], s=7, color=COR_B, alpha=.45, label=nome)
+    ax.scatter(P_ref[:, 0], P_ref[:, 1], s=7, color=COR_A, alpha=.6, label="treino (1a)")
+    ax.set_title(f"1a e {nome}"); ax.set_xlabel("CP 1"); ax.legend(fontsize=8, loc="upper left")
+    ax.set_xlim(-26, 16); ax.set_ylim(-19, 19)
+axes[1].set_ylabel("CP 2")
+plt.tight_layout(); plt.show()
+```
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment .callout-important}
+## Pergunta da aula
+A acurácia exige rótulos, que em produção normalmente não existem. Usando só as leituras $\mathbf{x}$, é possível detectar a mudança, com controle sobre o alarme falso?
+:::
+:::
+
+## O que já vimos e a ideia central
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Em termos estatísticos: as leituras de treino são uma amostra de uma distribuição $P$, as de produção são uma amostra de uma distribuição $Q$, e queremos decidir se $P=Q$ a partir das duas amostras. Três aulas anteriores tocam nesse problema.
+
+- **Aula 2, estimação de densidade.** Uma opção seria estimar as duas densidades com um KDE e compará-las. Em dimensão alta o KDE exige uma quantidade de dados que não temos, e aqui são `{python} d_gas` atributos.
+- **Aula 5, checagem de modelos.** Comparamos dados reais com amostras geradas por um modelo usando a MMD e um teste de permutação. Aquilo já era um teste de duas amostras, mas a MMD foi usada sem explicação. Vimos também que o resultado dependia da largura do kernel.
+- **Aula 10.** Os modelos de recomendação supunham que a distribuição dos dados não muda, e a aula terminou perguntando como detectar uma mudança sem rótulos.
+
+**Ideia central.** Se $P=Q$, toda função $f$ tem a mesma média nas duas distribuições: $\mathbb{E}_P[f(\mathbf{x})]=\mathbb{E}_Q[f(\mathbf{y})]$. Portanto, uma função cujas médias diferem entre treino e produção indica que as distribuições são diferentes. A MMD procura, dentro de uma família de funções, aquela cujas médias mais diferem.
+
+A aula responde a quatro perguntas:
+
+1. **Decisão:** como decidir, com duas amostras, se elas vêm da mesma distribuição, controlando a probabilidade de alarme falso?
+2. **Estatística:** o que é a MMD, e por que ela detecta diferenças que médias e variâncias não detectam?
+3. **Estimação e ajustes:** como calcular a MMD com amostras finitas, e qual é o efeito da largura do kernel e da dimensão?
+4. **Uso:** o que a rejeição do teste informa, o que ela não informa, e o que fazer depois?
+:::
+
+::: {.content-visible when-format="revealjs"}
+**Formulação:** treino é amostra de $P$, produção é amostra de $Q$. Decidir se $P=Q$ a partir das duas amostras.
+
+::: {.fragment}
+- **Aula 2 (KDE):** estimar as duas densidades e comparar exige dados demais em `{python} d_gas` dimensões.
+- **Aula 5 (checagem de modelos):** já usamos a MMD com permutação, sem explicar a MMD. O resultado dependia da largura do kernel.
+- **Aula 10:** os modelos supunham dados estáveis.
+:::
+
+::: {.fragment}
+**Ideia central:** se $P=Q$, toda função tem a mesma média nas duas, $\mathbb{E}_P[f(\mathbf{x})]=\mathbb{E}_Q[f(\mathbf{y})]$. A MMD procura, numa família de funções, aquela cujas médias mais diferem.
+:::
+
+::: {.fragment}
+1. **Decisão:** como decidir com duas amostras, controlando o alarme falso?
+2. **Estatística:** o que é a MMD, e o que ela detecta?
+3. **Estimação e ajustes:** como calculá-la, e qual o efeito da largura do kernel e da dimensão?
+4. **Uso:** o que a rejeição informa, e o que fazer depois?
+:::
+:::
+
+# As comparações mais simples
+
+## Três comparações diretas e quatro mudanças de teste
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Notação: $X=\{\mathbf{x}_1,\dots,\mathbf{x}_n\}$ é a amostra de referência, de $P$, e $Y=\{\mathbf{y}_1,\dots,\mathbf{y}_m\}$ é a amostra de produção, de $Q$. Nesta aula, $\mathbf{y}_j$ é um ponto da segunda amostra, e não um rótulo.
+
+Antes da MMD, consideramos três estatísticas simples:
+
+- **Diferença de médias:** $\|\bar{\mathbf{x}}-\bar{\mathbf{y}}\|$.
+- **Kolmogorov-Smirnov (KS) por atributo:** para cada atributo $j$, a maior diferença entre as distribuições acumuladas empíricas das duas amostras, $\max_t|\hat F_X^{(j)}(t)-\hat F_Y^{(j)}(t)|$. Usamos o maior valor entre os atributos.
+- **Médias e covariâncias:** $\|\bar{\mathbf{x}}-\bar{\mathbf{y}}\|^2+\|\hat\Sigma_X-\hat\Sigma_Y\|_F^2$.
+
+Para avaliar o que cada uma detecta, usamos quatro pares de distribuições em duas dimensões. Em todos, $P=\mathcal{N}(\mathbf{0},I)$, com `{python} N_SIN` pontos de cada lado:
+
+- **(a) Média deslocada:** $Q=\mathcal{N}\big((0{,}5;\,0),\,I\big)$.
+- **(b) Variância maior:** $Q=\mathcal{N}(\mathbf{0},\,1{,}5^2I)$.
+- **(c) Correlação:** $Q$ Gaussiana com média zero, variâncias 1 e correlação $0{,}6$. Cada atributo isolado continua $\mathcal{N}(0,1)$.
+- **(d) Mistura:** metade dos pontos vem de uma Gaussiana com correlação $+0{,}9$ e metade de uma com correlação $-0{,}9$. As correlações se cancelam, e $Q$ tem a mesma média, a mesma matriz de covariância e as mesmas marginais de $P$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+**Notação:** referência $X=\{\mathbf{x}_i\}_{i=1}^n\sim P$, produção $Y=\{\mathbf{y}_j\}_{j=1}^m\sim Q$ ($\mathbf{y}_j$ é um ponto, não um rótulo).
+
+- **Diferença de médias:** $\|\bar{\mathbf{x}}-\bar{\mathbf{y}}\|$.
+- **KS por atributo:** $\max_t|\hat F_X^{(j)}(t)-\hat F_Y^{(j)}(t)|$, o maior valor entre os atributos.
+- **Médias e covariâncias:** $\|\bar{\mathbf{x}}-\bar{\mathbf{y}}\|^2+\|\hat\Sigma_X-\hat\Sigma_Y\|_F^2$.
+
+::: {.fragment}
+**Quatro pares em 2D**, com $P=\mathcal{N}(\mathbf{0},I)$ e `{python} N_SIN` pontos de cada lado: (a) média deslocada; (b) variância maior; (c) correlação $0{,}6$; (d) mistura de correlações $+0{,}9$ e $-0{,}9$, com a mesma média, a mesma covariância e as mesmas marginais de $P$.
+:::
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, axes = plt.subplots(1, 4, figsize=(14, 3.6), sharex=True, sharey=True)
+for ax, (nome, titulo) in zip(axes, PARES.items()):
+    X, Y = pares[nome]
+    ax.scatter(Y[:, 0], Y[:, 1], s=6, color=COR_B, alpha=.5, label="$Q$ (produção)")
+    ax.scatter(X[:, 0], X[:, 1], s=6, color=COR_A, alpha=.5, label="$P$ (referência)")
+    ax.set_title(titulo); ax.set_xlim(-4.5, 4.5); ax.set_ylim(-4.5, 4.5); ax.set_aspect("equal")
+    ax.set_xlabel("$x_1$")
+axes[0].set_ylabel("$x_2$"); axes[0].legend(fontsize=8, loc="upper left", markerscale=2)
+plt.tight_layout(); plt.show()
+```
+:::
+
+## O que cada comparação detecta
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A tabela mostra em quantas de `{python} R_SIN` repetições do sorteio cada estatística indicou diferença. A regra de decisão é o teste de permutação do Bloco 1, ajustado para 5% de alarmes falsos. Um valor próximo de 5% significa que a estatística não detecta a mudança.
+
+| Estatística | (a) média | (b) variância | (c) correlação | (d) mistura |
+| :--- | :---: | :---: | :---: | :---: |
+| **Diferença de médias** | `{python} pct(poder_sin['media']['media'])` | `{python} pct(poder_sin['media']['variancia'])` | `{python} pct(poder_sin['media']['correlacao'])` | `{python} pct(poder_sin['media']['xis'])` |
+| **KS por atributo** | `{python} pct(poder_sin['ks']['media'])` | `{python} pct(poder_sin['ks']['variancia'])` | `{python} pct(poder_sin['ks']['correlacao'])` | `{python} pct(poder_sin['ks']['xis'])` |
+| **Médias e covariâncias** | `{python} pct(poder_sin['mcov']['media'])` | `{python} pct(poder_sin['mcov']['variancia'])` | `{python} pct(poder_sin['mcov']['correlacao'])` | `{python} pct(poder_sin['mcov']['xis'])` |
+
+Cada estatística detecta só o tipo de mudança para o qual foi construída, e nenhuma detecta o caso (d). Comparar dois KDEs (Aula 2) detectaria os quatro casos em 2D, mas não é viável em `{python} d_gas` dimensões.
+
+No conjunto de gases, as comparações simples funcionam: entre a metade 1a e o lote 2, o teste KS com correção para múltiplos testes indica diferença em `{python} ks_rej_l2` dos `{python} d_gas` atributos, e em `{python} ks_rej_ctl` entre as metades 1a e 1b. Rabanser, Günnemann & Lipton (2019, §5, p. 6) relatam resultado parecido em imagens. O drift dos sensores altera quase todos os atributos. Os casos sintéticos mostram que isso não é garantido em geral. O objetivo é ter uma única estatística que não dependa de saber de antemão o tipo de mudança.
+:::
+
+::: {.content-visible when-format="revealjs"}
+Fração de `{python} R_SIN` repetições em que cada estatística indicou diferença (5% de alarme falso, com o teste do Bloco 1):
+
+| | (a) média | (b) variância | (c) correlação | (d) mistura |
+| :--- | :---: | :---: | :---: | :---: |
+| **Diferença de médias** | `{python} pct(poder_sin['media']['media'])` | `{python} pct(poder_sin['media']['variancia'])` | `{python} pct(poder_sin['media']['correlacao'])` | `{python} pct(poder_sin['media']['xis'])` |
+| **KS por atributo** | `{python} pct(poder_sin['ks']['media'])` | `{python} pct(poder_sin['ks']['variancia'])` | `{python} pct(poder_sin['ks']['correlacao'])` | `{python} pct(poder_sin['ks']['xis'])` |
+| **Médias e covariâncias** | `{python} pct(poder_sin['mcov']['media'])` | `{python} pct(poder_sin['mcov']['variancia'])` | `{python} pct(poder_sin['mcov']['correlacao'])` | `{python} pct(poder_sin['mcov']['xis'])` |
+
+::: {.fragment}
+- **No gás, as simples funcionam:** o KS indica diferença em `{python} ks_rej_l2` dos `{python} d_gas` atributos no lote 2, e em `{python} ks_rej_ctl` na metade 1b. O drift altera quase todos os atributos.
+:::
+
+::: {.fragment .callout-important}
+## Limitação das comparações simples
+Cada estatística detecta só o tipo de mudança para o qual foi construída, e nenhuma detecta o caso (d). Queremos uma estatística que não dependa de conhecer o tipo de mudança.
+:::
+:::
+
+# Intuição: a Função que Mais Separa as Duas Amostras
+
+## Exemplo: Gaussiana e Laplace com a mesma média e a mesma variância
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Considere, em uma dimensão, $P$ Gaussiana padrão e $Q$ uma distribuição de Laplace com a mesma média e a mesma variância (exemplo da Figura 1 de Gretton et al., 2012). Cada comparação da seção anterior equivale a escolher uma função $f$ e comparar a média de $f$ nas duas amostras:
+
+| Função $f(x)$ | Média sob $P$ (Gaussiana) | Média sob $Q$ (Laplace) |
+| :--- | :---: | :---: |
+| $x$ | `{python} brl(mom_gl[1][0])` | `{python} brl(mom_gl[1][1])` |
+| $x^2$ | `{python} brl(mom_gl[2][0])` | `{python} brl(mom_gl[2][1])` |
+| $x^4$ | `{python} brl(mom_gl[4][0])` | `{python} brl(mom_gl[4][1])` |
+
+As funções $x$ e $x^2$ não distinguem as distribuições. A função $x^4$ distingue, porque a Laplace tem caudas mais pesadas, mas escolhê-la exige saber de antemão onde está a diferença.
+
+A alternativa é escolher a função a partir dos dados: fixamos uma família de funções suaves e procuramos, dentro dela, a função cuja média sob $P$ mais supera a média sob $Q$. Essa função é chamada de **função testemunha** (*witness function*). A figura mostra a testemunha deste exemplo, calculada com `{python} milhar(N_GL)` pontos de cada lado. Ela é positiva onde a Gaussiana tem mais massa e negativa onde a Laplace tem mais massa (no centro e nas caudas).
+
+A maior diferença de médias obtida dentro da família, aqui `{python} brl(mmd_b_gl, 3)`, é a **MMD** (*Maximum Mean Discrepancy*, discrepância máxima entre médias). Faltam três definições, que os blocos seguintes fornecem: qual família de funções usar (Bloco 2), como estimar a MMD com amostras (Bloco 3) e a partir de que valor rejeitar (Bloco 1).
+:::
+
+::: {.content-visible when-format="revealjs"}
+$P$ Gaussiana padrão, $Q$ Laplace com a mesma média e a mesma variância (Gretton et al., 2012, Fig. 1). Cada comparação corresponde a uma função $f$:
+
+| Função $f(x)$ | Média sob $P$ | Média sob $Q$ |
+| :--- | :---: | :---: |
+| $x$ | `{python} brl(mom_gl[1][0])` | `{python} brl(mom_gl[1][1])` |
+| $x^2$ | `{python} brl(mom_gl[2][0])` | `{python} brl(mom_gl[2][1])` |
+| $x^4$ | `{python} brl(mom_gl[4][0])` | `{python} brl(mom_gl[4][1])` |
+
+::: {.fragment}
+- **Função testemunha:** numa família de funções suaves, a função cuja média sob $P$ mais supera a média sob $Q$. É escolhida a partir dos dados.
+- **MMD** (*Maximum Mean Discrepancy*): o valor dessa maior diferença. Aqui, `{python} brl(mmd_b_gl, 3)`.
+- **Falta definir:** a família de funções (Bloco 2), o estimador (Bloco 3) e o limiar de rejeição (Bloco 1).
+:::
+:::
+
+::: {.fig-resize style="width: 60%; margin: 0 auto;"}
+```{python}
+#| echo: false
+t = np.linspace(-4.5, 4.5, 400)
+dens_g = np.exp(-t ** 2 / 2) / np.sqrt(2 * np.pi)
+dens_l = np.exp(-np.sqrt(2) * np.abs(t)) / np.sqrt(2)
+wit = testemunha(t[:, None], xg[:, None], xl[:, None], SIG_GL) / mmd_b_gl
+fig, (a1, a2) = plt.subplots(2, 1, figsize=(7.2, 4.6), sharex=True, gridspec_kw={"height_ratios": [1.2, 1]})
+a1.plot(t, dens_g, color=COR_A, lw=2, label="$P$: Gaussiana")
+a1.plot(t, dens_l, color=COR_B, lw=2, label="$Q$: Laplace")
+a1.set_ylabel("densidade"); a1.legend(fontsize=9); a1.set_title("Densidades com a mesma média e a mesma variância")
+a2.plot(t, wit, color=COR_NEU, lw=2)
+a2.fill_between(t, 0, wit, where=wit > 0, color=COR_A, alpha=.25)
+a2.fill_between(t, 0, wit, where=wit < 0, color=COR_B, alpha=.25)
+a2.axhline(0, color=COR_CINZA, lw=1)
+a2.set_ylabel("testemunha $f^\\star(t)$"); a2.set_xlabel("$t$")
+a2.set_title("Função testemunha: positiva onde $P$ tem mais massa")
+plt.tight_layout(); plt.show()
+```
+:::
+
+# Bloco 1: Teste de Duas Amostras e Teste de Permutação
+
+## Hipóteses, nível e poder
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+::: {.callout-note icon=false}
+## Definição (problema de duas amostras; Gretton et al., 2012, Problema 1, p. 725)
+Sejam $X=\{\mathbf{x}_1,\dots,\mathbf{x}_n\}$ observações independentes e identicamente distribuídas segundo $P$, e $Y=\{\mathbf{y}_1,\dots,\mathbf{y}_m\}$ observações independentes e identicamente distribuídas segundo $Q$, com $X$ independente de $Y$. O problema é decidir, a partir de $X$ e $Y$, entre
+$$H_0:\ P=Q\qquad\text{e}\qquad H_1:\ P\neq Q.$$
+:::
+
+Gretton et al. escrevem $m$ para o tamanho de $X$ e $n$ para o de $Y$. Aqui usamos $n$ para a referência, como na Aula 5.
+
+Um **teste** calcula uma estatística $T(X,Y)$, que tende a ser grande quando as amostras diferem, e rejeita $H_0$ quando $T$ ultrapassa um limiar. Há dois tipos de erro:
+
+- **Erro do tipo I (alarme falso):** rejeitar $H_0$ quando $P=Q$. O teste tem **nível** $\alpha$ se a probabilidade desse erro é no máximo $\alpha$.
+- **Erro do tipo II:** não rejeitar $H_0$ quando $P\neq Q$. O **poder** do teste contra um par $(P,Q)$ é a probabilidade de rejeitar quando esse par é o verdadeiro.
+
+O nível é fixado antes de observar os dados, normalmente $\alpha=0{,}05$. O poder depende da diferença entre $P$ e $Q$, do tamanho das amostras e da estatística. A tabela da seção anterior é uma tabela de poder.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note icon=false}
+## Definição (problema de duas amostras; Gretton et al., 2012, Problema 1, p. 725)
+$X=\{\mathbf{x}_i\}_{i=1}^n$ i.i.d. de $P$ e $Y=\{\mathbf{y}_j\}_{j=1}^m$ i.i.d. de $Q$, com $X$ independente de $Y$. Decidir entre $H_0: P=Q$ e $H_1: P\neq Q$.
+:::
+
+::: {.fragment}
+Um **teste** calcula uma estatística $T(X,Y)$ e rejeita $H_0$ quando ela ultrapassa um limiar.
+
+- **Erro do tipo I (alarme falso):** rejeitar quando $P=Q$. O teste tem **nível** $\alpha$ se essa probabilidade é no máximo $\alpha$.
+- **Erro do tipo II:** não rejeitar quando $P\neq Q$. O **poder** é a probabilidade de rejeitar sob um par $(P,Q)$ dado.
+:::
+
+::: {.fragment}
+- **O nível** é fixado antes de observar os dados (normalmente $\alpha=0{,}05$).
+- **O poder** depende da diferença, do tamanho das amostras e da estatística. A tabela anterior é uma tabela de poder.
+:::
+:::
+
+## O teste de permutação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para definir o limiar, é preciso saber como $T$ se distribui quando $P=Q$, e $P$ é desconhecida. O teste de permutação resolve isso com os próprios dados. Se $P=Q$, as $N=n+m$ observações vêm todas da mesma distribuição, e a atribuição de cada uma a "referência" ou "produção" é arbitrária. Redistribuir essas atribuições ao acaso gera conjuntos de dados com a mesma distribuição do conjunto observado.
+
+O procedimento é:
+
+1. Calcular a estatística nos dados observados: $T_0=T(X,Y)$.
+2. Juntar as duas amostras em uma só, com $N$ pontos.
+3. Repetir $B$ vezes: sortear $n$ dos $N$ pontos para o papel de $X$, usar os outros $m$ como $Y$, e calcular a estatística. Isso produz $T_1,\dots,T_B$.
+4. Calcular o **p-valor**:
+$$\hat p=\frac{1+\#\{b\in\{1,\dots,B\}:\ T_b\ge T_0\}}{B+1}.$$
+5. Rejeitar $H_0$ se $\hat p\le\alpha$.
+
+Os valores $T_1,\dots,T_B$ mostram a variação da estatística quando não há diferença entre os grupos. O p-valor mede a posição de $T_0$ em relação a eles. O menor p-valor possível é $1/(B+1)$: com $B=999$, é $0{,}001$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+**Problema:** o limiar depende da distribuição de $T$ quando $P=Q$, e $P$ é desconhecida.
+
+**Ideia:** se $P=Q$, a atribuição de cada ponto a "referência" ou "produção" é arbitrária. Redistribuí-la ao acaso gera dados com a mesma distribuição dos observados.
+
+::: {.fragment}
+1. $T_0=T(X,Y)$ nos dados observados.
+2. Juntar as amostras: $N=n+m$ pontos.
+3. $B$ vezes: sortear $n$ pontos para o papel de $X$, os outros $m$ para o de $Y$, e calcular $T_b$.
+4. **p-valor:** $\quad\hat p=\dfrac{1+\#\{b:\ T_b\ge T_0\}}{B+1}$. Rejeitar se $\hat p\le\alpha$.
+:::
+:::
+
+::: {.fig-resize style="width: 86%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{43,92,143}
+\definecolor{laranja}{RGB}{217,95,2}
+\definecolor{cinza}{RGB}{127,127,127}
+\begin{tikzpicture}[>=latex, font=\small, thick,
+  caixa/.style={draw=cinza, rounded corners=3pt, align=center, minimum height=1.25cm, text width=3.5cm}]
+  \node[caixa] (a) at (0,0) {\textcolor{azul}{$X$} e \textcolor{laranja}{$Y$} observados:\\ $T_0=T(X,Y)$};
+  \node[caixa] (b) at (4.7,0) {Juntar tudo:\\ $N=n+m$ pontos};
+  \node[caixa] (c) at (9.4,0) {Sortear $n$ para \textcolor{azul}{$X$},\\ o resto para \textcolor{laranja}{$Y$}: $T_b$};
+  \node[caixa] (d) at (14.1,0) {Posição de $T_0$ entre\\ $T_1,\dots,T_B$:\\ p-valor $\hat p$};
+  \draw[->] (a) -- (b);
+  \draw[->] (b) -- (c);
+  \draw[->] (c) -- (d);
+  \draw[->, cinza] ([xshift=7mm]c.south) -- ++(0,-0.5) -- node[below, cinza] {$B$ vezes} ++(-1.4,0) -- ([xshift=-7mm]c.south);
+\end{tikzpicture}
+```
+:::
+
+## O teste de permutação nos dados
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A figura aplica o procedimento com a diferença de médias como estatística e $B=999$. O histograma mostra $T_1,\dots,T_B$ e a linha vertical mostra $T_0$.
+
+- **Metade 1a contra metade 1b:** $T_0=$ `{python} brl(tm_ctl['obs'])` está dentro do histograma, com p-valor `{python} brl(tm_ctl['p'], 3)`. O teste não rejeita, como esperado para duas metades do mesmo lote.
+- **Metade 1a contra o lote 2:** $T_0=$ `{python} brl(tm_l2['obs'])` é maior que todos os valores permutados, com p-valor `{python} brl(tm_l2['p'], 3)`.
+- **Caso (d), a mistura:** p-valor `{python} brl(tm_xis['p'], 3)`. O teste não rejeita, embora $P\ne Q$, porque a diferença não está nas médias.
+
+O terceiro caso mostra que as duas propriedades do teste têm origens diferentes: o controle do alarme falso vem da permutação, e a capacidade de detectar a diferença vem da estatística.
+:::
+
+::: {.content-visible when-format="revealjs"}
+Estatística: diferença de médias. $B=999$. Histograma: $T_1,\dots,T_B$. Linha: $T_0$.
+
+::: {.fragment}
+- **1a contra 1b:** $\hat p=$ `{python} brl(tm_ctl['p'], 3)`. Não rejeita, como esperado.
+- **1a contra o lote 2:** $T_0$ maior que todos os valores permutados, $\hat p=$ `{python} brl(tm_l2['p'], 3)`.
+- **Caso (d):** $\hat p=$ `{python} brl(tm_xis['p'], 3)`. Não rejeita, embora $P\ne Q$: a diferença não está nas médias.
+:::
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.4))
+for ax, (titulo, t) in zip(axes, (("Gás: 1a contra 1b", tm_ctl), ("Gás: 1a contra o lote 2", tm_l2), ("Caso (d): mistura", tm_xis))):
+    ax.hist(t["nula"], bins=40, color=COR_CINZA, alpha=.75, label="permutados $T_b$")
+    ax.axvline(t["obs"], color=COR_ALERTA, lw=2.2, label="observado $T_0$")
+    ax.set_title(f"{titulo}  ($\\hat p$ = {brl(t['p'], 3)})"); ax.set_xlabel("diferença de médias")
+axes[0].set_ylabel("permutações"); axes[0].legend(fontsize=8)
+plt.tight_layout(); plt.show()
+```
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment .callout-important}
+## Nível e poder têm origens diferentes
+O controle do alarme falso vem da permutação. A capacidade de detectar a diferença vem da estatística.
+:::
+:::
+
+## Garantia de nível do teste de permutação
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O teste de permutação tem nível $\alpha$ para qualquer estatística e qualquer distribuição, com amostras finitas.
+
+Notação: $Z=(\mathbf{z}_1,\dots,\mathbf{z}_N)$ é a amostra conjunta, com $X$ nas $n$ primeiras posições. Para uma permutação $\pi$ de $\{1,\dots,N\}$, $Z_\pi=(\mathbf{z}_{\pi(1)},\dots,\mathbf{z}_{\pi(N)})$, e $T(Z)$ é a estatística calculada tratando as $n$ primeiras posições como a primeira amostra.
+
+::: {.callout-note icon=false}
+## Proposição (nível do teste de permutação)
+Suponha $H_0$ verdadeira: $\mathbf{z}_1,\dots,\mathbf{z}_N$ são independentes e identicamente distribuídas. Sejam $\pi_1,\dots,\pi_B$ permutações independentes, uniformes e independentes de $Z$, $T_0=T(Z)$ e $T_b=T(Z_{\pi_b})$. Então, para todo $\alpha\in(0,1)$,
+$$\Pr(\hat p\le\alpha)\le\alpha,\qquad\text{com}\quad \hat p=\frac{1+\#\{b\ge1:\ T_b\ge T_0\}}{B+1}.$$
+:::
+
+**Ideia da demonstração.** Sob $H_0$, a ordem das observações não altera a distribuição conjunta. Por isso, o valor observado $T_0$ se comporta como mais um valor permutado, e sua posição entre os $B+1$ valores é uniforme. A probabilidade de $T_0$ estar entre os $\alpha(B+1)$ maiores é, então, no máximo $\alpha$.
+
+**Demonstração completa (leitura complementar).**
+
+**Passo 1, a ordem não altera a distribuição sob $H_0$.** Como as $\mathbf{z}_i$ são i.i.d., a distribuição conjunta é o produto de $N$ cópias da mesma distribuição, e não muda quando trocamos a ordem. Logo $Z_\pi$ tem a mesma distribuição que $Z$ para toda permutação $\pi$ fixa. Seja $\pi_0$ mais uma permutação uniforme, independente de todo o resto. Condicionando em $\pi_0$, e usando $(Z_{\pi_0})_{\pi_b}=Z_{\pi_0\circ\pi_b}$:
+$$\big(T_0,T_1,\dots,T_B\big)\ \overset{d}{=}\ \big(T(Z_{\pi_0}),\,T(Z_{\pi_0\circ\pi_1}),\dots,T(Z_{\pi_0\circ\pi_B})\big).$$
+
+**Passo 2, o valor observado equivale a um valor permutado.** Defina $\sigma_0=\pi_0$ e $\sigma_b=\pi_0\circ\pi_b$. Dada $\pi_0$, cada $\sigma_b$ é uniforme (compor com uma permutação fixa é uma bijeção do conjunto das permutações) e as $\sigma_b$ são independentes entre si. Como essa distribuição condicional não depende de $\pi_0$, as $B+1$ permutações $\sigma_0,\dots,\sigma_B$ são independentes, uniformes e independentes de $Z$. Portanto, dado $Z$, as variáveis $T(Z_{\sigma_0}),\dots,T(Z_{\sigma_B})$ são i.i.d., e a distribuição conjunta delas não muda com a ordem. Pelo Passo 1, o mesmo vale para $(T_0,T_1,\dots,T_B)$.
+
+**Passo 3, contagem.** Seja $R_j=\#\{b\in\{0,\dots,B\}:\ T_b\ge T_j\}$. Então $\hat p=R_0/(B+1)$, e $\hat p\le\alpha$ equivale a $R_0\le k$, com $k=\lfloor\alpha(B+1)\rfloor$. No máximo $k$ índices $j$ têm $R_j\le k$: entre os índices com $R_j\le k$, tome o de menor valor $T_{j^\star}$; todos os outros índices desse conjunto têm $T_j\ge T_{j^\star}$ e são contados em $R_{j^\star}$, logo o conjunto tem no máximo $R_{j^\star}\le k$ elementos. Pelo Passo 2, $\Pr(R_j\le k)$ é a mesma para todo $j$, e portanto
+$$(B+1)\Pr(R_0\le k)=\sum_{j=0}^{B}\Pr(R_j\le k)=\mathbb{E}\big[\#\{j:\ R_j\le k\}\big]\le k.$$
+Logo $\Pr(\hat p\le\alpha)=\Pr(R_0\le k)\le\dfrac{k}{B+1}\le\alpha$. $\qquad\blacksquare$
+
+O que a demonstração usa e o que não usa:
+
+- **Não usa nenhuma propriedade da estatística, de $P$, da dimensão ou de $n$.** O nível vale para a diferença de médias, para a MMD e para qualquer outra estatística. O que muda entre estatísticas é o poder.
+- **Usa que, sob $H_0$, a ordem das observações não altera a distribuição conjunta.** Observações independentes satisfazem essa hipótese. Uma série temporal em que cada leitura depende da anterior não satisfaz, e nesse caso o teste pode ter mais alarmes falsos que o nível.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note icon=false}
+## Proposição (nível do teste de permutação)
+Sob $H_0$, com $\mathbf{z}_1,\dots,\mathbf{z}_N$ i.i.d., permutações $\pi_1,\dots,\pi_B$ independentes, uniformes e independentes de $Z$, $T_0=T(Z)$ e $T_b=T(Z_{\pi_b})$: $\quad\Pr(\hat p\le\alpha)\le\alpha$ para todo $\alpha\in(0,1)$.
+:::
+
+::: {.fragment}
+**Ideia da demonstração** (os três passos completos estão nas notas):
+
+- **Passo 1:** sob $H_0$, a ordem das observações não altera a distribuição conjunta.
+- **Passo 2:** por isso, $T_0$ se comporta como mais um valor permutado. A distribuição de $(T_0,T_1,\dots,T_B)$ não muda com a ordem.
+- **Passo 3:** a posição de $T_0$ entre os $B+1$ valores é uniforme, e a probabilidade de estar entre os $\lfloor\alpha(B+1)\rfloor$ maiores é no máximo $\alpha$.
+:::
+
+::: {.fragment}
+- **Não depende da estatística, de $P$, da dimensão ou de $n$.** O que muda entre estatísticas é o poder.
+- **Hipótese usada:** sob $H_0$, a ordem das observações não importa. Séries temporais com dependência entre leituras a violam.
+- **Menor p-valor possível:** $1/(B+1)$. Com $B=999$, $0{,}001$.
+:::
+:::
+
+## Pausa 1: Teste de Permutação
+
+::: {.callout-tip}
+## Um teste com $B=19$ permutações resulta em $T_0$ maior que todos os valores permutados. Qual é o p-valor? É possível rejeitar no nível $0{,}05$? E no nível $0{,}01$?
+
+Use a fórmula do p-valor e calcule o menor valor que ela pode assumir para esse $B$.
+:::
+
+::: {.callout-tip}
+## Nível, Poder e Permutação
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Se a estatística for trocada por uma que ignora os dados e devolve um número sorteado, o teste de permutação deixa de ter nível $\alpha$.
+- □ No caso (d), aumentar o número de permutações de $999$ para $99.999$ faria o teste com a diferença de médias passar a rejeitar.
+- □ O p-valor de `{python} brl(tm_ctl['p'], 3)` entre as metades 1a e 1b demonstra que as duas metades vêm da mesma distribuição.
+- □ Se as leituras de produção forem medidas consecutivas de um sensor cuja temperatura sobe gradualmente, a hipótese usada na demonstração do nível fica comprometida, mesmo sem drift de longo prazo.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 1: Teste de Permutação — Resposta
+
+::: {.callout-tip}
+## Nível, Poder e Permutação — Resposta
+
+- ✗ A demonstração não usa nenhuma propriedade de $T$. Uma estatística sem relação com os dados tem nível $\alpha$ e poder igual ao nível.
+- ✗ Mais permutações tornam o p-valor mais preciso, mas $T_0$ continua sendo um valor típico entre os permutados. Falta poder à estatística.
+- ✗ Não rejeitar indica ausência de evidência com essa estatística e esse tamanho de amostra. O caso (d) também não foi rejeitado, e nele $P\neq Q$.
+- ✔ Leituras consecutivas são dependentes, e a ordem passa a alterar a distribuição conjunta.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** $\hat p=(1+0)/(19+1)=0{,}05$. É possível rejeitar no nível $0{,}05$, e esse é o menor p-valor que $B=19$ produz. No nível $0{,}01$ não é possível rejeitar com esse $B$: são necessárias pelo menos $99$ permutações.
+:::
+
+:::
+
+# Bloco 2: A MMD
+
+## Definição da MMD
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O nível está garantido para qualquer estatística. Falta escolher uma estatística com poder contra tipos de mudança não previstos. O ponto de partida é o seguinte resultado, que não demonstramos:
+
+::: {.callout-note icon=false}
+## Lema (Gretton et al., 2012, Lema 1, p. 726; tradução livre)
+Seja $(\mathcal{X},d)$ um espaço métrico e sejam $P$ e $Q$ duas medidas de probabilidade de Borel em $\mathcal{X}$. Então $P=Q$ se e somente se $\mathbb{E}_P[f(\mathbf{x})]=\mathbb{E}_Q[f(\mathbf{y})]$ para toda função $f$ contínua e limitada em $\mathcal{X}$.
+:::
+
+::: {.callout-note icon=false}
+## Definição (*Maximum Mean Discrepancy*; Gretton et al., 2012, Definição 2, p. 726)
+Seja $\mathcal{F}$ uma classe de funções $f:\mathcal{X}\to\mathbb{R}$. A MMD entre $P$ e $Q$ em relação a $\mathcal{F}$ é
+$$\mathrm{MMD}[\mathcal{F},P,Q]=\sup_{f\in\mathcal{F}}\Big(\mathbb{E}_P[f(\mathbf{x})]-\mathbb{E}_Q[f(\mathbf{y})]\Big).$$
+:::
+
+A escolha de $\mathcal{F}$ envolve um compromisso. A classe de todas as funções contínuas e limitadas distingue quaisquer duas distribuições, mas não serve com amostras finitas: sempre existe uma função contínua que vale $1$ perto dos pontos de $X$ e $-1$ perto dos pontos de $Y$, e a diferença de médias amostrais atinge o máximo mesmo quando $P=Q$. Gretton et al. (p. 726, tradução livre) observam que "não é prático trabalhar com uma classe de funções tão rica no cenário de amostras finitas". Uma classe pequena demais não detecta diferenças. Começamos pela classe mais simples e a ampliamos.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note icon=false}
+## Lema e Definição (Gretton et al., 2012, Lema 1 e Definição 2, p. 726; tradução livre)
+$P=Q$ se e somente se $\mathbb{E}_P[f(\mathbf{x})]=\mathbb{E}_Q[f(\mathbf{y})]$ para toda $f$ contínua e limitada. Para uma classe $\mathcal{F}$ de funções $f:\mathcal{X}\to\mathbb{R}$,
+$$\mathrm{MMD}[\mathcal{F},P,Q]=\sup_{f\in\mathcal{F}}\Big(\mathbb{E}_P[f(\mathbf{x})]-\mathbb{E}_Q[f(\mathbf{y})]\Big).$$
+:::
+
+::: {.fragment}
+**A escolha de $\mathcal{F}$ é um compromisso:**
+
+- **Todas as funções contínuas e limitadas:** com amostras finitas, sempre há uma função que vale $1$ perto de $X$ e $-1$ perto de $Y$. A diferença amostral é máxima mesmo com $P=Q$.
+- **Classe pequena demais:** não detecta diferenças.
+- **Plano:** começar pela classe mais simples e ampliá-la.
+:::
+:::
+
+## Caso linear e atributos $(x,x^2)$
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Considere as funções lineares com vetor de pesos de norma no máximo 1, $\mathcal{F}_{\text{lin}}=\{f(\mathbf{x})=\mathbf{w}^T\mathbf{x}:\ \|\mathbf{w}\|\le1\}$, e suponha que as médias $\boldsymbol\mu_P=\mathbb{E}_P[\mathbf{x}]$ e $\boldsymbol\mu_Q=\mathbb{E}_Q[\mathbf{y}]$ existem. A restrição na norma é necessária: sem ela, a diferença poderia ser aumentada sem limite multiplicando $\mathbf{w}$ por uma constante.
+
+Pela linearidade da esperança,
+$$\mathbb{E}_P[\mathbf{w}^T\mathbf{x}]-\mathbb{E}_Q[\mathbf{w}^T\mathbf{y}]=\mathbf{w}^T(\boldsymbol\mu_P-\boldsymbol\mu_Q).$$
+Pela desigualdade de Cauchy-Schwarz, $\mathbf{w}^T(\boldsymbol\mu_P-\boldsymbol\mu_Q)\le\|\mathbf{w}\|\,\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|\le\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|$, com igualdade em $\mathbf{w}^\star=(\boldsymbol\mu_P-\boldsymbol\mu_Q)/\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|$. Portanto
+$$\mathrm{MMD}[\mathcal{F}_{\text{lin}},P,Q]=\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|.$$
+
+Com funções lineares, a MMD é a diferença de médias. O supremo tem solução fechada, e o valor ótimo é uma distância entre médias.
+
+Para detectar mais do que a média, trocamos $x$ por um vetor de atributos. Em uma dimensão, com $\phi(x)=(x,\,x^2)$ e funções $f(x)=\mathbf{w}^T\phi(x)$, a mesma conta dá
+$$\mathrm{MMD}^2=\big\|\mathbb{E}_P[\phi(x)]-\mathbb{E}_Q[\phi(y)]\big\|^2=\big(\mathbb{E}_P[x]-\mathbb{E}_Q[y]\big)^2+\big(\mathbb{E}_P[x^2]-\mathbb{E}_Q[y^2]\big)^2.$$
+
+Na figura, cada ponto $x$ é mapeado para $(x,x^2)$, sobre a parábola. A média dos pontos mapeados, $\mathbb{E}[\phi(x)]$, é um ponto do plano com coordenadas (média, segundo momento), e a MMD é a distância entre os pontos médios das duas distribuições. No primeiro painel eles diferem na horizontal (`{python} brl(mmd_phi['Médias diferentes'])`), e no segundo, na vertical (`{python} brl(mmd_phi['Variâncias diferentes'])`). No terceiro, com a Gaussiana e a Laplace, eles coincidem (`{python} brl(mmd_phi['Gaussiana e Laplace'])`, diferença de amostragem): esses atributos não capturam a diferença nas caudas.
+:::
+
+::: {.content-visible when-format="revealjs"}
+$\mathcal{F}_{\text{lin}}=\{f(\mathbf{x})=\mathbf{w}^T\mathbf{x}:\ \|\mathbf{w}\|\le1\}$, supondo que $\boldsymbol\mu_P=\mathbb{E}_P[\mathbf{x}]$ e $\boldsymbol\mu_Q=\mathbb{E}_Q[\mathbf{y}]$ existem.
+
+::: {.fragment}
+**Passo 1, linearidade da esperança:** $\quad\mathbb{E}_P[\mathbf{w}^T\mathbf{x}]-\mathbb{E}_Q[\mathbf{w}^T\mathbf{y}]=\mathbf{w}^T(\boldsymbol\mu_P-\boldsymbol\mu_Q)$
+:::
+
+::: {.fragment}
+**Passo 2, Cauchy-Schwarz:** $\quad\mathbf{w}^T(\boldsymbol\mu_P-\boldsymbol\mu_Q)\le\|\mathbf{w}\|\,\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|\le\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|$, com igualdade em $\mathbf{w}^\star=\dfrac{\boldsymbol\mu_P-\boldsymbol\mu_Q}{\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|}$.
+
+$$\mathrm{MMD}[\mathcal{F}_{\text{lin}},P,Q]=\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|\qquad\text{(a diferença de médias)}$$
+:::
+
+::: {.fragment}
+**Com atributos $\phi(x)=(x,x^2)$ em 1D** e $f(x)=\mathbf{w}^T\phi(x)$, a mesma conta dá
+$$\mathrm{MMD}^2=\big(\mathbb{E}_P[x]-\mathbb{E}_Q[y]\big)^2+\big(\mathbb{E}_P[x^2]-\mathbb{E}_Q[y^2]\big)^2.$$
+
+- Cada distribuição é resumida pelo ponto $\mathbb{E}[\phi(x)]$ = (média, segundo momento). A MMD é a distância entre os dois pontos.
+- **Gaussiana e Laplace:** os pontos coincidem. Esses atributos não capturam a diferença nas caudas.
+:::
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.4), sharey=True)
+tt = np.linspace(-3.6, 3.6, 200)
+for ax, (titulo, (a, b)) in zip(axes, pares_phi.items()):
+    a, b = a[:N_PHI], b[:N_PHI]
+    ax.plot(tt, tt ** 2, color=COR_CINZA, lw=1, alpha=.6)
+    ax.scatter(b, b ** 2, s=8, color=COR_B, alpha=.35)
+    ax.scatter(a, a ** 2, s=8, color=COR_A, alpha=.35)
+    ma, mb = (a.mean(), (a ** 2).mean()), (b.mean(), (b ** 2).mean())
+    ax.plot([ma[0], mb[0]], [ma[1], mb[1]], color="black", lw=1.5)
+    ax.scatter(*mb, s=170, marker="*", color=COR_B, edgecolor="black", zorder=5, label="$\\mathbb{E}_Q[\\phi]$")
+    ax.scatter(*ma, s=170, marker="*", color=COR_A, edgecolor="black", zorder=5, label="$\\mathbb{E}_P[\\phi]$")
+    ax.set_xlim(-3.6, 3.6); ax.set_ylim(-.3, 7); ax.set_title(titulo); ax.set_xlabel("$x$")
+axes[0].set_ylabel("$x^2$"); axes[0].legend(fontsize=9, loc="upper center")
+plt.tight_layout(); plt.show()
+```
+:::
+
+## Kernel e espaço de atributos
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Acrescentar atributos um a um ($x^3$, $x^4$, produtos entre coordenadas) não termina. A solução é usar um mapa $\phi$ cujo produto interno tem fórmula fechada, porque os cálculos da MMD só usam produtos internos entre vetores de atributos. Essa fórmula é o **kernel**:
+$$k(\mathbf{x},\mathbf{x}')=\langle\phi(\mathbf{x}),\phi(\mathbf{x}')\rangle,$$
+que corresponde à relação (6.1) do PRML (cap. 6, p. 292). O espaço em que $\phi(\mathbf{x})$ está é o **espaço de atributos**, denotado por $\mathcal{H}$. Ele tem produto interno e norma, e pode ter dimensão infinita. Na Aula 2, "kernel" designava a janela do KDE. A relação entre os dois usos aparece adiante.
+
+Usamos o kernel Gaussiano (PRML, eq. 6.23, p. 296):
+$$k(\mathbf{x},\mathbf{x}')=\exp\!\left(-\frac{\|\mathbf{x}-\mathbf{x}'\|^2}{2\sigma^2}\right).$$
+O parâmetro $\sigma>0$ é a **largura** do kernel. Na Aula 5 o mesmo kernel foi escrito com $\gamma=1/(2\sigma^2)$. Vale $k(\mathbf{x},\mathbf{x})=1$, e o valor tende a zero quando a distância entre os pontos é grande em relação a $\sigma$. Este $\sigma$ não é o desvio padrão do ruído das Aulas 6 e 7.
+
+Em uma dimensão, os atributos do kernel Gaussiano podem ser escritos explicitamente. O PRML (eq. 6.25, p. 296) fatora o kernel em três exponenciais, e a série de Taylor da exponencial do meio dá
+$$k(x,x')=e^{-x^2/(2\sigma^2)}\,e^{xx'/\sigma^2}\,e^{-x'^2/(2\sigma^2)}=\sum_{j=0}^{\infty}\phi_j(x)\,\phi_j(x'),\qquad\phi_j(x)=\frac{e^{-x^2/(2\sigma^2)}\,x^j}{\sigma^j\sqrt{j!}}.$$
+Há um atributo para cada potência $x^j$, com peso decrescente em $j$. O vetor de atributos tem dimensão infinita (PRML, p. 296) e nunca é calculado: basta a fórmula de $k$.
+
+A classe de funções usada na aula é a das funções lineares nos atributos, com pesos de norma limitada:
+$$\mathcal{F}=\big\{f(\mathbf{x})=\langle\mathbf{w},\phi(\mathbf{x})\rangle_{\mathcal{H}}:\ \|\mathbf{w}\|_{\mathcal{H}}\le1\big\}.$$
+Na literatura, $\mathcal{H}$ é um espaço de Hilbert com kernel reprodutor (RKHS) e $\mathcal{F}$ é a sua bola unitária. Não usamos essa teoria, apenas o fato de que vale a desigualdade de Cauchy-Schwarz em $\mathcal{H}$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+Acrescentar atributos um a um não termina. Os cálculos da MMD só usam **produtos internos** entre vetores de atributos.
+
+::: {.fragment}
+- **Kernel** (PRML, eq. 6.1, p. 292): $\ k(\mathbf{x},\mathbf{x}')=\langle\phi(\mathbf{x}),\phi(\mathbf{x}')\rangle$. O espaço $\mathcal{H}$ de $\phi(\mathbf{x})$ é o **espaço de atributos**.
+- **Kernel Gaussiano** (PRML, eq. 6.23, p. 296): $\ k(\mathbf{x},\mathbf{x}')=\exp\!\big(-\|\mathbf{x}-\mathbf{x}'\|^2/(2\sigma^2)\big)$, com **largura** $\sigma$. Na Aula 5, $\gamma=1/(2\sigma^2)$.
+:::
+
+::: {.fragment}
+- **Atributos do kernel Gaussiano em 1D** (PRML, eq. 6.25): $\ \phi_j(x)=\dfrac{e^{-x^2/(2\sigma^2)}x^j}{\sigma^j\sqrt{j!}}$, $j=0,1,2,\dots$ Um atributo para cada potência de $x$. Dimensão infinita, e $\phi$ nunca é calculado.
+:::
+
+::: {.fragment}
+**Classe de funções da aula:** $\quad\mathcal{F}=\big\{f(\mathbf{x})=\langle\mathbf{w},\phi(\mathbf{x})\rangle_{\mathcal{H}}:\ \|\mathbf{w}\|_{\mathcal{H}}\le1\big\}$
+
+Na literatura, é a bola unitária de um espaço de Hilbert com kernel reprodutor (RKHS). Só usamos que vale Cauchy-Schwarz em $\mathcal{H}$.
+:::
+:::
+
+## A MMD em termos do kernel
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Este é o resultado central da aula. Ele repete o caso linear no espaço $\mathcal{H}$.
+
+::: {.callout-note icon=false}
+## Definição (*mean embedding*; Gretton et al., 2012, Lema 3, p. 727)
+A **média de $P$ no espaço de atributos** é $\boldsymbol\mu_P=\mathbb{E}_P[\phi(\mathbf{x})]\in\mathcal{H}$, o elemento que satisfaz $\mathbb{E}_P[\langle\mathbf{w},\phi(\mathbf{x})\rangle_{\mathcal{H}}]=\langle\mathbf{w},\boldsymbol\mu_P\rangle_{\mathcal{H}}$ para todo $\mathbf{w}\in\mathcal{H}$. Ela existe quando $k$ é mensurável e $\mathbb{E}_P\big[\sqrt{k(\mathbf{x},\mathbf{x})}\big]<\infty$.
+:::
+
+A condição de existência é a hipótese técnica do teorema. Para o kernel Gaussiano, $k(\mathbf{x},\mathbf{x})=1$ e a condição vale para qualquer distribuição. O símbolo $\boldsymbol\mu_P$ não tem relação com a média global $\mu$ da Aula 10.
+
+::: {.callout-note icon=false}
+## Teorema (MMD em termos do kernel; Gretton et al., 2012, Lemas 4 e 6, pp. 727–728)
+Suponha que $\boldsymbol\mu_P$ e $\boldsymbol\mu_Q$ existem. Sejam $\mathbf{x},\mathbf{x}'$ independentes com distribuição $P$ e $\mathbf{y},\mathbf{y}'$ independentes com distribuição $Q$, com $(\mathbf{x},\mathbf{x}')$ independente de $(\mathbf{y},\mathbf{y}')$. Então
+$$\mathrm{MMD}^2[\mathcal{F},P,Q]=\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}^2=\mathbb{E}\big[k(\mathbf{x},\mathbf{x}')\big]-2\,\mathbb{E}\big[k(\mathbf{x},\mathbf{y})\big]+\mathbb{E}\big[k(\mathbf{y},\mathbf{y}')\big].$$
+:::
+
+**Demonstração.**
+
+**Passo 1, linearidade.** Para $f\in\mathcal{F}$, pela definição de $\boldsymbol\mu_P$ e $\boldsymbol\mu_Q$,
+$$\mathbb{E}_P[f(\mathbf{x})]-\mathbb{E}_Q[f(\mathbf{y})]=\mathbb{E}_P\big[\langle\mathbf{w},\phi(\mathbf{x})\rangle_{\mathcal{H}}\big]-\mathbb{E}_Q\big[\langle\mathbf{w},\phi(\mathbf{y})\rangle_{\mathcal{H}}\big]=\langle\mathbf{w},\boldsymbol\mu_P-\boldsymbol\mu_Q\rangle_{\mathcal{H}}.$$
+
+**Passo 2, Cauchy-Schwarz.** Para $\|\mathbf{w}\|_{\mathcal{H}}\le1$, $\langle\mathbf{w},\boldsymbol\mu_P-\boldsymbol\mu_Q\rangle_{\mathcal{H}}\le\|\mathbf{w}\|_{\mathcal{H}}\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}\le\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}$. Se $\boldsymbol\mu_P\ne\boldsymbol\mu_Q$, a igualdade vale em $\mathbf{w}^\star=(\boldsymbol\mu_P-\boldsymbol\mu_Q)/\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}$. Se $\boldsymbol\mu_P=\boldsymbol\mu_Q$, o supremo é zero. Nos dois casos,
+$$\mathrm{MMD}[\mathcal{F},P,Q]=\sup_{\|\mathbf{w}\|_{\mathcal{H}}\le1}\langle\mathbf{w},\boldsymbol\mu_P-\boldsymbol\mu_Q\rangle_{\mathcal{H}}=\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}.$$
+
+**Passo 3, expansão da norma.** Pela bilinearidade do produto interno,
+$$\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}^2=\langle\boldsymbol\mu_P,\boldsymbol\mu_P\rangle_{\mathcal{H}}-2\langle\boldsymbol\mu_P,\boldsymbol\mu_Q\rangle_{\mathcal{H}}+\langle\boldsymbol\mu_Q,\boldsymbol\mu_Q\rangle_{\mathcal{H}}.$$
+Aplicando a definição de $\boldsymbol\mu_P$ duas vezes, primeiro com $\mathbf{w}=\boldsymbol\mu_P$ e depois com $\mathbf{w}=\phi(\mathbf{x})$ para cada $\mathbf{x}$ fixo:
+$$\langle\boldsymbol\mu_P,\boldsymbol\mu_P\rangle_{\mathcal{H}}=\mathbb{E}_{\mathbf{x}}\big[\langle\boldsymbol\mu_P,\phi(\mathbf{x})\rangle_{\mathcal{H}}\big]=\mathbb{E}_{\mathbf{x}}\Big[\mathbb{E}_{\mathbf{x}'}\big[\langle\phi(\mathbf{x}'),\phi(\mathbf{x})\rangle_{\mathcal{H}}\big]\Big]=\mathbb{E}\big[k(\mathbf{x},\mathbf{x}')\big].$$
+Do mesmo modo, $\langle\boldsymbol\mu_P,\boldsymbol\mu_Q\rangle_{\mathcal{H}}=\mathbb{E}_{\mathbf{y}}\big[\mathbb{E}_{\mathbf{x}}[\langle\phi(\mathbf{x}),\phi(\mathbf{y})\rangle_{\mathcal{H}}]\big]=\mathbb{E}[k(\mathbf{x},\mathbf{y})]$ e $\langle\boldsymbol\mu_Q,\boldsymbol\mu_Q\rangle_{\mathcal{H}}=\mathbb{E}_{\mathbf{y}}\big[\mathbb{E}_{\mathbf{y}'}[\langle\phi(\mathbf{y}'),\phi(\mathbf{y})\rangle_{\mathcal{H}}]\big]=\mathbb{E}[k(\mathbf{y},\mathbf{y}')]$. Substituindo os três termos, obtemos a expressão do enunciado. $\qquad\blacksquare$
+
+Duas observações. Primeiro, $\langle\boldsymbol\mu_P,\boldsymbol\mu_P\rangle_{\mathcal{H}}$ é $\mathbb{E}[k(\mathbf{x},\mathbf{x}')]$ com $\mathbf{x}'$ uma cópia independente de $\mathbf{x}$, e não $\mathbb{E}[k(\mathbf{x},\mathbf{x})]$, que para o kernel Gaussiano vale 1. Essa distinção é usada no Bloco 3. Segundo, a expressão final tem interpretação direta: $\mathbb{E}[k(\mathbf{x},\mathbf{x}')]$ e $\mathbb{E}[k(\mathbf{y},\mathbf{y}')]$ são as semelhanças médias dentro de cada distribuição, e $\mathbb{E}[k(\mathbf{x},\mathbf{y})]$ é a semelhança média entre um ponto de cada uma. A MMD é grande quando os pontos são mais semelhantes aos da própria distribuição do que aos da outra.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note icon=false}
+## Teorema (MMD em termos do kernel; Gretton et al., 2012, Lemas 3, 4 e 6, pp. 727–728)
+Seja $\boldsymbol\mu_P=\mathbb{E}_P[\phi(\mathbf{x})]\in\mathcal{H}$ o elemento com $\mathbb{E}_P[\langle\mathbf{w},\phi(\mathbf{x})\rangle_{\mathcal{H}}]=\langle\mathbf{w},\boldsymbol\mu_P\rangle_{\mathcal{H}}$ para todo $\mathbf{w}$ (existe se $\mathbb{E}_P[\sqrt{k(\mathbf{x},\mathbf{x})}]<\infty$), e $\boldsymbol\mu_Q$ o análogo para $Q$. Com $\mathbf{x},\mathbf{x}'\sim P$ e $\mathbf{y},\mathbf{y}'\sim Q$, todos independentes,
+$$\mathrm{MMD}^2[\mathcal{F},P,Q]=\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}^2=\mathbb{E}[k(\mathbf{x},\mathbf{x}')]-2\,\mathbb{E}[k(\mathbf{x},\mathbf{y})]+\mathbb{E}[k(\mathbf{y},\mathbf{y}')].$$
+:::
+
+::: {.fragment}
+**Passo 1, linearidade (definição de $\boldsymbol\mu_P$, $\boldsymbol\mu_Q$):** $\quad\mathbb{E}_P[f(\mathbf{x})]-\mathbb{E}_Q[f(\mathbf{y})]=\mathbb{E}_P[\langle\mathbf{w},\phi(\mathbf{x})\rangle_{\mathcal{H}}]-\mathbb{E}_Q[\langle\mathbf{w},\phi(\mathbf{y})\rangle_{\mathcal{H}}]=\langle\mathbf{w},\boldsymbol\mu_P-\boldsymbol\mu_Q\rangle_{\mathcal{H}}$
+:::
+
+::: {.fragment}
+**Passo 2, Cauchy-Schwarz:** $\quad\langle\mathbf{w},\boldsymbol\mu_P-\boldsymbol\mu_Q\rangle_{\mathcal{H}}\le\|\mathbf{w}\|_{\mathcal{H}}\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}\le\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}$, com igualdade em $\mathbf{w}^\star=\dfrac{\boldsymbol\mu_P-\boldsymbol\mu_Q}{\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}}$ (se $\boldsymbol\mu_P=\boldsymbol\mu_Q$, o supremo é $0$). Logo $\mathrm{MMD}[\mathcal{F},P,Q]=\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}$.
+:::
+
+## A MMD em termos do kernel: expansão da norma
+
+**Onde o Passo 2 parou:** $\quad\mathrm{MMD}^2[\mathcal{F},P,Q]=\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}^2$
+
+::: {.fragment}
+**Passo 3, bilinearidade:** $\quad\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|_{\mathcal{H}}^2=\langle\boldsymbol\mu_P,\boldsymbol\mu_P\rangle_{\mathcal{H}}-2\langle\boldsymbol\mu_P,\boldsymbol\mu_Q\rangle_{\mathcal{H}}+\langle\boldsymbol\mu_Q,\boldsymbol\mu_Q\rangle_{\mathcal{H}}$
+:::
+
+::: {.fragment}
+**Passo 4, definição de $\boldsymbol\mu_P$ duas vezes:**
+$$\langle\boldsymbol\mu_P,\boldsymbol\mu_P\rangle_{\mathcal{H}}=\mathbb{E}_{\mathbf{x}}\big[\langle\boldsymbol\mu_P,\phi(\mathbf{x})\rangle_{\mathcal{H}}\big]=\mathbb{E}_{\mathbf{x}}\Big[\mathbb{E}_{\mathbf{x}'}\big[\langle\phi(\mathbf{x}'),\phi(\mathbf{x})\rangle_{\mathcal{H}}\big]\Big]=\mathbb{E}[k(\mathbf{x},\mathbf{x}')]$$
+$$\langle\boldsymbol\mu_P,\boldsymbol\mu_Q\rangle_{\mathcal{H}}=\mathbb{E}_{\mathbf{y}}\Big[\mathbb{E}_{\mathbf{x}}\big[\langle\phi(\mathbf{x}),\phi(\mathbf{y})\rangle_{\mathcal{H}}\big]\Big]=\mathbb{E}[k(\mathbf{x},\mathbf{y})],\qquad\langle\boldsymbol\mu_Q,\boldsymbol\mu_Q\rangle_{\mathcal{H}}=\mathbb{E}_{\mathbf{y}}\Big[\mathbb{E}_{\mathbf{y}'}\big[\langle\phi(\mathbf{y}'),\phi(\mathbf{y})\rangle_{\mathcal{H}}\big]\Big]=\mathbb{E}[k(\mathbf{y},\mathbf{y}')]\qquad\blacksquare$$
+:::
+
+::: {.fragment}
+- **Atenção:** $\langle\boldsymbol\mu_P,\boldsymbol\mu_P\rangle_{\mathcal{H}}=\mathbb{E}[k(\mathbf{x},\mathbf{x}')]$ com $\mathbf{x}'$ uma cópia **independente**, e não $\mathbb{E}[k(\mathbf{x},\mathbf{x})]=1$ (usado no Bloco 3).
+- **Hipótese técnica:** para o kernel Gaussiano, $k(\mathbf{x},\mathbf{x})=1$ e $\boldsymbol\mu_P$ existe para qualquer $P$.
+- **Interpretação:** semelhança média dentro de cada distribuição, menos duas vezes a semelhança média entre as duas.
+:::
+:::
+
+## A função testemunha
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O Passo 2 também fornece a função que atinge o supremo, $f^\star(\mathbf{t})=\langle\mathbf{w}^\star,\phi(\mathbf{t})\rangle_{\mathcal{H}}$. Aplicando a definição das médias com $\mathbf{w}=\phi(\mathbf{t})$ (Gretton et al., 2012, §2.3, p. 729):
+$$f^\star(\mathbf{t})\ \propto\ \mathbb{E}_P\big[k(\mathbf{x},\mathbf{t})\big]-\mathbb{E}_Q\big[k(\mathbf{y},\mathbf{t})\big],\qquad\hat f^\star(\mathbf{t})\ \propto\ \frac1n\sum_{i=1}^n k(\mathbf{x}_i,\mathbf{t})-\frac1m\sum_{j=1}^m k(\mathbf{y}_j,\mathbf{t}).$$
+
+O estimador de densidade por kernel da Aula 2 (PRML, eq. 2.250), com janela Gaussiana de largura $h$ em $d$ dimensões, é $\hat p(\mathbf{t})=\frac1n\sum_i(2\pi h^2)^{-d/2}\exp\big(-\|\mathbf{t}-\mathbf{x}_i\|^2/(2h^2)\big)$. Com $h=\sigma$, cada soma da testemunha é um KDE multiplicado pela constante $(2\pi\sigma^2)^{d/2}$. Portanto, **a testemunha é a diferença entre dois KDEs, um de cada amostra, com a mesma largura $\sigma$.** Ela é positiva onde a referência tem mais massa e negativa onde a produção tem mais.
+
+Isso explica por que a MMD não tem a limitação do KDE em dimensão alta. Na Aula 2, o KDE precisava de $h\to0$ e de muitos dados para se aproximar da densidade. Aqui nenhuma densidade é estimada: as duas distribuições são comparadas depois de suavizadas com a mesma largura fixa, e para isso bastam médias, que convergem na taxa $1/\sqrt{n}$ (Gretton et al., 2012, §4). Resta saber se a suavização pode eliminar a diferença entre as distribuições, o que a próxima seção responde.
+:::
+
+::: {.content-visible when-format="revealjs"}
+O Passo 2 fornece a função ótima, $f^\star(\mathbf{t})=\langle\mathbf{w}^\star,\phi(\mathbf{t})\rangle_{\mathcal{H}}$ (Gretton et al., 2012, §2.3, p. 729):
+$$f^\star(\mathbf{t})\ \propto\ \mathbb{E}_P[k(\mathbf{x},\mathbf{t})]-\mathbb{E}_Q[k(\mathbf{y},\mathbf{t})],\qquad\hat f^\star(\mathbf{t})\ \propto\ \frac1n\sum_{i=1}^n k(\mathbf{x}_i,\mathbf{t})-\frac1m\sum_{j=1}^m k(\mathbf{y}_j,\mathbf{t}).$$
+
+::: {.fragment}
+- **KDE da Aula 2** (PRML, eq. 2.250): $\ \hat p(\mathbf{t})=\frac1n\sum_i(2\pi h^2)^{-d/2}\exp\big(-\|\mathbf{t}-\mathbf{x}_i\|^2/(2h^2)\big)$.
+- **A testemunha é a diferença entre dois KDEs com a mesma largura $\sigma$**, cada soma é um KDE vezes $(2\pi\sigma^2)^{d/2}$).
+:::
+
+::: {.fragment}
+- **Diferença em relação ao KDE:** nenhuma densidade é estimada, e não é preciso $h\to0$. As distribuições são comparadas depois de suavizadas com a mesma largura, e para isso bastam médias.
+- **Resta saber:** a suavização pode eliminar a diferença?
+:::
+:::
+
+::: {.fig-resize style="width: 70%; margin: 0 auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{43,92,143}
+\definecolor{laranja}{RGB}{217,95,2}
+\definecolor{cinza}{RGB}{127,127,127}
+\begin{tikzpicture}[>=latex, font=\small, thick]
+  \draw[cinza, rounded corners=6pt] (0,0) rectangle (4.6,3.6);
+  \node[font=\bfseries] at (2.3,4.0) {Espaço dos dados};
+  \foreach \x/\y in {0.9/2.5,1.3/2.9,1.5/2.2,1.1/1.8,1.9/2.7,1.7/1.6,2.2/2.2,0.8/2.0}
+    \fill[azul] (\x,\y) circle (2pt);
+  \foreach \x/\y in {2.7/1.3,3.2/1.7,3.5/1.1,2.9/0.8,3.7/1.9,3.3/2.3,2.4/1.0,3.9/1.4}
+    \fill[laranja] (\x,\y) circle (2pt);
+  \node[azul] at (1.0,3.25) {$X\sim P$};
+  \node[laranja] at (3.5,0.4) {$Y\sim Q$};
+  \draw[->, very thick] (4.9,1.8) -- node[above] {$\phi$} (6.5,1.8);
+  \draw[cinza, rounded corners=6pt] (6.8,0) rectangle (12.6,3.6);
+  \node[font=\bfseries] at (9.7,4.0) {Espaço de atributos $\mathcal{H}$};
+  \foreach \x/\y in {7.5/2.7,7.9/3.1,8.3/2.5,7.7/2.1,8.6/3.0,8.2/1.9,8.9/2.4,7.4/2.4}
+    \fill[azul!45] (\x,\y) circle (1.6pt);
+  \foreach \x/\y in {10.6/1.2,11.1/1.6,11.5/1.0,10.9/0.7,11.8/1.7,11.3/2.1,10.4/0.9,12.0/1.3}
+    \fill[laranja!45] (\x,\y) circle (1.6pt);
+  \node[circle, draw=black, fill=azul, inner sep=2.6pt] (mp) at (8.1,2.5) {};
+  \node[circle, draw=black, fill=laranja, inner sep=2.6pt] (mq) at (11.2,1.3) {};
+  \draw[<->] (mp) -- node[above, sloped] {$\mathrm{MMD}$} (mq);
+  \node[azul, anchor=north] at (8.1,1.75) {$\boldsymbol\mu_P$: média dos $\phi(\mathbf{x})$};
+  \node[laranja, anchor=south] at (11.0,2.45) {$\boldsymbol\mu_Q$: média dos $\phi(\mathbf{y})$};
+\end{tikzpicture}
+```
+:::
+
+## Kernels característicos
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Com o kernel Gaussiano, duas distribuições diferentes nunca têm a mesma média em $\mathcal{H}$. Um kernel com essa propriedade é chamado de **característico** (Sriperumbudur et al., 2010, Definição 6, p. 1530).
+
+::: {.callout-note icon=false}
+## Teorema (o kernel Gaussiano é característico; Sriperumbudur et al., 2010, Teorema 9, p. 1533)
+Seja $k(\mathbf{x},\mathbf{x}')=\psi(\mathbf{x}-\mathbf{x}')$ um kernel em $\mathbb{R}^d$, com $\psi$ limitada, contínua e positiva definida. Então vale a equivalência $\mathrm{MMD}[\mathcal{F},P,Q]=0\iff P=Q$, para todo par de medidas de probabilidade de Borel em $\mathbb{R}^d$, se e somente se o suporte da transformada de Fourier de $\psi$ é todo o $\mathbb{R}^d$. Em particular, o kernel Gaussiano é característico para todo $\sigma>0$.
+:::
+
+Não demonstramos o teorema. A conclusão para o kernel Gaussiano segue do critério porque a transformada de Fourier de uma Gaussiana é uma Gaussiana, que não se anula em nenhum ponto. Gretton et al. (2012, Teorema 5, p. 727) dão um resultado análogo para domínios compactos. Consequência: com kernel Gaussiano, a MMD é uma distância entre distribuições.
+
+Nem todo kernel é característico. O kernel polinomial de grau 2, $k(\mathbf{x},\mathbf{x}')=(1+\mathbf{x}^T\mathbf{x}')^2$, corresponde a um $\phi$ de dimensão finita com termos constante, lineares e de grau dois (PRML, §6.2). A MMD com ele compara só médias e segundos momentos. Gretton et al. (p. 727, tradução livre) observam que um kernel polinomial de grau dois "não consegue distinguir distribuições com a mesma média e a mesma variância, mas curtose diferente". A tabela das quatro mudanças, com as duas versões da MMD:
+
+| Estatística | (a) média | (b) variância | (c) correlação | (d) mistura |
+| :--- | :---: | :---: | :---: | :---: |
+| **Médias e covariâncias** | `{python} pct(poder_sin['mcov']['media'])` | `{python} pct(poder_sin['mcov']['variancia'])` | `{python} pct(poder_sin['mcov']['correlacao'])` | `{python} pct(poder_sin['mcov']['xis'])` |
+| **MMD, kernel polinomial de grau 2** | `{python} pct(poder_sin['poli']['media'])` | `{python} pct(poder_sin['poli']['variancia'])` | `{python} pct(poder_sin['poli']['correlacao'])` | `{python} pct(poder_sin['poli']['xis'])` |
+| **MMD, kernel Gaussiano** | `{python} pct(poder_sin['gauss']['media'])` | `{python} pct(poder_sin['gauss']['variancia'])` | `{python} pct(poder_sin['gauss']['correlacao'])` | `{python} pct(poder_sin['gauss']['xis'])` |
+
+O kernel polinomial tem o mesmo comportamento da comparação de médias e covariâncias. O kernel Gaussiano é o único com poder acima do nível no caso (d), mas detecta a mistura em apenas `{python} pct(poder_sin['gauss']['xis'])` das repetições. O teorema se refere às distribuições: a MMD verdadeira entre $P$ e a mistura é positiva. Com `{python} N_SIN` pontos de cada lado e a largura $\sigma$ usada (a mediana das distâncias entre pares, explicada no Bloco 3), essa diferença é pequena em relação à variação amostral. Com metade dessa largura, o teste detecta a mistura em `{python} pct(poder_xis_meio)` das repetições. O kernel ser característico garante que a diferença existe para qualquer $\sigma$, mas não que ela seja detectável com qualquer $\sigma$ e qualquer tamanho de amostra.
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-note icon=false}
+## Teorema (o kernel Gaussiano é característico; Sriperumbudur et al., 2010, Teorema 9, p. 1533)
+Seja $k(\mathbf{x},\mathbf{x}')=\psi(\mathbf{x}-\mathbf{x}')$ em $\mathbb{R}^d$, com $\psi$ limitada, contínua e positiva definida. Então vale a equivalência $\mathrm{MMD}[\mathcal{F},P,Q]=0\iff P=Q$, para todo par de medidas de probabilidade de Borel, se e somente se o suporte da transformada de Fourier de $\psi$ é todo o $\mathbb{R}^d$. Vale para o kernel Gaussiano com qualquer $\sigma>0$.
+:::
+
+::: {.fragment}
+- **Sem demonstração.** A transformada de Fourier de uma Gaussiana não se anula em nenhum ponto.
+- **Consequência:** com kernel Gaussiano, a MMD é uma distância entre distribuições.
+- **Contraexemplo:** o kernel polinomial $(1+\mathbf{x}^T\mathbf{x}')^2$ só compara médias e segundos momentos (Gretton et al., 2012, p. 727).
+:::
+
+::: {.fragment}
+| | (a) média | (b) variância | (c) correlação | (d) mistura |
+| :--- | :---: | :---: | :---: | :---: |
+| **Médias e covariâncias** | `{python} pct(poder_sin['mcov']['media'])` | `{python} pct(poder_sin['mcov']['variancia'])` | `{python} pct(poder_sin['mcov']['correlacao'])` | `{python} pct(poder_sin['mcov']['xis'])` |
+| **MMD, polinomial grau 2** | `{python} pct(poder_sin['poli']['media'])` | `{python} pct(poder_sin['poli']['variancia'])` | `{python} pct(poder_sin['poli']['correlacao'])` | `{python} pct(poder_sin['poli']['xis'])` |
+| **MMD, Gaussiano** | `{python} pct(poder_sin['gauss']['media'])` | `{python} pct(poder_sin['gauss']['variancia'])` | `{python} pct(poder_sin['gauss']['correlacao'])` | `{python} pct(poder_sin['gauss']['xis'])` |
+
+No caso (d), o kernel Gaussiano detecta em `{python} pct(poder_sin['gauss']['xis'])` das repetições com a largura mediana, e em `{python} pct(poder_xis_meio)` com metade dela. O teorema garante que a diferença existe para qualquer $\sigma$, mas não que seja detectável com qualquer $\sigma$ e `{python} N_SIN` pontos (Bloco 3).
+:::
+:::
+
+## Pausa 2: A MMD
+
+::: {.callout-tip}
+## Com $\phi(x)=(x,x^2)$, $P=\mathcal{N}(0,1)$ e $Q=\mathcal{N}(1,1)$, quanto vale a MMD? Qual é a função testemunha, a menos de uma constante?
+
+Calcule $\mathbb{E}[\phi]$ para cada distribuição, lembrando que $\mathbb{E}[x^2]=\text{variância}+\text{média}^2$. A testemunha é linear em $\phi$, na direção da diferença.
+:::
+
+::: {.callout-tip}
+## Kernels, Médias e Testemunha
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Com o kernel linear $k(\mathbf{x},\mathbf{x}')=\mathbf{x}^T\mathbf{x}'$, a MMD entre duas distribuições com a mesma média e variâncias diferentes é zero.
+- □ Para calcular a MMD com kernel Gaussiano é preciso truncar o vetor de atributos $\phi(\mathbf{x})$ em um número finito de coordenadas.
+- □ Nas regiões em que a testemunha é negativa, a densidade da produção suavizada pelo kernel é maior que a densidade suavizada da referência.
+- □ O termo $\mathbb{E}[k(\mathbf{x},\mathbf{x}')]$ da MMD, com kernel Gaussiano, vale 1 para qualquer distribuição $P$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 2: A MMD — Resposta
+
+::: {.callout-tip}
+## Kernels, Médias e Testemunha — Resposta
+
+- ✔ Com kernel linear, $\phi(\mathbf{x})=\mathbf{x}$ e a MMD é $\|\boldsymbol\mu_P-\boldsymbol\mu_Q\|$, que só depende das médias.
+- ✗ A expressão final só usa $k(\cdot,\cdot)$ entre pares de pontos. O vetor $\phi$ nunca é calculado.
+- ✔ A testemunha é proporcional à diferença entre os dois KDEs de largura $\sigma$, referência menos produção.
+- ✗ O termo que vale 1 é $k(\mathbf{x},\mathbf{x})$. Em $\mathbb{E}[k(\mathbf{x},\mathbf{x}')]$ os pontos são cópias independentes, e o valor depende da concentração de $P$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** $\mathbb{E}_P[\phi]=(0,1)$ e $\mathbb{E}_Q[\phi]=(1,2)$, logo $\mathrm{MMD}=\|(-1,-1)\|=\sqrt2$. A testemunha é $f^\star(x)\propto-(x+x^2)$: negativa onde $x$ e $x^2$ são grandes, região em que $Q$ tem mais massa.
+:::
+
+:::
+
+# Bloco 3: Estimação, Largura do Kernel e Dimensão
+
+## Estimador não viesado
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O teorema do Bloco 2 envolve esperanças. A estimativa direta troca cada esperança por uma média sobre todos os pares:
+$$\widehat{\mathrm{MMD}}_b^2=\frac{1}{n^2}\sum_{i=1}^n\sum_{i'=1}^n k(\mathbf{x}_i,\mathbf{x}_{i'})-\frac{2}{nm}\sum_{i=1}^n\sum_{j=1}^m k(\mathbf{x}_i,\mathbf{y}_j)+\frac{1}{m^2}\sum_{j=1}^m\sum_{j'=1}^m k(\mathbf{y}_j,\mathbf{y}_{j'}).$$
+Esse estimador é viesado (o índice $b$ vem de *biased*). O viés vem dos termos com $i=i'$, que valem $k(\mathbf{x}_i,\mathbf{x}_i)$, enquanto o teorema exige pares independentes. Na primeira soma há $n$ termos com $i=i'$, de esperança $\mathbb{E}[k(\mathbf{x},\mathbf{x})]$, e $n(n-1)$ termos com $i\ne i'$, de esperança $\mathbb{E}[k(\mathbf{x},\mathbf{x}')]$. O mesmo vale para a soma em $Y$, e o termo cruzado não tem viés. Para o kernel Gaussiano, com $k(\mathbf{x},\mathbf{x})=1$:
+$$\mathbb{E}\big[\widehat{\mathrm{MMD}}_b^2\big]=\mathrm{MMD}^2+\frac1n\Big(1-\mathbb{E}[k(\mathbf{x},\mathbf{x}')]\Big)+\frac1m\Big(1-\mathbb{E}[k(\mathbf{y},\mathbf{y}')]\Big).$$
+
+A correção é excluir os termos em que um ponto é comparado consigo mesmo:
+
+::: {.callout-note icon=false}
+## Proposição (estimador não viesado; Gretton et al., 2012, Lema 6 e eq. 3, p. 728)
+Com $X$ e $Y$ como na definição do problema de duas amostras e $n,m\ge2$, o estimador
+$$\widehat{\mathrm{MMD}}_u^2=\frac{1}{n(n-1)}\sum_{i\ne i'}k(\mathbf{x}_i,\mathbf{x}_{i'})-\frac{2}{nm}\sum_{i=1}^n\sum_{j=1}^m k(\mathbf{x}_i,\mathbf{y}_j)+\frac{1}{m(m-1)}\sum_{j\ne j'}k(\mathbf{y}_j,\mathbf{y}_{j'})$$
+satisfaz $\mathbb{E}\big[\widehat{\mathrm{MMD}}_u^2\big]=\mathrm{MMD}^2[\mathcal{F},P,Q]$.
+:::
+
+**Demonstração.** Para $i\ne i'$, $\mathbf{x}_i$ e $\mathbf{x}_{i'}$ são independentes com distribuição $P$, logo $\mathbb{E}[k(\mathbf{x}_i,\mathbf{x}_{i'})]=\mathbb{E}[k(\mathbf{x},\mathbf{x}')]$. A primeira soma tem $n(n-1)$ termos, e dividida por $n(n-1)$ tem esperança $\mathbb{E}[k(\mathbf{x},\mathbf{x}')]$. Pelo mesmo argumento, a terceira parcela tem esperança $\mathbb{E}[k(\mathbf{y},\mathbf{y}')]$. Na parcela do meio, cada um dos $nm$ termos tem esperança $\mathbb{E}[k(\mathbf{x},\mathbf{y})]$. Pela linearidade da esperança, a soma das três esperanças é a expressão do teorema do Bloco 2. $\qquad\blacksquare$
+
+O estimador não viesado (índice $u$, de *unbiased*) pode assumir valores **negativos**. Sob $H_0$ sua esperança é zero, e um estimador não constante com esperança zero assume valores negativos. Um valor negativo indica ausência de evidência de diferença.
+
+A figura mostra os dois estimadores em uma simulação de $H_0$: $X$ e $Y$ sorteados da mesma $\mathcal{N}(\mathbf{0},I)$ em duas dimensões, com $n=m=$ `{python} N_H0`, $\sigma=1$ e `{python} milhar(R_H0)` repetições. O estimador viesado tem média `{python} brl(h0_b.mean(), 4)`, e a expressão do viés dá `{python} brl(vies_teo, 4)`. O não viesado tem média `{python} brl(h0_u.mean(), 4)` e é negativo em `{python} pct(frac_neg_h0)` das repetições. A distribuição é assimétrica, com cauda à direita.
+:::
+
+::: {.content-visible when-format="revealjs"}
+**Estimativa direta (viesada):** médias sobre todos os pares, incluindo $i=i'$.
+$$\widehat{\mathrm{MMD}}_b^2=\frac{1}{n^2}\sum_{i,i'}k(\mathbf{x}_i,\mathbf{x}_{i'})-\frac{2}{nm}\sum_{i,j}k(\mathbf{x}_i,\mathbf{y}_j)+\frac{1}{m^2}\sum_{j,j'}k(\mathbf{y}_j,\mathbf{y}_{j'})$$
+
+- **Origem do viés:** os termos com $i=i'$ valem $k(\mathbf{x}_i,\mathbf{x}_i)=1$, e o teorema exige pares independentes.
+
+::: {.callout-note .fragment icon=false}
+## Proposição (estimador não viesado; Gretton et al., 2012, Lema 6 e eq. 3, p. 728)
+Com $X\sim P$ e $Y\sim Q$ i.i.d., independentes, e $n,m\ge2$:
+$$\widehat{\mathrm{MMD}}_u^2=\frac{1}{n(n-1)}\sum_{i\ne i'}k(\mathbf{x}_i,\mathbf{x}_{i'})-\frac{2}{nm}\sum_{i,j}k(\mathbf{x}_i,\mathbf{y}_j)+\frac{1}{m(m-1)}\sum_{j\ne j'}k(\mathbf{y}_j,\mathbf{y}_{j'})\quad\text{satisfaz}\quad\mathbb{E}\big[\widehat{\mathrm{MMD}}_u^2\big]=\mathrm{MMD}^2.$$
+:::
+
+::: {.fragment}
+**Demonstração, termo a termo:** para $i\ne i'$, $\mathbf{x}_i$ e $\mathbf{x}_{i'}$ são independentes, logo $\mathbb{E}[k(\mathbf{x}_i,\mathbf{x}_{i'})]=\mathbb{E}[k(\mathbf{x},\mathbf{x}')]$, e são $n(n-1)$ termos divididos por $n(n-1)$. Do mesmo modo, a terceira parcela tem esperança $\mathbb{E}[k(\mathbf{y},\mathbf{y}')]$ e cada termo do meio, $\mathbb{E}[k(\mathbf{x},\mathbf{y})]$. Pela linearidade, a soma é $\mathrm{MMD}^2$. $\qquad\blacksquare$
+:::
+
+## Os dois estimadores sob $H_0$
+
+Simulação: $X,Y\sim\mathcal{N}(\mathbf{0},I)$ em 2D, $n=m=$ `{python} N_H0`, $\sigma=1$, `{python} milhar(R_H0)` repetições.
+
+- **Viesado:** média `{python} brl(h0_b.mean(), 4)`, com a MMD verdadeira igual a zero.
+- **Não viesado:** média `{python} brl(h0_u.mean(), 4)`. É **negativo** em `{python} pct(frac_neg_h0)` das repetições: sob $H_0$ a esperança é zero, então ele assume valores negativos. Um valor negativo indica ausência de evidência de diferença.
+:::
+
+::: {.fig-resize style="width: 62%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, ax = plt.subplots(figsize=(7.4, 3.4))
+bins = np.linspace(min(h0_u.min(), 0) - .002, np.quantile(h0_b, .999), 70)
+ax.hist(h0_u, bins=bins, color=COR_A, alpha=.7, label="não viesado $\\widehat{\\mathrm{MMD}}_u^2$")
+ax.hist(h0_b, bins=bins, color=COR_B, alpha=.6, label="viesado $\\widehat{\\mathrm{MMD}}_b^2$")
+ax.axvline(0, color="black", lw=1.2)
+ax.axvline(vies_teo, color=COR_B, ls="--", lw=1.5)
+ax.text(vies_teo, ax.get_ylim()[1] * .93, " viés previsto", color=COR_B, fontsize=9)
+ax.set_xlabel("valor do estimador (a MMD verdadeira é 0)"); ax.set_ylabel("repetições")
+ax.set_title("Os dois estimadores sob $H_0$"); ax.legend(fontsize=9, loc="center right")
+plt.tight_layout(); plt.show()
+```
+:::
+
+## Limiar e custo computacional
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+**Limiar.** A distribuição de $\widehat{\mathrm{MMD}}_u^2$ sob $H_0$ é conhecida apenas no limite de amostras grandes (Gretton et al., 2012, Teorema 12, p. 737): é uma soma infinita de variáveis aleatórias ponderadas por autovalores que dependem do kernel e da distribuição $P$. Como $P$ é desconhecida, não é possível tabelar o limiar. O artigo sugere estimar o quantil por reamostragem dos dados agregados (§5, p. 737). Usamos o teste de permutação do Bloco 1, que é essa ideia sem reposição e tem nível garantido com amostras finitas.
+
+**Custo.** O cálculo usa a matriz de kernel da amostra conjunta, de tamanho $(n+m)\times(n+m)$, ao custo de $\mathcal{O}((n+m)^2d)$ operações. Gretton et al. (p. 729) registram o custo $\mathcal{O}((m+n)^2)$ para os estimadores. Cada permutação reutiliza a matriz, com custo adicional $\mathcal{O}((n+m)^2)$. A limitação prática é a memória. Existe uma versão de custo linear, com menos poder (Gretton et al., 2012, §6). Na prática, comparam-se subamostras de algumas centenas ou milhares de pontos.
+
+**No conjunto de gases.** Entre as metades 1a e 1b, $\widehat{\mathrm{MMD}}_u^2=$ `{python} brl(tl['1b']['obs'], 4)`, abaixo do limiar de permutação `{python} brl(tl['1b']['lim'], 4)` (quantil de 95% dos valores permutados), com p-valor `{python} brl(tl['1b']['p'], 3)`. Entre a metade 1a e o lote 2, $\widehat{\mathrm{MMD}}_u^2=$ `{python} brl(tl[2]['obs'], 4)`, com limiar `{python} brl(tl[2]['lim'], 4)`. Como verificação do nível, repetimos `{python} R_CAL` vezes a divisão aleatória do lote 1 em duas metades, caso em que $H_0$ é verdadeira: o teste rejeitou em `{python} pct(frac_rej_calib, 1)` das divisões, compatível com o nível de 5%.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Limiar:** a distribuição sob $H_0$ (Gretton et al., 2012, Teorema 12, p. 737) depende de autovalores determinados pelo kernel **e por $P$**, que é desconhecida. Não há tabela. Usamos o teste de permutação do Bloco 1.
+- **Custo:** matriz de kernel $(n+m)\times(n+m)$, $\mathcal{O}((n+m)^2d)$. Cada permutação reutiliza a matriz. A limitação é a memória, e na prática comparam-se subamostras.
+
+::: {.fragment}
+**No conjunto de gases:**
+
+- **1a contra 1b:** $\widehat{\mathrm{MMD}}_u^2=$ `{python} brl(tl['1b']['obs'], 4)`, limiar `{python} brl(tl['1b']['lim'], 4)`, $\hat p=$ `{python} brl(tl['1b']['p'], 3)`.
+- **1a contra o lote 2:** $\widehat{\mathrm{MMD}}_u^2=$ `{python} brl(tl[2]['obs'], 4)`, limiar `{python} brl(tl[2]['lim'], 4)`.
+- **Verificação do nível:** em `{python} R_CAL` divisões aleatórias do lote 1 ($H_0$ verdadeira), o teste rejeitou em `{python} pct(frac_rej_calib, 1)`.
+:::
+:::
+
+## Escolha da largura do kernel
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A largura $\sigma$ afeta o poder do teste. Se $\sigma$ é muito pequeno, $k(\mathbf{x},\mathbf{x}')\approx0$ para quaisquer dois pontos distintos e as três médias do estimador ficam próximas de zero. Se $\sigma$ é muito grande, $k(\mathbf{x},\mathbf{x}')\approx1$ para todos os pares e a estatística fica próxima de $1-2+1=0$. Nos dois extremos o teste não detecta diferenças.
+
+A escolha mais usada é a **heurística da mediana**. Gretton et al. (2012, §8, p. 748, tradução livre): "Tomamos $\sigma$ como a mediana das distâncias entre os pontos da amostra agregada, como um meio-termo entre esses dois extremos: isso continua sendo uma heurística [...] e a escolha ótima da largura do kernel é uma área de pesquisa em andamento." É a largura usada nos testes desta aula.
+
+A heurística pode ter pouco poder. Na Aula 5, comparamos as duas luas com amostras de uma mistura de duas Gaussianas ajustada a elas. O painel da esquerda mostra $\widehat{\mathrm{MMD}}_u^2$ em função da largura, em múltiplos da mediana $\sigma_{\text{med}}$, com o limiar de permutação de cada largura. Com a mediana, a estatística vale `{python} brl(t_luas_med['obs'], 4)` e o p-valor é `{python} brl(t_luas_med['p'], 3)`. Com $\sigma=$ `{python} brl(FATOR_ESTREITO, 1)` $\sigma_{\text{med}}$, a estatística vale `{python} brl(t_luas_est['obs'], 4)` e o p-valor é `{python} brl(t_luas_est['p'], 3)`.
+
+Os outros painéis mostram a testemunha nos dois casos, na mesma escala de cores. Com a largura mediana, da ordem do tamanho da nuvem de pontos, os dois KDEs suavizam as duas distribuições até ficarem quase iguais. Com a largura menor, a testemunha acompanha o formato das luas. A largura define a escala em que a diferença é procurada: $\sigma$ grande compara posição e dispersão, e $\sigma$ pequeno compara detalhes e exige mais pontos.
+
+**Escolha da largura e nível do teste.** A proposição do Bloco 1 exige que a estatística seja a mesma função nos dados observados e nos dados permutados. A mediana satisfaz essa condição, porque é calculada na amostra conjunta e não depende de quais pontos estão em cada grupo. Testar várias larguras e relatar a de menor p-valor não satisfaz: a largura foi escolhida com base nas atribuições observadas, e o teste deixa de ter nível $\alpha$. As alternativas corretas são repetir a busca pela largura dentro de cada permutação ou escolher a largura em uma parte dos dados e testar em outra.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **$\sigma$ muito pequeno:** $k\approx0$ entre pontos distintos, e as três médias ficam perto de zero.
+- **$\sigma$ muito grande:** $k\approx1$ para todos os pares, e a estatística fica perto de $1-2+1=0$.
+- **Heurística da mediana** (Gretton et al., 2012, §8, p. 748): $\sigma$ = mediana das distâncias entre os pontos da amostra conjunta.
+
+::: {.fragment}
+**Duas luas da Aula 5** contra amostras de uma mistura de 2 Gaussianas:
+
+- **$\sigma=\sigma_{\text{med}}$:** $\widehat{\mathrm{MMD}}_u^2=$ `{python} brl(t_luas_med['obs'], 4)`, $\hat p=$ `{python} brl(t_luas_med['p'], 3)`. Os dois KDEs ficam quase iguais.
+- **$\sigma=$ `{python} brl(FATOR_ESTREITO, 1)` $\sigma_{\text{med}}$:** $\widehat{\mathrm{MMD}}_u^2=$ `{python} brl(t_luas_est['obs'], 4)`, $\hat p=$ `{python} brl(t_luas_est['p'], 3)`. A testemunha acompanha o formato das luas.
+:::
+
+::: {.fragment}
+- **A largura define a escala da comparação:** $\sigma$ grande compara posição e dispersão. $\sigma$ pequeno compara detalhes e exige mais pontos.
+- **Nível do teste:** a mediana não depende das atribuições dos pontos e preserva o nível. Testar várias larguras e relatar a de menor p-valor não preserva.
+:::
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, axes = plt.subplots(1, 3, figsize=(14, 3.7), gridspec_kw={"width_ratios": [1.25, 1, 1]})
+ax = axes[0]
+ax.plot(FATORES, [c["obs"] for c in curva_luas], color=COR_A, lw=2, marker="o", ms=3, label="$\\widehat{\\mathrm{MMD}}_u^2$ observado")
+ax.plot(FATORES, [c["lim"] for c in curva_luas], color=COR_CINZA, lw=1.5, ls="--", label="limiar de permutação (95%)")
+ax.axvline(1, color=COR_B, lw=1.2, label="mediana"); ax.axvline(FATOR_ESTREITO, color=COR_VERDE, lw=1.2, label=f"{brl(FATOR_ESTREITO, 1)} da mediana")
+ax.set_xscale("log"); ax.set_xlabel("largura $\\sigma/\\sigma_{\\mathrm{med}}$"); ax.set_ylabel("$\\widehat{\\mathrm{MMD}}_u^2$")
+ax.set_title("Duas luas contra a mistura"); ax.legend(fontsize=8, loc="upper right")
+g1, g2 = np.linspace(-1.6, 2.6, 110), np.linspace(-1.2, 1.7, 90)
+G1, G2 = np.meshgrid(g1, g2)
+Ws = [testemunha(np.c_[G1.ravel(), G2.ravel()], Xm, Ym, f * sig_luas).reshape(G1.shape) for f in (1., FATOR_ESTREITO)]
+lim = np.abs(Ws[1]).max()   # mesma escala de cores nos dois painéis
+nomes = ("$\\sigma=\\sigma_{\\mathrm{med}}$", "$\\sigma=" + brl(FATOR_ESTREITO, 1).replace(",", "{,}") + "\\,\\sigma_{\\mathrm{med}}$")
+for ax, W, nome in zip(axes[1:], Ws, nomes):
+    ax.contourf(G1, G2, np.clip(W, -lim, lim), levels=np.linspace(-lim, lim, 15), cmap=CMAP_PQ)
+    ax.scatter(Ym[::3, 0], Ym[::3, 1], s=3, color=COR_B, alpha=.5)
+    ax.scatter(Xm[::3, 0], Xm[::3, 1], s=3, color=COR_A, alpha=.5)
+    ax.set_title(f"Testemunha, {nome}"); ax.set_xticks([]); ax.set_yticks([])
+plt.tight_layout(); plt.show()
+```
+:::
+
+## Efeito da dimensão no poder
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A taxa com que o estimador se aproxima da MMD verdadeira, da ordem de $1/\sqrt{n}$, não depende da dimensão (Gretton et al., 2012, §4). Mas a MMD verdadeira associada a uma mudança de tamanho fixo pode diminuir quando a dimensão aumenta, e o poder diminui com ela.
+
+Experimento: $P=\mathcal{N}(\mathbf{0},I_d)$ e $Q$ igual a $P$ com a primeira coordenada deslocada de $\delta$. A mudança é a mesma em todas as dimensões, e só aumenta o número de coordenadas sem mudança. Com $n=m=$ `{python} N_DIM` e a largura mediana, a figura mostra a fração de `{python} R_DIM` repetições em que o teste rejeitou. Com $\delta=$ `{python} brl(DELTAS[1])`, o poder vai de `{python} pct(poder_dim[DELTAS[1]][0])` em uma dimensão para `{python} pct(poder_dim[DELTAS[1]][-1])` em `{python} DIMS[-1]` dimensões.
+
+Explicação: a distância ao quadrado entre dois pontos de $\mathcal{N}(\mathbf{0},I_d)$ é em média $2d$, e o deslocamento acrescenta $\delta^2$ para pares de grupos diferentes. Em 200 dimensões, $\delta^2$ é pequeno em relação a $400$, e o kernel, que depende só de distâncias, quase não distingue os dois tipos de par. Reddi et al. (2014, resumo, tradução livre) mostram que "o poder desses testes na verdade cai polinomialmente com o aumento da dimensão contra alternativas justas". Os autores chamam de justas (§2.5) as alternativas em que a divergência de Kullback-Leibler entre $P$ e $Q$ é mantida constante quando a dimensão cresce, e o deslocamento da média em uma única coordenada é um dos exemplos dados.
+
+Uma resposta usual é aplicar o teste a uma representação de dimensão menor. Rabanser et al. (2019, resumo, p. 1, tradução livre) relatam que, em imagens, "uma abordagem baseada em teste de duas amostras, usando classificadores pré-treinados para redução de dimensionalidade, tem o melhor desempenho". No conjunto de gases isso não é necessário: o drift altera quase todos os atributos, e o teste nos `{python} d_gas` atributos originais rejeita em todos os lotes, como mostra o Bloco 4.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Não depende da dimensão:** a taxa de convergência do estimador, $1/\sqrt{n}$ (Gretton et al., 2012, §4).
+- **Depende da dimensão:** o valor da MMD verdadeira para uma mudança fixa, e portanto o poder.
+
+::: {.fragment}
+**Experimento:** $P=\mathcal{N}(\mathbf{0},I_d)$, $Q$ igual com a 1ª coordenada deslocada de $\delta$. $n=m=$ `{python} N_DIM`, largura mediana. Com $\delta=$ `{python} brl(DELTAS[1])`, o poder vai de `{python} pct(poder_dim[DELTAS[1]][0])` ($d=1$) a `{python} pct(poder_dim[DELTAS[1]][-1])` ($d=$ `{python} DIMS[-1]`).
+:::
+
+::: {.fragment}
+- **Explicação:** a distância ao quadrado entre dois pontos é em média $2d$, e o deslocamento acrescenta $\delta^2$. Em $d=200$, $\delta^2$ é pequeno em relação a $400$.
+- **Reddi et al. (2014, resumo):** o poder cai polinomialmente com a dimensão contra alternativas que mantêm a divergência KL constante.
+- **Prática:** testar em uma representação de dimensão menor, como a saída de um classificador (Rabanser et al., 2019).
+:::
+:::
+
+::: {.fig-resize style="width: 56%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, ax = plt.subplots(figsize=(6.6, 3.5))
+for dl, cor in zip(DELTAS, (COR_B, COR_A)):
+    ax.plot(DIMS, poder_dim[dl], marker="o", color=cor, lw=2, label=f"$\\delta$ = {brl(dl)}")
+ax.axhline(ALFA, color=COR_CINZA, ls="--", lw=1); ax.text(DIMS[0], ALFA + .02, "nível (5%)", color=COR_CINZA, fontsize=9)
+ax.set_xscale("log"); ax.set_xticks(DIMS); ax.set_xticklabels(DIMS)
+ax.set_xlabel("dimensão $d$"); ax.set_ylabel("poder (fração de rejeições)"); ax.set_ylim(0, 1.05)
+ax.set_title("Poder para a mesma mudança, por dimensão"); ax.legend(fontsize=9)
+plt.tight_layout(); plt.show()
+```
+:::
+
+## Pausa 3: Estimação e Largura do Kernel
+
+::: {.callout-tip}
+## O cálculo da MMD entre duas amostras resulta em $-0{,}0009$. Um valor negativo para uma distância ao quadrado indica erro no código?
+
+Considere qual dos dois estimadores foi usado e qual é a esperança dele quando as duas amostras vêm da mesma distribuição.
+:::
+
+::: {.callout-tip}
+## Viés, Custo e Largura
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O viés do estimador $\widehat{\mathrm{MMD}}_b^2$ vem dos termos cruzados $k(\mathbf{x}_i,\mathbf{y}_j)$, em que os pontos pertencem a amostras diferentes.
+- □ Dobrar o tamanho das duas amostras multiplica por cerca de quatro a memória necessária para a matriz de kernel.
+- □ Testar 20 larguras nos dados observados e relatar o menor dos 20 p-valores mantém o nível $\alpha$, porque cada teste individual tem nível $\alpha$.
+- □ A heurística da mediana usa os próprios dados do teste para definir o kernel e, mesmo assim, não invalida o teste de permutação.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 3: Estimação e Largura do Kernel — Resposta
+
+::: {.callout-tip}
+## Viés, Custo e Largura — Resposta
+
+- ✗ O viés vem dos termos com $i=i'$ dentro de cada amostra, em que um ponto é comparado consigo mesmo. Os termos cruzados envolvem sempre pares independentes.
+- ✔ A matriz tem $(n+m)^2$ entradas, e $(2n+2m)^2=4(n+m)^2$.
+- ✗ O menor de 20 p-valores fica abaixo de $\alpha$ com frequência maior que $\alpha$. A estatística deixa de ser a mesma função nos dados observados e nos permutados.
+- ✔ A mediana da amostra conjunta não depende das atribuições dos pontos e é a mesma em todas as permutações.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** não necessariamente. O estimador não viesado tem esperança zero sob $H_0$ e assume valores negativos com frequência (`{python} pct(frac_neg_h0)` das repetições na simulação). O valor $-0{,}0009$ indica ausência de evidência de diferença. Com o estimador viesado, um valor negativo indicaria erro, porque ele é o quadrado de uma norma.
+:::
+
+:::
+
+# Bloco 4: Uso no Monitoramento e Alinhamento
+
+## Resultado no conjunto de gases
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para cada lote, sorteamos até `{python} N_SUB` leituras e aplicamos o teste contra a referência 1a, com a largura mediana e `{python} B_TL` permutações. O painel da esquerda mostra a estatística de cada lote e o limiar correspondente.
+
+**Múltiplos testes.** São `{python} N_TESTES` testes. Com 5% de probabilidade de alarme falso em cada um, a probabilidade de pelo menos um alarme falso seria `{python} pct(1 - (1 - ALFA) ** N_TESTES)` se os testes fossem independentes. A correção de Bonferroni exige de cada teste o nível $\alpha/K$, com $K$ o número de testes. Como a probabilidade de uma união de eventos é no máximo a soma das probabilidades, a probabilidade de algum alarme falso fica limitada por $K\cdot\alpha/K=\alpha$, sem supor independência. É a agregação usada por Rabanser et al. (2019, §3.2, p. 4). Aqui, cada teste precisa de p-valor de no máximo `{python} brl(alfa_bonf, 3)`.
+
+**Resultado.** A metade 1b não é rejeitada (p-valor `{python} brl(tl['1b']['p'], 3)`). Os `{python} n_rej_tl` lotes seguintes são todos rejeitados, com p-valor `{python} brl(p_min_tl, 3)`, o menor possível com `{python} B_TL` permutações. O teste detecta a mudança a partir do lote 2 sem usar rótulos.
+
+O painel da direita relaciona a estatística com a acurácia, que só é conhecida porque este conjunto tem rótulos. A relação não é monótona: o lote 2 tem $\widehat{\mathrm{MMD}}_u^2=$ `{python} brl(tl[2]['obs'], 3)` e acurácia `{python} pct(acc[2], 1)`, e o lote 10 tem $\widehat{\mathrm{MMD}}_u^2=$ `{python} brl(tl[10]['obs'], 3)` e acurácia `{python} pct(acc[10], 1)`. A MMD mede a mudança na distribuição das leituras, e não a perda de acurácia do classificador.
+:::
+
+::: {.content-visible when-format="revealjs"}
+Até `{python} N_SUB` leituras por lote contra a referência 1a, largura mediana, `{python} B_TL` permutações.
+
+::: {.fragment}
+- **Múltiplos testes:** com `{python} N_TESTES` testes a 5%, a probabilidade de algum alarme falso seria `{python} pct(1 - (1 - ALFA) ** N_TESTES)` (se independentes).
+- **Correção de Bonferroni:** exigir $\alpha/K$ de cada um dos $K$ testes. A probabilidade da união é no máximo a soma, $K\cdot\alpha/K=\alpha$, sem supor independência (Rabanser et al., 2019, §3.2, p. 4).
+:::
+
+::: {.fragment}
+- **Resultado:** 1b não é rejeitada ($\hat p=$ `{python} brl(tl['1b']['p'], 3)`). Os `{python} n_rej_tl` lotes seguintes são rejeitados, com $\hat p=$ `{python} brl(p_min_tl, 3)`, abaixo de `{python} brl(alfa_bonf, 3)`.
+- **Estatística e acurácia:** lote 2 com $\widehat{\mathrm{MMD}}_u^2=$ `{python} brl(tl[2]['obs'], 3)` e acurácia `{python} pct(acc[2], 1)`. Lote 10 com `{python} brl(tl[10]['obs'], 3)` e acurácia `{python} pct(acc[10], 1)`.
+:::
+:::
+
+::: {.fig-resize style="width: 92%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(12.5, 3.7), gridspec_kw={"width_ratios": [1.4, 1]})
+chaves = ["1b"] + list(range(2, 11))
+xs = np.arange(len(chaves))
+a1.bar(xs, [max(tl[c]["obs"], 1e-4) for c in chaves], color=[COR_A] + [COR_B] * 9, label="$\\widehat{\\mathrm{MMD}}_u^2$")
+a1.scatter(xs, [tl[c]["lim"] for c in chaves], marker="_", s=500, color="black", lw=2, zorder=5, label="limiar de permutação (95%)")
+a1.set_yscale("log"); a1.set_xticks(xs); a1.set_xticklabels([f"{c}\n({MESES[c] if c != '1b' else MESES[1]})" for c in chaves], fontsize=8)
+a1.set_xlabel("lote (meses)"); a1.set_ylabel("$\\widehat{\\mathrm{MMD}}_u^2$ (escala log)")
+a1.set_ylim(1e-3, 6); a1.set_title("Referência 1a contra cada lote"); a1.legend(fontsize=8, loc="upper left", ncol=2)
+a2.scatter([tl["1b"]["obs"]], [acc_ctl], color=COR_A, s=45); a2.annotate("1b", (tl["1b"]["obs"], acc_ctl), xytext=(6, -4), textcoords="offset points", fontsize=9)
+for b in range(2, 11):
+    a2.scatter([tl[b]["obs"]], [acc[b]], color=COR_B, s=45)
+    a2.annotate(str(b), (tl[b]["obs"], acc[b]), xytext=(6, -4), textcoords="offset points", fontsize=9)
+a2.set_xlabel("$\\widehat{\\mathrm{MMD}}_u^2$ contra 1a"); a2.set_ylabel("acurácia do classificador"); a2.set_ylim(0, 1)
+a2.set_title("Estatística e acurácia, por lote")
+plt.tight_layout(); plt.show()
+```
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment .callout-important}
+## A MMD não mede a perda de acurácia
+A MMD mede a mudança na distribuição das leituras. A relação com a acurácia do classificador não é monótona.
+:::
+:::
+
+## O que a rejeição não informa
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+**Tipos de mudança.** Nesta seção, $c$ denota a classe (o gás) de uma leitura $\mathbf{x}$, $p$ é a distribuição de referência e $q$ a de produção. A distribuição conjunta fatora de duas maneiras, $p(\mathbf{x},c)=p(\mathbf{x})\,p(c\mid\mathbf{x})=p(c)\,p(\mathbf{x}\mid c)$, e a literatura classifica as mudanças pelo fator que permanece igual (Rabanser et al., 2019, §2, p. 2, que usam $y$ para o rótulo):
+
+- ***Covariate shift*:** $q(\mathbf{x},c)=q(\mathbf{x})\,p(c\mid\mathbf{x})$. Muda a distribuição das entradas, e a relação entre entrada e classe permanece.
+- ***Label shift*:** $q(\mathbf{x},c)=q(c)\,p(\mathbf{x}\mid c)$. Muda a proporção das classes, e a distribuição das entradas de cada classe permanece.
+- ***Concept shift*:** muda $p(c\mid\mathbf{x})$, a relação entre entrada e classe.
+
+O teste de duas amostras nas leituras compara apenas $p(\mathbf{x})$ com $q(\mathbf{x})$. Disso decorrem três limitações.
+
+**1. A rejeição não identifica o tipo de mudança.** Nos três casos $q(\mathbf{x})$ pode diferir de $p(\mathbf{x})$. E uma mudança em $p(c\mid\mathbf{x})$ que mantenha $p(\mathbf{x})$ igual não é detectável por nenhum teste que use só as leituras. No conjunto de gases, que tem rótulos, é possível verificar: a proporção dos gases muda entre os lotes, e a distribuição das leituras de cada gás também. Comparando com a MMD as leituras de um mesmo gás entre o lote 1 e cada lote posterior, `{python} n_rej_gas` das `{python} n_comp_gas` comparações possíveis são rejeitadas com correção de Bonferroni.
+
+**2. A rejeição não implica perda de acurácia.** Tomamos a metade 1b, do mesmo lote da referência, e mantivemos só as leituras de etanol e etileno (`{python} n_prior` leituras). É uma mudança apenas na proporção das classes. O teste rejeita, com $\widehat{\mathrm{MMD}}_u^2=$ `{python} brl(t_prior['obs'], 3)` e p-valor `{python} brl(t_prior['p'], 3)`, e a acurácia do classificador nessas leituras é `{python} pct(acc_prior, 1)`.
+
+**3. Com amostras grandes, diferenças pequenas são rejeitadas.** Em um experimento sintético com $P=\mathcal{N}(\mathbf{0},I_2)$ e $Q$ com a primeira coordenada deslocada de `{python} brl(DELTA_N)` desvio padrão, a fração de rejeições vai de `{python} pct(poder_n[0])` com $n=$ `{python} NS[0]` para `{python} pct(poder_n[-1])` com $n=$ `{python} milhar(NS[-1])`, enquanto o valor médio da estatística permanece em torno de `{python} brl(mmd_n_med[-1], 4)`. O p-valor indica se há evidência de alguma diferença, e não o tamanho dela.
+
+Na prática, convém acompanhar o valor de $\widehat{\mathrm{MMD}}_u^2$ em relação ao histórico do sistema, além do p-valor, e verificar se a mudança afeta a tarefa: aplicar o teste às saídas do classificador, examinar a testemunha para localizar a mudança e rotular uma amostra pequena.
+:::
+
+::: {.content-visible when-format="revealjs"}
+$c$: classe (o gás). $p$: referência, $q$: produção. $\ p(\mathbf{x},c)=p(\mathbf{x})\,p(c\mid\mathbf{x})=p(c)\,p(\mathbf{x}\mid c)$ (Rabanser et al., 2019, §2, p. 2).
+
+- ***Covariate shift*:** $q(\mathbf{x},c)=q(\mathbf{x})\,p(c\mid\mathbf{x})$. Mudam as entradas.
+- ***Label shift*:** $q(\mathbf{x},c)=q(c)\,p(\mathbf{x}\mid c)$. Muda a proporção das classes.
+- ***Concept shift*:** muda $p(c\mid\mathbf{x})$
+
+::: {.fragment}
+**O teste nas leituras compara só $p(\mathbf{x})$ com $q(\mathbf{x})$:**
+
+1. **Não identifica o tipo de mudança.** Uma mudança em $p(c\mid\mathbf{x})$ com $p(\mathbf{x})$ igual não é detectável sem rótulos. No gás, mudam a proporção dos gases e a distribuição das leituras de cada gás (`{python} n_rej_gas` de `{python} n_comp_gas` comparações por gás rejeitadas).
+:::
+
+::: {.fragment}
+2. **Não implica perda de acurácia.** Metade 1b só com etanol e etileno (`{python} n_prior` leituras): o teste rejeita ($\hat p=$ `{python} brl(t_prior['p'], 3)`), e a acurácia é `{python} pct(acc_prior, 1)`.
+:::
+
+::: {.fragment}
+3. **Com amostras grandes, diferenças pequenas são rejeitadas.** Deslocamento de `{python} brl(DELTA_N)` desvio padrão: rejeição em `{python} pct(poder_n[0])` dos casos com $n=$ `{python} NS[0]` e em `{python} pct(poder_n[-1])` com $n=$ `{python} milhar(NS[-1])`. A estatística permanece em torno de `{python} brl(mmd_n_med[-1], 4)`.
+:::
+
+::: {.fragment}
+**Na prática:** acompanhar o valor da estatística em relação ao histórico, além do p-valor, e verificar o efeito na tarefa (teste nas saídas do classificador, pequena amostra rotulada).
+:::
+:::
+
+## Alinhamento de distribuições
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Quando a mudança afeta a tarefa, a solução completa é rotular dados novos e retreinar. Sem rótulos, uma alternativa é transformar os dados de produção para que sua distribuição se aproxime da distribuição de referência. Esse procedimento é o **alinhamento de distribuições**, e a MMD mede o resultado.
+
+A forma mais simples é padronizar cada lote com a média e o desvio padrão do próprio lote, atributo por atributo. Isso iguala os dois primeiros momentos de cada atributo aos da referência, sem usar rótulos. A figura mostra o resultado. A estatística diminui em todos os lotes, por um fator entre `{python} brl(min(razao_al), 0)` e `{python} brl(max(razao_al), 0)`. A acurácia aumenta em `{python} n_al_melhor` dos 9 lotes: no lote `{python} b_al_max`, de `{python} pct(acc[b_al_max], 1)` para `{python} pct(acc_al[b_al_max], 1)`. No lote `{python} b_al_min` ela diminui, de `{python} pct(acc[b_al_min], 1)` para `{python} pct(acc_al[b_al_min], 1)`. O teste ainda rejeita em `{python} n_al_rej` dos 9 lotes com a correção de Bonferroni, ou seja, resta diferença que médias e desvios não explicam.
+
+**Hipótese do alinhamento.** Padronizar o lote supõe que toda diferença entre produção e referência deve ser removida. Isso é falso quando a proporção das classes muda. Nas `{python} n_prior` leituras de etanol e etileno da seção anterior, a mesma padronização reduz a acurácia de `{python} pct(acc_prior, 1)` para `{python} pct(acc_prior_al, 1)`. O alinhamento é adequado quando a mudança está na medição e a proporção das classes se mantém, o que não pode ser verificado sem rótulos.
+
+Em redes neurais, a mesma ideia é chamada de adaptação de domínio. A MMD é uma soma de kernels entre pontos, portanto é diferenciável em relação às representações e pode ser usada como termo de penalidade na função de perda. Na *Deep Adaptation Network* de Long et al. (2015, resumo, tradução livre), "as representações ocultas de todas as camadas específicas da tarefa são mapeadas para um espaço de Hilbert com kernel reprodutor, onde as médias (*mean embeddings*) das distribuições dos diferentes domínios podem ser explicitamente aproximadas". A hipótese e a limitação são as mesmas da padronização.
+:::
+
+::: {.content-visible when-format="revealjs"}
+**Alinhamento:** transformar os dados de produção para aproximar sua distribuição da referência, sem rótulos. A MMD mede o resultado.
+
+::: {.fragment}
+**Forma mais simples:** padronizar cada lote com a média e o desvio do próprio lote (iguala os dois primeiros momentos de cada atributo).
+
+- A estatística diminui por um fator entre `{python} brl(min(razao_al), 0)` e `{python} brl(max(razao_al), 0)`.
+- A acurácia aumenta em `{python} n_al_melhor` dos 9 lotes. Lote `{python} b_al_max`: de `{python} pct(acc[b_al_max], 1)` para `{python} pct(acc_al[b_al_max], 1)`. Lote `{python} b_al_min`: de `{python} pct(acc[b_al_min], 1)` para `{python} pct(acc_al[b_al_min], 1)`.
+- O teste ainda rejeita em `{python} n_al_rej` dos 9 lotes.
+:::
+
+::: {.fragment}
+- **Hipótese:** toda diferença deve ser removida. Falsa quando a proporção das classes muda: nas leituras só de etanol e etileno, a padronização reduz a acurácia de `{python} pct(acc_prior, 1)` para `{python} pct(acc_prior_al, 1)`.
+- **Em redes neurais (adaptação de domínio):** a MMD é diferenciável e entra na função de perda, como na DAN (Long et al., 2015). Mesma hipótese, mesma limitação.
+:::
+:::
+
+::: {.fig-resize style="width: 88%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(12, 3.5))
+lotes = np.arange(2, 11); w = .38
+a1.bar(lotes - w / 2, [tl[b]["obs"] for b in lotes], w, color=COR_B, label="antes")
+a1.bar(lotes + w / 2, [max(al[b]["obs"], 1e-4) for b in lotes], w, color=COR_VERDE, label="depois de padronizar o lote")
+a1.set_yscale("log"); a1.set_xticks(lotes); a1.set_xlabel("lote"); a1.set_ylabel("$\\widehat{\\mathrm{MMD}}_u^2$ contra 1a (log)")
+a1.set_ylim(top=4); a1.set_title("MMD antes e depois do alinhamento"); a1.legend(fontsize=8, loc="upper left", ncol=2)
+a2.bar(lotes - w / 2, [acc[b] for b in lotes], w, color=COR_B, label="antes")
+a2.bar(lotes + w / 2, [acc_al[b] for b in lotes], w, color=COR_VERDE, label="depois")
+a2.axhline(acc_ctl, color=COR_A, ls="--", lw=1.2); a2.text(10.4, acc_ctl - .06, "metade 1b", color=COR_A, fontsize=8, ha="right")
+a2.set_xticks(lotes); a2.set_xlabel("lote"); a2.set_ylabel("acurácia"); a2.set_ylim(0, 1.25)
+a2.set_title("Acurácia antes e depois do alinhamento"); a2.legend(fontsize=8, loc="upper left", ncol=2)
+plt.tight_layout(); plt.show()
+```
+:::
+
+## Pausa 4: Interpretação do Teste e Alinhamento
+
+::: {.callout-tip}
+## O teste indica drift com o menor p-valor possível. Sem rótulos novos, que verificações ajudam a decidir entre não agir, alinhar os dados ou pedir rótulos para retreinar?
+
+Separe três perguntas: a diferença é grande em relação ao histórico? Em que atributos ou regiões ela está? Ela altera as respostas do modelo?
+:::
+
+::: {.callout-tip}
+## Tipos de Mudança e Alinhamento
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Se a distribuição das entradas $p(\mathbf{x})$ não muda entre treino e produção, a acurácia do classificador não pode diminuir.
+- □ Com amostras suficientemente grandes, o teste rejeita mesmo uma diferença pequena demais para ter efeito prático.
+- □ Padronizar cada lote de produção com a própria média e o próprio desvio é uma correção segura quando só a proporção das classes mudou.
+- □ A correção de Bonferroni com $K$ testes só controla a probabilidade de algum alarme falso se os $K$ testes forem independentes.
+:::
+
+::: {.content-visible when-format="revealjs"}
+
+## Pausa 4: Interpretação do Teste e Alinhamento — Resposta
+
+::: {.callout-tip}
+## Tipos de Mudança e Alinhamento — Resposta
+
+- ✗ Em um *concept shift*, $p(c\mid\mathbf{x})$ muda com $p(\mathbf{x})$ igual, e a acurácia diminui sem que um teste nas entradas detecte.
+- ✔ O poder cresce com $n$ para qualquer diferença fixa. O p-valor não mede o tamanho da diferença.
+- ✗ Nesse caso a diferença não deve ser removida. No experimento com etanol e etileno, a padronização reduziu a acurácia.
+- ✗ A desigualdade $\Pr(\cup_k A_k)\le\sum_k\Pr(A_k)$ vale com qualquer dependência entre os testes.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** comparar o valor de $\widehat{\mathrm{MMD}}_u^2$ com o histórico do sistema. Examinar a testemunha ou os atributos individualmente para localizar a mudança. Repetir o teste nas saídas do classificador e comparar a proporção das classes previstas com a do treino. Se a mudança altera as respostas, rotular uma amostra pequena antes de alinhar ou retreinar.
+:::
+
+:::
+
+# Fechamento e Ponte para a Aula 12
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Retomando as 4 perguntas
+
+1. **Decisão:** um teste de duas amostras rejeita $H_0: P=Q$ quando uma estatística ultrapassa um limiar. O teste de permutação obtém o limiar dos próprios dados e tem nível $\alpha$ para qualquer estatística, com amostras finitas, desde que a ordem das observações não importe sob $H_0$. O poder depende da estatística.
+2. **Estatística:** a MMD é a maior diferença de médias obtida por uma função de norma limitada no espaço de atributos. Ela é igual à distância entre as médias das duas distribuições nesse espaço e se escreve com três esperanças do kernel. Com kernel Gaussiano, é zero somente quando $P=Q$, e a função testemunha é a diferença entre dois KDEs.
+3. **Estimação e ajustes:** o estimador que exclui os pares de um ponto consigo mesmo é não viesado e pode ser negativo. O limiar vem da permutação e o custo é quadrático no número de pontos. A largura do kernel define a escala da comparação, e a heurística da mediana preserva o nível mas pode ter pouco poder. O poder contra uma mudança fixa diminui com a dimensão.
+4. **Uso:** a rejeição indica que $p(\mathbf{x})$ mudou. Ela não identifica o tipo de mudança nem a perda de acurácia, e com amostras grandes ocorre para diferenças pequenas. No conjunto de gases, o teste rejeitou os `{python} n_rej_tl` lotes, e a padronização por lote aumentou a acurácia em `{python} n_al_melhor` deles, sob a hipótese de que a proporção das classes não mudou.
+
+### Os métodos lado a lado
+
+| | Diferença de médias | KS por atributo | MMD, kernel Gaussiano | Teste por classificador |
+| :--- | :---: | :---: | :---: | :---: |
+| **O que detecta** | Só a média | Cada marginal | Qualquer diferença, na escala $\sigma$ | O que o classificador consegue aprender |
+| **O que é preciso escolher** | Nada | Correção para múltiplos testes | Largura $\sigma$ | Modelo e treino |
+| **Custo** | $\mathcal{O}((n+m)d)$ | $\mathcal{O}(d\,(n+m)\log(n+m))$ | $\mathcal{O}((n+m)^2d)$ | Um treinamento |
+
+A última coluna é o **teste de duas amostras por classificador**: rotulam-se os pontos de $X$ com 0 e os de $Y$ com 1, treina-se um classificador e mede-se a acurácia em dados não usados no treino. Lopez-Paz & Oquab (2017, resumo, tradução livre): "se a hipótese nula '$P=Q$' é verdadeira, então a acurácia de um classificador binário num subconjunto separado desse conjunto de dados deve ficar perto do nível do acaso". No conjunto de gases, com regressão logística e validação cruzada, a acurácia é `{python} pct(c2st_ctl, 1)` entre as metades 1a e 1b e `{python} pct(c2st_l2, 1)` entre a metade 1a e o lote 2.
+
+### O que fica em aberto
+
+- **Dados com dependência temporal:** o teste de permutação supõe que, sob $H_0$, a ordem das observações não importa. Leituras consecutivas de um sensor violam essa hipótese.
+- **Escolha do kernel:** a mediana é uma heurística. A escolha do kernel que maximiza o poder é descrita por Gretton et al. (2012, p. 748) como área de pesquisa em andamento.
+- **Monitoramento contínuo:** a correção de Bonferroni fica mais conservadora a cada novo teste.
+
+### Ponte para a Aula 12
+
+Nesta aula, o espaço de atributos foi fixado pela escolha do kernel. O teste por classificador faz o contrário: aprende uma função a partir da tarefa de distinguir de qual amostra veio cada ponto, uma tarefa que não exige rótulos anotados.
+
+Na **Aula 12**, essa ideia é usada para aprender representações: o **aprendizado contrastivo** treina uma rede para distinguir pares que devem ficar próximos de pares que devem ficar distantes, com a perda **InfoNCE**.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as 4 perguntas
+
+1. **Decisão:** o teste de permutação obtém o limiar dos próprios dados e tem nível $\alpha$ para qualquer estatística, se a ordem das observações não importa sob $H_0$. O poder depende da estatística.
+2. **Estatística:** a MMD é a distância entre as médias das distribuições no espaço de atributos, $\mathbb{E}[k(\mathbf{x},\mathbf{x}')]-2\mathbb{E}[k(\mathbf{x},\mathbf{y})]+\mathbb{E}[k(\mathbf{y},\mathbf{y}')]$. Com kernel Gaussiano, é zero somente se $P=Q$.
+3. **Estimação e ajustes:** estimador não viesado (pode ser negativo), limiar por permutação, custo quadrático. A largura define a escala da comparação, e o poder diminui com a dimensão.
+4. **Uso:** a rejeição indica que $p(\mathbf{x})$ mudou, e não o tipo de mudança nem a perda de acurácia. O alinhamento ajuda se a proporção das classes não mudou.
+
+## Os métodos lado a lado
+
+| | O que detecta | O que é preciso escolher | Custo |
+| :--- | :---: | :---: | :---: |
+| **Diferença de médias** | Só a média | Nada | $\mathcal{O}((n+m)d)$ |
+| **KS por atributo** | Cada marginal | Correção para múltiplos testes | $\mathcal{O}(d\,(n+m)\log(n+m))$ |
+| **MMD, kernel Gaussiano** | Qualquer diferença, na escala $\sigma$ | Largura $\sigma$ | $\mathcal{O}((n+m)^2d)$ |
+| **Teste por classificador** | O que o classificador aprende | Modelo e treino | Um treinamento |
+
+::: {.fragment}
+- **Teste por classificador** (Lopez-Paz & Oquab, 2017): rotular $X$ com 0 e $Y$ com 1 e treinar um classificador. Se $P=Q$, a acurácia fica perto de 50%. No gás: `{python} pct(c2st_ctl, 1)` entre 1a e 1b, `{python} pct(c2st_l2, 1)` entre 1a e o lote 2.
+- **Em aberto:** dados com dependência temporal, escolha do kernel para maximizar o poder, monitoramento contínuo.
+:::
+
+::: {.fragment}
+### Próxima aula
+Nesta aula o espaço de atributos foi fixado pelo kernel. O teste por classificador aprende uma função a partir da tarefa de distinguir de qual amostra veio cada ponto, sem rótulos anotados. **Aula 12: aprendizado contrastivo e a perda InfoNCE.**
+:::
+
+::: {.fragment}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+:::
