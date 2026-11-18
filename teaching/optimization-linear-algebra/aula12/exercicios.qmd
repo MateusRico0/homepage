@@ -1,0 +1,113 @@
+---
+title: "Exercícios — Aula 12: Momento, Curvatura e Métodos Acelerados"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado das questões de Verdadeiro/Falso está em
+[`soluções.qmd`](soluções.qmd). Encontrou um erro numa questão? Corrija
+diretamente neste arquivo e abra um *pull request*.
+:::
+
+## Contexto e notação
+
+Considere a minimização irrestrita de uma função suave duas vezes continuamente diferenciável $f: \mathbb{R}^d \to \mathbb{R}$. Denotamos por $\mathbf{g}_k = \nabla f(\mathbf{w}_k)$ o gradiente no ponto $\mathbf{w}_k$ e por $H = \nabla^2 f(\mathbf{w}_k)$ a matriz Hessiana, com autovalores limitados por $0 < \lambda_{\min} \le \lambda_i \le \lambda_{\max}$, definindo o número de condição $\kappa = \frac{\lambda_{\max}}{\lambda_{\min}} \ge 1$.
+
+O **Momento de Polyak (*Heavy-Ball*)** modela a inércia mecânica de uma partícula com velocidade $\mathbf{v}_k$:
+$$\mathbf{v}_{k+1} = \beta \mathbf{v}_k - \alpha \nabla f(\mathbf{w}_k), \quad \mathbf{w}_{k+1} = \mathbf{w}_k + \mathbf{v}_{k+1}$$
+onde $\alpha > 0$ é a taxa de aprendizado e $\beta \in [0, 1)$ é o coeficiente de amortecimento.
+
+O **Gradiente Acelerado de Nesterov (NAG)** avalia o gradiente no ponto antecipado pela velocidade (*look-ahead*):
+$$\mathbf{v}_{k+1} = \beta \mathbf{v}_k - \alpha \nabla f(\mathbf{w}_k + \beta \mathbf{v}_k), \quad \mathbf{w}_{k+1} = \mathbf{w}_k + \mathbf{v}_{k+1}$$
+
+O otimizador **Adam (Adaptive Moment Estimation)** unifica a inércia de primeira ordem com o precondicionamento diagonal de segunda ordem via médias móveis exponenciais:
+$$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t, \quad \mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^2$$
+com correções analíticas de viés de inicialização:
+$$\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}, \quad \hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1 - \beta_2^t}$$
+e atualização por coordenada:
+$$\mathbf{w}_{t+1} = \mathbf{w}_t - \frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \odot \hat{\mathbf{m}}_t$$
+
+O otimizador **AdamW** desacopla a penalidade de decaimento de pesos (*weight decay*) da fração adaptativa:
+$$\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha \lambda \mathbf{w}_t - \frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon} \odot \hat{\mathbf{m}}_t$$
+onde $\lambda > 0$ é a taxa de decaimento de peso.
+
+---
+
+## Questões discursivas
+
+1. **Análise Espectral do Operador de Polyak e Dedução do Raio Espectral de Chebyshev.**
+   Considere a forma quadrática estritamente convexa $f(\mathbf{w}) = \frac{1}{2}\mathbf{w}^T H \mathbf{w}$, onde $H \succ 0$ possui autovalores $\lambda_i \in [\lambda_{\min}, \lambda_{\max}]$. Seja $\mathbf{e}_k = \mathbf{w}_k - \mathbf{w}^\star$ o vetor de erro na iteração $k$.
+   a) Decomponha o erro na base ortonormal de autovetores de $H$ e mostre que a dinâmica de cada coordenada espectral $e_{k, i}$ obedece ao sistema linear de 2ª ordem:
+      $$\begin{bmatrix} e_{k+1, i} \\ e_{k, i} \end{bmatrix} = \begin{bmatrix} 1 + \beta - \alpha \lambda_i & -\beta \\ 1 & 0 \end{bmatrix} \begin{bmatrix} e_{k, i} \\ e_{k-1, i} \end{bmatrix}$$
+   b) Mostre que o polinômio característico da matriz de transição acima é $p(\mu) = \mu^2 - (1 + \beta - \alpha \lambda_i)\mu + \beta = 0$, e deduza que quando o discriminante é não-positivo ($(1 + \beta - \alpha \lambda_i)^2 \le 4\beta$), o módulo dos autovalores é identicamente $|\mu| = \sqrt{\beta}$ para qualquer $\lambda_i$.
+   c) Mostre que a escolha ótima de hiperparâmetros que minimiza o raio espectral em todo o espectro $[\lambda_{\min}, \lambda_{\max}]$ impõe as igualdades nos extremos:
+      $$1 + \beta - \alpha \lambda_{\min} = 2\sqrt{\beta} \quad \text{e} \quad 1 + \beta - \alpha \lambda_{\max} = -2\sqrt{\beta}$$
+      e resolva esse sistema para deduzir as fórmulas de Polyak:
+      $$\alpha^\star = \frac{4}{(\sqrt{\lambda_{\max}} + \sqrt{\lambda_{\min}})^2}, \quad \beta^\star = \left(\frac{\sqrt{\kappa} - 1}{\sqrt{\kappa} + 1}\right)^2$$
+   d) Calcule o raio espectral ótimo $\rho^\star = \sqrt{\beta^\star} = \frac{\sqrt{\kappa} - 1}{\sqrt{\kappa} + 1}$ e contraste com o raio espectral do Gradiente Descendente clássico ($\rho_{\text{GD}} = \frac{\kappa - 1}{\kappa + 1}$). Para uma matriz com $\kappa = 10.000$, quantas iterações são necessárias para contrair o erro por um fator de $10\times$ em cada método?
+
+2. **A Cirurgia do Weight Decay: Por que Adam com $L_2$ Difere Estruturalmente do AdamW.**
+   Considere o problema de regularização de uma função de perda empírica $\mathcal{L}(\mathbf{w})$ com penalidade quadrática clássica ($L_2$ regularization):
+   $$\mathcal{L}_{\text{reg}}(\mathbf{w}) = \mathcal{L}(\mathbf{w}) + \frac{\lambda}{2} \|\mathbf{w}\|^2$$
+   a) Mostre que o gradiente da perda regularizada é $\tilde{\mathbf{g}}_t = \nabla \mathcal{L}(\mathbf{w}_t) + \lambda \mathbf{w}_t$.
+   b) Suponha que este gradiente $\tilde{\mathbf{g}}_t$ seja alimentado diretamente no otimizador Adam padrão (como era feito historicamente em frameworks de Deep Learning). Mostre analiticamente que a taxa de decaimento efetiva aplicada à coordenada $w_{t, i}$ torna-se proporcional a:
+      $$\frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}} + \epsilon}$$
+      onde $\hat{v}_{t, i}$ acumula a magnitude histórica de $\tilde{g}_{\tau, i}^2$.
+   c) Com base no resultado do item (b), explique por que parâmetros que recebem gradientes volumosos e frequentes sofrem uma penalidade de decaimento de peso praticamente nula, enquanto parâmetros esparsos (com gradientes nulos ou mínimos) são penalizados com máxima intensidade.
+   d) Escreva a equação de atualização do AdamW e mostre que, no regime onde o gradiente da tarefa é nulo ($\nabla \mathcal{L}(\mathbf{w}) = \mathbf{0}$), o AdamW induz uma contração puramente geométrica $\mathbf{w}_{t+1} = (1 - \alpha \lambda) \mathbf{w}_t$, demonstrando por que o desacoplamento restaura a semântica correta do decaimento de peso.
+
+---
+
+## Questões de Verdadeiro/Falso
+
+Julgue V ou F para cada um dos itens abaixo. A pontuação de cada teste é computada pelo critério de blocos de 4 afirmações.
+
+::: {.callout-note icon=false}
+## Teste 1 — Dinâmica de Inércia e o Momento de Polyak
+
+* ( ) O vetor velocidade no momento clássico acumula uma média móvel exponencial de gradientes passados, cancelando componentes ortogonais de alta frequência cujos sinais oscilam ao longo das iterações.
+* ( ) Em uma forma quadrática mal-condicionada ($\kappa \gg 1$), o método de Polyak (*Heavy-Ball*) atinge uma taxa assintótica de contração que escala com $\mathcal{O}(1 - 2/\sqrt{\kappa})$, em contraste com o gradiente descendente que escala com $\mathcal{O}(1 - 2/\kappa)$.
+* ( ) Para garantir que todos os modos espectrais da matriz de transição de Polyak decaiam com raio espectral uniforme $\sqrt{\beta}$, o discriminante da equação característica deve ser estritamente positivo para todos os autovalores.
+* ( ) O momento clássico de Polyak acelera a convergência em formas quadráticas, mas não garante convergência global para funções convexas gerais não-quadráticas com hiperparâmetros fixos.
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — O Gradiente Acelerado de Nesterov (NAG)
+
+* ( ) O Gradiente Acelerado de Nesterov diferencia-se do momento clássico por avaliar o vetor gradiente no ponto antecipado pela inércia ($\mathbf{w}_k + \beta \mathbf{v}_k$), agindo como um amortecedor preventivo antes que o otimizador suba a encosta oposta.
+* ( ) Para funções convexas $L$-suaves gerais, o método NAG atinge a taxa teórica de convergência $\mathcal{O}(1/k^2)$, que é a cota inferior matemática inultrapassável para qualquer algoritmo de primeira ordem (Teorema de Complexidade de Nesterov).
+* ( ) A avaliação do gradiente no ponto antecipado de Nesterov exige duas passagens de retropropagação (*backpropagation*) completas por iteração, duplicando o custo computacional por passo em relação ao gradiente padrão.
+* ( ) Em problemas não-convexos com ruído estocástico acentuado de mini-batch, a antecipação de Nesterov pode amplificar a variância das estimativas de gradiente se o passo de momento for excessivamente agressivo.
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — A Síntese do Otimizador Adam
+
+* ( ) O otimizador Adam unifica o momento de Polyak (inércia direcional de 1ª ordem via $m_t$) com a escala adaptativa do RMSProp (precondicionamento diagonal de 2ª ordem via $v_t$).
+* ( ) Como as variáveis $m_t$ e $v_t$ são inicializadas em zero, os seus valores nas primeiras iterações são severamente enviesados em direção à origem, exigindo a divisão por $(1 - \beta_1^t)$ e $(1 - \beta_2^t)$ para recuperar estimadores não-viesados.
+* ( ) O fator de correção de viés do segundo momento $\frac{1}{1 - \beta_2^t}$ permanece significativamente maior do que 1 por centenas de iterações quando se utiliza o valor canônico $\beta_2 = 0{,}999$.
+* ( ) Na ausência da correção de viés do segundo momento, o denominador $\sqrt{v_t} + \epsilon$ nos passos iniciais torna-se artificialmente grande, provocando a paralisia completa do otimizador no início do treinamento.
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — Regularização $L_2$ vs. Weight Decay Desacoplado (AdamW)
+
+* ( ) Em otimizadores de passo uniforme como o Gradiente Descendente padrão, adicionar uma penalidade $\frac{\lambda}{2}\|\mathbf{w}\|^2$ à função de perda é algebricamente idêntico a aplicar decaimento de pesos multiplicativo $\mathbf{w}_{t+1} = (1 - \alpha\lambda)\mathbf{w}_t - \alpha \nabla \mathcal{L}(\mathbf{w}_t)$.
+* ( ) No Adam clássico com regularização $L_2$ na perda, pesos associados a atributos com gradientes intensos e frequentes sofrem maior decaimento relativo de magnitude do que pesos associados a atributos com gradientes esparsos.
+* ( ) O algoritmo AdamW resolve a patologia do decaimento de pesos ao subtrair a penalidade $\alpha \lambda \mathbf{w}_t$ diretamente da atualização dos parâmetros, fora da escala adaptativa $\sqrt{\hat{v}_t} + \epsilon$.
+* ( ) O sucesso do AdamW no treinamento de arquiteturas como Transformers (GPT, LLaMA) decorre do fato de que o decaimento de peso uniforme desacoplado atua como um regularizador de capacidade estritamente independente da frequência de ativação dos tokens no vocabulário.
+:::
+

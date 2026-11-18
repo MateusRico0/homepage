@@ -1,0 +1,839 @@
+---
+title: "Aula 12: Redes Neurais e Aprendizado de Representação"
+subtitle: "Supervised Learning"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-10-27"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: homepage
+execute:
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all aria-label="Ver slides" title="Ver slides"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Lista de aulas" title="Lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SETUP GLOBAL — simulação e fronteiras de decisão comparadas
+# =====================================================================
+import os
+os.environ["MPLCONFIGDIR"] = "/tmp/mpl"
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.datasets import make_moons, load_breast_cancer
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+import warnings
+warnings.filterwarnings("ignore")
+
+plt.style.use('seaborn-v0_8-whitegrid')
+plt.rcParams.update({
+    "figure.dpi": 120,
+    "font.size": 11,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "legend.frameon": True,
+    "legend.framealpha": 0.9,
+})
+
+COR_A     = "#2b5c8f"   # Azul institucional (Classe 0)
+COR_B     = "#d95f02"   # Laranja quente (Classe 1)
+COR_NEU   = "#7570b3"   # Roxo
+COR_VERDE = "#1b9e77"   # Verde
+COR_CINZA = "#7f7f7f"
+
+# Dataset 2D sintético com não-linearidade acentuada (Two Moons)
+X_moons, y_moons = make_moons(n_samples=300, noise=0.22, random_state=42)
+scaler_m = StandardScaler()
+X_m = scaler_m.fit_transform(X_moons)
+
+# Treinamento dos três paradigmas fundamentais
+clf_lr  = LogisticRegression(C=1.0, random_state=42).fit(X_m, y_moons)
+clf_svm = SVC(kernel="rbf", C=1.0, gamma=1.0, probability=True, random_state=42).fit(X_m, y_moons)
+clf_mlp = MLPClassifier(hidden_layer_sizes=(16, 8), activation="relu", max_iter=1000, random_state=42).fit(X_m, y_moons)
+
+# Dataset Breast Cancer Wisconsin (30 atributos) para benchmark comparativo
+cancer = load_breast_cancer()
+X_bc = StandardScaler().fit_transform(cancer.data)
+y_bc = cancer.target
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+acc_lr  = cross_val_score(LogisticRegression(C=1.0, random_state=42), X_bc, y_bc, cv=cv).mean()
+acc_svm = cross_val_score(SVC(kernel="rbf", C=1.0, gamma="scale", random_state=42), X_bc, y_bc, cv=cv).mean()
+acc_mlp = cross_val_score(MLPClassifier(hidden_layer_sizes=(32, 16), max_iter=800, random_state=42), X_bc, y_bc, cv=cv).mean()
+```
+
+# Revisão e Introdução
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Revisão Cuidadosa: O Que a Aula 11 Deixou Pronto
+
+Na **Aula 11**, exploramos as **Máquinas de Vetores de Suporte (SVM)**. Vimos que a SVM rompeu deliberadamente com a modelagem da densidade global $p(y \mid \mathbf{x})$, concentrando sua capacidade na busca pelo hiperplano separador de margem máxima via otimização quadrática convexa. Através do **Truque do Kernel (*Kernel Trick*)** e do Teorema de Mercer, demonstramos que dados linearmente inseparáveis podem ser projetados implicitamente em espaços de Hilbert de dimensão infinita (Kernel RBF Gaussiano) sem incorrer no custo de calcular explicitamente as coordenadas transformadas.
+
+Contudo, tanto a SVM quanto os Modelos Lineares Generalizados (GLMs) das Aulas 5 a 7 compartilham um pressuposto estrutural restritivo: **a transformação de atributos $\boldsymbol{\phi}(\mathbf{x})$ é estática e fixada a priori pelo engenheiro humano**. 
+
+Seja escolhendo uma base de polinômios $\boldsymbol{\phi}(\mathbf{x}) = [1, x_1, x_2, x_1^2, x_1 x_2, \dots]$ ou selecionando a família do kernel RBF com hiperparâmetro $\gamma = \frac{1}{2\sigma^2}$, o modelo supervisionado aprende apenas uma **combinação linear final** sobre atributos pré-determinados:
+$$f(\mathbf{x}) = \mathbf{w}^T \boldsymbol{\phi}(\mathbf{x}) + b$$
+
+Em problemas reais com dados perceptuais complexos (imagens com milhões de pixels brutos, áudio contínuo ou sequências textuais), as geometrias das classes formam variedades topológicas (*manifolds*) altamente intrincadas. Nesses cenários, a engenharia manual de atributos (*feature engineering*) torna-se um gargalo intransponível: nenhum kernel analítico simples consegue antecipar as invariâncias de rotação, escala e semântica necessárias para separar os dados.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Da Aula 11: O Que Já Temos
+
+::: {.columns}
+::: {.column width="50%"}
+**Conquistas da Aula 11:**
+
+- **SVM:** Margem máxima de separação entre classes ($2/\|\mathbf{w}\|$).
+- Formulação dual convexa com vetores de suporte esparsos.
+- **Truque do Kernel:** Projeção em espaços de Hilbert sem cálculo explícito de coordenadas.
+:::
+
+::: {.column width="50%"}
+**A Limitação Estrutural:**
+
+- A transformação $\boldsymbol{\phi}(\mathbf{x})$ é **fixada a priori** pelo engenheiro (polinômios ou kernel analítico RBF).
+- O algoritmo é cego à semântica dos dados: ele não aprende *quais* atributos são relevantes.
+- Em dados perceptuais complexos (imagens, fala, texto), kernels manuais falham miseravelmente!
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Ideia Central: Da Engenharia Manual ao Aprendizado de Representação
+
+A virada de paradigma do Aprendizado Profundo (*Deep Learning*) reside no conceito de **Aprendizado de Representação (*Representation Learning*)**: em vez de confiar que um especialista humano desenhe atributos artesanais $\boldsymbol{\phi}(\mathbf{x})$, o próprio algoritmo deve **aprender a transformação não linear ótima $\boldsymbol{\phi}(\mathbf{x}; W)$ diretamente dos dados brutos**.
+
+Sob a ótica estatística rigorosa (Bishop, PRML §5; Bishop & Bishop, DLFC §3), um **Perceptron Multicamadas (*Multilayer Perceptron* - MLP)** nada mais é do que uma **composição hierárquica e encadeada de Modelos Lineares Generalizados (GLMs)**:
+1. Cada camada oculta projeta suas entradas em uma combinação linear afim seguida por uma função de ativação não linear $h(\cdot)$ (como a ReLU ou a Sigmoide).
+2. As camadas intermediárias atuam como **extratores adaptativos de atributos latentes**, desamassando e deformando a geometria dos dados.
+3. A camada final é exatamente um **GLM padrão** (Regressão Linear, Logística ou Softmax) ajustado sobre a representação latente final $\mathbf{z}^{(L-1)}$.
+4. Todos os parâmetros de todas as camadas são otimizados conjuntamente de ponta a ponta (*end-to-end*) via **Retropropagação (*Backpropagation*)**.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Ideia Central: Aprendizado de Representação
+
+::: {.fragment}
+
+- **Modelos Tradicionais (Aulas 5–11):**
+  $$\mathbf{x} \;\xrightarrow{\;\text{Atributos Fixos / Kernel Manual}\;}\; \boldsymbol{\phi}(\mathbf{x}) \;\xrightarrow{\;\text{Combinação Linear}\;}\; \hat{y}$$
+:::
+
+::: {.fragment}
+
+- **Redes Neurais Profundas (Aula 12):**
+  $$\mathbf{x} \;\xrightarrow{\;W^{(1)}\;}\; \mathbf{z}^{(1)} \;\xrightarrow{\;W^{(2)}\;}\; \dots \;\xrightarrow{\;W^{(L-1)}\;}\; \mathbf{z}^{(L-1)} \;\xrightarrow{\;W^{(L)}\;}\; \hat{y}$$
+:::
+
+::: {.fragment .callout-important}
+## A Tese Unificadora do Curso
+Uma rede neural profunda é uma **cadeia de GLMs**, onde as camadas ocultas aprendem a transformação não linear $\boldsymbol{\phi}(\mathbf{x})$ e a camada de saída calcula a Máxima Verossimilhança sobre a família de distribuições assumida!
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Roteiro da Aula
+
+Nesta aula terminal de Aprendizado Supervisionado, responderemos a quatro perguntas centrais:
+1. **A Composição de GLMs e o Teorema de Cybenko:** Como uma rede neural constrói representações adaptativas e por que arquiteturas profundas particionam o espaço com parcimônia exponencial em relação a redes rasas?
+2. **A Camada de Saída e a Teoria da Verossimilhança:** Como a suposição de ruído Gaussiano, Bernoulli e Multinomial deduz naturalmente as funções de perda MSE, Entropia Cruzada Binária e Softmax, preservando a propriedade da ligação canônica ($\delta_k = \hat{y}_k - y_k$)?
+3. **A Mecânica da Retropropagação (*Backpropagation*):** Como a regra da cadeia multivariada propaga as sensibilidades de erro $\boldsymbol{\delta}^{(l)}$ em tempo linear $\mathcal{O}(|W|)$ do topo à base?
+4. **Regularização em Redes Profundas:** Como a penalidade $L_2$ (Weight Decay como priori MAP) e o Dropout (como ensemble implícito de $2^D$ sub-redes) viabilizam a generalização em modelos superparametrizados?
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Roteiro da Aula
+
+1. **Redes Neurais como Cadeias de GLMs:** Ativações não lineares, Teorema da Aproximação Universal e o poder da profundidade.
+2. **A Camada de Saída sob a Verossimilhança:** Gaussianas, Bernoulli e Multinomial; Softmax e o resíduo linear canônico ($\hat{y}_k - y_k$).
+3. **O Algoritmo de Retropropagação (*Backpropagation*):** Sensibilidades de erro $\boldsymbol{\delta}^{(l)}$, gradientes matriciais e complexidade linear $\mathcal{O}(|W|)$.
+4. **Regularização Profunda e Síntese Final:** Weight Decay, Dropout como ensemble exponencial e o mapa comparativo das 12 aulas do curso.
+:::
+
+# Intuição — Deformação do Espaço e Representação Latente
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Metáfora do Papel Amassado
+
+Considere uma folha de papel branca sobre a qual desenhamos duas manchas circulares de cores distintas: uma gota de tinta azul no centro cercada por um anel externo de tinta laranja.
+
+Se amassarmos essa folha de papel até transformá-la em uma bola irregular tridimensional, nenhum corte plano feito com uma tesoura reta conseguirá separar a tinta azul da tinta laranja sem cortar pedaços de ambas as cores. Esse é o desafio que os dados não lineares impõem aos classificadores lineares clássicos.
+
+O papel das camadas ocultas de uma rede neural é equivalente a **desamassar, esticar e dobrar cuidadosamente a folha de papel** através de transformações afins seguidas de dobras não lineares:
+
+- Cada camada oculta mapeia os pontos originais para um novo espaço vetorial latente $\mathbf{z} \in \mathbb{R}^h$.
+- Nesse espaço latente, a geometria é distorcida de modo que os pontos da classe azul são agrupados em uma região convexa compacta, enquanto os pontos da classe laranja são empurrados para a periferia.
+- Chegando à camada final, o espaço transformado tornou-se **linearmente separável**: a camada de saída precisa apenas aplicar um hiperplano reto para classificar perfeitamente todos os dados!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Visualização: Fronteiras de Decisão nos Três Paradigmas
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 3, figsize=(11.5, 3.8))
+
+x_min, x_max = X_m[:, 0].min() - 0.5, X_m[:, 0].max() + 0.5
+y_min, y_max = X_m[:, 1].min() - 0.5, X_m[:, 1].max() + 0.5
+xx, yy = np.meshgrid(np.linspace(x_min, x_max, 150), np.linspace(y_min, y_max, 150))
+grid = np.c_[xx.ravel(), yy.ravel()]
+
+modelos = [
+    ("Regressão Logística (Linear)", clf_lr, axes[0]),
+    ("SVM Kernel RBF (Kernel Fixo)", clf_svm, axes[1]),
+    ("MLP 2 Camadas (Atributos Aprendidos)", clf_mlp, axes[2])
+]
+
+for title, model, ax in modelos:
+    Z = model.predict_proba(grid)[:, 1].reshape(xx.shape)
+    ax.contourf(xx, yy, Z, levels=20, cmap="coolwarm", alpha=0.3)
+    ax.contour(xx, yy, Z, levels=[0.5], colors="#182B49", linewidths=2.0)
+    ax.scatter(X_m[y_moons == 0, 0], X_m[y_moons == 0, 1], color=COR_A, s=20, label="Classe 0", alpha=0.8)
+    ax.scatter(X_m[y_moons == 1, 0], X_m[y_moons == 1, 1], color=COR_B, s=20, label="Classe 1", alpha=0.8)
+    ax.set_title(title, fontsize=10.5)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+axes[0].legend(loc="lower left", fontsize=8.5)
+plt.tight_layout()
+plt.show()
+```
+:::
+
+# Bloco 1: A Arquitetura do MLP como Composição de GLMs
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Anatomia de um Neurônio Artificial
+
+A unidade computacional básica de um Perceptron Multicamadas opera em duas etapas estritamente análogas às de um Modelo Linear Generalizado (GLM, Aula 6):
+
+1. **Combinação Linear Afim (Ativação Pré-Sináptica):**
+   Calcula a projeção ortogonal ponderada dos atributos de entrada com um deslocamento de bias:
+   $$a_j = \sum_{i=1}^d W_{ji} x_i + b_j = \mathbf{w}_j^T \mathbf{x} + b_j$$
+   Essa etapa define a orientação e a posição de um hiperplano no espaço de entrada.
+
+2. **Transformação Não-Linear (Ativação Pós-Sináptica):**
+   Aplica uma função escalar não linear $h: \mathbb{R} \to \mathbb{R}$ sobre a ativação pré-sináptica:
+   $$z_j = h(a_j)$$
+   O valor $z_j$ atua como o novo atributo latente sintetizado por este neurônio.
+
+### O Catálogo de Funções de Ativação Ocultas
+
+A escolha de $h(\cdot)$ governa a dinâmica do fluxo de gradientes durante o treinamento:
+
+- **Sigmoide Logística ($\sigma(a) = \frac{1}{1 + e^{-a}}$):** Historicamente popular por mapear valores em $(0, 1)$. Contudo, satura nos extremos ($a \to \pm \infty$), fazendo com que sua derivada $\sigma'(a) = \sigma(a)(1 - \sigma(a))$ decaia exponencialmente para zero, provocando o fenômeno do **gradiente evanescente (*vanishing gradient*)**.
+- **Tangente Hiperbólica ($\tanh(a) = \frac{e^a - e^{-a}}{e^a + e^{-a}}$):** Mapeia valores em $(-1, 1)$, mantendo as saídas centradas em zero, o que acelera a convergência em relação à sigmoide, embora ainda sofra de saturação nos extremos.
+- **ReLU (*Rectified Linear Unit*, Nair & Hinton, 2010):**
+  $$\text{ReLU}(a) = \max(0, a)$$
+  Tornou-se a ativação padrão absoluta em aprendizado profundo por razões analíticas contundentes:
+  1. *Gradiente Não-Saturante:* Para qualquer ativação positiva ($a > 0$), sua derivada é rigorosamente constante e unitária ($h'(a) = 1$). O gradiente flui através de dezenas de camadas sem atenuação exponencial.
+  2. *Esparsidade Representacional:* Neurônios com $a \le 0$ são desligados ($z = 0$), induzindo representações latentes esparsas e computacionalmente eficientes.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Neurônio Artificial: Um GLM Intermediário
+
+::: {.columns}
+::: {.column width="50%"}
+**Estrutura de 2 Etapas:**
+
+1. **Ativação Pré-Sináptica (Afim):**
+   $$a_j = \mathbf{w}_j^T \mathbf{x} + b_j$$
+2. **Ativação Pós-Sináptica (Não Linear):**
+   $$z_j = h(a_j)$$
+
+- Cada neurônio define um hiperplano divisor e uma curvatura local.
+- As saídas $\mathbf{z}$ tornam-se os atributos de entrada da próxima camada.
+:::
+
+::: {.column width="50%"}
+**Catálogo de Ativações Ocultas:**
+
+- **Sigmoide:** $\sigma(a) \in (0, 1)$. Saturação bilateral $\to$ Gradiente evanescente.
+- **$\tanh(a)$:** $\in (-1, 1)$. Centrada em zero, saturação nos extremos.
+- **ReLU:** $\max(0, a)$.
+  - Derivada unitária para $a > 0$ ($h'=1$).
+  - Imune ao gradiente evanescente.
+  - Padrão dominante da indústria!
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Teorema da Aproximação Universal e o Poder da Profundidade
+
+Uma questão teórica natural surge: *quantas camadas são necessárias para que uma rede neural consiga modelar qualquer função contínua?*
+
+### O Teorema da Aproximação Universal (Cybenko, 1989; Hornik, 1991)
+Seja $h: \mathbb{R} \to \mathbb{R}$ uma função contínua não-constante, limitada e estritamente monótona (como a sigmoide). Para qualquer função contínua $f: K \to \mathbb{R}$ definida sobre um conjunto compacto $K \subset \mathbb{R}^d$ e qualquer tolerância de erro $\epsilon > 0$, **existe uma rede neural com uma única camada oculta** e um número finito $M < \infty$ de neurônios:
+$$F(\mathbf{x}) = \sum_{j=1}^M v_j h(\mathbf{w}_j^T \mathbf{x} + b_j)$$
+tal que:
+$$\sup_{\mathbf{x} \in K} |F(\mathbf{x}) - f(\mathbf{x})| < \epsilon$$
+
+### Por que Redes Profundas Superam Redes Rasas?
+O Teorema de Cybenko garante a *existência teórica*, mas oculta uma armadilha matemática perversa: **ele não impõe limites sobre a magnitude de $M$**.
+
+Em muitos problemas práticos com simetrias combinatórias (como a função de paridade ou variedades em alta dimensão), para que uma rede rasa de 1 camada atinja precisão $\epsilon$, o número de neurônios necessários cresce exponencialmente: $M \sim \mathcal{O}(2^d)$.
+
+Montúfar et al. (2014) provaram que **redes profundas particionam o espaço com parcimônia exponencial**:
+
+- Uma rede rasa com $M$ neurônios ReLU particiona o espaço $\mathbb{R}^d$ em no máximo $\sum_{i=0}^d \binom{M}{i} \approx \mathcal{O}(M^d)$ regiões lineares por partes.
+- Uma rede profunda com $L$ camadas e $n$ neurônios por camada particiona o espaço em até $\mathcal{O}((n/d)^{(L-1)d} n^d)$ regiões lineares distintas!
+
+A profundidade permite **reutilização hierárquica de representações**: camadas profundas compõem funções de funções $f(g(h(\mathbf{x})))$, capturando estruturas invariantes do mundo físico (bordas $\to$ formas $\to$ partes $\to$ objetos) com ordens de magnitude menos parâmetros e menor variância amostral!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Teorema de Cybenko vs. O Poder da Profundidade
+
+::: {.columns}
+::: {.column width="50%"}
+**Teorema de Cybenko (1989):**
+
+Uma rede com **apenas 1 camada oculta** aproxima qualquer função contínua sobre compactos com erro $\epsilon > 0$:
+$$F(\mathbf{x}) = \sum_{j=1}^M v_j h(\mathbf{w}_j^T \mathbf{x} + b_j)$$
+
+- *Gargalo:* Teorema de existência!
+- Para funções reais, $M$ escala exponencialmente com a dimensão: $M \sim \mathcal{O}(2^d)$ (inviável!).
+:::
+
+::: {.column width="50%"}
+**A Vantagem da Profundidade:**
+
+- **Composição Hierárquica:** Camadas profundas reutilizam detectores ($f(g(h(\mathbf{x})))$).
+- **Parcimônia Exponencial:** $L$ camadas particionam o espaço em até $\mathcal{O}(n^{L \cdot d})$ regiões com apenas $\mathcal{O}(L \cdot n^2)$ parâmetros (Montúfar et al., 2014).
+- Menor variância e melhor generalização!
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 1: O Dilema da Representação e o Teorema de Cybenko
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 1
+1. Por que em um modelo linear clássico com atributos originais é impossível resolver o problema do XOR, e como uma camada oculta de 2 neurônios ReLU torna os pontos linearmente separáveis?
+2. Se o Teorema de Cybenko prova que 1 camada oculta é suficiente para aproximar qualquer função contínua, por que a indústria utiliza redes com dezenas de camadas profundas?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- ( ) No MLP, cada camada oculta atua como uma transformação adaptativa de atributos $\mathbf{z} = \boldsymbol{\phi}(\mathbf{x}; W)$ otimizada conjuntamente com a tarefa preditiva.
+- ( ) Se substituirmos todas as funções de ativação por funções lineares de identidade ($h(a) = a$), a rede com $L$ camadas preserva sua capacidade expressiva não-linear.
+- ( ) O Teorema da Aproximação Universal garante a existência de pesos aproximadores, mas não garante que o algoritmo de gradiente estocástico conseguirá encontrá-los em tempo polinomial.
+- ( ) Redes profundas conseguem particionar o domínio em um número exponencial de regiões lineares com uma quantidade puramente polinomial de parâmetros.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 1: Aprendizado de Representação
+
+::: {.callout-tip}
+## Pergunta de Fixação
+
+- Na SVM, $\boldsymbol{\phi}(\mathbf{x})$ é fixada a priori via Mercer Kernel.
+- No MLP, as camadas ocultas deformam o espaço aprendendo a representação latente $\mathbf{z} = \boldsymbol{\phi}(\mathbf{x}; W)$.
+- Por que redes profundas superam redes de 1 camada oculta em problemas de alta dimensão?
+:::
+
+::: {.fragment}
+
+- [x] O MLP aprende a representação ótima dos atributos diretamente dos dados.
+- [ ] Redes com ativação puramente linear preservam capacidade não-linear. *(Falso: colapsam em uma transformação afim única!)*
+- [x] O Teorema de Cybenko não garante convergência do SGD em tempo viável.
+- [x] Redes profundas geram particionamento exponencial do espaço com parcimônia paramétrica.
+:::
+:::
+
+# Bloco 2: A Camada de Saída sob a Ótica da Verossimilhança
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Encontro do Deep Learning com a Teoria da Verossimilhança
+
+Nas Aulas 5 e 6 do curso, aprendemos a formular modelos supervisionados a partir da **família exponencial de distribuições**:
+
+- Se assumirmos ruído Gaussiano aditivo $\mathcal{N}(y \mid \mu, \sigma^2)$, a Máxima Verossimilhança deduz o Erro Quadrático Médio (MSE).
+- Se assumirmos uma distribuição de Bernoulli para classes binárias $\{0, 1\}$, a Máxima Verossimilhança deduz a perda de Entropia Cruzada Binária (BCE).
+
+Em uma rede neural profunda, **a camada de saída $L$ é exatamente a parametrização dessa distribuição condicional $p(y \mid \mathbf{x})$**, onde as variáveis latentes $\mathbf{z}^{(L-1)}$ fazem o papel dos preditores lineares!
+
+### 1. Regressão Real: Distribuição Gaussiana e MSE
+Se o alvo for contínuo $y \in \mathbb{R}$, assumimos ruído Gaussiano homocedástico com média $\mu(\mathbf{x}) = a^{(L)}$:
+$$p(y \mid \mathbf{x}) = \mathcal{N}(y \mid a^{(L)}, \sigma^2) \propto \exp\left(-\frac{1}{2\sigma^2}(y - a^{(L)})^2\right)$$
+A minimização do negativo da log-verossimilhança resulta na **função de perda de erro quadrático (MSE)**:
+$$\mathcal{L} = \frac{1}{2}\sum_{n=1}^N (y_n - a_n^{(L)})^2$$
+com ativação de saída linear $g(a) = a$.
+
+### 2. Classificação Binária: Família de Bernoulli e Entropia Cruzada
+Para $y \in \{0, 1\}$, modelamos a probabilidade da classe positiva via ativação sigmoide $\hat{y} = \sigma(a^{(L)})$:
+$$p(y \mid \mathbf{x}) = \hat{y}^y (1 - \hat{y})^{1 - y}$$
+A Máxima Verossimilhança resulta na **Entropia Cruzada Binária (BCE)**:
+$$\mathcal{L} = -\sum_{n=1}^N \left[ y_n \ln \hat{y}_n + (1 - y_n) \ln(1 - \hat{y}_n) \right]$$
+
+### 3. Classificação Multiclasse: Distribuição Multinomial e Softmax
+Para $K \ge 3$ classes mutualmente exclusivas com alvo codificado em *one-hot* $\mathbf{y} \in \{0, 1\}^K$, a ativação de saída é a **função Softmax**:
+$$\hat{y}_k = p(y = k \mid \mathbf{x}) = \frac{e^{a_k^{(L)}}}{\sum_{j=1}^K e^{a_j^{(L)}}}$$
+A probabilidade conjunta da distribuição Categórica/Multinomial é:
+$$p(\mathbf{y} \mid \mathbf{x}) = \prod_{k=1}^K \hat{y}_k^{y_k}$$
+Tomando o negativo do logaritmo, obtemos a **Entropia Cruzada Categórica**:
+$$\mathcal{L} = -\sum_{n=1}^N \sum_{k=1}^K y_{nk} \ln \hat{y}_{nk}$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Camada de Saída como Modelo Probabilístico
+
+| Tarefa | Distribuição Assumida | Ativação Final $g(\mathbf{a})$ | Função de Perda $\mathcal{L}$ |
+| :--- | :---: | :---: | :--- |
+| **Regressão Contínua** | Gaussiana $\mathcal{N}(\mu, \sigma^2 I)$ | Linear ($g(a) = a$) | Erro Quadrático Médio (MSE) |
+| **Classificação Binária** | Bernoulli ($y \in \{0, 1\}$) | Sigmoide ($\sigma(a)$) | Entropia Cruzada Binária (BCE) |
+| **Classificação Multiclasse** | Multinomial / Categórica | Softmax ($\frac{e^{a_k}}{\sum e^{a_j}}$) | Entropia Cruzada Categórica |
+| **Classificação Multirrótulo** | $K \times$ Bernoulli independentes | $K \times$ Sigmoides | Soma de $K$ BCEs independentes |
+
+::: {.fragment .callout-tip}
+## Coerência Estatística
+A arquitetura da saída e a função de custo não são escolhas heurísticas arbitrárias: decorrem da **Teoria da Máxima Verossimilhança** aplicada à família exponencial!
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Elegância da Ligação Canônica: O Resíduo Linear $\delta_k = \hat{y}_k - y_k$
+
+Um dos resultados mais belos e práticos da estatística matemática é a **propriedade da função de ligação canônica**: quando emparelhamos a distribuição da família exponencial com a sua ligação canônica natural (Gaussiana com Linear, Bernoulli com Sigmoide, Multinomial com Softmax), as não-linearidades exponenciais da ativação e do logaritmo cancelam-se perfeitamente durante a derivação!
+
+Para a combinação Softmax + Entropia Cruzada Categórica, a sensibilidade de erro na camada de saída reduz-se identicamente ao **resíduo linear puro**:
+$$\delta_k^{(L)} = \frac{\partial \mathcal{L}}{\partial a_k^{(L)}} = \hat{y}_k - y_k$$
+
+**Por que esse cancelamento salvou o Deep Learning?**
+Se tivéssemos utilizado a perda quadrática MSE com ativação Softmax ou Sigmoide, a derivada conteria o termo multiplicativo da ativação $\hat{y}_k (1 - \hat{y}_k)$.
+Quando o modelo comete um erro catastrófico (por exemplo, prediz $\hat{y}_k = 0{,}001$ quando o rótulo verdadeiro é $y_k = 1$), o termo $\hat{y}_k$ é quase zero, fazendo com que o gradiente desapareça exatamente quando o erro é máximo!
+Com a ligação canônica (Entropia Cruzada), a derivada é $\hat{y}_k - y_k = 0{,}001 - 1 = -0{,}999$: o sinal de correção é máximo e vigoroso, empurrando os pesos na direção do aprendizado sem saturação!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Mágica da Ligação Canônica: $\delta_k = \hat{y}_k - y_k$
+
+::: {.columns}
+::: {.column width="50%"}
+**MSE com Sigmoide / Softmax (Patologia):**
+
+$$\frac{\partial \mathcal{L}_{\text{MSE}}}{\partial a_k} = (\hat{y}_k - y_k) \underbrace{\hat{y}_k(1 - \hat{y}_k)}_{\to 0 \text{ nos extremos!}}$$
+
+- Se o modelo erra com convicção ($\hat{y} \approx 0$ e $y = 1$), a derivada é multiplicada por zero!
+- O gradiente desaparece (*vanishing gradient*) justamente onde o erro é maior.
+:::
+
+::: {.column width="50%"}
+**Entropia Cruzada Canônica (Cura):**
+
+$$\delta_k = \frac{\partial \mathcal{L}_{\text{CE}}}{\partial a_k} = \hat{y}_k - y_k$$
+
+- O termo $\hat{y}_k$ no denominador cancela a derivada da exponencial.
+- O gradiente é o **resíduo linear puro**.
+- Se o erro é máximo, o gradiente é máximo ($|0 - 1| = 1$). Aprendizado rápido e robusto!
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 2: Verossimilhança e a Camada de Saída
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 2
+1. Demonstre por que a função Softmax $\hat{y}_k = \frac{e^{a_k}}{\sum_{j=1}^K e^{a_j}}$ parametriza rigorosamente uma distribuição de probabilidade categórica válida sobre $K$ classes.
+2. O que acontece com a magnitude do gradiente $\delta_k = \frac{\partial \mathcal{L}}{\partial a_k}$ se utilizarmos Entropia Cruzada quando o modelo comete um erro grosseiro ($\hat{y}_k = 0{,}01$ e $y_k = 1$)?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- ( ) A perda de Erro Quadrático Médio (MSE) é a função de custo ótima sob a premissa de ruído gaussiano homocedástico com média dada pela ativação linear da saída.
+- ( ) A Softmax deve ser utilizada em problemas multirrótulo (*multi-label*) onde uma instância pode pertencer a mais de uma classe simultaneamente.
+- ( ) Sob a ligação canônica (Softmax + Entropia Cruzada), o gradiente na saída reduz-se ao resíduo linear exato $\hat{y}_k - y_k$.
+- ( ) A perda quadrática MSE aplicada a uma saída sigmoide sofre de saturação de gradiente quando a predição é confiante e errada.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 2: Verossimilhança e Saída
+
+::: {.callout-tip}
+## Pergunta de Fixação
+
+- Para classes exclusivas: Softmax ($\sum \hat{y}_k = 1$) + Entropia Cruzada Categórica.
+- Para classes multirrótulo: $K$ Sigmoides independentes + Entropia Cruzada Binária.
+- Por que a ligação canônica $\delta_k = \hat{y}_k - y_k$ é imune à saturação de gradiente?
+:::
+
+::: {.fragment}
+
+- [x] O MSE decorre da Máxima Verossimilhança sob ruído Gaussiano homocedástico.
+- [ ] A Softmax é ideal para classificação multirrótulo. *(Falso: Softmax impõe soma 1 estrita; multirrótulo exige sigmoides independentes!)*
+- [x] A ligação canônica preserva o resíduo linear puro na derivada de saída.
+- [x] O MSE com sigmoide sofre de gradiente evanescente em erros graves.
+:::
+:::
+
+# Bloco 3: O Algoritmo de Retropropagação (*Backpropagation*)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Regra da Cadeia Multivariada em Grafos Computacionais
+
+Com a função de perda global $\mathcal{L}$ definida a partir da verossimilhança, precisamos calcular as derivadas parciais em relação a **todos os parâmetros de todas as camadas**:
+$$\frac{\partial \mathcal{L}}{\partial W_{ji}^{(l)}} \quad \text{e} \quad \frac{\partial \mathcal{L}}{\partial b_j^{(l)}}, \quad \forall l \in \{1, \dots, L\}$$
+
+Se uma rede profunda possui $P = 10^7$ parâmetros, calcular cada derivada por diferenças finitas exigiria $10^7$ passagens diretas forward, tornando o treino impraticável.
+
+O algoritmo de **Retropropagação (*Backpropagation*)** (Rumelhart, Hinton & Williams, 1986) resolve esse gargalo avaliando o gradiente de **todos os parâmetros simultaneamente em uma única passagem reversa** com complexidade temporal estritamente linear $\mathcal{O}(|W|)$!
+
+### Definição Formal de Sensibilidade de Erro
+Definimos a **sensibilidade de erro** (*error signal*) do neurônio $j$ na camada $l$ como a taxa de variação da perda em relação à sua ativação pré-sináptica:
+$$\delta_j^{(l)} \equiv \frac{\partial \mathcal{L}}{\partial a_j^{(l)}}$$
+
+### Dedução da Recorrência Backward
+A ativação pré-sináptica $a_j^{(l)}$ afeta a perda $\mathcal{L}$ exclusivamente através de sua ativação pós-sináptica $z_j^{(l)} = h(a_j^{(l)})$, que por sua vez se propaga para todos os neurônios $k$ da camada seguinte $l+1$:
+$$a_k^{(l+1)} = \sum_{j'=1}^{n_l} W_{kj'}^{(l+1)} z_{j'}^{(l)} + b_k^{(l+1)}$$
+
+Pela regra da cadeia multivariada:
+$$\delta_j^{(l)} = \frac{\partial \mathcal{L}}{\partial a_j^{(l)}} = \sum_{k=1}^{n_{l+1}} \frac{\partial \mathcal{L}}{\partial a_k^{(l+1)}} \frac{\partial a_k^{(l+1)}}{\partial z_j^{(l)}} \frac{\partial z_j^{(l)}}{\partial a_j^{(l)}}$$
+
+Identificando cada um dos três termos:
+1. $\frac{\partial \mathcal{L}}{\partial a_k^{(l+1)}} = \delta_k^{(l+1)}$ (a sensibilidade do neurônio $k$ na camada posterior).
+2. $\frac{\partial a_k^{(l+1)}}{\partial z_j^{(l)}} = W_{kj}^{(l+1)}$ (o peso da conexão sináptica).
+3. $\frac{\partial z_j^{(l)}}{\partial a_j^{(l)}} = h'(a_j^{(l)})$ (a derivada da função de ativação local).
+
+Substituindo esses termos, obtemos a **equação fundamental da retropropagação**:
+$$\delta_j^{(l)} = h'(a_j^{(l)}) \sum_{k=1}^{n_{l+1}} W_{kj}^{(l+1)} \delta_k^{(l+1)}$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Mecânica da Retropropagação de Erro
+
+::: {.columns}
+::: {.column width="50%"}
+**Definição da Sensibilidade $\delta_j^{(l)}$:**
+
+$$\delta_j^{(l)} \equiv \frac{\partial \mathcal{L}}{\partial a_j^{(l)}}$$
+
+**Equação de Recorrência Backward:**
+$$\delta_j^{(l)} = h'(a_j^{(l)}) \sum_{k=1}^{n_{l+1}} W_{kj}^{(l+1)} \delta_k^{(l+1)}$$
+
+- O erro flui do topo para a base.
+- Multiplica pelo peso transposto $W_{kj}^{(l+1)}$ e pela derivada local $h'(a_j^{(l)})$.
+:::
+
+::: {.column width="50%"}
+**Formulação Vetorial Matricial:**
+
+$$\boldsymbol{\delta}^{(l)} = \left( (W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)} \right) \odot h'(\mathbf{a}^{(l)})$$
+
+**Gradientes dos Parâmetros:**
+$$\nabla_{W^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)} (\mathbf{z}^{(l-1)})^T$$
+$$\nabla_{\mathbf{b}^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)}$$
+
+- Produto externo entre o erro corrente e a ativação da camada anterior!
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## O Algoritmo Vetorizado e o Teorema de Baur-Strassen
+
+Em notação matricial vetorizada compacta, para cada amostra (ou lote de amostras), o algoritmo executa:
+
+1. **Passagem Direta (*Forward Pass*):**
+   Para $l = 1, \dots, L$:
+   $$\mathbf{a}^{(l)} = W^{(l)} \mathbf{z}^{(l-1)} + \mathbf{b}^{(l)}, \quad \mathbf{z}^{(l)} = h(\mathbf{a}^{(l)})$$
+   com $\mathbf{z}^{(0)} = \mathbf{x}$.
+2. **Sensibilidade da Camada de Saída:**
+   $$\boldsymbol{\delta}^{(L)} = \hat{\mathbf{y}} - \mathbf{y}$$
+3. **Passagem Reversa (*Backward Pass*):**
+   Para $l = L-1, \dots, 1$:
+   $$\boldsymbol{\delta}^{(l)} = \left( (W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)} \right) \odot h'(\mathbf{a}^{(l)})$$
+4. **Cálculo dos Gradientes das Matrizes:**
+   $$\nabla_{W^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)} (\mathbf{z}^{(l-1)})^T, \quad \nabla_{\mathbf{b}^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)}$$
+
+### Complexidade Computacional: O Teorema de Baur-Strassen
+O Teorema de Baur-Strassen (1983) estabelece que para qualquer grafo de computação algébrico que avalia uma função escalar em tempo $C_{\text{fwd}}$, o gradiente completo em relação a **todas** as variáveis de entrada e parâmetros pode ser avaliado em tempo:
+$$C_{\text{grad}} \le 4 \cdot C_{\text{fwd}} = \mathcal{O}(|W|)$$
+
+A retropropagação calcula o gradiente exato de milhões de pesos no mesmo tempo que levaria para executar 2 a 3 passagens diretas da rede, fundamentando a viabilidade de toda a inteligência artificial contemporânea!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Fluxo Completo: Forward + Backward
+
+::: {.callout-note}
+## Ciclo de Otimização por Mini-Batch
+1. **Forward:** Propaga ativações $\mathbf{x} \to \mathbf{z}^{(1)} \to \dots \to \hat{\mathbf{y}}$ e armazena os tensores $\mathbf{a}^{(l)}$ e $\mathbf{z}^{(l)}$.
+2. **Saída:** Avalia resíduo canônico $\boldsymbol{\delta}^{(L)} = \hat{\mathbf{y}} - \mathbf{y}$.
+3. **Backward:** Propaga sensibilidades $\boldsymbol{\delta}^{(l)} = ((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}) \odot h'(\mathbf{a}^{(l)})$.
+4. **Gradiente:** Computa $\nabla_{W^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)}(\mathbf{z}^{(l-1)})^T$ e atualiza pesos via otimizador (SGD, Adam, AdamW).
+:::
+
+::: {.fragment .callout-tip}
+## Teorema de Baur-Strassen
+O custo temporal para calcular todos os gradientes é de no máximo $4\times$ o custo do forward ($\mathcal{O}(|W|)$ linear!).
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 3: Retropropagação de Erro
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 3
+Considere uma rede 2-2-1 com ativação ReLU nas camadas ocultas e saída linear com perda quadrática $\mathcal{L} = \frac{1}{2}(\hat{y} - y)^2$.
+Suponha que para um exemplo tenhamos resíduo $\delta^{(2)} = \hat{y} - y = 4{,}0$. Os pesos da saída são $W^{(2)} = [3{,}0, \, -2{,}0]$ e as ativações pré-sinápticas ocultas são $a_1^{(1)} = 1{,}5$ e $a_2^{(1)} = -0{,}8$.
+1. Qual é o valor das sensibilidades $\delta_1^{(1)}$ e $\delta_2^{(1)}$?
+2. Por que a sensibilidade do neurônio 2 é nula?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- ( ) A sensibilidade $\boldsymbol{\delta}^{(l)}$ é obtida multiplicando o erro da camada posterior pelo transposto da matriz de pesos e pela derivada da função de ativação local.
+- ( ) Neurônios com ativação ReLU inativa ($a \le 0$) têm derivada nula, bloqueando a propagação de gradientes através deles naquela iteração.
+- ( ) A retropropagação tem custo computacional exponencial $\mathcal{O}(2^L)$ em relação ao número de camadas $L$.
+- ( ) O gradiente da perda em relação a $W^{(l)}$ é dado pelo produto externo entre o vetor de sensibilidade $\boldsymbol{\delta}^{(l)}$ e as ativações anteriores $(\mathbf{z}^{(l-1)})^T$.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 3: Backpropagation
+
+::: {.callout-tip}
+## Pergunta de Fixação
+
+- Para $a_1 = 1{,}5 > 0 \implies h'=1 \implies \delta_1 = 1 \cdot (4 \times 3) = \mathbf{12{,}0}$.
+- Para $a_2 = -0{,}8 \le 0 \implies h'=0 \implies \delta_2 = 0 \cdot (4 \times (-2)) = \mathbf{0{,}0}$.
+- Neurônios dormentes na ReLU bloqueiam gradientes no passo backward!
+:::
+
+::: {.fragment}
+
+- [x] O erro propaga multiplicando por $(W^{(l+1)})^T$ e pela derivada local $h'$.
+- [x] A ReLU na região negativa zera o gradiente local, bloqueando o fluxo de erro.
+- [ ] A retropropagação escala exponencialmente com a profundidade. *(Falso: complexidade linear $\mathcal{O}(|W|)$ via Baur-Strassen!)*
+- [x] O gradiente dos pesos é o produto externo $\boldsymbol{\delta}^{(l)}(\mathbf{z}^{(l-1)})^T$.
+:::
+:::
+
+# Bloco 4: Regularização em Redes Profundas
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Superparametrização e os Mecanismos de Controle de Capacidade
+
+Em modelos lineares clássicos, aprendemos que quando o número de parâmetros $P$ supera o número de observações $N$ ($P > N$), o modelo entra em sobreajuste severo e perde capacidade de generalização.
+
+Redes neurais modernas frequentemente operam em regime massivamente superparametrizado ($P \gg N$), com milhões ou bilhões de conexões sinápticas. Como evitar que essas redes memorizem o ruído de treino?
+
+### 1. Decaimento de Pesos (*Weight Decay* / Regularização $L_2$)
+Adiciona uma penalidade quadrática sobre as normas das matrizes de pesos:
+$$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{dados}} + \frac{\lambda}{2}\sum_{l=1}^L \|W^{(l)}\|_F^2$$
+
+Pela perspectiva bayesiana desenvolvida na Aula 7:
+
+- O decaimento de pesos equivale à estimativa **Máximo A Posteriori (MAP)** sob uma distribuição a priori Gaussiana independente em cada peso:
+  $$p(W) = \prod_{l, j, i} \mathcal{N}\left(W_{ji}^{(l)} \;\Big|\; 0, \, \sigma_w^2\right), \quad \text{com } \lambda = \frac{1}{\sigma_w^2}$$
+
+- Cada passo de gradiente encolhe os pesos multiplicativamente: $W^{(l)} \leftarrow (1 - \alpha \lambda) W^{(l)} - \alpha \nabla \mathcal{L}$.
+
+### 2. Dropout: O Ensemble Exponencial Implícito (Srivastava et al., 2014)
+O **Dropout** é uma das técnicas de regularização mais influentes da história da computação:
+
+- **Durante o Treinamento:** A cada iteração de mini-batch, cada neurônio oculto é zerado temporariamente com probabilidade $p_{\text{drop}}$ (tipicamente $0{,}2$ a $0{,}5$):
+  $$\tilde{\mathbf{z}}^{(l)} = \mathbf{z}^{(l)} \odot \mathbf{m}^{(l)}, \quad \text{onde } m_j^{(l)} \sim \text{Bernoulli}(1 - p_{\text{drop}})$$
+
+- **Durante o Teste e Inferência:** Todos os neurônios permanecem permanentemente ligados, produzindo predições determinísticas. Para compensar a presença simultânea de todos os nós, as ativações são multiplicadas por $(1 - p_{\text{drop}})$ (ou utiliza-se *Inverted Dropout* dividindo por $1 - p_{\text{drop}}$ no treino).
+
+**Por que o Dropout funciona tão bem?**
+1. *Eliminação de Co-Adaptações:* Em redes densas sem regularização, certos neurônios tornam-se "dependentes" das ativações de outros nós vizinhos para corrigir seus próprios erros. O Dropout impede essa cumplicidade: como qualquer neurônio pode desaparecer a qualquer instante, cada nó é forçado a aprender detectores de características úteis e independentes por si só.
+2. *Interpretação como Ensemble Exponencial:* Uma rede com $D$ neurônios ocultos possui $2^D$ sub-arquiteturas possíveis. O Dropout treina estocasticamente um comitê colossal de $2^D$ sub-redes com compartilhamento extremo de pesos! Na inferência, a rede completa atua como uma aproximação geométrica da média desse comitê de modelos (conectando-se diretamente à teoria de ensembles da Aula 9).
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Regularização Profunda: Weight Decay e Dropout
+
+::: {.columns}
+::: {.column width="50%"}
+**Weight Decay ($L_2$ MAP):**
+
+$$\mathcal{L}_{\text{reg}} = \mathcal{L} + \frac{\lambda}{2}\sum_l \|W^{(l)}\|_F^2$$
+
+- Priori Gaussiana centrada na origem ($\lambda = 1/\sigma_w^2$).
+- Contrai os pesos em direção a zero:
+  $$W \leftarrow (1 - \alpha \lambda) W - \alpha \nabla \mathcal{L}$$
+
+- Limita a curvatura das fronteiras de decisão.
+:::
+
+::: {.column width="50%"}
+**Dropout (Srivastava et al., 2014):**
+
+- **Treino:** Zera estocasticamente neurônios com probabilidade $p_{\text{drop}}$ ($\mathbf{m} \sim \text{Bernoulli}$).
+- **Teste:** Todos ativos (escala $1 - p_{\text{drop}}$).
+
+**A Magia do Ensemble Implícito:**
+
+- Treina um comitê massivo de até $\mathbf{2^D}$ sub-redes distintas compartilhando parâmetros.
+- Quebra co-adaptações espúrias entre neurônios!
+:::
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 4: Regularização em Redes Profundas
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 4
+1. Como o Dropout conecta a teoria de Redes Neurais com a teoria de Ensembles (Bagging e Random Forests) vista na Aula 9?
+2. Por que o Dropout deve ser desativado durante a etapa de teste e inferência?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- ( ) O decaimento de pesos ($L_2$) equivale à inferência MAP sob uma distribuição a priori Gaussiana independente em cada peso.
+- ( ) O Dropout treina estocasticamente um ensemble implícito de até $2^D$ sub-redes com compartilhamento de parâmetros.
+- ( ) No momento do teste e inferência, o Dropout continua ativado aleatoriamente para manter variância de amostragem nas predições.
+- ( ) O Dropout força cada neurônio a aprender detectores de características robustos e independentes, prevenindo co-adaptações espúrias.
+:::
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 4: Weight Decay e Dropout
+
+::: {.callout-tip}
+## Pergunta de Fixação
+
+- Weight Decay = Priori Gaussiana MAP sobre os pesos ($L_2$).
+- Dropout = Amostragem estocástica de sub-arquiteturas a cada passo de mini-batch.
+- Por que desativar o Dropout na inferência? Para eliminar ruído estocástico e avaliar a média determinística do comitê de $2^D$ redes!
+:::
+
+::: {.fragment}
+
+- [x] O Weight Decay equivale à estimativa MAP sob priori Gaussiana centrada em zero.
+- [x] O Dropout simula o treinamento de um ensemble exponencial de sub-redes.
+- [ ] O Dropout permanece ativado aleatoriamente no teste. *(Falso: é desativado para predições determinísticas!)*
+- [x] O Dropout quebra co-adaptações espúrias entre detectores de atributos.
+:::
+:::
+
+# Fechamento e Síntese da Disciplina
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Retomando as 4 Perguntas da Aula
+
+1. **A Composição de GLMs e o Teorema de Cybenko:** Como uma rede neural constrói representações adaptativas?
+   *Resposta:* O MLP encadeia combinações afins seguidas de não-linearidades ($h(\cdot)$). Cada camada oculta atua como um extrator de variáveis latentes $\mathbf{z} = \boldsymbol{\phi}(\mathbf{x}; W)$ treinado conjuntamente. O Teorema de Cybenko garante aproximação universal mesmo com 1 camada oculta, mas redes profundas conseguem particionar o espaço em um número exponencial de regiões com contagem puramente polinomial de parâmetros.
+2. **A Camada de Saída e a Teoria da Verossimilhança:** Como a verossimilhança define a perda e a ativação final?
+   *Resposta:* A camada de saída é um GLM que parametriza uma família de distribuições (Gaussiana $\to$ Linear/MSE; Bernoulli $\to$ Sigmoide/BCE; Multinomial $\to$ Softmax/Entropia Cruzada Categórica). A função de ligação canônica cancela termos não lineares da derivada, produzindo o resíduo linear exato $\delta_k = \hat{y}_k - y_k$, que evita a saturação de gradiente em erros severos.
+3. **A Mecânica da Retropropagação (*Backpropagation*):** Como a regra da cadeia propaga as sensibilidades?
+   *Resposta:* A sensibilidade $\boldsymbol{\delta}^{(l)} = ((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}) \odot h'(\mathbf{a}^{(l)})$ propaga o erro de trás para frente. O gradiente dos pesos é obtido pelo produto externo $\nabla_W \mathcal{L} = \boldsymbol{\delta}^{(l)}(\mathbf{z}^{(l-1)})^T$. O Teorema de Baur-Strassen garante que todos os gradientes são avaliados em tempo linear $\mathcal{O}(|W|)$.
+4. **Regularização em Redes Profundas:** Como evitar sobreajuste em modelos superparametrizados?
+   *Resposta:* O Weight Decay ($L_2$) impõe uma prior Gaussiana MAP que contrai a magnitude dos pesos. O Dropout amostragem estocasticamente neurônios a cada mini-batch, treinando um comitê implícito de $2^D$ sub-redes com compartilhamento de pesos que neutraliza co-adaptações espúrias.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Mapa Completo do Aprendizado Supervisionado
+
+| Família de Modelos | Hipótese Principal | Vantagens | Limitações | Quando Escolher |
+| :--- | :--- | :--- | :--- | :--- |
+| **Modelos Lineares / GLMs** (Aulas 5–7) | Relação linear entre atributos e parâmetros canônicos | Interpretabilidade analítica, treino instantâneo convexo | Alto viés estrutural em dados não-lineares | Linhas de base, dados tabulares pequenos, causalidade |
+| **Árvores e Ensembles** (Aulas 3, 9, 10) | Particionamento retangular ortogonal do espaço | Estado da arte em dados tabulares, imune a escalas e outliers | Não extrapolam bem fora do domínio, fronteiras em escada | Dados tabulares heterogêneos com variáveis mistas |
+| **SVMs** (Aula 11) | Hiperplano de margem máxima via Truque do Kernel | Ótimo global convexo, esparsidade via vetores de suporte | Escala mal com amostras grandes ($\mathcal{O}(N^3)$), kernel fixo | Amostras pequenas a médias com alta dimensionalidade |
+| **Redes Neurais / Deep Learning** (Aula 12) | Composição hierárquica de GLMs (representação latente) | Aprende representações diretamente dos dados brutos | Custo computacional massivo, otimização não-convexa | Imagens, fala, texto, manifolds altamente não-lineares |
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Encerramento da Disciplina de Aprendizado Supervisionado
+
+Ao longo destas 12 aulas, percorremos uma jornada coerente e unificada pelo aprendizado de máquina supervisionado:
+1. **Parte 1 (Fundamentos):** Estabelecemos que classificar e regredir é tomar decisões sob incerteza probabilística (Regra de Bayes, densidades Beta e Naive Bayes), investigamos o particionamento guloso de árvores (CART) e os protocolos formais de reamostragem e validação cruzada para estimar o risco esperado.
+2. **Parte 2 (A História Linear Paramétrica):** Erguemos o arcabouço dos Modelos Lineares Generalizados (GLMs), provando a equivalência entre Mínimos Quadrados e Máxima Verossimilhança Gaussiana, estendendo para a família de Bernoulli via Regressão Logística, aplicando regularização Ridge e Lasso como inferência MAP Bayesiana e deduzindo analiticamente a decomposição formal do erro em Viés, Variância e Ruído Irredutível.
+3. **Parte 3 (Modelos Avançados e Otimização):** Desvendamos os ensembles de redução de variância (Bagging e Random Forests), os métodos de otimização em espaço de funções para redução de viés (Gradient Boosting), as fronteiras de margem máxima fundamentadas em dualidade de Lagrange e Truque do Kernel (SVMs) e, finalmente, as Redes Neurais Artificiais como hierarquias encadeadas de GLMs que aprendem representações diretamente dos dados.
+
+A tese inicial do curso consolidou-se em cada etapa: **todo modelo supervisionado é o produto de uma distribuição assumida, uma verossimilhança estatística e uma regra de decisão ótima**.
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Parabéns pelo Término da Disciplina!
+
+::: {.callout-note}
+## A Tese do Curso Concluída com Sucesso
+$$\text{Algoritmo Supervisionado} = \text{Distribuição Assumida} + \text{Verossimilhança} + \text{Regra de Decisão}$$
+:::
+
+::: {.columns}
+::: {.column width="50%"}
+**A Jornada:**
+
+- **Bloco 1:** Probabilidade, Árvores e Validação.
+- **Bloco 2:** GLMs, Máxima Verossimilhança e Viés-Variância.
+- **Bloco 3:** Ensembles, Boosting, SVMs e Redes Neurais Profundas.
+:::
+
+::: {.column width="50%"}
+**Próximos Passos:**
+
+- Conclusão do **Trabalho Final (TF)**.
+- Teste 3 no dia 30 de novembro.
+- Sucesso nos projetos de Machine Learning!
+:::
+:::
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link} [Soluções](soluções.qmd){.see-all .solucoes-link}
+:::
+

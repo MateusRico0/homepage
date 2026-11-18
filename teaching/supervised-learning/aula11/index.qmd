@@ -65,7 +65,7 @@ import matplotlib.pyplot as plt
 from sklearn.datasets import load_breast_cancer
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC, SVR
-from sklearn.calibration import CalibratedClassifierCV
+from sklearn.calibration import CalibratedClassifierCV, calibration_curve
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, brier_score_loss
 import warnings
@@ -149,7 +149,7 @@ Em todos esses métodos, existia uma premissa implícita: para classificar um no
 :::
 :::
 
-## A Ruptura de Vapnik: O Princípio de Conservação da Capacidade
+## Margem vs. Verossimilhança
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 Em 1995, Vladimir Vapnik e Corinna Cortes formularam uma proposta epistemológica radical que deu origem às **Máquinas de Vetores de Suporte (*Support Vector Machines* — SVM)**:
@@ -282,7 +282,7 @@ plt.show()
 ::: {.column width="55%"}
 ::: {.fragment}
 - **Observações Cruciais do Gráfico:**
-  - O **Hiperplano A** passa perigosamente próximo a tumores malignos: qualquer ruído de medição gerará falso negativo.
+  - O **Hiperplano A** passa rente a tumores malignos: qualquer ruído de medição gerará falso negativo.
   - O **Hiperplano B** passa rente a nódulos benignos.
   - A **SVM de Margem Máxima** constrói o corredor simétrico central mais espaçoso possível.
 :::
@@ -297,12 +297,6 @@ Observe os círculos pretos: **apenas os pontos destacados** definem o hiperplan
 :::
 
 ## Pausa 1: A Ruptura com a Verossimilhança
-
-::: {.callout-tip}
-## Pergunta aberta provocadora
-
-Em uma aplicação de diagnóstico médico, a Regressão Logística estima que um novo paciente tem probabilidade estimada $\hat{p} = 0{,}51$ de apresentar nódulo maligno, enquanto uma SVM Linear treinada no mesmo conjunto classifica o paciente como benigno com escore de margem $f(\mathbf{x}) = +0{,}85$. Explique conceitualmente por que esses dois modelos lineares podem produzir decisões divergentes mesmo tendo acesso aos mesmos dados.
-:::
 
 ::: {.callout-tip}
 ## Julgamento de V ou F
@@ -336,10 +330,12 @@ Julgue V ou F — a questão só conta se acertar os 4 itens:
 
 # Bloco 1: Margem Máxima e Problema Dual (Hard Margin)
 
-## A Geometria do Hiperplano Canônico
+## A Geometria do Hiperplano e Separabilidade
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Seja um conjunto de treinamento $D = \{(\mathbf{x}_1, y_1), \dots, (\mathbf{x}_N, y_N)\}$ com atributos $\mathbf{x}_i \in \mathbb{R}^d$ e rótulos binários $y_i \in \{-1, +1\}$.
+Neste primeiro bloco, **assumimos que o problema é linearmente separável**. Dado um conjunto de treinamento $D = \{(\mathbf{x}_1, y_1), \dots, (\mathbf{x}_N, y_N)\}$ com atributos $\mathbf{x}_i \in \mathbb{R}^d$ e rótulos binários $y_i \in \{-1, +1\}$, isso significa que existe ao menos um hiperplano capaz de classificar corretamente todas as amostras sem nenhum erro:
+
+$$y_i(\mathbf{w}^T \mathbf{x}_i + b) > 0, \quad \forall i = 1, \dots, N$$
 
 Um **hiperplano afim** em $\mathbb{R}^d$ é definido pelo conjunto de pontos que satisfazem:
 
@@ -353,135 +349,260 @@ $$\mathbf{w}^T \left(\mathbf{x} - d \frac{\mathbf{w}}{\|\mathbf{w}\|}\right) + b
 
 $$d(\mathbf{x}) = \frac{\mathbf{w}^T \mathbf{x} + b}{\|\mathbf{w}\|}$$
 
-Multiplicando pelo rótulo da classe $y \in \{-1, +1\}$, a distância euclidiana ortogonal perpendicular de uma amostra $(\mathbf{x}_i, y_i)$ ao hiperplano é:
+Multiplicando pelo rótulo da classe $y_i \in \{-1, +1\}$, a **distância euclidiana ortogonal** de uma amostra $(\mathbf{x}_i, y_i)$ ao hiperplano é:
 
 $$d_i = \frac{y_i(\mathbf{w}^T \mathbf{x}_i + b)}{\|\mathbf{w}\|}$$
+
+Como existem infinitos hiperplanos separadores, **o que estamos procurando** é o hiperplano que **maximiza a menor distância** até os pontos de treinamento ($\max_{\mathbf{w}, b} \min_i d_i$), abrindo o corredor de segurança mais largo possível entre as duas classes.
+
+::: {.callout-note}
+## Invariância de Escala
+Note que multiplicar (ou dividir) $\mathbf{w}$ e $b$ por qualquer escalar positivo $\kappa > 0$ gera exatamente o mesmo hiperplano geométrico e a mesma distância física $d_i$:
+$$\frac{y_i\big((\kappa\mathbf{w})^T \mathbf{x}_i + \kappa b\big)}{\|\kappa\mathbf{w}\|} = \frac{\kappa\, y_i(\mathbf{w}^T \mathbf{x}_i + b)}{\kappa\,\|\mathbf{w}\|} = \frac{y_i(\mathbf{w}^T \mathbf{x}_i + b)}{\|\mathbf{w}\|}$$
+:::
 :::
 
 ::: {.content-visible when-format="revealjs"}
 ::: {.fragment}
-- **Definição do Hiperplano:**
-  $$\mathbf{w}^T \mathbf{x} + b = 0$$
-  onde $\mathbf{w}$ é o vetor ortogonal à fronteira e $b/\|\mathbf{w}\|$ é a distância da origem ao hiperplano.
+- **Hipótese Fundamental (Problema Separável):**
+  Assumimos que os dados são **linearmente separáveis**: existe $(\mathbf{w}, b)$ tal que
+  $$y_i(\mathbf{w}^T \mathbf{x}_i + b) > 0, \quad \forall i = 1, \dots, N$$
 :::
 
 ::: {.fragment}
-- **Distância Euclidiana Ortogonal de um Ponto $\mathbf{x}_i$:**
+- **O Que Estamos Procurando?**
+  Dentre infinitos hiperplanos separadores $\mathbf{w}^T \mathbf{x} + b = 0$, buscamos o que **maximiza a menor distância** até os dados ($\max_{\mathbf{w}, b} \min_i d_i$).
+:::
+
+::: {.fragment}
+- **Distância Euclidiana Ortogonal de $\mathbf{x}_i$ ao Hiperplano:**
   $$d_i = \frac{y_i(\mathbf{w}^T \mathbf{x}_i + b)}{\|\mathbf{w}\|}$$
 :::
 
 ::: {.fragment .callout-note}
 ## Invariância de Escala
-Note que multiplicar $\mathbf{w}$ e $b$ por um escalar positivo $\kappa > 0$ gera exatamente o mesmo hiperplano geométrico e a mesma distância física $d_i$, pois $\frac{\kappa(\mathbf{w}^T \mathbf{x} + b)}{\kappa\|\mathbf{w}\|} = \frac{\mathbf{w}^T \mathbf{x} + b}{\|\mathbf{w}\|}$.
+Multiplicar ou dividir $\mathbf{w}$ e $b$ por qualquer escalar positivo $\kappa > 0$ gera exatamente o **mesmo hiperplano** e a **mesma distância física $d_i$**, pois $\frac{\kappa\, y_i(\mathbf{w}^T \mathbf{x}_i + b)}{\kappa\,\|\mathbf{w}\|} = \frac{y_i(\mathbf{w}^T \mathbf{x}_i + b)}{\|\mathbf{w}\|}$.
 :::
 :::
 
-## Fixação da Escala Canônica e o Problema Primal
+## O Que Estamos Procurando? (Problema Separável)
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-Para eliminar a redundância de escala provocada por $\kappa > 0$, impomos a **convenção canônica**: escalonamos os parâmetros $(\mathbf{w}, b)$ de modo que o ponto mais próximo do hiperplano tenha valor absoluto exatamente igual a 1:
-
-$$\min_{i=1, \dots, N} y_i(\mathbf{w}^T \mathbf{x}_i + b) = 1$$
-
-Sob essa parametrização canônica:
-1. Para todos os pontos da classe positiva ($y_i = +1$), temos $\mathbf{w}^T \mathbf{x}_i + b \ge +1$.
-2. Para todos os pontos da classe negativa ($y_i = -1$), temos $\mathbf{w}^T \mathbf{x}_i + b \le -1$.
-3. Logo, para qualquer amostra $i = 1, \dots, N$:
-   $$y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1$$
-
-A distância do ponto mais próximo até o hiperplano é dada por $\gamma_{\text{half}} = \frac{1}{\|\mathbf{w}\|}$.
-
-Portanto, a **margem geométrica total** (a distância entre os dois hiperplanos de suporte paralelos $\mathbf{w}^T \mathbf{x} + b = +1$ e $\mathbf{w}^T \mathbf{x} + b = -1$) é:
-
-$$\gamma = \frac{2}{\|\mathbf{w}\|}$$
-
-Maximizar a margem geométrica $\frac{2}{\|\mathbf{w}\|}$ equivale estritamente a minimizar a sua recíproca quadrática $\frac{1}{2}\|\mathbf{w}\|^2$. Chegamos assim ao **Problema Primal da SVM de Margem Rígida (*Hard Margin*)**:
-
-$$\min_{\mathbf{w}, b} \frac{1}{2} \|\mathbf{w}\|^2 \quad \text{sujeito a } y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1, \quad \forall i = 1, \dots, N$$
+Para visualizar o problema de busca no caso linearmente separável, considere duas nuvens de pontos bem separadas no plano. À esquerda, comparamos dois hiperplanos separadores válidos — um que passa perigosamente próximo à classe positiva e outro que maximiza a largura do corredor entre as classes. À direita, destacamos a anatomia geométrica da distância ortogonal $d_i$ de um ponto $\mathbf{x}_i$ até o hiperplano $\mathbf{w}^T \mathbf{x} + b = 0$.
 :::
-
-::: {.content-visible when-format="revealjs"}
-::: {.fragment}
-- **Escala Canônica:**
-  Fixamos $\min_{i} y_i(\mathbf{w}^T \mathbf{x}_i + b) = 1$.
-:::
-
-::: {.fragment}
-- **A Margem Geométrica Total:**
-  $$\gamma = \frac{2}{\|\mathbf{w}\|}$$
-:::
-
-::: {.fragment .callout-important}
-## O Problema Primal Quadrático Convexo
-$$\min_{\mathbf{w}, b} \frac{1}{2} \|\mathbf{w}\|^2 \quad \text{sujeito a } y_i(\mathbf{w}^T \mathbf{x}_i + b) - 1 \ge 0, \quad \forall i=1, \dots, N$$
-- Função objetivo convexa quadrática estrita.
-- Restrições lineares afins de desigualdade.
-- **Mínimo global único**, solucionável via Otimização Convexa (Programação Quadrática).
-:::
-:::
-
-## Geometria do Hiperplano e Margem Canônica
 
 ```{python}
 #| echo: false
 #| fig-align: center
 
-fig, ax = plt.subplots(figsize=(8, 4.8))
+fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.4))
 
-# Linhas do hiperplano e margens
+# Dados sintéticos linearmente separáveis
+X_neg_sep = np.array([[-2.2, -1.0], [-1.8, -2.0], [-1.2, -0.8], [-2.5, -0.2],
+                      [-0.8, -1.6], [-1.5, -1.4], [-0.5, -2.2], [-2.0, -2.5]])
+X_pos_sep = np.array([[1.2, 0.8], [1.8, 1.8], [2.2, 0.5], [0.8, 1.9],
+                      [1.5, 1.2], [2.5, 1.5], [0.9, 2.5], [2.0, 2.3]])
+
+# Painel Esquerdo: Infinitos separadores vs. Maior corredor
+ax = axes[0]
+ax.scatter(X_neg_sep[:, 0], X_neg_sep[:, 1], color=COR_B, s=55, edgecolor='k', linewidth=0.7, label="Classe $-1$")
+ax.scatter(X_pos_sep[:, 0], X_pos_sep[:, 1], color=COR_A, s=55, marker='s', edgecolor='k', linewidth=0.7, label="Classe $+1$")
+
+xv = np.linspace(-3.0, 3.0, 200)
+# Separador ruim (muito inclinado / próximo da classe +1)
+ax.plot(xv, -1.35 * xv + 1.6, '--', color=COR_CINZA, lw=1.6, label="Separador A (folga pequena)")
+# Separador ruim 2 (próximo da classe -1)
+ax.plot(xv, -0.55 * xv - 0.85, ':', color=COR_NEU, lw=1.8, label="Separador B (folga pequena)")
+# Separador ótimo (máxima margem)
+ax.plot(xv, -0.95 * xv + 0.05, '-', color='black', lw=2.3, label="Objetivo: Corredor Máximo")
+ax.fill_between(xv, -0.95 * xv + 0.05 - 1.05, -0.95 * xv + 0.05 + 1.05, color='#e6f0fa', alpha=0.55)
+
+ax.set_title("Separabilidade: Qual Hiperplano Escolher?")
+ax.set_xlabel("$x_1$")
+ax.set_ylabel("$x_2$")
+ax.set_xlim(-3.0, 3.0)
+ax.set_ylim(-3.0, 3.0)
+ax.set_aspect('equal', adjustable='box')
+ax.legend(fontsize=8.5, loc="lower left")
+
+# Painel Direito: Anatomia da distância ortogonal d_i
+ax = axes[1]
+ax.scatter(X_neg_sep[:, 0], X_neg_sep[:, 1], color=COR_B, s=50, alpha=0.45, edgecolor='k', linewidth=0.5)
+ax.scatter(X_pos_sep[:, 0], X_pos_sep[:, 1], color=COR_A, s=50, marker='s', alpha=0.45, edgecolor='k', linewidth=0.5)
+
+# Hiperplano w^T x + b = 0: x_1 + x_2 = 0 => w = [1, 1], b = 0
+ax.plot(xv, -xv, '-', color='black', lw=2.2, label=r"$\mathbf{w}^T\mathbf{x} + b = 0$")
+
+# Vetor normal w saindo da origem
+ax.annotate("", xy=(1.0, 1.0), xytext=(0.0, 0.0),
+            arrowprops=dict(arrowstyle="->", color="black", lw=2.2))
+ax.text(0.45, 0.95, r"$\mathbf{w}$", fontweight="bold", fontsize=12)
+
+# Ponto x_i e projeção ortogonal x_0
+xi = np.array([1.2, 0.8])
+# Projeção de (1.2, 0.8) em x1 + x2 = 0 é (-0.2+..., ) -> d = (1.2+0.8)/sqrt(2) = sqrt(2), x0 = [0.2, -0.2]
+x0 = np.array([0.2, -0.2])
+ax.scatter([xi[0]], [xi[1]], color=COR_A, s=110, marker='s', edgecolor='black', lw=1.6, zorder=6)
+ax.scatter([x0[0]], [x0[1]], color='black', s=40, zorder=6)
+ax.plot([x0[0], xi[0]], [x0[1], xi[1]], '--', color=COR_A, lw=1.8)
+ax.text(xi[0] + 0.12, xi[1] + 0.05, r"$\mathbf{x}_i$ ($y_i=+1$)", fontsize=10, fontweight="bold", color=COR_A)
+ax.text(x0[0] - 0.35, x0[1] - 0.35, r"$\mathbf{x}_0$", fontsize=10, fontweight="bold")
+ax.text(0.85, 0.05, r"$d_i = \frac{y_i(\mathbf{w}^T\mathbf{x}_i + b)}{\|\mathbf{w}\|}$", fontsize=10.5,
+        bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=COR_A, alpha=0.9))
+
+ax.set_title("Geometria da Distância Ortogonal $d_i$")
+ax.set_xlabel("$x_1$")
+ax.set_ylabel("$x_2$")
+ax.set_xlim(-3.0, 3.0)
+ax.set_ylim(-3.0, 3.0)
+ax.set_aspect('equal', adjustable='box')
+ax.legend(fontsize=9, loc="upper left")
+
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="revealjs"}
+- **Esquerda:** Em um problema separável, vários hiperplanos acertam $100\%$ dos pontos, mas queremos o que abre o **maior corredor de segurança** entre as classes.
+- **Direita:** O objetivo é maximizar a menor distância ortogonal $d_i = \frac{y_i(\mathbf{w}^T\mathbf{x}_i + b)}{\|\mathbf{w}\|}$ entre os pontos e a fronteira $\mathbf{w}^T\mathbf{x} + b = 0$.
+:::
+
+## Fixação da Escala Canônica
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Como assumimos que o problema é **linearmente separável**, todo ponto $\mathbf{x}_i$ está do lado correto do hiperplano, o que garante $y_i(\mathbf{w}^T \mathbf{x}_i + b) > 0$ para todo $i = 1, \dots, N$.
+
+Consequentemente, até mesmo o **menor valor** dessa quantidade sobre todo o conjunto de treinamento é estritamente positivo. Chamando esse menor valor de $c$:
+
+$$c = \min_{i=1, \dots, N} y_i(\mathbf{w}^T \mathbf{x}_i + b) > 0 \implies y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge c, \quad \forall i = 1, \dots, N$$
+
+Pela **invariância de escala** vista no slide anterior, dividir os parâmetros $(\mathbf{w}, b)$ pelo escalar positivo $c > 0$ (isto é, redefinir $\mathbf{w} \leftarrow \frac{\mathbf{w}}{c}$ e $b \leftarrow \frac{b}{c}$) não altera em nada o hiperplano geométrico nem as distâncias físicas $d_i$. Ao fazermos essa divisão por $c$, a desigualdade $y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge c$ transforma-se na **escala canônica**:
+
+$$\min_{i=1, \dots, N} y_i(\mathbf{w}^T \mathbf{x}_i + b) = 1 \implies y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1, \quad \forall i = 1, \dots, N$$
+
+Sob essa parametrização canônica:
+1. Para todos os pontos da classe positiva ($y_i = +1$), temos $\mathbf{w}^T \mathbf{x}_i + b \ge +1$.
+2. Para todos os pontos da classe negativa ($y_i = -1$), temos $\mathbf{w}^T \mathbf{x}_i + b \le -1$.
+
+**Por que a margem geométrica total é $\gamma = \frac{2}{\|\mathbf{w}\|}$?** Pela fórmula da distância ortogonal $d_i = \frac{y_i(\mathbf{w}^T \mathbf{x}_i + b)}{\|\mathbf{w}\|}$, o(s) ponto(s) mais próximo(s) — onde $y_i(\mathbf{w}^T \mathbf{x}_i + b) = 1$ — estão à distância $\gamma_{\text{half}} = \frac{1}{\|\mathbf{w}\|}$ do hiperplano. Como o hiperplano central $\mathbf{w}^T \mathbf{x} + b = 0$ divide simetricamente os dois hiperplanos de suporte ($\mathbf{w}^T \mathbf{x} + b = +1$ e $\mathbf{w}^T \mathbf{x} + b = -1$), a largura total do corredor é o dobro dessa distância (equivalentemente, projetando $\mathbf{x}^+ - \mathbf{x}^-$ na direção normal unitária $\frac{\mathbf{w}}{\|\mathbf{w}\|}$, temos $\frac{\mathbf{w}^T(\mathbf{x}^+ - \mathbf{x}^-)}{\|\mathbf{w}\|} = \frac{1 - (-1)}{\|\mathbf{w}\|} = \frac{2}{\|\mathbf{w}\|}$):
+
+$$\gamma = \frac{2}{\|\mathbf{w}\|}$$
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **Consequência da Separabilidade:**
+  Como todos os pontos estão do lado certo, até o menor valor é estritamente positivo:
+  $$c = \min_{i} y_i(\mathbf{w}^T \mathbf{x}_i + b) > 0 \implies y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge c, \quad \forall i$$
+:::
+
+::: {.fragment}
+- **Dividindo por $c$ (pelo slide anterior):**
+  Pela invariância de escala, dividimos $(\mathbf{w}, b)$ por $c > 0$ sem mudar o hiperplano nem $d_i$, obtendo a **escala canônica**:
+  $$\min_{i} y_i(\mathbf{w}^T \mathbf{x}_i + b) = 1 \implies y_i(\mathbf{w}^T \mathbf{x}_i + b) \ge 1, \quad \forall i$$
+:::
+
+::: {.fragment}
+- **Margem Geométrica Total ($\gamma = \frac{2}{\|\mathbf{w}\|}$):**
+  Como $d_i = \frac{y_i(\mathbf{w}^T \mathbf{x}_i + b)}{\|\mathbf{w}\|}$, o ponto mais próximo ($y_i(\mathbf{w}^T\mathbf{x}_i + b) = 1$) está à distância $\frac{1}{\|\mathbf{w}\|}$ de cada lado do hiperplano; somando os dois lados ($\pm 1$), a largura do corredor é $\gamma = \frac{2}{\|\mathbf{w}\|}$.
+:::
+:::
+
+## O Problema Primal Quadrático Convexo
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Maximizar a margem geométrica $\gamma = \frac{2}{\|\mathbf{w}\|}$ equivale estritamente a minimizar $\|\mathbf{w}\|$, ou, de forma ainda mais conveniente para derivação, minimizar a sua forma quadrática $\frac{1}{2}\|\mathbf{w}\|^2$. Chegamos assim ao **Problema Primal da SVM de Margem Rígida (*Hard Margin*)**:
+
+$$\min_{\mathbf{w}, b} \frac{1}{2} \|\mathbf{w}\|^2 \quad \text{sujeito a } y_i(\mathbf{w}^T \mathbf{x}_i + b) - 1 \ge 0, \quad \forall i = 1, \dots, N$$
+
+Por se tratar de uma função objetivo quadrática estritamente convexa em $\mathbf{w}$ sujeita a restrições lineares afins de desigualdade, o problema possui **mínimo global único** e pode ser resolvido com garantias exatas via Programação Quadrática (Otimização Convexa).
+:::
+
+::: {.content-visible when-format="revealjs"}
+::: {.fragment}
+- **Da Margem à Norma Quadrática:**
+  Maximizar $\gamma = \frac{2}{\|\mathbf{w}\|}$ equivale a minimizar $\frac{1}{2}\|\mathbf{w}\|^2$.
+:::
+
+::: {.fragment .callout-important}
+## Formulação Primal (*Hard Margin*)
+$$\min_{\mathbf{w}, b} \frac{1}{2} \|\mathbf{w}\|^2 \quad \text{sujeito a } y_i(\mathbf{w}^T \mathbf{x}_i + b) - 1 \ge 0, \quad \forall i=1, \dots, N$$
+- Função objetivo convexa quadrática estrita e restrições lineares afins.
+- **Mínimo global único**, solucionável via Otimização Convexa (Programação Quadrática).
+:::
+:::
+
+## Reescalonamento por $c$ e a Margem Canônica
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A figura abaixo ilustra a equivalência geométrica obtida ao dividir $(\mathbf{w}, b)$ por $c$: à esquerda temos uma escala arbitrária onde o ponto mais próximo satisfaz $y_i(\mathbf{w}^T\mathbf{x}_i + b) = c$; à direita, após dividirmos por $c$, o hiperplano e a largura física do corredor permanecem idênticos, mas as fronteiras da margem passam a ser descritas por $\mathbf{w}^T\mathbf{x} + b = \pm 1$.
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.6))
+
 x_line = np.linspace(-4, 4, 200)
 slope = -0.6
 b0 = 0.0
 margin_offset = 1.4
 
-ax.plot(x_line, slope * x_line + b0 + margin_offset, '--', color=COR_A, linewidth=1.8, label=r"Margem Positiva: $\mathbf{w}^T\mathbf{x} + b = +1$")
-ax.plot(x_line, slope * x_line + b0, '-', color='black', linewidth=2.2, label=r"Fronteira de Decisão: $\mathbf{w}^T\mathbf{x} + b = 0$")
-ax.plot(x_line, slope * x_line + b0 - margin_offset, '--', color=COR_B, linewidth=1.8, label=r"Margem Negativa: $\mathbf{w}^T\mathbf{x} + b = -1$")
+# Vetor normal unitário ao hiperplano 0.6*x1 + x2 = 0
+normal_vec = np.array([-slope, 1.0])
+normal_unit = normal_vec / np.linalg.norm(normal_vec)
+half_dist = margin_offset / np.linalg.norm(normal_vec)
+p_center = np.array([-1.5, slope * (-1.5) + b0])
+p_pos = p_center + half_dist * normal_unit
+p_neg = p_center - half_dist * normal_unit
 
-# Faixa de margem sombreada
-ax.fill_between(x_line, slope * x_line + b0 - margin_offset, slope * x_line + b0 + margin_offset, color='#f0f4fa', alpha=0.5)
-
-# Vetor normal w
-w_vec = np.array([0.9, 1.5])
-ax.annotate("", xy=(w_vec[0], w_vec[1]), xytext=(0, 0),
-            arrowprops=dict(arrowstyle="->", color="black", lw=2.4))
-ax.text(w_vec[0] + 0.1, w_vec[1], r"$\mathbf{w}$ (Vetor Normal)", fontweight="bold", fontsize=11)
-
-# Seta indicando a margem 2/||w||
-ax.annotate("", xy=(-1.5, slope * (-1.5) + b0 + margin_offset), xytext=(-0.85, slope * (-1.5) + b0 - margin_offset + 0.39),
-            arrowprops=dict(arrowstyle="<->", color="black", lw=1.6))
-ax.text(-1.4, 0.4, r"Margem $\gamma = \frac{2}{\|\mathbf{w}\|}$", fontweight="bold", fontsize=11,
-        bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="gray", alpha=0.8))
-
-# Vetores de Suporte (sobre as margens)
 sv_pos = np.array([[-0.5, slope*(-0.5) + b0 + margin_offset], [2.0, slope*(2.0) + b0 + margin_offset]])
 sv_neg = np.array([[-1.2, slope*(-1.2) + b0 - margin_offset], [1.0, slope*(1.0) + b0 - margin_offset]])
-
-ax.scatter(sv_pos[:, 0], sv_pos[:, 1], color=COR_A, s=110, edgecolor='black', linewidth=1.8, zorder=5, label="Vetores de Suporte (+1)")
-ax.scatter(sv_neg[:, 0], sv_neg[:, 1], color=COR_B, s=110, marker='s', edgecolor='black', linewidth=1.8, zorder=5, label="Vetores de Suporte (-1)")
-
-# Anotações para SVs
-ax.annotate(r"Vetor de Suporte ($\alpha_i > 0$)", xy=(sv_pos[0, 0], sv_pos[0, 1]), xytext=(sv_pos[0, 0] - 1.2, sv_pos[0, 1] + 0.8),
-            arrowprops=dict(arrowstyle="->", color=COR_A, lw=1.2), fontweight="bold", color=COR_A, fontsize=9.5)
-ax.annotate(r"Vetor de Suporte ($\alpha_j > 0$)", xy=(sv_neg[0, 0], sv_neg[0, 1]), xytext=(sv_neg[0, 0] - 1.4, sv_neg[0, 1] - 0.9),
-            arrowprops=dict(arrowstyle="->", color=COR_B, lw=1.2), fontweight="bold", color=COR_B, fontsize=9.5)
-
-# Pontos internos além da margem (inativos, alpha=0)
 pts_pos = np.array([[-2.5, 3.2], [0.5, 2.5], [2.5, 1.8], [3.2, 1.0]])
 pts_neg = np.array([[-3.0, -1.5], [-1.0, -3.0], [0.5, -2.5], [2.5, -3.2]])
 
-ax.scatter(pts_pos[:, 0], pts_pos[:, 1], color=COR_A, s=45, alpha=0.6, zorder=4)
-ax.scatter(pts_neg[:, 0], pts_neg[:, 1], color=COR_B, s=45, marker='s', alpha=0.6, zorder=4)
+titles = [
+    r"Antes de dividir por $c$: $y_i(\mathbf{w}^T\mathbf{x}_i + b) \geq c$",
+    r"Após dividir por $c$: $y_i(\mathbf{w}^T\mathbf{x}_i + b) \geq 1$"
+]
+labels_pos = [r"$\mathbf{w}^T\mathbf{x} + b = +c$", r"$\mathbf{w}^T\mathbf{x} + b = +1$"]
+labels_neg = [r"$\mathbf{w}^T\mathbf{x} + b = -c$", r"$\mathbf{w}^T\mathbf{x} + b = -1$"]
+margin_texts = [r"Margem $\gamma = \frac{2c}{\|\mathbf{w}\|}$", r"Margem $\gamma = \frac{2}{\|\mathbf{w}\|}$"]
 
-ax.text(0.6, 2.7, r"$\alpha_k = 0$ (Ponto Interno: Descartado)", color=COR_CINZA, fontsize=9, style='italic')
-ax.text(-2.8, -1.2, r"$\alpha_l = 0$ (Ponto Interno: Descartado)", color=COR_CINZA, fontsize=9, style='italic')
+for idx, ax in enumerate(axes):
+    ax.plot(x_line, slope * x_line + b0 + margin_offset, '--', color=COR_A, lw=1.8, label=labels_pos[idx])
+    ax.plot(x_line, slope * x_line + b0, '-', color='black', lw=2.2, label=r"$\mathbf{w}^T\mathbf{x} + b = 0$")
+    ax.plot(x_line, slope * x_line + b0 - margin_offset, '--', color=COR_B, lw=1.8, label=labels_neg[idx])
+    ax.fill_between(x_line, slope * x_line + b0 - margin_offset, slope * x_line + b0 + margin_offset, color='#f0f4fa', alpha=0.55)
 
-ax.set_xlim(-4, 4)
-ax.set_ylim(-3.5, 3.8)
-ax.set_title("Geometria da Margem Máxima, Hiperplano Canônico e Vetores de Suporte", pad=12)
-ax.set_xlabel("Coordenada $x_1$")
-ax.set_ylabel("Coordenada $x_2$")
-ax.legend(fontsize=9, loc="upper right")
+    # Vetor normal (maior antes de dividir por c, menor após dividir por c>1)
+    scale_w = 1.45 if idx == 0 else 0.9
+    w_vec = np.array([0.9, 1.5]) * scale_w
+    ax.annotate("", xy=(w_vec[0], w_vec[1]), xytext=(0, 0),
+                arrowprops=dict(arrowstyle="->", color="black", lw=2.2))
+    w_lbl = r"$\mathbf{w}$" if idx == 0 else r"$\mathbf{w}/c$"
+    ax.text(w_vec[0] + 0.1, w_vec[1], w_lbl, fontweight="bold", fontsize=11)
+
+    # Seta ortogonal indicando a margem física (idêntica nos dois painéis!)
+    ax.annotate("", xy=(p_pos[0], p_pos[1]), xytext=(p_neg[0], p_neg[1]),
+                arrowprops=dict(arrowstyle="<->", color="black", lw=1.6))
+    ax.text(p_center[0] - 0.85, p_center[1] - 0.15, margin_texts[idx], fontweight="bold", fontsize=10,
+            bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="gray", alpha=0.85))
+
+    ax.scatter(sv_pos[:, 0], sv_pos[:, 1], color=COR_A, s=100, edgecolor='black', lw=1.6, zorder=5)
+    ax.scatter(sv_neg[:, 0], sv_neg[:, 1], color=COR_B, s=100, marker='s', edgecolor='black', lw=1.6, zorder=5)
+    ax.scatter(pts_pos[:, 0], pts_pos[:, 1], color=COR_A, s=45, alpha=0.6, zorder=4)
+    ax.scatter(pts_neg[:, 0], pts_neg[:, 1], color=COR_B, s=45, marker='s', alpha=0.6, zorder=4)
+
+    ax.set_xlim(-3.8, 3.8)
+    ax.set_ylim(-3.6, 3.8)
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_title(titles[idx], fontsize=11)
+    ax.set_xlabel("$x_1$")
+    ax.set_ylabel("$x_2$")
+    ax.legend(fontsize=8.5, loc="upper right")
+
 plt.tight_layout()
 plt.show()
 ```
@@ -608,12 +729,6 @@ O modelo armazena apenas os vetores de suporte. Todo o restante da base de trein
 :::
 
 ## Pausa 2: Dualidade e Esparsidade dos Vetores de Suporte
-
-::: {.callout-tip}
-## Pergunta aberta provocadora
-
-Imagine que após treinar uma SVM de margem rígida em um banco com $N = 100.000$ transações financeiras, identificamos que exatamente 42 amostras são vetores de suporte ($\alpha_i > 0$). Se um operador acidentalmente deletar $50.000$ observações do conjunto de treino que possuíam $\alpha_i = 0$ e retreinar a SVM do zero nas $50.000$ restantes, o que acontecerá com os parâmetros $(\mathbf{w}, b)$ do hiperplano final?
-:::
 
 ::: {.callout-tip}
 ## Julgamento de V ou F
@@ -852,13 +967,7 @@ plt.tight_layout()
 plt.show()
 ```
 
-## Pausa 3: Margem Suave, Perda Hinge e o Hiperparâmetro $C$
-
-::: {.callout-tip}
-## Pergunta aberta provocadora
-
-Compare a curva da Perda Hinge com a curva da Perda Logística para $z = y \cdot f(\mathbf{x}) \ge 2$. O que acontece com o gradiente de cada função nessa região e como esse comportamento matemático explica por que a SVM possui soluções esparsas enquanto a Regressão Logística é obrigada a manter coeficientes dependentes de todas as amostras?
-:::
+## Pausa 3: Margem Suave, Perda Hinge e o Hiperparâmetro
 
 ::: {.callout-tip}
 ## Julgamento de V ou F
@@ -1081,12 +1190,6 @@ plt.show()
 ## Pausa 4: O Truque do Kernel e a Geometria de Hilbert
 
 ::: {.callout-tip}
-## Pergunta aberta provocadora
-
-Um analista de dados afirma: *"Já que o Kernel RBF projeta os dados em um espaço de dimensão infinita, qualquer conjunto de dados com $N$ observações se tornará linearmente separável; logo, podemos dispensar as variáveis de folga $\xi_i$ e usar sempre $C \to \infty$."* Explique o erro conceitual dessa afirmação e descreva o que acontecerá com a fronteira de decisão se os dados contiverem rótulos com ruído.
-:::
-
-::: {.callout-tip}
 ## Julgamento de V ou F
 
 Julgue V ou F — a questão só conta se acertar os 4 itens:
@@ -1170,6 +1273,7 @@ onde os parâmetros escalares $A, B \in \mathbb{R}$ são determinados por Máxim
 ::: {.fragment .callout-important}
 ## A Formulação de Platt (1999)
 $$P(Y = +1 \mid \mathbf{x}) = \frac{1}{1 + \exp\big(A \cdot f(\mathbf{x}) + B\big)}$$
+
 - Ajusta uma sigmoide sobre o escore contínuo $f(\mathbf{x})$.
 :::
 
@@ -1186,6 +1290,15 @@ $$P(Y = +1 \mid \mathbf{x}) = \frac{1}{1 + \exp\big(A \cdot f(\mathbf{x}) + B\bi
 
 ## Curva de Calibração: Escore vs. Probabilidade de Platt
 
+::: {.content-visible when-format="html" unless-format="revealjs"}
+**O que significa um modelo estar calibrado?** Dizemos que um classificador está **bem calibrado** quando suas probabilidades previstas refletem as frequências empíricas reais: entre todas as amostras para as quais o modelo prevê $P(Y=+1 \mid \mathbf{x}) \approx 0{,}8$, aproximadamente $80\%$ devem pertencer de fato à classe $+1$. No **diagrama de confiabilidade** (*reliability diagram*), um modelo perfeitamente calibrado repousa sobre a diagonal principal $y = x$.
+
+**Por que isso é importante mesmo em modelos que já retornam valores entre $0$ e $1$?**
+Ter uma saída no intervalo $[0, 1]$ **não garante calibração**. Por exemplo, aplicar a sigmoide padrão $\sigma(f(\mathbf{x}))$ sobre a SVM — ou usar modelos como *Naive Bayes* (que costuma empurrar probabilidades para perto de $0$ e $1$) e *Random Forests* (que tende a comprimir previsões longe dos extremos) — produz números em $[0, 1]$ que apenas **ordenam** bem os exemplos, mas distorcem o risco real. Sempre que a decisão depende de **limiares assimétricos de custo** (ex.: indicar biópsia se risco $> 15\%$) ou do cálculo de **valor esperado**, um modelo descalibrado leva a decisões sistematicamente subótimas.
+
+A figura abaixo compara a sigmoide ingênua $\sigma(f(\mathbf{x}))$ com a **Calibração de Platt** (via *out-of-fold*), mostrando tanto o mapeamento escore $\to$ probabilidade quanto a aproximação à diagonal ideal no diagrama de confiabilidade (e a redução do *Brier Score*):
+:::
+
 ```{python}
 #| echo: false
 #| fig-align: center
@@ -1196,39 +1309,57 @@ cal_svc = CalibratedClassifierCV(estimator=base_svc, method='sigmoid', cv=5)
 cal_svc.fit(X_train, y_train)
 
 scores_test = clf_rbf.decision_function(X_test)
-probs_test = cal_svc.predict_proba(X_test)[:, 1] # P(Benigno / +1)
+probs_naive = 1.0 / (1.0 + np.exp(-scores_test))
+probs_platt = cal_svc.predict_proba(X_test)[:, 1] # P(Benigno / +1)
+y_test_bin = (y_test == 1).astype(int)
 
-fig, axes = plt.subplots(1, 2, figsize=(11, 4.0))
+fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.2))
 
-# Gráfico 1: Escore vs Probabilidade
+# Gráfico 1: Escore vs Probabilidade (Ingênua vs Platt)
 ax = axes[0]
 order = np.argsort(scores_test)
-ax.plot(scores_test[order], probs_test[order], color=COR_A, linewidth=2.5, label="Sigmoide de Platt Calibrada")
-ax.scatter(scores_test, probs_test, color=COR_B, s=25, alpha=0.5, edgecolor='k', linewidth=0.5)
+ax.plot(scores_test[order], probs_naive[order], '--', color=COR_CINZA, linewidth=2.0,
+        label=r"Sigmoide Ingênua $\sigma(f(\mathbf{x}))$")
+ax.plot(scores_test[order], probs_platt[order], color=COR_A, linewidth=2.5,
+        label="Sigmoide de Platt Calibrada")
+ax.scatter(scores_test, probs_platt, color=COR_B, s=22, alpha=0.5, edgecolor='k', linewidth=0.4)
 ax.axvline(0, color='gray', linestyle=':', label="Fronteira SVM f(x)=0")
-ax.axhline(0.5, color='black', linestyle='--', alpha=0.5, label="P = 0.5")
-ax.set_title("Platt Scaling: Mapeamento Escore $\\to$ Probabilidade")
+ax.axhline(0.5, color='black', linestyle='--', alpha=0.4)
+ax.set_title("Mapeamento Escore $\\to$ Probabilidade")
 ax.set_xlabel("Escore de Decisão da SVM $f(\\mathbf{x})$")
-ax.set_ylabel("Probabilidade Calibrada $P(Y=+1 \\mid \\mathbf{x})$")
+ax.set_ylabel("Saída em $[0, 1]$")
 ax.legend(fontsize=8.5, loc="lower right")
 
-# Gráfico 2: Histograma de Probabilidades por Classe Real
+# Gráfico 2: Diagrama de Confiabilidade (Curva de Calibração)
 ax = axes[1]
-mask_test_benign = (y_test == 1)
-mask_test_malign = (y_test == -1)
+frac_naive, mean_naive = calibration_curve(y_test_bin, probs_naive, n_bins=7, strategy='quantile')
+frac_platt, mean_platt = calibration_curve(y_test_bin, probs_platt, n_bins=7, strategy='quantile')
 
-ax.hist(probs_test[mask_test_malign], bins=15, alpha=0.6, color=COR_B, label="Real Maligno ($y=-1$)", density=True)
-ax.hist(probs_test[mask_test_benign], bins=15, alpha=0.6, color=COR_A, label="Real Benigno ($y=+1$)", density=True)
-ax.set_title(f"Separação das Probabilidades Calibradas (Brier: {brier_score_loss((y_test==1), probs_test):.4f})")
-ax.set_xlabel("Probabilidade Estimada $P(Y=+1 \\mid \\mathbf{x})$")
-ax.set_ylabel("Densidade Amostral")
-ax.legend(fontsize=8.5, loc="upper center")
+brier_naive = brier_score_loss(y_test_bin, probs_naive)
+brier_platt = brier_score_loss(y_test_bin, probs_platt)
+
+ax.plot([0, 1], [0, 1], 'k--', alpha=0.6, label="Calibração Perfeita ($y=x$)")
+ax.plot(mean_naive, frac_naive, 'o--', color=COR_CINZA, linewidth=1.8,
+        label=f"Ingênua (Brier: {brier_naive:.4f})")
+ax.plot(mean_platt, frac_platt, 's-', color=COR_A, linewidth=2.3,
+        label=f"Platt (Brier: {brier_platt:.4f})")
+ax.set_title("Diagrama de Confiabilidade (Curva de Calibração)")
+ax.set_xlabel("Probabilidade Prevista Média")
+ax.set_ylabel("Fração Empírica de Positivos ($y=+1$)")
+ax.set_xlim(0, 1)
+ax.set_ylim(0, 1)
+ax.legend(fontsize=8.5, loc="upper left")
 
 plt.tight_layout()
 plt.show()
 ```
 
-## Extensão para Regressão: Support Vector Regression ($\varepsilon$-SVR)
+::: {.content-visible when-format="revealjs"}
+- **O que é calibração?** Quando o modelo prevê $p = 0{,}8$, cerca de $80\%$ desses casos devem ser realmente positivos (pontos sobre a diagonal $y = x$).
+- **Por que importa mesmo entre $0$ e $1$?** Sair em $[0, 1]$ (como $\sigma(f(\mathbf{x}))$, *Naive Bayes* ou *Random Forests*) garante apenas **ordenação**, não risco real — essencial para limiares assimétricos de decisão e valor esperado.
+:::
+
+## Regressão: Support Vector Regression ($\varepsilon$-SVR)
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 A genialidade do princípio de esparsidade por margem não se limita à classificação: ela estende-se naturalmente à regressão através da **Support Vector Regression ($\varepsilon$-SVR)** proposta por Vapnik (1995).
@@ -1321,12 +1452,6 @@ plt.show()
 ## Pausa 5: Calibração de Platt e o Tubo da SVR
 
 ::: {.callout-tip}
-## Pergunta aberta provocadora
-
-Na Support Vector Regression ($\varepsilon$-SVR), o cientista decide configurar o raio do tubo $\varepsilon = 0$. O que acontece com a esparsidade da solução resultante? O modelo ainda desfrutará da propriedade de ignorar observações não informativas?
-:::
-
-::: {.callout-tip}
 ## Julgamento de V ou F
 
 Julgue V ou F — a questão só conta se acertar os 4 itens:
@@ -1357,6 +1482,7 @@ Julgue V ou F — a questão só conta se acertar os 4 itens:
 :::
 
 # Fechamento da Aula
+
 
 ## Retomando as Cinco Perguntas Centrais
 
