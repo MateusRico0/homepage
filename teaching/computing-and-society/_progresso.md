@@ -17,7 +17,11 @@ Estado aprovado + vocabulário, para dar continuidade entre aulas. O histórico 
 | `aula06` | 6 — Dados, viés e discriminação algorítmica (LGPD) | A | Amazon (abertura), seguradora da Aula 5 | publicada (reescrita em 2026-09-21) |
 | `aula07` | 7 — Fairness algorítmica: definições, métricas e mitigação | A | empréstimo; três danos documentados | publicada; título diverge do index (ver Pendências) |
 | `aula08` | 8 — Soberania digital na policrise (aula convidada: Beatriz Cardoso Nascimento) | — | Scala AI City (Eldorado do Sul); slides em PDF | publicada como PDF em 2026-10-05; a aula gerada anteriormente está em `aula08/_gerada/` (não publicada) |
-| — | 9–15 | — | — | não iniciadas |
+| — | 9–10 | — | — | 9 não iniciada; 10 cancelada |
+| `aula11` | 11 — Atenção, manipulação e ecossistema informacional (Fabio Carrella) | — | — | publicada |
+| `aula12` | 12 — Design ético: conflitos de valores e *trade-offs* | A | criptografia vs. investigação; prontuário; privacidade diferencial | publicada |
+| `aula13` | 13 — Princípios de *Data Feminism* e colaboração interdisciplinar | A | *Gender Shades*; contra-dados de feminicídio (Maria Salguero) | criada em 2026-11-23 |
+| — | 14–15 | — | — | não iniciadas |
 
 ## Fio condutor
 
@@ -29,6 +33,8 @@ Estado aprovado + vocabulário, para dar continuidade entre aulas. O histórico 
 - **6:** o dado de treino é a sociedade: quatro espaços (construto, observado, bruto, preparado) × três validades × cinco vieses (Varshney, cap. 4). A cegueira de atributo não resolve. LGPD: princípios do art. 6º × vieses (síntese nossa); histórico do art. 20. Métricas de fairness e mitigação ficaram, por decisão do usuário, para a Aula 7.
 - **7:** atributo sensível $Z$; injustiça individual × de grupo; paridade demográfica × igualdade de oportunidade; teorema da impossibilidade; fairness rawlsiana (princípio da diferença, M²FGB); fairness de longo prazo com rótulos seletivos. **Ponte:** o custo material de onde esse cálculo roda (Aula 8).
 - **8:** a "nuvem" tem peso: energia, água e minerais (TI Verde, Tabela 14.1 de Maciel & Viterbo) recaem sobre territórios concretos. Caso-fio Scala AI City; soberania digital (4 dimensões e seu paradoxo), policrise, zona de sacrifício digital (inclusão predatória) × redlining; colonialismo verde (LEAF/Pará, CLPI); Brundtland, justiça intra/intergeracional, ciclo de vida; síntese em ética territorial. **Ponte:** a Parte 2 termina com quem *não* estava na sala; a Aula 9 (Parte 3) pergunta quem *está* — gênero e diversidade na equipe.
+- **12:** conflitos entre valores distintos e distributivos; VSD (investigações conceitual, empírica, técnica); Hierarquia de Valores de Van de Poel (*Value Trees*); mediação de *trade-offs* e inovações conceituais de design (Privacidade Diferencial, Aprendizado Federado). **Ponte:** perspectivas críticas de gênero e justiça de dados (Aula 13).
+- **13:** deslocamento de ética de dados para justiça de dados; *god trick* e Matriz de Dominação (4 domínios); os 7 princípios do *Data Feminism* (D'Ignazio & Klein) aplicados ao pipeline; *missing datasets* e *counterdata*; trabalho invisível (*ghost work*); colaboração interdisciplinar desde a formulação (co-design), *Datasheets for Datasets*, *Model Cards* e recusa técnica. **Ponte:** propriedade, licenciamento e conhecimento como bem comum (Aula 14).
 
 ## Vocabulário (termos que as aulas seguintes podem usar sem redefinir)
 
@@ -57,6 +63,11 @@ Estado aprovado + vocabulário, para dar continuidade entre aulas. O histórico 
 | justiça intra/intergeracional; poluidor-pagador | divisão justa dentro da/entre gerações; quem causa o dano repara | 8 |
 | análise de ciclo de vida | impacto em extração, produção, uso e descarte (e-waste) | 8 |
 | ética territorial | território como ecossistema + modo de vida, não só jurisdição | 8 |
+| *Value Sensitive Design* (VSD), Árvore de Valores | investigações conceitual/empírica/técnica; especificação valor → norma → requisito | 12 |
+| *Data Feminism*, Matriz de Dominação | análise interseccional de poder em dados; 4 domínios (estrutural, disciplinar, hegemônico, interpessoal) | 13 |
+| *missing datasets*, *counterdata* | ausências de dados por decisão política/econômica; coleta independente para contestar omissões | 13 |
+| *ghost work*, artefatos de fronteira | trabalho humano oculto (rotulagem, moderação, curadoria); *Datasheets for Datasets* e *Model Cards* | 13 |
+| recusa técnica (*refusal*) | decisão legítima de não coletar o dado ou não construir o sistema | 13 |
 
 ## Pendências
 
