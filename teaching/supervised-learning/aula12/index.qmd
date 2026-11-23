@@ -200,21 +200,133 @@ Nesta aula terminal de Aprendizado Supervisionado, responderemos a quatro pergun
 # Intuição — Deformação do Espaço e Representação Latente
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-## A Metáfora do Papel Amassado
+## A Metáfora do Papel Amassado e a Geometria das Camadas
 
-Considere uma folha de papel branca sobre a qual desenhamos duas manchas circulares de cores distintas: uma gota de tinta azul no centro cercada por um anel externo de tinta laranja.
+Considere uma folha de papel branca sobre a qual desenhamos duas curvas entrelaçadas de cores distintas (como duas luas encaixadas). Se amassarmos essa folha até transformá-la em uma bola irregular tridimensional, nenhum corte plano feito com uma tesoura reta conseguirá separar a tinta azul da tinta laranja sem cortar pedaços de ambas as cores. Esse é exatamente o desafio que dados não lineares impõem a classificadores lineares como a Regressão Logística ou o Perceptron simples.
 
-Se amassarmos essa folha de papel até transformá-la em uma bola irregular tridimensional, nenhum corte plano feito com uma tesoura reta conseguirá separar a tinta azul da tinta laranja sem cortar pedaços de ambas as cores. Esse é o desafio que os dados não lineares impõem aos classificadores lineares clássicos.
+O papel das camadas ocultas de uma rede neural é **desamassar, esticar e dobrar o espaço passo a passo**, construindo uma **representação latente** $\mathbf{z}$ onde o problema finalmente se torna linear:
 
-O papel das camadas ocultas de uma rede neural é equivalente a **desamassar, esticar e dobrar cuidadosamente a folha de papel** através de transformações afins seguidas de dobras não lineares:
-
-- Cada camada oculta mapeia os pontos originais para um novo espaço vetorial latente $\mathbf{z} \in \mathbb{R}^h$.
-- Nesse espaço latente, a geometria é distorcida de modo que os pontos da classe azul são agrupados em uma região convexa compacta, enquanto os pontos da classe laranja são empurrados para a periferia.
-- Chegando à camada final, o espaço transformado tornou-se **linearmente separável**: a camada de saída precisa apenas aplicar um hiperplano reto para classificar perfeitamente todos os dados!
+1. **Transformação Afim ($W^{(l)}\mathbf{z}^{(l-1)} + \mathbf{b}^{(l)}$):** rotaciona, escala, cisalha e translada o espaço. Sozinha, essa operação preserva retas — qualquer composição de matrizes afins continua sendo um único hiperplano.
+2. **Dobra Não-Linear ($h(\cdot)$):** aplica uma função não linear elemento a elemento (como $\text{ReLU}$ ou $\tanh$), criando **dobras e compressões** no espaço. É a alternância entre transformações afins e dobras não lineares que permite desembaraçar regiões entrelaçadas.
+3. **Corte Linear Final ($W^{(L)}\mathbf{z}^{(L-1)} + \mathbf{b}^{(L)} = \mathbf{0}$):** ao final das camadas ocultas, os pontos da classe azul e da classe laranja ocupam regiões linearmente separáveis no espaço latente $\mathbf{z}^{(L-1)}$. A última camada é apenas um classificador linear (um GLM) atuando sobre essa representação aprendida!
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Visualização: Fronteiras de Decisão nos Três Paradigmas
+## A Metáfora do Papel Amassado: O Que a Rede Faz?
+
+::: {.columns}
+::: {.column width="50%"}
+::: {.fragment}
+- **O Problema (Papel Amassado):**
+  Classes entrelaçadas no espaço original $\mathbf{x}$ não podem ser separadas por um único corte reto (hiperplano).
+:::
+
+::: {.fragment}
+- **A Solução (Deformação em Camadas):**
+  Cada camada oculta aplica:
+  1. **Transformação Afim** ($W\mathbf{x} + \mathbf{b}$): gira, estica e translada.
+  2. **Dobra Não-Linear** ($h(\cdot)$): dobra o espaço (ReLU / $\tanh$).
+:::
+:::
+
+::: {.column width="50%"}
+::: {.fragment .callout-tip}
+## Representação Latente $\mathbf{z}$
+Ao final das camadas ocultas, o espaço foi **desamassado**: a camada de saída aplica apenas um **corte linear simples** sobre $\mathbf{z}^{(L-1)}$!
+
+- Na **SVM**, a transformação $\boldsymbol{\phi}(\mathbf{x})$ é **fixa** (kernel).
+- Na **Rede Neural**, $\boldsymbol{\phi}(\mathbf{x}; W)$ é **aprendida** junto com o classificador.
+:::
+:::
+:::
+:::
+
+## Visualizando a Deformação: Espaço Original $\to$ Espaço Latente
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Abaixo treinamos uma pequena rede MLP com uma última camada oculta bidimensional ($\mathbf{z} \in \mathbb{R}^2$, ativação $\tanh$) sobre o conjunto *Two Moons*. À esquerda, as duas classes estão entrelaçadas no espaço original $\mathbf{x} = (x_1, x_2)$ — nenhuma reta as separa. À direita, observamos exatamente os mesmos pontos e a mesma grade cartesiana após passarem pelas camadas ocultas: a rede **deformou o espaço** de modo que a camada de saída agora separa as classes com uma **única linha reta**.
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# MLP com gargalo 2D na última camada oculta para visualizar o espaço latente (z1, z2)
+mlp_vis = MLPClassifier(hidden_layer_sizes=(8, 2), activation="tanh",
+                        max_iter=3000, random_state=42).fit(X_m, y_moons)
+
+def forward_latent(model, X):
+    a1 = X @ model.coefs_[0] + model.intercepts_[0]
+    z1 = np.tanh(a1)
+    a2 = z1 @ model.coefs_[1] + model.intercepts_[1]
+    z2 = np.tanh(a2)
+    return z2
+
+Z_lat = forward_latent(mlp_vis, X_m)
+
+fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.1))
+
+# Grade cartesiana no espaço original para visualizar a deformação
+gx = np.linspace(X_m[:, 0].min() - 0.3, X_m[:, 0].max() + 0.3, 11)
+gy = np.linspace(X_m[:, 1].min() - 0.3, X_m[:, 1].max() + 0.3, 11)
+t_line = np.linspace(0, 1, 60)
+
+# Painel 1: Espaço Original
+ax = axes[0]
+for x_val in gx:
+    pts = np.column_stack([np.full_like(t_line, x_val), np.linspace(gy[0], gy[-1], len(t_line))])
+    ax.plot(pts[:, 0], pts[:, 1], color='lightgray', lw=0.8, zorder=1)
+    pts_lat = forward_latent(mlp_vis, pts)
+    axes[1].plot(pts_lat[:, 0], pts_lat[:, 1], color='lightgray', lw=0.8, zorder=1)
+
+for y_val in gy:
+    pts = np.column_stack([np.linspace(gx[0], gx[-1], len(t_line)), np.full_like(t_line, y_val)])
+    ax.plot(pts[:, 0], pts[:, 1], color='lightgray', lw=0.8, zorder=1)
+    pts_lat = forward_latent(mlp_vis, pts)
+    axes[1].plot(pts_lat[:, 0], pts_lat[:, 1], color='lightgray', lw=0.8, zorder=1)
+
+ax.scatter(X_m[y_moons == 0, 0], X_m[y_moons == 0, 1], color=COR_A, s=25, alpha=0.85, label="Classe 0", zorder=3)
+ax.scatter(X_m[y_moons == 1, 0], X_m[y_moons == 1, 1], color=COR_B, s=25, alpha=0.85, label="Classe 1", zorder=3)
+ax.set_title("1. Espaço Original $(x_1, x_2)$: Não Linearmente Separável", fontsize=10.5)
+ax.set_xlabel("$x_1$")
+ax.set_ylabel("$x_2$")
+ax.legend(loc="lower left", fontsize=8.5)
+
+# Painel 2: Espaço Latente + Hiperplano Reto da Camada de Saída
+ax = axes[1]
+ax.scatter(Z_lat[y_moons == 0, 0], Z_lat[y_moons == 0, 1], color=COR_A, s=25, alpha=0.85, zorder=3)
+ax.scatter(Z_lat[y_moons == 1, 0], Z_lat[y_moons == 1, 1], color=COR_B, s=25, alpha=0.85, zorder=3)
+
+# Reta de decisão da camada de saída: w_out[0]*z1 + w_out[1]*z2 + b_out = 0
+w_out = mlp_vis.coefs_[2].ravel()
+b_out = mlp_vis.intercepts_[2][0]
+z1_vals = np.linspace(-1.05, 1.05, 200)
+if abs(w_out[1]) > 1e-6:
+    z2_vals = -(w_out[0] * z1_vals + b_out) / w_out[1]
+    mask = (z2_vals >= -1.05) & (z2_vals <= 1.05)
+    ax.plot(z1_vals[mask], z2_vals[mask], '-', color="#182B49", lw=2.4, label="Corte Linear Final")
+
+ax.set_xlim(-1.08, 1.08)
+ax.set_ylim(-1.08, 1.08)
+ax.set_title("2. Espaço Latente $(z_1, z_2)$: Linearmente Separável!", fontsize=10.5)
+ax.set_xlabel("$z_1$")
+ax.set_ylabel("$z_2$")
+ax.legend(loc="lower left", fontsize=8.5)
+
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="revealjs"}
+- **Esquerda:** grade cartesiana e dados no espaço original $(x_1, x_2)$.
+- **Direita:** a mesma grade deformada pelas camadas ocultas até o espaço latente $(z_1, z_2)$, onde a camada de saída aplica um **hiperplano reto**.
+:::
+
+## Fronteiras de Decisão nos Três Paradigmas
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Como consequência dessa deformação aprendida, quando projetamos de volta o corte linear da camada de saída para o espaço original $(x_1, x_2)$, obtemos uma fronteira de decisão não linear adaptada diretamente aos dados — contrastando com a fronteira rígida da Regressão Logística e com a fronteira induzida pelo kernel RBF fixo da SVM:
+:::
 
 ```{python}
 #| echo: false
@@ -247,7 +359,6 @@ axes[0].legend(loc="lower left", fontsize=8.5)
 plt.tight_layout()
 plt.show()
 ```
-:::
 
 # Bloco 1: A Arquitetura do MLP como Composição de GLMs
 
@@ -339,7 +450,7 @@ A profundidade permite **reutilização hierárquica de representações**: cama
 ::: {.column width="50%"}
 **Teorema de Cybenko (1989):**
 
-Uma rede com **apenas 1 camada oculta** aproxima qualquer função contínua sobre compactos com erro $\epsilon > 0$:
+Para toda $f$ contínua em um compacto $K \subset \mathbb{R}^d$ e qualquer tolerância $\epsilon > 0$, existe uma rede com **apenas 1 camada oculta** ($M$ finito) tal que $\sup_{\mathbf{x} \in K} |F(\mathbf{x}) - f(\mathbf{x})| < \epsilon$:
 $$F(\mathbf{x}) = \sum_{j=1}^M v_j h(\mathbf{w}_j^T \mathbf{x} + b_j)$$
 
 - *Gargalo:* Teorema de existência!
@@ -349,50 +460,43 @@ $$F(\mathbf{x}) = \sum_{j=1}^M v_j h(\mathbf{w}_j^T \mathbf{x} + b_j)$$
 ::: {.column width="50%"}
 **A Vantagem da Profundidade:**
 
-- **Composição Hierárquica:** Camadas profundas reutilizam detectores ($f(g(h(\mathbf{x})))$).
-- **Parcimônia Exponencial:** $L$ camadas particionam o espaço em até $\mathcal{O}(n^{L \cdot d})$ regiões com apenas $\mathcal{O}(L \cdot n^2)$ parâmetros (Montúfar et al., 2014).
-- Menor variância e melhor generalização!
+- **Reuso Hierárquico:** Em vez de aprender tudo do zero em uma camada gigante, cada camada compõe padrões simples em conceitos mais complexos (ex.: bordas $\to$ formas $\to$ objetos).
+- **Dobras Compostas (Montúfar et al., 2014):** Com ReLU, cada camada dobra o espaço; empilhar $L$ camadas de largura $n$ dobra as dobras anteriores, multiplicando as regiões lineares **exponencialmente com $L$** usando apenas $\mathcal{O}(L \cdot n^2)$ parâmetros.
+- **Eficiência Estatística:** Menos parâmetros para a mesma complexidade significa menor risco de sobreajuste.
 :::
 :::
 :::
 
-::: {.content-visible when-format="html" unless-format="revealjs"}
 ## Pausa 1: O Dilema da Representação e o Teorema de Cybenko
 
-::: {.callout-tip icon=false}
-### Teste Seus Conhecimentos — Pausa 1
-1. Por que em um modelo linear clássico com atributos originais é impossível resolver o problema do XOR, e como uma camada oculta de 2 neurônios ReLU torna os pontos linearmente separáveis?
-2. Se o Teorema de Cybenko prova que 1 camada oculta é suficiente para aproximar qualquer função contínua, por que a indústria utiliza redes com dezenas de camadas profundas?
-:::
+::: {.callout-tip}
+## Julgamento de V ou F
 
-::: {.callout-note icon=false}
-### Julgue V ou F para cada afirmação:
+Julgue V ou F — a questão só conta se acertar os 4 itens:
 
-- ( ) No MLP, cada camada oculta atua como uma transformação adaptativa de atributos $\mathbf{z} = \boldsymbol{\phi}(\mathbf{x}; W)$ otimizada conjuntamente com a tarefa preditiva.
-- ( ) Se substituirmos todas as funções de ativação por funções lineares de identidade ($h(a) = a$), a rede com $L$ camadas preserva sua capacidade expressiva não-linear.
-- ( ) O Teorema da Aproximação Universal garante a existência de pesos aproximadores, mas não garante que o algoritmo de gradiente estocástico conseguirá encontrá-los em tempo polinomial.
-- ( ) Redes profundas conseguem particionar o domínio em um número exponencial de regiões lineares com uma quantidade puramente polinomial de parâmetros.
-:::
+- □ No MLP, cada camada oculta atua como uma transformação adaptativa de atributos $\mathbf{z} = \boldsymbol{\phi}(\mathbf{x}; W)$ otimizada conjuntamente com a tarefa preditiva.
+- □ Se substituirmos todas as funções de ativação por funções lineares de identidade ($h(a) = a$), a rede com $L$ camadas preserva sua capacidade expressiva não-linear.
+- □ O Teorema da Aproximação Universal garante a existência de pesos aproximadores, mas não garante que o algoritmo de gradiente estocástico conseguirá encontrá-los em tempo polinomial.
+- □ Redes profundas conseguem particionar o domínio em um número exponencial de regiões lineares com uma quantidade puramente polinomial de parâmetros.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Pausa 1: Aprendizado de Representação
+
+## Pausa 1: O Dilema da Representação e o Teorema de Cybenko — Resposta
 
 ::: {.callout-tip}
-## Pergunta de Fixação
+## Julgamento de V ou F — Resposta
 
-- Na SVM, $\boldsymbol{\phi}(\mathbf{x})$ é fixada a priori via Mercer Kernel.
-- No MLP, as camadas ocultas deformam o espaço aprendendo a representação latente $\mathbf{z} = \boldsymbol{\phi}(\mathbf{x}; W)$.
-- Por que redes profundas superam redes de 1 camada oculta em problemas de alta dimensão?
+- ✔ **V:** Na SVM $\boldsymbol{\phi}(\mathbf{x})$ é fixa via kernel; no MLP, as camadas ocultas deformam o espaço aprendendo $\mathbf{z} = \boldsymbol{\phi}(\mathbf{x}; W)$ junto com o classificador.
+- ✗ **F:** Sem não-linearidades, a composição de transformações afins colapsa em uma única transformação afim linear ($W_{\text{eq}}\mathbf{x} + \mathbf{b}_{\text{eq}}$).
+- ✔ **V:** O Teorema de Cybenko é um resultado de existência (e exige largura $M \sim \mathcal{O}(2^d)$ no pior caso), sem garantia de otimização eficiente via SGD.
+- ✔ **V:** Cada camada ReLU dobra as dobras anteriores, multiplicando as regiões lineares exponencialmente com a profundidade $L$ com apenas $\mathcal{O}(L \cdot n^2)$ parâmetros.
 :::
 
 ::: {.fragment}
-
-- [x] O MLP aprende a representação ótima dos atributos diretamente dos dados.
-- [ ] Redes com ativação puramente linear preservam capacidade não-linear. *(Falso: colapsam em uma transformação afim única!)*
-- [x] O Teorema de Cybenko não garante convergência do SGD em tempo viável.
-- [x] Redes profundas geram particionamento exponencial do espaço com parcimônia paramétrica.
+**Voltando à pergunta:** Em um modelo linear com atributos originais, o XOR é inseparável porque não existe reta separadora; uma camada oculta com 2 neurônios ReLU dobra o espaço, colocando os pontos de mesma classe no mesmo semiespaço. Em alta dimensão, a profundidade substitui largura exponencial por composição hierárquica.
 :::
+
 :::
 
 # Bloco 2: A Camada de Saída sob a Ótica da Verossimilhança
@@ -450,13 +554,28 @@ A arquitetura da saída e a função de custo não são escolhas heurísticas ar
 
 Um dos resultados mais belos e práticos da estatística matemática é a **propriedade da função de ligação canônica**: quando emparelhamos a distribuição da família exponencial com a sua ligação canônica natural (Gaussiana com Linear, Bernoulli com Sigmoide, Multinomial com Softmax), as não-linearidades exponenciais da ativação e do logaritmo cancelam-se perfeitamente durante a derivação!
 
-Para a combinação Softmax + Entropia Cruzada Categórica, a sensibilidade de erro na camada de saída reduz-se identicamente ao **resíduo linear puro**:
-$$\delta_k^{(L)} = \frac{\partial \mathcal{L}}{\partial a_k^{(L)}} = \hat{y}_k - y_k$$
+Vejamos a derivação explícita para cada perda:
 
-**Por que esse cancelamento salvou o Deep Learning?**
-Se tivéssemos utilizado a perda quadrática MSE com ativação Softmax ou Sigmoide, a derivada conteria o termo multiplicativo da ativação $\hat{y}_k (1 - \hat{y}_k)$.
-Quando o modelo comete um erro catastrófico (por exemplo, prediz $\hat{y}_k = 0{,}001$ quando o rótulo verdadeiro é $y_k = 1$), o termo $\hat{y}_k$ é quase zero, fazendo com que o gradiente desapareça exatamente quando o erro é máximo!
-Com a ligação canônica (Entropia Cruzada), a derivada é $\hat{y}_k - y_k = 0{,}001 - 1 = -0{,}999$: o sinal de correção é máximo e vigoroso, empurrando os pesos na direção do aprendizado sem saturação!
+1. **Regressão (Saída Linear + MSE):**
+   Com $\hat{y} = a^{(L)}$ e $\mathcal{L}_{\text{MSE}} = \frac{1}{2}(\hat{y} - y)^2$:
+   $$\delta^{(L)} = \frac{\partial \mathcal{L}_{\text{MSE}}}{\partial a^{(L)}} = \hat{y} - y$$
+
+2. **Classificação Binária — Patologia (Sigmoide + MSE):**
+   Com $\hat{y} = \sigma(a)$ e $\sigma'(a) = \hat{y}(1 - \hat{y})$:
+   $$\frac{\partial \mathcal{L}_{\text{MSE}}}{\partial a} = \frac{\partial \mathcal{L}_{\text{MSE}}}{\partial \hat{y}} \frac{\partial \hat{y}}{\partial a} = (\hat{y} - y)\,\hat{y}(1 - \hat{y})$$
+   Quando o modelo comete um erro severo ($\hat{y} \approx 0$ com $y = 1$), o fator $\hat{y}(1 - \hat{y}) \approx 0$ **anula o gradiente** justamente onde o erro é máximo!
+
+3. **Classificação Binária — Canônica (Sigmoide + Entropia Cruzada Binária):**
+   Com $\mathcal{L}_{\text{BCE}} = -\big[y\ln\hat{y} + (1-y)\ln(1-\hat{y})\big]$:
+   $$\frac{\partial \mathcal{L}_{\text{BCE}}}{\partial \hat{y}} = -\frac{y}{\hat{y}} + \frac{1-y}{1-\hat{y}} = \frac{\hat{y} - y}{\hat{y}(1 - \hat{y})}$$
+   Multiplicando pela derivada da sigmoide $\frac{\partial \hat{y}}{\partial a} = \hat{y}(1 - \hat{y})$, o denominador cancela exatamente:
+   $$\delta^{(L)} = \frac{\partial \mathcal{L}_{\text{BCE}}}{\partial a} = \frac{\hat{y} - y}{\hat{y}(1 - \hat{y})} \cdot \hat{y}(1 - \hat{y}) = \hat{y} - y$$
+
+4. **Classificação Multiclasse — Canônica (Softmax + Entropia Cruzada Categórica):**
+   Com $\hat{y}_j = \frac{e^{a_j}}{\sum_m e^{a_m}}$, $\mathcal{L}_{\text{CE}} = -\sum_{j=1}^K y_j \ln \hat{y}_j$ ($\sum_j y_j = 1$) e $\frac{\partial \hat{y}_j}{\partial a_k} = \hat{y}_j(\delta_{jk} - \hat{y}_k)$:
+   $$\delta_k^{(L)} = \frac{\partial \mathcal{L}_{\text{CE}}}{\partial a_k} = -\sum_{j=1}^K \frac{y_j}{\hat{y}_j} \frac{\partial \hat{y}_j}{\partial a_k} = -\sum_{j=1}^K y_j(\delta_{jk} - \hat{y}_k) = -y_k + \hat{y}_k \underbrace{\sum_{j=1}^K y_j}_{=1} = \hat{y}_k - y_k$$
+
+Com a ligação canônica, quando o erro é máximo ($\hat{y}_k = 0{,}001$, $y_k = 1$), a derivada é $\hat{y}_k - y_k = -0{,}999$: o sinal de correção é máximo e vigoroso, sem saturação!
 :::
 
 ::: {.content-visible when-format="revealjs"}
@@ -464,63 +583,57 @@ Com a ligação canônica (Entropia Cruzada), a derivada é $\hat{y}_k - y_k = 0
 
 ::: {.columns}
 ::: {.column width="50%"}
-**MSE com Sigmoide / Softmax (Patologia):**
+**MSE + Sigmoide (Patologia):**
 
-$$\frac{\partial \mathcal{L}_{\text{MSE}}}{\partial a_k} = (\hat{y}_k - y_k) \underbrace{\hat{y}_k(1 - \hat{y}_k)}_{\to 0 \text{ nos extremos!}}$$
+$\mathcal{L}_{\text{MSE}} = \frac{1}{2}(\hat{y} - y)^2$, $\;\hat{y} = \sigma(a)$:
+$$\frac{\partial \mathcal{L}_{\text{MSE}}}{\partial a} = \frac{\partial \mathcal{L}_{\text{MSE}}}{\partial \hat{y}} \frac{\partial \hat{y}}{\partial a} = (\hat{y} - y) \underbrace{\hat{y}(1 - \hat{y})}_{\to 0 \text{ nos extremos!}}$$
 
-- Se o modelo erra com convicção ($\hat{y} \approx 0$ e $y = 1$), a derivada é multiplicada por zero!
-- O gradiente desaparece (*vanishing gradient*) justamente onde o erro é maior.
+- Se erra com convicção ($\hat{y} \approx 0, y = 1$), a derivada zera!
+- **Regressão (Linear + MSE):** $\hat{y} = a \implies \delta = \hat{y} - y$.
 :::
 
 ::: {.column width="50%"}
 **Entropia Cruzada Canônica (Cura):**
 
-$$\delta_k = \frac{\partial \mathcal{L}_{\text{CE}}}{\partial a_k} = \hat{y}_k - y_k$$
-
-- O termo $\hat{y}_k$ no denominador cancela a derivada da exponencial.
-- O gradiente é o **resíduo linear puro**.
-- Se o erro é máximo, o gradiente é máximo ($|0 - 1| = 1$). Aprendizado rápido e robusto!
+- **Binária (Sigmoide + BCE):**
+  $$\frac{\partial \mathcal{L}_{\text{BCE}}}{\partial a} = \frac{\hat{y}-y}{\cancel{\hat{y}(1-\hat{y})}} \cdot \cancel{\hat{y}(1-\hat{y})} = \hat{y} - y$$
+- **Multiclasse (Softmax + CE):**
+  $$\frac{\partial \mathcal{L}_{\text{CE}}}{\partial a_k} = -\sum_j \frac{y_j}{\cancel{\hat{y}_j}}\,\cancel{\hat{y}_j}(\delta_{jk} - \hat{y}_k) = \hat{y}_k - y_k$$
+- O gradiente é sempre o **resíduo linear puro** — erro máximo $\implies$ gradiente máximo!
 :::
 :::
 :::
 
-::: {.content-visible when-format="html" unless-format="revealjs"}
 ## Pausa 2: Verossimilhança e a Camada de Saída
 
-::: {.callout-tip icon=false}
-### Teste Seus Conhecimentos — Pausa 2
-1. Demonstre por que a função Softmax $\hat{y}_k = \frac{e^{a_k}}{\sum_{j=1}^K e^{a_j}}$ parametriza rigorosamente uma distribuição de probabilidade categórica válida sobre $K$ classes.
-2. O que acontece com a magnitude do gradiente $\delta_k = \frac{\partial \mathcal{L}}{\partial a_k}$ se utilizarmos Entropia Cruzada quando o modelo comete um erro grosseiro ($\hat{y}_k = 0{,}01$ e $y_k = 1$)?
-:::
+::: {.callout-tip}
+## Julgamento de V ou F
 
-::: {.callout-note icon=false}
-### Julgue V ou F para cada afirmação:
+Julgue V ou F — a questão só conta se acertar os 4 itens:
 
-- ( ) A perda de Erro Quadrático Médio (MSE) é a função de custo ótima sob a premissa de ruído gaussiano homocedástico com média dada pela ativação linear da saída.
-- ( ) A Softmax deve ser utilizada em problemas multirrótulo (*multi-label*) onde uma instância pode pertencer a mais de uma classe simultaneamente.
-- ( ) Sob a ligação canônica (Softmax + Entropia Cruzada), o gradiente na saída reduz-se ao resíduo linear exato $\hat{y}_k - y_k$.
-- ( ) A perda quadrática MSE aplicada a uma saída sigmoide sofre de saturação de gradiente quando a predição é confiante e errada.
-:::
+- □ A perda de Erro Quadrático Médio (MSE) é a função de custo ótima sob a premissa de ruído gaussiano homocedástico com média dada pela ativação linear da saída.
+- □ A Softmax deve ser utilizada em problemas multirrótulo (*multi-label*) onde uma instância pode pertencer a mais de uma classe simultaneamente.
+- □ Sob a ligação canônica (Softmax + Entropia Cruzada), o gradiente na saída reduz-se ao resíduo linear exato $\hat{y}_k - y_k$.
+- □ A perda quadrática MSE aplicada a uma saída sigmoide sofre de saturação de gradiente quando a predição é confiante e errada.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Pausa 2: Verossimilhança e Saída
+
+## Pausa 2: Verossimilhança e a Camada de Saída — Resposta
 
 ::: {.callout-tip}
-## Pergunta de Fixação
+## Julgamento de V ou F — Resposta
 
-- Para classes exclusivas: Softmax ($\sum \hat{y}_k = 1$) + Entropia Cruzada Categórica.
-- Para classes multirrótulo: $K$ Sigmoides independentes + Entropia Cruzada Binária.
-- Por que a ligação canônica $\delta_k = \hat{y}_k - y_k$ é imune à saturação de gradiente?
+- ✔ **V:** O MSE decorre diretamente da Máxima Verossimilhança sob ruído Gaussiano homocedástico.
+- ✗ **F:** A Softmax impõe $\sum_k \hat{y}_k = 1$ (classes mutuamente exclusivas); problemas multirrótulo exigem $K$ sigmoides independentes com Entropia Cruzada Binária.
+- ✔ **V:** O denominador da derivada da Entropia Cruzada cancela exatamente a derivada da exponencial, deixando apenas $\hat{y}_k - y_k$.
+- ✔ **V:** No MSE com sigmoide, o fator $\hat{y}(1 - \hat{y})$ vai a zero nos extremos, anulando o gradiente justamente quando o erro é máximo.
 :::
 
 ::: {.fragment}
-
-- [x] O MSE decorre da Máxima Verossimilhança sob ruído Gaussiano homocedástico.
-- [ ] A Softmax é ideal para classificação multirrótulo. *(Falso: Softmax impõe soma 1 estrita; multirrótulo exige sigmoides independentes!)*
-- [x] A ligação canônica preserva o resíduo linear puro na derivada de saída.
-- [x] O MSE com sigmoide sofre de gradiente evanescente em erros graves.
+**Voltando à pergunta:** Quando o modelo erra feio ($\hat{y}_k = 0{,}01$ com $y_k = 1$), a Entropia Cruzada gera $\delta_k = \hat{y}_k - y_k = -0{,}99$ (correção máxima), enquanto o MSE com sigmoide teria $\delta_k \approx -0{,}0098$ (quase nulo).
 :::
+
 :::
 
 # Bloco 3: O Algoritmo de Retropropagação (*Backpropagation*)
@@ -553,6 +666,15 @@ Identificando cada um dos três termos:
 
 Substituindo esses termos, obtemos a **equação fundamental da retropropagação**:
 $$\delta_j^{(l)} = h'(a_j^{(l)}) \sum_{k=1}^{n_{l+1}} W_{kj}^{(l+1)} \delta_k^{(l+1)}$$
+
+### Dedução dos Gradientes dos Parâmetros ($W^{(l)}$ e $\mathbf{b}^{(l)}$)
+Uma vez conhecidas as sensibilidades $\delta_j^{(l)} = \frac{\partial \mathcal{L}}{\partial a_j^{(l)}}$, o gradiente em relação a qualquer peso ou bias da camada $l$ sai diretamente da regra da cadeia local, pois:
+$$a_j^{(l)} = \sum_{i=1}^{n_{l-1}} W_{ji}^{(l)} z_i^{(l-1)} + b_j^{(l)} \implies \frac{\partial a_j^{(l)}}{\partial W_{ji}^{(l)}} = z_i^{(l-1)}, \quad \frac{\partial a_j^{(l)}}{\partial b_j^{(l)}} = 1$$
+
+Logo:
+$$\frac{\partial \mathcal{L}}{\partial W_{ji}^{(l)}} = \frac{\partial \mathcal{L}}{\partial a_j^{(l)}} \frac{\partial a_j^{(l)}}{\partial W_{ji}^{(l)}} = \delta_j^{(l)} z_i^{(l-1)} \quad \text{e} \quad \frac{\partial \mathcal{L}}{\partial b_j^{(l)}} = \delta_j^{(l)}$$
+
+Em forma matricial, o gradiente da matriz de pesos $W^{(l)}$ é o **produto externo** entre o sinal de erro que chega à camada $l$ e a ativação que entrou na camada $l$: $\nabla_{W^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)} (\mathbf{z}^{(l-1)})^T$.
 :::
 
 ::: {.content-visible when-format="revealjs"}
@@ -560,40 +682,97 @@ $$\delta_j^{(l)} = h'(a_j^{(l)}) \sum_{k=1}^{n_{l+1}} W_{kj}^{(l+1)} \delta_k^{(
 
 ::: {.columns}
 ::: {.column width="50%"}
-**Definição da Sensibilidade $\delta_j^{(l)}$:**
+**1. Sensibilidade $\delta_j^{(l)} \equiv \frac{\partial \mathcal{L}}{\partial a_j^{(l)}}$:**
 
-$$\delta_j^{(l)} \equiv \frac{\partial \mathcal{L}}{\partial a_j^{(l)}}$$
-
-**Equação de Recorrência Backward:**
 $$\delta_j^{(l)} = h'(a_j^{(l)}) \sum_{k=1}^{n_{l+1}} W_{kj}^{(l+1)} \delta_k^{(l+1)}$$
 
-- O erro flui do topo para a base.
-- Multiplica pelo peso transposto $W_{kj}^{(l+1)}$ e pela derivada local $h'(a_j^{(l)})$.
+- Propaga do topo ($L$) para a base ($1$).
+- Multiplica pelo peso transposto $(W^{(l+1)})^T$ e pela derivada local $h'(\mathbf{a}^{(l)})$:
+$$\boldsymbol{\delta}^{(l)} = \left( (W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)} \right) \odot h'(\mathbf{a}^{(l)})$$
 :::
 
 ::: {.column width="50%"}
-**Formulação Vetorial Matricial:**
+**2. De $\boldsymbol{\delta}^{(l)}$ aos Gradientes:**
 
-$$\boldsymbol{\delta}^{(l)} = \left( (W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)} \right) \odot h'(\mathbf{a}^{(l)})$$
+Como $a_j^{(l)} = \sum_i W_{ji}^{(l)} z_i^{(l-1)} + b_j^{(l)}$:
+$$\frac{\partial a_j^{(l)}}{\partial W_{ji}^{(l)}} = z_i^{(l-1)}, \qquad \frac{\partial a_j^{(l)}}{\partial b_j^{(l)}} = 1$$
 
-**Gradientes dos Parâmetros:**
-$$\nabla_{W^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)} (\mathbf{z}^{(l-1)})^T$$
-$$\nabla_{\mathbf{b}^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)}$$
+Logo, pela regra da cadeia local:
+$$\nabla_{W^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)} (\mathbf{z}^{(l-1)})^T, \qquad \nabla_{\mathbf{b}^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)}$$
 
-- Produto externo entre o erro corrente e a ativação da camada anterior!
+- **Produto externo** entre o erro corrente e a ativação da camada anterior!
 :::
 :::
 :::
+
+## Diagrama do Fluxo: Forward vs. Backward
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+from matplotlib.patches import FancyBboxPatch
+
+fig, ax = plt.subplots(figsize=(10.5, 4.0))
+ax.set_xlim(0, 12)
+ax.set_ylim(0, 5.2)
+ax.axis('off')
+
+def draw_box(x, y, w, h, text, fc, ec, tc='black', fs=10, fw='bold'):
+    box = FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.12,rounding_size=0.18",
+                         facecolor=fc, edgecolor=ec, linewidth=1.8)
+    ax.add_patch(box)
+    ax.text(x + w/2, y + h/2, text, ha='center', va='center', color=tc, fontsize=fs, fontweight=fw)
+
+# Linha superior: FORWARD PASS
+ax.text(0.2, 4.75, "PASSAGEM DIRETA (Forward) — calcula predições e guarda ativações em memória",
+        fontsize=10.5, fontweight='bold', color=COR_A)
+
+draw_box(0.3, 3.4, 1.5, 0.9, r"$\mathbf{z}^{(l-1)}$", "#e8f1fa", COR_A)
+draw_box(2.7, 3.4, 2.3, 0.9, r"$\mathbf{a}^{(l)} = W^{(l)}\mathbf{z}^{(l-1)} + \mathbf{b}^{(l)}$", "#e8f1fa", COR_A, fs=9.5)
+draw_box(5.9, 3.4, 1.8, 0.9, r"$\mathbf{z}^{(l)} = h(\mathbf{a}^{(l)})$", "#e8f1fa", COR_A, fs=9.5)
+draw_box(8.6, 3.4, 1.5, 0.9, r"$\dots \to \hat{\mathbf{y}}$", "#e8f1fa", COR_A)
+draw_box(10.6, 3.4, 1.1, 0.9, r"$\mathcal{L}$", "#fdebd0", COR_B)
+
+for x1, x2 in [(1.92, 2.58), (5.12, 5.78), (7.82, 8.48), (10.22, 10.48)]:
+    ax.annotate("", xy=(x2, 3.85), xytext=(x1, 3.85),
+                arrowprops=dict(arrowstyle="->", color=COR_A, lw=2.0))
+
+# Cache (setas verticais pontilhadas)
+ax.annotate("", xy=(1.05, 1.85), xytext=(1.05, 3.28),
+            arrowprops=dict(arrowstyle="->", color="gray", lw=1.4, ls="--"))
+ax.text(1.15, 2.55, "cache\n" + r"$\mathbf{z}^{(l-1)}$", fontsize=8.5, color="dimgray")
+
+ax.annotate("", xy=(6.8, 1.85), xytext=(6.8, 3.28),
+            arrowprops=dict(arrowstyle="->", color="gray", lw=1.4, ls="--"))
+ax.text(6.9, 2.55, "cache\n" + r"$h'(\mathbf{a}^{(l)})$", fontsize=8.5, color="dimgray")
+
+# Linha inferior: BACKWARD PASS
+ax.text(0.2, 2.05, "PASSAGEM REVERSA (Backward) — propaga sensibilidades e acumula gradientes",
+        fontsize=10.5, fontweight='bold', color=COR_B)
+
+draw_box(9.6, 0.7, 2.1, 0.9, r"$\boldsymbol{\delta}^{(L)} = \hat{\mathbf{y}} - \mathbf{y}$", "#fdebd0", COR_B, fs=9.5)
+draw_box(5.7, 0.7, 3.1, 0.9, r"$\boldsymbol{\delta}^{(l)} = ((W^{(l+1)})^T\boldsymbol{\delta}^{(l+1)}) \odot h'(\mathbf{a}^{(l)})$", "#fdebd0", COR_B, fs=9.0)
+draw_box(2.4, 0.7, 2.5, 0.9, r"$\nabla_{W^{(l)}}\mathcal{L} = \boldsymbol{\delta}^{(l)}(\mathbf{z}^{(l-1)})^T$" + "\n" + r"$\nabla_{\mathbf{b}^{(l)}}\mathcal{L} = \boldsymbol{\delta}^{(l)}$", "#f3e8ff", "#6a3d9a", fs=9.0)
+draw_box(0.3, 0.7, 1.4, 0.9, r"$\dots \to \boldsymbol{\delta}^{(1)}$", "#fdebd0", COR_B, fs=9.5)
+
+for x1, x2 in [(9.48, 8.92), (5.58, 5.02), (2.28, 1.82)]:
+    ax.annotate("", xy=(x2, 1.15), xytext=(x1, 1.15),
+                arrowprops=dict(arrowstyle="->", color=COR_B, lw=2.0))
+
+plt.tight_layout()
+plt.show()
+```
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
-## O Algoritmo Vetorizado e o Teorema de Baur-Strassen
+## O Algoritmo Vetorizado, Memória e Gradientes em Redes Profundas
 
 Em notação matricial vetorizada compacta, para cada amostra (ou lote de amostras), o algoritmo executa:
 
 1. **Passagem Direta (*Forward Pass*):**
    Para $l = 1, \dots, L$:
    $$\mathbf{a}^{(l)} = W^{(l)} \mathbf{z}^{(l-1)} + \mathbf{b}^{(l)}, \quad \mathbf{z}^{(l)} = h(\mathbf{a}^{(l)})$$
-   com $\mathbf{z}^{(0)} = \mathbf{x}$.
+   com $\mathbf{z}^{(0)} = \mathbf{x}$, **armazenando em memória** os vetores $\mathbf{a}^{(l)}$ e $\mathbf{z}^{(l-1)}$ para uso posterior no passo reverso.
 2. **Sensibilidade da Camada de Saída:**
    $$\boldsymbol{\delta}^{(L)} = \hat{\mathbf{y}} - \mathbf{y}$$
 3. **Passagem Reversa (*Backward Pass*):**
@@ -601,6 +780,12 @@ Em notação matricial vetorizada compacta, para cada amostra (ou lote de amostr
    $$\boldsymbol{\delta}^{(l)} = \left( (W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)} \right) \odot h'(\mathbf{a}^{(l)})$$
 4. **Cálculo dos Gradientes das Matrizes:**
    $$\nabla_{W^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)} (\mathbf{z}^{(l-1)})^T, \quad \nabla_{\mathbf{b}^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)}$$
+
+### O Papel da Memória e o Problema do Desaparecimento do Gradiente
+- **Por que o treinamento profundo consome muita memória?** Ao contrário da inferência (que descarta ativações intermediárias após cada camada), o *backpropagation* exige manter o *cache* de $\mathbf{a}^{(l)}$ e $\mathbf{z}^{(l-1)}$ de todas as camadas até a passagem reversa voltar até elas (o que motiva técnicas como *gradient checkpointing*).
+- **Desaparecimento e Explosão do Gradiente (*Vanishing / Exploding Gradients*):** Desenrolando a recorrência da camada $L$ até a camada $1$:
+  $$\boldsymbol{\delta}^{(1)} = \left(\prod_{l=1}^{L-1} \operatorname{diag}\big(h'(\mathbf{a}^{(l)})\big)\,(W^{(l+1)})^T\right) \boldsymbol{\delta}^{(L)}$$
+  Se usarmos ativações saturantes como a sigmoide (cujo máximo da derivada é $h'(0) = 0{,}25$), esse produto de $L-1$ matrizes encolhe exponencialmente com a profundidade, fazendo as primeiras camadas pararem de aprender. O uso da **ReLU** ($h'(a) = 1$ para $a > 0$), normalizações (*LayerNorm/BatchNorm*) e conexões residuais ($\mathbf{z}^{(l+1)} = \mathbf{z}^{(l)} + F(\mathbf{z}^{(l)})$) garante que o gradiente flua sem colapsar.
 
 ### Complexidade Computacional: O Teorema de Baur-Strassen
 O Teorema de Baur-Strassen (1983) estabelece que para qualquer grafo de computação algébrico que avalia uma função escalar em tempo $C_{\text{fwd}}$, o gradiente completo em relação a **todas** as variáveis de entrada e parâmetros pode ser avaliado em tempo:
@@ -610,61 +795,59 @@ A retropropagação calcula o gradiente exato de milhões de pesos no mesmo temp
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## O Fluxo Completo: Forward + Backward
+## O Fluxo Completo, Memória e Gradientes Profundos
 
 ::: {.callout-note}
 ## Ciclo de Otimização por Mini-Batch
-1. **Forward:** Propaga ativações $\mathbf{x} \to \mathbf{z}^{(1)} \to \dots \to \hat{\mathbf{y}}$ e armazena os tensores $\mathbf{a}^{(l)}$ e $\mathbf{z}^{(l)}$.
+1. **Forward:** Propaga $\mathbf{x} \to \mathbf{z}^{(1)} \to \dots \to \hat{\mathbf{y}}$ e **guarda em memória** $\mathbf{a}^{(l)}, \mathbf{z}^{(l)}$ (cache).
 2. **Saída:** Avalia resíduo canônico $\boldsymbol{\delta}^{(L)} = \hat{\mathbf{y}} - \mathbf{y}$.
-3. **Backward:** Propaga sensibilidades $\boldsymbol{\delta}^{(l)} = ((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}) \odot h'(\mathbf{a}^{(l)})$.
-4. **Gradiente:** Computa $\nabla_{W^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)}(\mathbf{z}^{(l-1)})^T$ e atualiza pesos via otimizador (SGD, Adam, AdamW).
+3. **Backward:** Propaga $\boldsymbol{\delta}^{(l)} = ((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}) \odot h'(\mathbf{a}^{(l)})$.
+4. **Gradiente:** Computa $\nabla_{W^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)}(\mathbf{z}^{(l-1)})^T$ e atualiza pesos (SGD, AdamW).
+:::
+
+::: {.fragment}
+- **Desaparecimento do Gradiente (*Vanishing Gradients*):**
+  $\boldsymbol{\delta}^{(1)}$ depende do produto de $L-1$ Jacobianos $\operatorname{diag}(h'(\mathbf{a}^{(l)}))(W^{(l+1)})^T$:
+  - Sigmoide ($h' \le 0{,}25$) faz o gradiente encolher exponencialmente em redes profundas.
+  - ReLU ($h' \in \{0, 1\}$) e conexões residuais mantêm o fluxo de gradiente vivo.
 :::
 
 ::: {.fragment .callout-tip}
 ## Teorema de Baur-Strassen
-O custo temporal para calcular todos os gradientes é de no máximo $4\times$ o custo do forward ($\mathcal{O}(|W|)$ linear!).
+O custo temporal para calcular todos os gradientes é no máximo $4\times$ o custo do forward ($\mathcal{O}(|W|)$ linear!).
 :::
 :::
 
-::: {.content-visible when-format="html" unless-format="revealjs"}
 ## Pausa 3: Retropropagação de Erro
 
-::: {.callout-tip icon=false}
-### Teste Seus Conhecimentos — Pausa 3
-Considere uma rede 2-2-1 com ativação ReLU nas camadas ocultas e saída linear com perda quadrática $\mathcal{L} = \frac{1}{2}(\hat{y} - y)^2$.
-Suponha que para um exemplo tenhamos resíduo $\delta^{(2)} = \hat{y} - y = 4{,}0$. Os pesos da saída são $W^{(2)} = [3{,}0, \, -2{,}0]$ e as ativações pré-sinápticas ocultas são $a_1^{(1)} = 1{,}5$ e $a_2^{(1)} = -0{,}8$.
-1. Qual é o valor das sensibilidades $\delta_1^{(1)}$ e $\delta_2^{(1)}$?
-2. Por que a sensibilidade do neurônio 2 é nula?
-:::
+::: {.callout-tip}
+## Julgamento de V ou F
 
-::: {.callout-note icon=false}
-### Julgue V ou F para cada afirmação:
+Julgue V ou F — a questão só conta se acertar os 4 itens:
 
-- ( ) A sensibilidade $\boldsymbol{\delta}^{(l)}$ é obtida multiplicando o erro da camada posterior pelo transposto da matriz de pesos e pela derivada da função de ativação local.
-- ( ) Neurônios com ativação ReLU inativa ($a \le 0$) têm derivada nula, bloqueando a propagação de gradientes através deles naquela iteração.
-- ( ) A retropropagação tem custo computacional exponencial $\mathcal{O}(2^L)$ em relação ao número de camadas $L$.
-- ( ) O gradiente da perda em relação a $W^{(l)}$ é dado pelo produto externo entre o vetor de sensibilidade $\boldsymbol{\delta}^{(l)}$ e as ativações anteriores $(\mathbf{z}^{(l-1)})^T$.
-:::
+- □ A sensibilidade $\boldsymbol{\delta}^{(l)}$ é obtida multiplicando o erro da camada posterior pelo transposto da matriz de pesos e pela derivada da função de ativação local.
+- □ Neurônios com ativação ReLU inativa ($a \le 0$) têm derivada nula, bloqueando a propagação de gradientes através deles naquela iteração.
+- □ A retropropagação tem custo computacional exponencial $\mathcal{O}(2^L)$ em relação ao número de camadas $L$.
+- □ O gradiente da perda em relação a $W^{(l)}$ é dado pelo produto externo entre o vetor de sensibilidade $\boldsymbol{\delta}^{(l)}$ e as ativações anteriores $(\mathbf{z}^{(l-1)})^T$.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Pausa 3: Backpropagation
+
+## Pausa 3: Retropropagação de Erro — Resposta
 
 ::: {.callout-tip}
-## Pergunta de Fixação
+## Julgamento de V ou F — Resposta
 
-- Para $a_1 = 1{,}5 > 0 \implies h'=1 \implies \delta_1 = 1 \cdot (4 \times 3) = \mathbf{12{,}0}$.
-- Para $a_2 = -0{,}8 \le 0 \implies h'=0 \implies \delta_2 = 0 \cdot (4 \times (-2)) = \mathbf{0{,}0}$.
-- Neurônios dormentes na ReLU bloqueiam gradientes no passo backward!
+- ✔ **V:** Pela regra da cadeia, $\boldsymbol{\delta}^{(l)} = \big((W^{(l+1)})^T \boldsymbol{\delta}^{(l+1)}\big) \odot h'(\mathbf{a}^{(l)})$.
+- ✔ **V:** Quando $a \le 0$, $h'(a) = 0$, zerando a sensibilidade daquele neurônio na passagem reversa (*dying ReLU*).
+- ✗ **F:** Pelo Teorema de Baur-Strassen, todos os gradientes são calculados em tempo linear $\mathcal{O}(|W|)$ (no máximo $4\times$ o custo do *forward*).
+- ✔ **V:** Como $\frac{\partial a_j^{(l)}}{\partial W_{ji}^{(l)}} = z_i^{(l-1)}$, segue diretamente $\nabla_{W^{(l)}} \mathcal{L} = \boldsymbol{\delta}^{(l)} (\mathbf{z}^{(l-1)})^T$.
 :::
 
 ::: {.fragment}
-
-- [x] O erro propaga multiplicando por $(W^{(l+1)})^T$ e pela derivada local $h'$.
-- [x] A ReLU na região negativa zera o gradiente local, bloqueando o fluxo de erro.
-- [ ] A retropropagação escala exponencialmente com a profundidade. *(Falso: complexidade linear $\mathcal{O}(|W|)$ via Baur-Strassen!)*
-- [x] O gradiente dos pesos é o produto externo $\boldsymbol{\delta}^{(l)}(\mathbf{z}^{(l-1)})^T$.
+**Exemplo numérico (rede 2-2-1 ReLU, $\delta^{(2)} = 4{,}0$, $W^{(2)} = [3{,}0, -2{,}0]$):** para $a_1^{(1)} = 1{,}5 > 0$, $\delta_1^{(1)} = 1 \cdot (4 \times 3) = \mathbf{12{,}0}$; para $a_2^{(1)} = -0{,}8 \le 0$, $\delta_2^{(1)} = 0 \cdot (4 \times (-2)) = \mathbf{0{,}0}$.
 :::
+
 :::
 
 # Bloco 4: Regularização em Redes Profundas
@@ -730,42 +913,330 @@ $$\mathcal{L}_{\text{reg}} = \mathcal{L} + \frac{\lambda}{2}\sum_l \|W^{(l)}\|_F
 :::
 :::
 
-::: {.content-visible when-format="html" unless-format="revealjs"}
 ## Pausa 4: Regularização em Redes Profundas
 
-::: {.callout-tip icon=false}
-### Teste Seus Conhecimentos — Pausa 4
-1. Como o Dropout conecta a teoria de Redes Neurais com a teoria de Ensembles (Bagging e Random Forests) vista na Aula 9?
-2. Por que o Dropout deve ser desativado durante a etapa de teste e inferência?
-:::
+::: {.callout-tip}
+## Julgamento de V ou F
 
-::: {.callout-note icon=false}
-### Julgue V ou F para cada afirmação:
+Julgue V ou F — a questão só conta se acertar os 4 itens:
 
-- ( ) O decaimento de pesos ($L_2$) equivale à inferência MAP sob uma distribuição a priori Gaussiana independente em cada peso.
-- ( ) O Dropout treina estocasticamente um ensemble implícito de até $2^D$ sub-redes com compartilhamento de parâmetros.
-- ( ) No momento do teste e inferência, o Dropout continua ativado aleatoriamente para manter variância de amostragem nas predições.
-- ( ) O Dropout força cada neurônio a aprender detectores de características robustos e independentes, prevenindo co-adaptações espúrias.
-:::
+- □ O decaimento de pesos ($L_2$) equivale à inferência MAP sob uma distribuição a priori Gaussiana independente em cada peso.
+- □ O Dropout treina estocasticamente um ensemble implícito de até $2^D$ sub-redes com compartilhamento de parâmetros.
+- □ No momento do teste e inferência, o Dropout continua ativado aleatoriamente para manter variância de amostragem nas predições.
+- □ O Dropout força cada neurônio a aprender detectores de características robustos e independentes, prevenindo co-adaptações espúrias.
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Pausa 4: Weight Decay e Dropout
+
+## Pausa 4: Regularização em Redes Profundas — Resposta
 
 ::: {.callout-tip}
-## Pergunta de Fixação
+## Julgamento de V ou F — Resposta
 
-- Weight Decay = Priori Gaussiana MAP sobre os pesos ($L_2$).
-- Dropout = Amostragem estocástica de sub-arquiteturas a cada passo de mini-batch.
-- Por que desativar o Dropout na inferência? Para eliminar ruído estocástico e avaliar a média determinística do comitê de $2^D$ redes!
+- ✔ **V:** A penalidade $\frac{\lambda}{2}\|W\|_F^2$ corresponde exatamente ao termo de log-prior Gaussiano centrado em zero com $\lambda = 1/\sigma_w^2$.
+- ✔ **V:** Com $D$ neurônios ocultos sujeitos à máscara de Bernoulli, cada mini-batch amostra uma dentre $2^D$ sub-arquiteturas compartilhando pesos.
+- ✗ **F:** Na inferência, todos os neurônios ficam ligados (escalados por $1 - p_{\text{drop}}$) para gerar predições determinísticas que aproximam a média do comitê.
+- ✔ **V:** Como qualquer vizinho pode ser zerado a qualquer momento, os neurônios não podem depender de co-adaptações frágeis.
 :::
 
 ::: {.fragment}
+**Voltando à pergunta:** Assim como no Bagging (Aula 9) combinamos múltiplas árvores para reduzir a variância, o Dropout combina um comitê exponencial de sub-redes — mas com compartilhamento de pesos em uma única rede e desativação na inferência para avaliar a média determinística.
+:::
 
-- [x] O Weight Decay equivale à estimativa MAP sob priori Gaussiana centrada em zero.
-- [x] O Dropout simula o treinamento de um ensemble exponencial de sub-redes.
-- [ ] O Dropout permanece ativado aleatoriamente no teste. *(Falso: é desativado para predições determinísticas!)*
-- [x] O Dropout quebra co-adaptações espúrias entre detectores de atributos.
+:::
+
+# Bloco 5: Arquiteturas como *Priors* Estruturais
+
+## Camada Densa (MLP): O *Baseline* Sem *Prior* Geométrico
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Ao longo desta aula, estudamos o MLP, onde cada camada aplica $\mathbf{a}^{(l)} = W^{(l)}\mathbf{z}^{(l-1)} + \mathbf{b}^{(l)}$. Antes de avançarmos para arquiteturas especializadas, vale notar que **a arquitetura da rede funciona como um *prior* indutivo estrutural**: assim como *priors* sobre pesos (Aula 7) favorecem soluções suaves ou esparsas, a topologia das camadas define **quais relações são fáceis de extrair**.
+
+Na **camada densa (MLP)**, todo neurônio de entrada conecta-se a todo neurônio da camada seguinte com um peso independente:
+
+- **Prior Indutivo:** Nenhuma estrutura espacial, temporal ou relacional é assumida — o modelo é **agnóstico à permutação** das variáveis de entrada.
+- **Relevância e Aplicações:** Ideal para **dados tabulares** (ex.: prontuários clínicos, escore de crédito, sensores heterogêneos) onde a ordem das colunas é arbitrária. Porém, em imagens ou textos longos, desperdiça parâmetros ($\mathcal{O}(n_{l-1} n_l)$) e ignora que elementos vizinhos são fortemente correlacionados.
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+from matplotlib.patches import FancyBboxPatch
+
+fig, ax = plt.subplots(figsize=(8.8, 2.8))
+ax.set_xlim(0, 10)
+ax.set_ylim(0, 3.6)
+ax.axis('off')
+
+x_in = [1.5, 1.5, 1.5, 1.5]
+y_in = [0.5, 1.35, 2.2, 3.05]
+x_hid = [5.0, 5.0, 5.0]
+y_hid = [0.9, 1.8, 2.7]
+x_out = [8.5, 8.5]
+y_out = [1.3, 2.3]
+
+# Conexões todos-com-todos
+for yi in y_in:
+    for yh in y_hid:
+        ax.plot([1.75, 4.75], [yi, yh], color=COR_A, alpha=0.45, lw=1.3)
+for yh in y_hid:
+    for yo in y_out:
+        ax.plot([5.25, 8.25], [yh, yo], color=COR_B, alpha=0.55, lw=1.4)
+
+for idx, yi in enumerate(y_in):
+    ax.scatter([1.5], [yi], s=320, color="#e8f1fa", edgecolor=COR_A, lw=1.8, zorder=4)
+    ax.text(1.5, yi, f"$x_{idx+1}$", ha='center', va='center', fontsize=9.5, fontweight='bold')
+for idx, yh in enumerate(y_hid):
+    ax.scatter([5.0], [yh], s=340, color="#fdebd0", edgecolor=COR_B, lw=1.8, zorder=4)
+    ax.text(5.0, yh, f"$z_{idx+1}$", ha='center', va='center', fontsize=9.5, fontweight='bold')
+for idx, yo in enumerate(y_out):
+    ax.scatter([8.5], [yo], s=340, color="#e8f8f5", edgecolor=COR_VERDE, lw=1.8, zorder=4)
+    ax.text(8.5, yo, f"$\\hat{{y}}_{idx+1}$", ha='center', va='center', fontsize=9.5, fontweight='bold')
+
+ax.text(1.5, 3.45, "Entrada $\\mathbf{x}$", ha='center', fontsize=10, fontweight='bold', color=COR_A)
+ax.text(5.0, 3.45, "Camada Densa ($W^{(1)}$)", ha='center', fontsize=10, fontweight='bold', color=COR_B)
+ax.text(8.5, 3.45, "Saída ($W^{(2)}$)", ha='center', fontsize=10, fontweight='bold', color=COR_VERDE)
+ax.text(3.25, 0.15, "Conectividade global todos-com-todos (sem compartilhamento de pesos)",
+        ha='center', fontsize=9, color="dimgray", style="italic")
+
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="revealjs"}
+- **Prior Indutivo:** Nenhuma geometria assumida (agnóstico à ordem/permutação das colunas de $\mathbf{x}$).
+- **Por que importa:** Excelente para **dados tabulares** (prontuários, finanças), mas explode em parâmetros e ignora vizinhança em imagens, áudio ou texto.
+:::
+
+## Convolução (CNN): *Prior* de Localidade e Equivariância
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Na **Rede Neural Convolucional (CNN)**, substituímos a matriz densa $W$ por um **filtro local compartilhado** $K$ (ex.: $3 \times 3$) que desliza sobre uma grade (1D, 2D ou 3D):
+$$(\mathbf{z} * K)[p] = \sum_{\Delta \in \mathcal{N}_k} K[\Delta]\,\mathbf{z}[p + \Delta]$$
+
+- **Prior Indutivo:** (1) **Localidade** — padrões relevantes nascem da combinação de elementos vizinhos; (2) **Equivariância à translação** — o mesmo detector (compartilhamento de pesos $K$) identifica uma borda ou textura em qualquer posição da grade.
+- **Relevância e Aplicações:** Essencial em **visão computacional** (diagnóstico por imagem médica, detecção de objetos, imagens de satélite), **áudio/espectrogramas** e **sinais em grade**, permitindo empilhar camadas para ir de bordas simples $\to$ partes $\to$ objetos completos com muito menos parâmetros que um MLP.
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+from matplotlib.patches import Rectangle
+
+fig, ax = plt.subplots(figsize=(9.2, 2.9))
+ax.set_xlim(0, 11.5)
+ax.set_ylim(0, 3.6)
+ax.axis('off')
+
+# Grade 5x5 de entrada
+for r in range(5):
+    for c in range(5):
+        in_win = (1 <= r <= 3) and (1 <= c <= 3)
+        fc = "#d6eaf8" if in_win else "#f4f6f7"
+        ec = COR_A if in_win else "#bdc3c7"
+        lw = 1.8 if in_win else 0.9
+        ax.add_patch(Rectangle((0.5 + c*0.48, 0.55 + r*0.48), 0.46, 0.46, facecolor=fc, edgecolor=ec, lw=lw))
+
+ax.text(1.7, 3.25, "Entrada 2D ($5\\times 5$)", ha='center', fontsize=10, fontweight='bold', color=COR_A)
+ax.text(1.7, 0.2, "Janela local $3\\times 3$ (filtro $K$)", ha='center', fontsize=8.8, color=COR_A)
+
+# Seta para Mapa de Atributos (3x3)
+ax.annotate("", xy=(4.1, 1.75), xytext=(3.1, 1.75), arrowprops=dict(arrowstyle="->", color=COR_A, lw=2.0))
+ax.text(3.6, 2.05, "$*\\,K$", ha='center', fontsize=10.5, fontweight='bold', color=COR_A)
+
+# Mapa de Atributos 3x3
+for r in range(3):
+    for c in range(3):
+        is_c = (r == 1 and c == 1)
+        fc = "#fdebd0" if is_c else "#fef5e7"
+        ec = COR_B if is_c else "#e59866"
+        ax.add_patch(Rectangle((4.3 + c*0.52, 0.95 + r*0.52), 0.50, 0.50, facecolor=fc, edgecolor=ec, lw=1.6 if is_c else 1.0))
+
+ax.text(5.08, 3.25, "Mapa de Atributos ($K$)", ha='center', fontsize=10, fontweight='bold', color=COR_B)
+ax.text(5.08, 0.2, "Mesmos pesos em toda a grade", ha='center', fontsize=8.8, color=COR_B)
+
+# Seta para Hierarquia de Camadas
+ax.annotate("", xy=(7.1, 1.75), xytext=(6.05, 1.75), arrowprops=dict(arrowstyle="->", color="dimgray", lw=1.8))
+
+# Caixas de composição hierárquica
+layers_cnn = [
+    (7.3, "Camada 1\nBordas Locais", "#e8f1fa", COR_A),
+    (8.8, "Camada 2\nTexturas / Partes", "#fdebd0", COR_B),
+    (10.3, "Camada $L$\nObjetos", "#e8f8f5", COR_VERDE),
+]
+for idx, (lx, ltxt, lfc, lec) in enumerate(layers_cnn):
+    box = FancyBboxPatch((lx, 1.15), 1.15, 1.2, boxstyle="round,pad=0.08,rounding_size=0.12",
+                         facecolor=lfc, edgecolor=lec, lw=1.6)
+    ax.add_patch(box)
+    ax.text(lx + 0.575, 1.75, ltxt, ha='center', va='center', fontsize=8.5, fontweight='bold')
+    if idx < 2:
+        ax.annotate("", xy=(lx + 1.46, 1.75), xytext=(lx + 1.2, 1.75),
+                    arrowprops=dict(arrowstyle="->", color="dimgray", lw=1.5))
+
+ax.text(9.35, 3.25, "Hierarquia de Campos Receptivos", ha='center', fontsize=10, fontweight='bold', color="#182B49")
+
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="revealjs"}
+- **Prior Indutivo:** **Localidade espacial** + **equivariância à translação** (mesmo filtro $K$ varre toda a grade).
+- **Por que importa:** Em **imagens médicas, visão e áudio**, padrões locais repetem-se em qualquer posição; compor convoluções constrói hierarquias (bordas $\to$ partes $\to$ objetos) com fração dos parâmetros de um MLP.
+:::
+
+## *Self-Attention* (Transformer): *Prior* Relacional por Conteúdo
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+No bloco **Self-Attention** dos *Transformers*, cada elemento (*token*) da sequência projeta vetores de consulta ($Q$), chave ($K$) e valor ($V$) e calcula dinamicamente o quanto deve "prestar atenção" em todos os outros *tokens*:
+$$\text{Attention}(Q, K, V) = \operatorname{softmax}\!\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$
+
+- **Prior Indutivo:** **Grafo completo dinâmico guiado por afinidade semântica**. Diferente da convolução, não há janela fixa de vizinhança: qualquer *token* pode interagir diretamente com qualquer outro em 1 passo (a ordem sequencial é injetada via *positional encoding*).
+- **Relevância e Aplicações:** Dominante em **NLP e LLMs** (tradução, sumarização, código), **sequências biológicas longas** (DNA/proteínas) e **modelos multimodais**, justamente onde dependências de longo alcance (ex.: ligar um pronome ao seu referente 500 palavras atrás) são decisivas.
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(9.2, 2.9))
+ax.set_xlim(0, 11.5)
+ax.set_ylim(0, 3.6)
+ax.axis('off')
+
+tokens = [r"$t_1$ (O)", r"$t_2$ (gato)", r"$t_3$ (que...)", r"$t_4$ (dormiu)"]
+tx = [1.2, 2.8, 4.4, 6.0]
+
+# Tokens de entrada + Positional Encoding
+for i, (x, lbl) in enumerate(zip(tx, tokens)):
+    box = FancyBboxPatch((x - 0.62, 0.45), 1.24, 0.65, boxstyle="round,pad=0.06,rounding_size=0.1",
+                         facecolor="#e8f1fa", edgecolor=COR_A, lw=1.6)
+    ax.add_patch(box)
+    ax.text(x, 0.78, lbl, ha='center', va='center', fontsize=8.8, fontweight='bold')
+
+    box_out = FancyBboxPatch((x - 0.55, 2.45), 1.1, 0.6, boxstyle="round,pad=0.06,rounding_size=0.1",
+                             facecolor="#e8f8f5", edgecolor=COR_VERDE, lw=1.6)
+    ax.add_patch(box_out)
+    ax.text(x, 2.75, f"$\\mathbf{{z}}_{i+1}$", ha='center', va='center', fontsize=9.5, fontweight='bold')
+
+# Conexões de atenção para t_4 ("dormiu" olhando para "gato" com peso alto!)
+weights = [0.15, 0.72, 0.08, 0.25]
+for i, (x, w) in enumerate(zip(tx, weights)):
+    col = COR_B if i == 1 else "gray"
+    ax.annotate("", xy=(6.0, 2.42), xytext=(x, 1.15),
+                arrowprops=dict(arrowstyle="->", color=col, lw=0.9 + 3.2*w, alpha=0.35 + 0.65*w))
+ax.text(3.6, 1.92, "Atenção forte ($t_2 \\to t_4$) mesmo à distância!", fontsize=8.8, fontweight='bold', color=COR_B)
+
+ax.text(3.6, 0.12, "Tokens + Positional Encoding", ha='center', fontsize=9, color=COR_A, fontweight='bold')
+ax.text(3.6, 3.28, "Representações Contextualizadas (Grafo Dinâmico)", ha='center', fontsize=9.5, color=COR_VERDE, fontweight='bold')
+
+# Bloco da equação / camadas à direita
+blk1 = FancyBboxPatch((7.3, 1.9), 3.7, 1.05, boxstyle="round,pad=0.08,rounding_size=0.14",
+                      facecolor="#fdebd0", edgecolor=COR_B, lw=1.6)
+ax.add_patch(blk1)
+ax.text(9.15, 2.42, "Multi-Head Self-Attention\n" + r"$\mathrm{softmax}(QK^T/\sqrt{d_k})V$",
+        ha='center', va='center', fontsize=9, fontweight='bold')
+
+blk2 = FancyBboxPatch((7.3, 0.5), 3.7, 0.95, boxstyle="round,pad=0.08,rounding_size=0.14",
+                      facecolor="#f4f6f7", edgecolor="#182B49", lw=1.5)
+ax.add_patch(blk2)
+ax.text(9.15, 0.98, "MLP (Feed-Forward) + Residual\n(aplicado posição a posição)",
+        ha='center', va='center', fontsize=8.8, fontweight='bold')
+
+ax.annotate("", xy=(9.15, 1.5), xytext=(9.15, 1.85), arrowprops=dict(arrowstyle="->", color="#182B49", lw=1.8))
+
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="revealjs"}
+- **Prior Indutivo:** **Interação dinâmica por conteúdo** (grafo completo onde pesos dependem de $QK^T$; ordem via *positional encoding*).
+- **Por que importa:** Em **NLP (LLMs), DNA/proteínas e dados multimodais**, captura **dependências de longo alcance** em 1 único passo sem ficar preso a vizinhanças locais.
+:::
+
+## *Message Passing* (GNN): *Prior* de Topologia Explícita
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Quando os dados não vivem em uma tabela nem em uma grade regular, mas em um **grafo arbitrário** $\mathcal{G} = (\mathcal{V}, \mathcal{E})$, a **Rede Neural em Grafos (GNN)** atualiza cada nó $v$ agregando mensagens exclusivamente de seus vizinhos $\mathcal{N}(v)$:
+$$\mathbf{h}_v^{(l+1)} = \phi\!\left(\mathbf{h}_v^{(l)}, \; \bigoplus_{u \in \mathcal{N}(v)} \psi(\mathbf{h}_u^{(l)})\right)$$
+
+- **Prior Indutivo:** **Topologia relacional explícita e simetria de permutação** — a informação só flui pelas arestas existentes, e renumerar os vértices do grafo não altera o resultado (pois $\bigoplus$ é invariante à ordem, como soma ou média).
+- **Relevância e Aplicações:** Indispensável em **química e descoberta de fármacos** (átomos e ligações em moléculas), **sistemas de recomendação e redes sociais**, **roteamento/logística** e **simulações físicas em malhas**.
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+fig, ax = plt.subplots(figsize=(9.2, 2.9))
+ax.set_xlim(0, 11.5)
+ax.set_ylim(0, 3.6)
+ax.axis('off')
+
+# Grafo de entrada à esquerda
+nodes = {1: (1.2, 2.5), 2: (2.6, 2.7), 3: (2.1, 1.55), 4: (0.9, 0.8), 5: (3.3, 0.85)}
+edges = [(1, 2), (1, 3), (2, 3), (3, 4), (3, 5), (4, 5)]
+
+for u, v in edges:
+    is_target = (u == 3 or v == 3)
+    ax.plot([nodes[u][0], nodes[v][0]], [nodes[u][1], nodes[v][1]],
+            color=COR_B if is_target else "#bdc3c7", lw=2.3 if is_target else 1.3, zorder=1)
+
+for nid, (nx, ny) in nodes.items():
+    is_v = (nid == 3)
+    fc = "#fdebd0" if is_v else "#e8f1fa"
+    ec = COR_B if is_v else COR_A
+    ax.scatter([nx], [ny], s=420 if is_v else 300, color=fc, edgecolor=ec, lw=2.0, zorder=4)
+    lbl = "$v$" if is_v else f"$u_{nid}$"
+    ax.text(nx, ny, lbl, ha='center', va='center', fontsize=9.5, fontweight='bold')
+
+ax.text(2.1, 3.25, "Grafo de Entrada $\\mathcal{G}=(\\mathcal{V}, \\mathcal{E})$", ha='center', fontsize=10, fontweight='bold', color=COR_A)
+ax.text(2.1, 0.18, "Fluxo restrito às arestas de $\\mathcal{N}(v)$", ha='center', fontsize=8.8, color=COR_B)
+
+# Seta para Agregação
+ax.annotate("", xy=(5.0, 1.75), xytext=(3.8, 1.75), arrowprops=dict(arrowstyle="->", color=COR_B, lw=2.0))
+ax.text(4.4, 2.05, "Mensagens", ha='center', fontsize=8.8, fontweight='bold', color=COR_B)
+
+# Caixas de Message Passing
+b1 = FancyBboxPatch((5.2, 1.15), 2.4, 1.25, boxstyle="round,pad=0.08,rounding_size=0.14",
+                    facecolor="#fdebd0", edgecolor=COR_B, lw=1.6)
+ax.add_patch(b1)
+ax.text(6.4, 1.78, "Agregação Simétrica\n" + r"$\mathbf{m}_v = \bigoplus_{u \in \mathcal{N}(v)} \psi(\mathbf{h}_u^{(l)})$",
+        ha='center', va='center', fontsize=8.8, fontweight='bold')
+
+ax.annotate("", xy=(8.35, 1.75), xytext=(7.7, 1.75), arrowprops=dict(arrowstyle="->", color=COR_VERDE, lw=2.0))
+
+b2 = FancyBboxPatch((8.5, 1.15), 2.5, 1.25, boxstyle="round,pad=0.08,rounding_size=0.14",
+                    facecolor="#e8f8f5", edgecolor=COR_VERDE, lw=1.6)
+ax.add_patch(b2)
+ax.text(9.75, 1.78, "Atualização do Nó\n" + r"$\mathbf{h}_v^{(l+1)} = \phi(\mathbf{h}_v^{(l)}, \mathbf{m}_v)$",
+        ha='center', va='center', fontsize=8.8, fontweight='bold')
+
+ax.text(8.1, 3.25, "Camada de Message Passing (Equivariante)", ha='center', fontsize=10, fontweight='bold', color="#182B49")
+
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="revealjs"}
+- **Prior Indutivo:** **Topologia relacional explícita** (informação só flui pelas arestas) + **simetria à permutação** dos vértices.
+- **Por que importa:** Essencial para **moléculas e fármacos**, **redes sociais**, **sistemas de recomendação** e **malhas físicas**, onde não há grade regular.
+:::
+
+## Síntese: A Arquitetura Guia a Informação Extraída
+
+| Operador | *Prior* Indutivo (Hipótese sobre os Dados) | Estrutura da Camada | Aplicações Típicas |
+| :--- | :--- | :--- | :--- |
+| **Denso (MLP)** | Sem *prior* geométrico (invariante à permutação) | Conexão global todos-com-todos | Dados tabulares genéricos |
+| **Convolução (CNN)** | Localidade + equivariância à translação | Filtro local compartilhado em grade | Imagens, visão, áudio |
+| **Self-Attention (Transformer)** | Interação dinâmica por conteúdo | Grafo completo ponderado por $QK^T$ | Texto (LLMs), DNA/proteínas, multimodal |
+| **Message Passing (GNN)** | Topologia de grafo + simetria de nós | Agregação simétrica sobre arestas $\mathcal{N}(v)$ | Moléculas, redes sociais, malhas |
+
+::: {.content-visible when-format="revealjs"}
+::: {.callout-tip}
+## Lição Unificadora
+Redes profundas não são apenas "MLPs gigantes": **a arquitetura atua como um *prior* estrutural** que restringe o espaço de hipóteses e direciona o *backpropagation* para representações compatíveis com o domínio.
 :::
 :::
 
