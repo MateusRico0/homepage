@@ -1,0 +1,193 @@
+---
+title: "Soluções — Aula 12: Fundamentos do Aprendizado de Representação Contrastivo (InfoNCE)"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "today"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+
+::: {.callout-note icon=false}
+Gabarito comentado das questões discursivas e dos testes de Verdadeiro/Falso da Aula 12. A notação é a da seção "Contexto e notação" de [`exercicios.qmd`](exercicios.qmd).
+:::
+
+## Questões discursivas
+
+1. **Colapso e normalização.**
+   - **(a)** Como $\|\mathbf{z}_1 - \mathbf{z}_2\|_2^2 \ge 0$, o mínimo possível de $\mathcal{L}_{\text{align}}$ é $0$. Se $\mathbf{z}(\mathbf{x}) \equiv \mathbf{c}$ com $\|\mathbf{c}\|_2 = 1$, então $\|\mathbf{c} - \mathbf{c}\|_2^2 = 0$ para todo par, atingindo o mínimo global. Já na InfoNCE do SimCLR com lote de $B$ objetos, há $2B$ visões e $K = 2B - 2$ negativos por âncora. Para o mapa constante, $\mathbf{z}_i^T\mathbf{z}_j = \mathbf{c}^T\mathbf{c} = 1$ para todos os pares, logo:
+     $$\mathcal{L}_{\text{InfoNCE}} = -\ln\frac{\exp(1/\tau)}{\exp(1/\tau) + (2B-2)\exp(1/\tau)} = \ln(2B-1) = \ln(K+1).$$
+   - **(b)** Multiplicando $\mathbf{z}$ por $\alpha > 0$, todos os escores ficam multiplicados por $\alpha^2$:
+     $$\mathcal{L}_{\text{InfoNCE}}(\alpha\mathbf{z}) = \ln\!\left(1 + \sum_{j=1}^K \exp\!\left(\frac{\alpha^2}{\tau}\big(\mathbf{z}(\mathbf{x})^T\mathbf{z}(\mathbf{x}_j^-) - \mathbf{z}(\mathbf{x})^T\mathbf{z}(\mathbf{x}^+)\big)\right)\right).$$
+     Como cada diferença nos expoentes é estritamente negativa, quando $\alpha \to \infty$ cada exponencial tende a $0$ e a perda converge para $0$ sem que a separação angular entre os vetores melhore. Na otimização por gradiente, a rede pode inflar $\|\mathbf{z}\|_2$ arbitrariamente em vez de aprender direções discriminativas.
+
+2. **Crítico ótimo de Bayes e razão de densidades.**
+   - **(a)** Sob a hipótese $y^\star = i$, o candidato $\mathbf{x}_i$ vem de $p(\mathbf{x}_i\mid\mathbf{x})$ e os $K$ demais vêm i.i.d. de $p(\mathbf{x}_j)$, logo:
+     $$p(\mathcal{C}\mid\mathbf{x}, y^\star = i) = p(\mathbf{x}_i\mid\mathbf{x})\prod_{j\ne i} p(\mathbf{x}_j) = \frac{p(\mathbf{x}_i\mid\mathbf{x})}{p(\mathbf{x}_i)}\prod_{j=0}^K p(\mathbf{x}_j).$$
+     Pela regra de Bayes com priori uniforme $P(y^\star = i) = \frac{1}{K+1}$, o fator comum $\frac{1}{K+1}\prod_{j=0}^K p(\mathbf{x}_j)$ cancela entre numerador e denominador:
+     $$P(y^\star = i\mid\mathbf{x}, \mathcal{C}) = \frac{p(\mathbf{x}_i\mid\mathbf{x})/p(\mathbf{x}_i)}{\sum_{j=0}^K p(\mathbf{x}_j\mid\mathbf{x})/p(\mathbf{x}_j)}.$$
+   - **(b)** A entropia cruzada é uma regra de pontuação estritamente própria, portanto seu mínimo ocorre quando a *softmax* do modelo iguala $P(y^\star=i\mid\mathbf{x},\mathcal{C})$ para todo $i$. Isso ocorre se e somente se $\exp(u^\star(\mathbf{x},\mathbf{x}')) = c(\mathbf{x})\frac{p(\mathbf{x}'\mid\mathbf{x})}{p(\mathbf{x}')}$ para algum fator positivo $c(\mathbf{x})$ que não depende do candidato $\mathbf{x}'$ (pois um fator que dependa apenas de $\mathbf{x}$ cancela igualmente no numerador e em todos os termos do denominador da *softmax*).
+
+3. **Saturação da cota de Informação Mútua.**
+   - **(a)** Como $\mathcal{L}_{\text{InfoNCE}} \ge 0$, precisamos de $\ln(K+1) \ge 6{,}91 \approx \ln(1.000)$, logo $K + 1 \ge 1.000 \implies K \ge 999$ negativos.
+   - **(b)** No SimCLR, $K = 2B - 2 \ge 999 \implies 2B \ge 1.001 \implies B \ge 501$ imagens por minilote. O MoCo desacopla $K$ de $B$ mantendo uma fila dinâmica com as $K$ últimas projeções de um codificador *momentum*, permitindo $K$ muito maior que $2B-2$ com memória de lote pequena.
+
+4. **Temperatura e gradiente na hiperesfera.**
+   - **(a)** Escrevendo $\ell = -\frac{\mathbf{z}^T\mathbf{z}^+}{\tau} + \ln\Big(\exp(\mathbf{z}^T\mathbf{z}^+/\tau) + \sum_{j=1}^K \exp(\mathbf{z}^T\mathbf{z}_j^-/\tau)\Big)$ e definindo $p_+ = 1 - \sum_{j=1}^K p_j$, temos:
+     $$\frac{\partial \ell}{\partial \mathbf{z}} = -\frac{\mathbf{z}^+}{\tau} + p_+\frac{\mathbf{z}^+}{\tau} + \sum_{j=1}^K p_j \frac{\mathbf{z}_j^-}{\tau} = \frac{1}{\tau}\sum_{j=1}^K p_j (\mathbf{z}_j^- - \mathbf{z}^+).$$
+     (Alternativamente, usando $p_+ = 1 - \sum_j p_j$, o gradiente empurra $\mathbf{z}$ na direção de $\mathbf{z}^+$ e afasta de cada $\mathbf{z}_j^-$ proporcionalmente a $p_j$.)
+   - **(b)** Quando $\tau \to 0^+$, $p_j$ concentra quase todo o peso no negativo de maior similaridade $\mathbf{z}^T\mathbf{z}_j^-$ (*hard negative*). Se esse negativo próximo for um falso negativo (mesma classe semântica), o gradiente o empurra fortemente para longe, fragmentando a classe (*dilema uniformidade-tolerância*). Quando $\tau \to \infty$, todos os $p_j$ convergem para $1/(K+1)$, dando o mesmo peso a negativos fáceis e difíceis e reduzindo a magnitude do gradiente pelo fator $1/\tau$.
+
+## Questões de Verdadeiro/Falso
+
+::: {.callout-note icon=false}
+## Teste 1 — Reconstrução vs. Contraste
+
+- □ Se as 18 últimas coordenadas de um conjunto de dados em $\mathbb{R}^{20}$ são ruído gaussiano de variância $9$ e as 2 primeiras contêm 3 classes com variância $0{,}1$, a PCA 2D recupera as 2 primeiras coordenadas.
+- □ Um Autoencoder treinado com erro quadrático médio (MSE) sofre do mesmo viés de variância que a PCA quando o *nuisance* domina a energia do sinal.
+- □ O aprendizado contrastivo depende da escolha da família de aumentações $\mathcal{T}$ para definir quais variações devem ser descartadas na representação.
+- □ Minimizar apenas $\|\mathbf{z}(\mathbf{x}) - \mathbf{z}(\mathbf{x}^+)\|_2^2$ sobre vetores unitários $\|\mathbf{z}\|_2 = 1$ já é suficiente para evitar o colapso constante.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 1 — Reconstrução vs. Contraste
+
+- ✗ Falso — a PCA maximiza a variância projetada; ela escolherá duas direções no subespaço de ruído (variância $9$), ignorando o sinal (variância $0{,}1$).
+- ✔ Verdadeiro — minimizar MSE nos atributos de entrada prioriza reconstruir as componentes de maior energia/variância.
+- ✔ Verdadeiro — sem rótulos, $\mathcal{T}$ é a definição operacional de quais perturbações a representação deve ignorar.
+- ✗ Falso — um vetor constante unitário $\mathbf{z}(\mathbf{x}) \equiv \mathbf{c}$ tem norma $1$ e zera $\|\mathbf{z}(\mathbf{x}) - \mathbf{z}(\mathbf{x}^+)\|_2^2$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — Formulação da InfoNCE
+
+- □ No SimCLR com minilote de $B = 32$ imagens, existem $64$ visões no total e $K = 62$ negativos para cada visão âncora.
+- □ Se um codificador mapeia todos os pontos para o mesmo vetor unitário $\mathbf{c}$, a perda InfoNCE com $K$ negativos vale $\ln(K+1)$.
+- □ A perda InfoNCE pode assumir valores negativos quando a similaridade do par positivo é próxima de $1$ e $\tau$ é pequeno.
+- □ No SimCLR, todos os negativos do minilote são garantidamente de classes semânticas diferentes da âncora.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 2 — Formulação da InfoNCE
+
+- ✔ Verdadeiro — são $2B = 64$ visões; excluindo a própria âncora e sua contraparte positiva, sobram $2B - 2 = 62$ negativos.
+- ✔ Verdadeiro — todas as similaridades valem $1$, logo a razão dentro do $\ln$ é $1/(K+1)$ e $-\ln(1/(K+1)) = \ln(K+1)$.
+- ✗ Falso — o numerador é estritamente menor que o denominador (já que $\exp(\cdot) > 0$), portanto a fração está em $(0, 1)$ e $-\ln(\cdot) > 0$ sempre.
+- ✗ Falso — como não há rótulos no treino, outras imagens do lote podem pertencer à mesma classe semântica (falsos negativos).
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — Informação Mútua e Razão de Densidades
+
+- □ A Informação Mútua $I(X; Y)$ é sempre não negativa e igual a zero se e somente se $X$ e $Y$ são independentes.
+- □ O crítico ótimo da InfoNCE exige estimar separadamente a densidade marginal $p(\mathbf{x})$ via KDE antes de calcular a razão $p(\mathbf{x}'\mid\mathbf{x})/p(\mathbf{x}')$.
+- □ Para qualquer função $u$ e qualquer $K \ge 1$, vale $I(\mathbf{x}; \mathbf{x}^+) \ge \ln(K+1) - \mathcal{L}_{\text{InfoNCE}}(u; K)$.
+- □ Se $\mathcal{L}_{\text{InfoNCE}} = 0{,}05$ com $K = 7$, podemos afirmar que $I(\mathbf{x}; \mathbf{x}^+) \le \ln 8$.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 3 — Informação Mútua e Razão de Densidades
+
+- ✔ Verdadeiro — $I(X;Y) = \mathrm{KL}(p(x,y)\|p(x)p(y)) \ge 0$, com igualdade sse $p(x,y) = p(x)p(y)$.
+- ✗ Falso — a entropia cruzada contrastiva estima diretamente o logaritmo da razão de densidades, sem estimar $p(\mathbf{x})$ isolada.
+- ✔ Verdadeiro — é o teorema da cota inferior da InfoNCE (Oord et al., 2018; Poole et al., 2019).
+- ✗ Falso — a cota é *inferior*: garantimos apenas $I(\mathbf{x}; \mathbf{x}^+) \ge \ln 8 - 0{,}05$, podendo ser muito maior.
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — Saturação e Papel de $K$
+
+- □ A cota $\ln(K+1) - \mathcal{L}_{\text{InfoNCE}}$ nunca pode ultrapassar $\ln(K+1)$ nats, independentemente da arquitetura da rede.
+- □ Aumentar o número de negativos $K$ muda o valor real de $I(\mathbf{x}; \mathbf{x}^+)$ entre duas visões do mesmo dado.
+- □ Quando $I(\mathbf{x}; \mathbf{x}^+)$ é muito maior que $\ln(K+1)$, a InfoNCE pode atingir perda próxima de zero mesmo que a rede capture apenas parte da informação compartilhada.
+- □ Pela Desigualdade de Processamento de Dados, $I(\mathbf{z}(\mathbf{x}); \mathbf{z}(\mathbf{x}^+)) \le I(\mathbf{x}; \mathbf{x}^+)$.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 4 — Saturação e Papel de $K$
+
+- ✔ Verdadeiro — como $\mathcal{L}_{\text{InfoNCE}} \ge 0$, vale $\ln(K+1) - \mathcal{L}_{\text{InfoNCE}} \le \ln(K+1)$.
+- ✗ Falso — $I(\mathbf{x};\mathbf{x}^+)$ depende apenas da distribuição conjunta das visões $p(\mathbf{x},\mathbf{x}^+)$, não de $K$.
+- ✔ Verdadeiro — basta que os $\ln(K+1)$ nats capturados sejam suficientes para distinguir 1 positivo entre $K$ negativos aleatórios.
+- ✔ Verdadeiro — aplicar uma função determinística $\mathbf{z}(\cdot)$ às entradas não pode criar informação mútua.
+:::
+
+::: {.callout-note icon=false}
+## Teste 5 — Geometria na Hiperesfera
+
+- □ Na hiperesfera unitária $\mathbb{S}^{M_z-1}$, maximizar $\mathbf{z}_1^T\mathbf{z}_2$ equivale exatamente a minimizar $\|\mathbf{z}_1 - \mathbf{z}_2\|_2^2$.
+- □ No limite $K \to \infty$, o termo repulsivo da InfoNCE converge para um termo proporcional à energia média do kernel Gaussiano na esfera, que é minimizada pela distribuição uniforme.
+- □ A decomposição de Wang & Isola (2020) mostra que a InfoNCE busca simultaneamente invariância local (alinhamento) e máxima entropia global na esfera (uniformidade).
+- □ Uma representação perfeitamente uniforme na hiperesfera, mas com $\mathcal{L}_{\text{align}}$ alto, é útil para classificação porque separa bem todas as amostras.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 5 — Geometria na Hiperesfera
+
+- ✔ Verdadeiro — $\|\mathbf{z}_1 - \mathbf{z}_2\|_2^2 = 2 - 2\mathbf{z}_1^T\mathbf{z}_2$ quando $\|\mathbf{z}_1\|_2 = \|\mathbf{z}_2\|_2 = 1$.
+- ✔ Verdadeiro — $\mathcal{L}_{\text{uniform}}$ é o logaritmo da média de $\exp(-t\|\mathbf{z}-\mathbf{z}'\|_2^2)$, cuja distribuição minimizadora na esfera compacta é a uniforme.
+- ✔ Verdadeiro — a perda equilibra os dois objetivos no limite de muitos negativos.
+- ✗ Falso — ruído puro mapeado uniformemente na esfera tem alta uniformidade, mas não agrupa visões do mesmo objeto ($\mathcal{L}_{\text{align}}$ alto) e falha em tarefas *downstream*.
+:::
+
+::: {.callout-note icon=false}
+## Teste 6 — Temperatura $\tau$
+
+- □ Valores muito pequenos de $\tau$ fazem o gradiente concentrar-se nos negativos mais próximos da âncora (*hard negatives*).
+- □ No dilema uniformidade-tolerância, $\tau$ pequeno demais pode prejudicar a acurácia *downstream* porque empurra com força excessiva falsos negativos da mesma classe.
+- □ Aumentar $\tau$ para $\tau = 100$ melhora a separação de *hard negatives* porque amplifica diferenças pequenas de cosseno.
+- □ A temperatura $\tau$ pode ser interpretada como um inverso da escala de norma efetiva na *softmax*.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 6 — Temperatura $\tau$
+
+- ✔ Verdadeiro — dividir por $\tau$ pequeno amplifica diferenças de similaridade, concentrando o peso exponencial nos maiores produtos internos negativos.
+- ✔ Verdadeiro — falsos negativos são justamente negativos muito próximos da âncora; puni-los com força excessiva fragmenta a estrutura de classes.
+- ✗ Falso — $\tau$ grande *reduz* as diferenças nos expoentes, aproximando todos os pesos *softmax* de $1/(K+1)$.
+- ✔ Verdadeiro — $\frac{\mathbf{z}_1^T\mathbf{z}_2}{\tau} = \left(\frac{\mathbf{z}_1}{\sqrt{\tau}}\right)^T \left(\frac{\mathbf{z}_2}{\sqrt{\tau}}\right)$, equivalente a fixar $\|\mathbf{z}\|_2 = 1/\sqrt{\tau}$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 7 — Cabeça de Projeção e Aumentações
+
+- □ Após o treinamento contrastivo, descartamos a cabeça de projeção $g_{\boldsymbol\psi}$ e usamos $\mathbf{h} = f_{\boldsymbol\phi}(\mathbf{x})$ no *linear probe* porque $\mathbf{h}$ retém informações úteis que $\mathbf{z}$ descarta para satisfazer a invariância estrita.
+- □ O *linear probe* ajusta todo o *backbone* $f_{\boldsymbol\phi}$ com uma taxa de aprendizado pequena nos dados rotulados.
+- □ Se as aumentações $\mathcal{T}$ forem fracas demais, o modelo pode resolver a tarefa contrastiva usando atalhos superficiais (*shortcuts*) sem aprender semântica.
+- □ Pelo princípio InfoMin, quanto maior for $I(\tilde{\mathbf{x}}^{(1)}; \tilde{\mathbf{x}}^{(2)})$, melhor será sempre a representação para qualquer tarefa *downstream*.
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 7 — Cabeça de Projeção e Aumentações
+
+- ✔ Verdadeiro — confirmado empiricamente por Chen et al. (2020) e no experimento com `load_digits` desta aula.
+- ✗ Falso — o *linear probe* congela $f_{\boldsymbol\phi}$ e treina apenas o classificador linear sobre $\mathbf{h}$. Ajustar $f_{\boldsymbol\phi}$ chama-se *fine-tuning*.
+- ✔ Verdadeiro — se $\tilde{\mathbf{x}}^{(1)} \approx \tilde{\mathbf{x}}^{(2)}$, basta comparar estatísticas triviais de pixel ou fundo.
+- ✗ Falso — aumentar $I(\tilde{\mathbf{x}}^{(1)}; \tilde{\mathbf{x}}^{(2)})$ reduzindo as aumentações pode reter *nuisance* demais e facilitar atalhos; o InfoMin busca *minimizar* $I$ mantendo a informação da tarefa.
+:::
+
+::: {.callout-note icon=false}
+## Teste 8 — Alternativas Sem Negativos Explícitos
+
+- □ O MoCo usa uma fila de representações de um codificador *momentum* para obter $K$ grande sem precisar de minilotes gigantes em GPU.
+- □ Métodos como Barlow Twins substituem os pares negativos por uma penalização que aproxima a matriz de correlação cruzada entre as visões da matriz identidade.
+- □ No SimSiam e no BYOL, remover o *stop-gradient* não altera o ponto fixo do treinamento.
+- □ A descorrelação entre coordenadas no Barlow Twins guarda parentesco conceitual com o branqueamento (*whitening*) visto na PCA (Aula 6).
+:::
+
+::: {.callout-tip}
+## (Resposta) Teste 8 — Alternativas Sem Negativos Explícitos
+
+- ✔ Verdadeiro — a fila armazena projeções recentes de lotes anteriores, desacoplando $K$ de $B$.
+- ✔ Verdadeiro — força invariância na diagonal ($1$) e redundância nula fora da diagonal ($0$).
+- ✗ Falso — sem *stop-gradient*, ambos os ramos se adaptam um ao outro simetricamente e colapsam para um vetor constante.
+- ✔ Verdadeiro — ambos buscam dimensões de variância unitária e covariância nula entre si.
+:::

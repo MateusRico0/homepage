@@ -1,0 +1,156 @@
+---
+title: "Soluções dos Exercícios — Aula 13: Precondicionamento Estruturado e Ortogonalização Matricial"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+
+::: {.callout-tip icon=false}
+Este documento contém as resoluções detalhadas passo a passo de todas as questões discursivas e o gabarito comentado das questões conceituais da **Aula 13**.
+:::
+
+## Questões discursivas
+
+### Questão 1: Explosão Combinatória do Hessiano Completo vs. Fatoração de Kronecker
+
+**a) Dimensão do vetor e tamanho do Hessiano:**
+- Matriz $W \in \mathbb{R}^{m \times n}$ com $m = 2.048$ e $n = 4.096$.
+- Dimensão do vetor achatado:
+  $$d = m \times n = 2.048 \times 4.096 = 8.388.608 \approx 8{,}39 \times 10^6 \text{ parâmetros (8,39M)}$$
+- Dimensão do Hessiano completo $H$:
+  $$\dim(H) = d \times d = (8{,}39 \times 10^6) \times (8{,}39 \times 10^6) \approx 7{,}04 \times 10^{13} \text{ elementos}$$
+
+**b) Memória necessária em FP32:**
+- Cada elemento em precisão simples ocupa 4 bytes:
+  $$\text{Memória} = 7{,}04 \times 10^{13} \times 4 \text{ bytes} \approx 2{,}81 \times 10^{14} \text{ bytes} \approx 281{,}5 \text{ Terabytes (TB)}$$
+  Armazenar o Hessiano de uma única camada exigiria a memória combinada de mais de 3.500 GPUs de 80 GB!
+
+**c) Comparativo de FLOPs de Inversão:**
+- Inversão completa do Hessiano:
+  $$\text{FLOPs}_{\text{completo}} \approx \frac{2}{3} d^3 = \frac{2}{3} (8{,}39 \times 10^6)^3 \approx 3{,}93 \times 10^{20} \text{ FLOPs}$$
+- Raízes inversas do Shampoo:
+  $$L = \mathbb{E}[G G^T] \in \mathbb{R}^{2.048 \times 2.048}, \quad R = \mathbb{E}[G^T G] \in \mathbb{R}^{4.096 \times 4.096}$$
+  $$\text{FLOPs}_{\text{Shampoo}} = \mathcal{O}(m^3 + n^3) \approx \frac{2}{3}(2.048)^3 + \frac{2}{3}(4.096)^3 \approx 5{,}7 \times 10^9 + 4{,}58 \times 10^{10} \approx 5{,}15 \times 10^{10} \text{ FLOPs}$$
+  O ganho de eficiência do Shampoo é de:
+  $$\frac{3{,}93 \times 10^{20}}{5{,}15 \times 10^{10}} \approx 7{,}6 \times 10^9 \quad (\approx 7{,}6 \text{ bilhões de vezes mais rápido!})$$
+
+**d) Justificativa Algébrica do Expoente $-1/4$:**
+Pela álgebra do produto de Kronecker, a inversa da raiz quadrada de $H \approx L \otimes R$ fatora como:
+$$(L \otimes R)^{-1/2} = L^{-1/2} \otimes R^{-1/2}$$
+Pela propriedade da vetorização de produtos matriciais $\text{vec}(A X B) = (B^T \otimes A)\text{vec}(X)$:
+Para matrizes simétricas $L$ e $R$ ($L = L^T, R = R^T$), se definirmos os fatores simétricos simetricamente à esquerda e à direita:
+$$(L^{-1/2} \otimes R^{-1/2})\text{vec}(G) = \text{vec}\left( L^{-1/4} G R^{-1/4} \right)$$
+pois a aplicação repetida do operador linear em coordenadas matriciais divide a potência simetricamente por 2 em cada lado do produto bilinear: $(L^{-1/4})^2 = L^{-1/2}$ e $(R^{-1/4})^2 = R^{-1/2}$.
+
+---
+
+### Questão 2: Dedução da Decomposição Polar e o Problema de Procrustes Ortogonal
+
+**a) Fatoração $G = U P$:**
+Dada a SVD $G = V_1 \Sigma V_2^T$:
+Defina $U \triangleq V_1 V_2^T$ e $P \triangleq V_2 \Sigma V_2^T$.
+1. Produto $U P$:
+   $$U P = (V_1 V_2^T)(V_2 \Sigma V_2^T) = V_1 (V_2^T V_2) \Sigma V_2^T = V_1 I \Sigma V_2^T = V_1 \Sigma V_2^T = G$$
+2. Ortogonalidade de $U$:
+   $$U^T U = (V_1 V_2^T)^T (V_1 V_2^T) = V_2 V_1^T V_1 V_2^T = V_2 I_n V_2^T = V_2 V_2^T = I_n$$
+3. Definitude de $P$:
+   $P^T = (V_2 \Sigma V_2^T)^T = V_2 \Sigma^T V_2^T = P$ (simétrica). Como $\sigma_i > 0$, $\mathbf{x}^T P \mathbf{x} = (V_2^T \mathbf{x})^T \Sigma (V_2^T \mathbf{x}) = \sum \sigma_i z_i^2 > 0$ para qualquer $\mathbf{x} \neq \mathbf{0}$. Logo, $P \succ 0$.
+
+**b) Dedução da Fórmula $U = G(G^T G)^{-1/2}$:**
+Calculemos $G^T G$:
+$$G^T G = (U P)^T (U P) = P^T U^T U P = P I P = P^2$$
+Como $P \succ 0$, a raiz quadrada simétrica única é $(G^T G)^{1/2} = P$.
+Invertendo: $P^{-1} = (G^T G)^{-1/2}$.
+Multiplicando $G = U P$ à direita por $P^{-1}$:
+$$G P^{-1} = U P P^{-1} \implies U = G (G^T G)^{-1/2}$$
+
+**c) Problema de Procrustes Ortogonal:**
+Queremos resolver $\min_{Q^T Q = I_n} \|Q - G\|_F^2$.
+Expandindo pela definição da norma de Frobenius $\|A\|_F^2 = \operatorname{tr}(A^T A)$:
+$$\|Q - G\|_F^2 = \operatorname{tr}\left((Q - G)^T (Q - G)\right) = \operatorname{tr}(Q^T Q) - 2\operatorname{tr}(Q^T G) + \operatorname{tr}(G^T G)$$
+Como $Q^T Q = I_n$, temos $\operatorname{tr}(Q^T Q) = \operatorname{tr}(I_n) = n$ (constante). O termo $\operatorname{tr}(G^T G) = \|G\|_F^2$ também é constante.
+Portanto:
+$$\arg\min_{Q^T Q = I_n} \|Q - G\|_F^2 \equiv \arg\max_{Q^T Q = I_n} \operatorname{tr}(Q^T G)$$
+Substituindo a SVD de $G = V_1 \Sigma V_2^T$:
+$$\operatorname{tr}(Q^T G) = \operatorname{tr}(Q^T V_1 \Sigma V_2^T) = \operatorname{tr}(V_2^T Q^T V_1 \Sigma)$$
+Defina a matriz ortogonal $Z \triangleq V_2^T Q^T V_1 \in \mathbb{R}^{n \times n}$. Como $Z$ é produto de matrizes com colunas ortonormais, suas entradas satisfazem $|Z_{ii}| \le 1$.
+$$\operatorname{tr}(Z \Sigma) = \sum_{i=1}^n Z_{ii} \sigma_i \le \sum_{i=1}^n 1 \cdot \sigma_i = \sum_{i=1}^n \sigma_i$$
+A igualdade ocorre se e somente se $Z_{ii} = 1$ para todo $i$, ou seja, $Z = I_n$.
+$$V_2^T Q^T V_1 = I_n \implies Q = V_1 V_2^T = U$$
+Provando que o fator polar $U$ é exatamente a projeção ortogonal ótima de $G$ no espaço de Procrustes!
+
+**d) Valores Singulares de $U$ e Controle da Norma Espectral:**
+Como $U = V_1 I_n V_2^T$, seus valores singulares são todos unitários: $\boldsymbol{\sigma}(U) = [1, 1, \dots, 1]^T$.
+A norma espectral de uma matriz é seu maior valor singular: $\|U\|_2 = \sigma_{\max}(U) = 1$.
+Em redes neurais profundas, a atualização $W_{t+1} = W_t - \alpha U_t$ garante que a perturbação máxima que qualquer vetor de ativação $\mathbf{x}$ pode sofrer em norma euclidiana seja rigorosamente limitada por:
+$$\|\Delta W \mathbf{x}\|_2 \le \alpha \|U\|_2 \|\mathbf{x}\|_2 = \alpha \|\mathbf{x}\|_2$$
+Isso impede que autovetores dominantes acumulem ganhos multiplicativos descontrolados camada a camada, garantindo estabilidade numérica perfeita sem requerer clipping manual de gradientes.
+
+---
+
+### Questão 3: Análise de Convergência da Iteração Polinomial de Newton-Schulz
+
+**a) Desacoplamento Diagonal dos Valores Singulares:**
+Seja $X_k = V_1 \Sigma_k V_2^T$.
+Substituindo na iteração de Newton-Schulz:
+$$X_k^T X_k = (V_2 \Sigma_k V_1^T)(V_1 \Sigma_k V_2^T) = V_2 \Sigma_k^2 V_2^T$$
+$$3I - X_k^T X_k = 3 V_2 V_2^T - V_2 \Sigma_k^2 V_2^T = V_2 (3I - \Sigma_k^2) V_2^T$$
+Multiplicando por $X_k$:
+$$X_{k+1} = \frac{1}{2} (V_1 \Sigma_k V_2^T) [V_2 (3I - \Sigma_k^2) V_2^T] = \frac{1}{2} V_1 \Sigma_k (3I - \Sigma_k^2) V_2^T = V_1 \left[ \frac{1}{2}\Sigma_k(3I - \Sigma_k^2) \right] V_2^T$$
+Portanto, as matrizes de bases singulares $V_1$ e $V_2$ permanecem inalteradas, e cada valor singular $\sigma$ evolui independentemente pela regra escalar:
+$$\sigma_{k+1} = f(\sigma_k) = \frac{1}{2}\sigma_k (3 - \sigma_k^2)$$
+
+**b) Pontos Fixos:**
+$$\sigma = \frac{1}{2}\sigma(3 - \sigma^2) \implies 2\sigma = 3\sigma - \sigma^3 \implies \sigma^3 - \sigma = 0 \implies \sigma(\sigma^2 - 1) = 0$$
+Para $\sigma \ge 0$, os pontos fixos são:
+$$\sigma = 0 \quad \text{e} \quad \sigma = 1$$
+
+**c) Ordem de Convergência:**
+Calculando as derivadas da função de iteração $f(\sigma) = \frac{3}{2}\sigma - \frac{1}{2}\sigma^3$:
+- Primeira derivada: $f'(\sigma) = \frac{3}{2} - \frac{3}{2}\sigma^2 = \frac{3}{2}(1 - \sigma^2)$
+  No ponto fixo $\sigma = 1$:
+  $$f'(1) = \frac{3}{2}(1 - 1) = 0$$
+- Segunda derivada: $f''(\sigma) = -3\sigma$
+  No ponto fixo $\sigma = 1$:
+  $$f''(1) = -3 \neq 0$$
+Pela teoria de pontos fixos de Banach, como $f'(1) = 0$, a convergência não é linear, mas de ordem pelo menos quadrática/cúbica!
+Analisando a expansão de Taylor do erro $e_k = 1 - \sigma_k$:
+$$e_{k+1} = 1 - \sigma_{k+1} = 1 - \frac{1}{2}(1 - e_k)(3 - (1 - e_k)^2) = 1 - \frac{1}{2}(1 - e_k)(3 - 1 + 2e_k - e_k^2) = 1 - \frac{1}{2}(1 - e_k)(2 + 2e_k - e_k^2)$$
+$$e_{k+1} = 1 - \frac{1}{2}(2 + 2e_k - e_k^2 - 2e_k - 2e_k^2 + e_k^3) = 1 - \frac{1}{2}(2 - 3e_k^2 + e_k^3) = \frac{3}{2}e_k^2 - \frac{1}{2}e_k^3 \approx \frac{3}{2}e_k^2$$
+O erro decresce quadraticamente para pequenos desvios, atingindo precisão de máquina em 5 a 6 passos!
+
+**d) Intervalo de Convergência e Normalização Inicial:**
+Para que a iteração convirja monotonamente para $\sigma = 1$, precisamos que $|f'(\sigma)| < 1$ e que $f(\sigma) > 0$:
+$$f(\sigma) = \frac{1}{2}\sigma(3 - \sigma^2) > 0 \implies 3 - \sigma^2 > 0 \implies \sigma < \sqrt{3} \approx 1{,}732$$
+Se $\sigma_0 \ge \sqrt{3}$, temos $3 - \sigma_0^2 \le 0 \implies \sigma_1 \le 0$, e a iteração diverge para $-\infty$.
+Portanto, a condição necessária e suficiente de convergência para o atrator $\sigma = 1$ é:
+$$\sigma_0 \in (0, \sqrt{3})$$
+Como $\|G\|_2 \le \|G\|_F$, normalizar $X_0 = \frac{G}{\|G\|_F}$ garante que:
+$$\sigma_{\max}(X_0) = \frac{\sigma_{\max}(G)}{\|G\|_F} \le 1 < \sqrt{3}$$
+Garantindo rigorosamente que todos os valores singulares estejam dentro da bacia de atração de convergência para $1$!
+
+---
+
+## Questões conceituais (Verdadeiro ou Falso)
+
+1. **Verdadeiro.** O AdamW divide o passo por $\sqrt{v_{ij}}$, tratando cada entrada como um escalar unidimensional isolado e ignorando a estrutura de operador linear da matriz.
+2. **Verdadeiro.** Para um vetor de tamanho $d = mn$, a matriz Hessiana tem dimensão $(mn) \times (mn)$, exigindo $\mathcal{O}((mn)^3) = \mathcal{O}(m^3 n^3)$ operações para ser invertida.
+3. **Verdadeiro.** $L \in \mathbb{R}^{m \times m}$ e $R \in \mathbb{R}^{n \times n}$ exigem apenas $m^2 + n^2$ posições de memória, contra $m^2 n^2$ do Hessiano completo.
+4. **Verdadeiro.** Como $(L \otimes R)^{-1/2} = L^{-1/2} \otimes R^{-1/2}$, a aplicação simétrica sobre a matriz $G$ distribui a potência como $L^{-1/4} G R^{-1/4}$.
+5. **Verdadeiro.** A decomposição polar projeta $G$ no grupo ortogonal $U = V_1 V_2^T$, fixando todos os valores singulares em $\sigma_i = 1$.
+6. **Verdadeiro.** O fator polar $U$ resolve o problema de Procrustes ortogonal $\arg\max_{Q^T Q = I} \operatorname{tr}(Q^T G) = \arg\min \|Q - G\|_F$.
+7. **Falso.** Rotinas de SVD são iterativas e sequenciais, não explorando o paralelismo massivo das Tensor Cores de GPUs.
+8. **Verdadeiro.** A recorrência de Newton-Schulz utiliza exclusivamente multiplicações matriciais densas (GEMM), atingindo a taxa de pico de hardware das GPUs.
+9. **Verdadeiro.** Se $\sigma_0 \ge \sqrt{3}$, o termo $(3 - \sigma^2)$ torna-se não-positivo, levando a iteração à divergência.
+10. **Falso.** O Muon é aplicado exclusivamente a matrizes bidimensionais densas ($W \in \mathbb{R}^{m \times n}$); vetores 1D (bias, LayerNorm) e embeddings continuam sob AdamW.

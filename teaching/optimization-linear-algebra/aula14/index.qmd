@@ -1,0 +1,844 @@
+---
+title: "Aula 14: Otimização Não-Suave, Subgradientes e Operadores Proximais"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-11-06"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: python3
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all .slides-link aria-label="Ver slides da aula" title="Ver slides da aula"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Voltar à lista de aulas" title="Voltar à lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SIMULAÇÃO COMPARATIVA — OTIMIZAÇÃO NÃO-SUAVE (LASSO)
+# Comparação entre Método do Subgradiente, ISTA e FISTA
+# =====================================================================
+import numpy as np
+import matplotlib.pyplot as plt
+
+np.random.seed(42)
+
+N, d = 100, 200
+X = np.random.randn(N, d)
+# Normalizar colunas de X para condicionamento estável
+X /= np.linalg.norm(X, axis=0)
+
+# Vetor esparso verdadeiro: apenas 10 coeficientes não-nulos
+w_star = np.zeros(d)
+non_zeros = np.random.choice(d, 10, replace=False)
+w_star[non_zeros] = np.random.uniform(1.0, 3.0, size=10) * np.random.choice([-1, 1], size=10)
+
+y = X @ w_star + 0.05 * np.random.randn(N)
+
+# Parâmetro de regularização L1
+lambda_reg = 0.05
+L_lip = np.linalg.norm(X.T @ X, 2)
+alpha = 1.0 / L_lip
+
+def soft_thresholding(w, threshold):
+    return np.sign(w) * np.maximum(np.abs(w) - threshold, 0.0)
+
+def loss_func(w):
+    return 0.5 * np.sum((X @ w - y)**2) + lambda_reg * np.sum(np.abs(w))
+
+iters = 120
+
+# 1. Método do Subgradiente (passo decrescente)
+w_sub = np.zeros(d)
+loss_sub = []
+for k in range(1, iters + 1):
+    loss_sub.append(loss_func(w_sub))
+    sub_grad = X.T @ (X @ w_sub - y) + lambda_reg * np.sign(w_sub)
+    step = alpha / np.sqrt(k)
+    w_sub -= step * sub_grad
+
+# 2. ISTA (Iterative Shrinkage-Thresholding Algorithm)
+w_ista = np.zeros(d)
+loss_ista = []
+for _ in range(iters):
+    loss_ista.append(loss_func(w_ista))
+    grad_smooth = X.T @ (X @ w_ista - y)
+    w_ista = soft_thresholding(w_ista - alpha * grad_smooth, alpha * lambda_reg)
+
+# 3. FISTA (Fast ISTA com momento de Nesterov)
+w_fista = np.zeros(d)
+w_prev = np.zeros(d)
+loss_fista = []
+for k in range(1, iters + 1):
+    loss_fista.append(loss_func(w_fista))
+    beta_k = (k - 1) / (k + 2)
+    y_ahead = w_fista + beta_k * (w_fista - w_prev)
+    grad_smooth = X.T @ (X @ y_ahead - y)
+    w_next = soft_thresholding(y_ahead - alpha * grad_smooth, alpha * lambda_reg)
+    w_prev = w_fista.copy()
+    w_fista = w_next.copy()
+
+# Subtrair mínimo empírico para escala logarítmica limpa
+min_val = min(min(loss_sub), min(loss_ista), min(loss_fista)) - 1e-6
+loss_sub = [v - min_val for v in loss_sub]
+loss_ista = [v - min_val for v in loss_ista]
+loss_fista = [v - min_val for v in loss_fista]
+
+plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+fig, ax = plt.subplots(figsize=(6.5, 3.6), dpi=130)
+
+ax.semilogy(loss_sub, label='Subgradiente ($\\mathcal{O}(1/\\sqrt{k})$)', color='#e03c31', linewidth=1.8, linestyle='--')
+ax.semilogy(loss_ista, label='ISTA Proximal ($\\mathcal{O}(1/k)$)', color='#0085ca', linewidth=2.0)
+ax.semilogy(loss_fista, label='FISTA Acelerado ($\\mathcal{O}(1/k^2)$)', color='#1b9e77', linewidth=2.4)
+
+ax.set_title('Convergência na Regressão Lasso Não-Suave ($L_1$)', fontsize=11, fontweight='bold', pad=10)
+ax.set_xlabel('Iteração', fontsize=9)
+ax.set_ylabel('$F(\\mathbf{w}_k) - F^\\star$ (escala log)', fontsize=9)
+ax.grid(True, which='both', linestyle=':', alpha=0.6)
+ax.legend(frameon=True, facecolor='white', facealpha=0.9, fontsize=8.5, loc='upper right')
+
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+# Introdução: A Fronteira da Não-Diferenciabilidade
+
+Durante todo o nosso percurso em Otimização Contínua — desde o Gradiente Descendente euclidiano da Aula 8 até o pré-condicionamento estruturado do Shampoo e do Muon na Aula 13 —, trabalhamos sob um pressuposto fundamental: a função de perda $\mathcal{L}(\mathbf{w})$ era **suave e continuamente diferenciável**. Em cada ponto do espaço, o vetor gradiente $\nabla \mathcal{L}(\mathbf{w})$ fornecia uma bússola local única para a direção de maior subida.
+
+Entretanto, em Aprendizado de Máquina, funções **não-suaves** desempenham um papel indispensável:
+
+1. **Regularização $L_1$ (Lasso):** $\|\mathbf{w}\|_1 = \sum_{i=1}^d |w_i|$. A função valor absoluto possui um "bico" na origem. Ao contrário do $L_2$ (Ridge), que apenas contrai os parâmetros continuamente sem nunca zerá-los, a norma $L_1$ induz **esparsidade estrita**, zerando exatamente os coeficientes irrelevantes e realizando seleção automática de atributos.
+2. **Funções de Perda com Margem (Hinge Loss):** $\mathcal{L}(w) = \max(0, 1 - y \mathbf{w}^T \mathbf{x})$, utilizada em Support Vector Machines (SVM).
+3. **Ativações Não-Lineares em Redes Neurais:** A ativação ReLU ($\text{ReLU}(z) = \max(0, z)$) possui uma descontinuidade de derivada exatamente em $z = 0$.
+
+Como minimizar funções em pontos onde o gradiente clássico simplesmente não existe? Nesta aula final, estabeleceremos a teoria matemática que resolve esse desafio através de subgradientes, operadores proximais e algoritmos acelerados para problemas compostos.
+:::
+
+::: {.content-visible when-format="revealjs"}
+# A Fronteira da Não-Suavidade
+
+## O Desafio dos Bicos e Descontinuidades
+
+::: {.columns}
+::: {.column width="50%"}
+**Por que funções não-suaves em ML?**
+
+- **Norma $L_1$ (Lasso):** $\|\mathbf{w}\|_1 = \sum |w_i|$
+  - Induz **esparsidade exata** ($\mathbf{w}_i = 0$).
+  - Seleção de atributos e compressão de redes.
+- **Hinge Loss (SVM):** $\max(0, 1 - y \mathbf{w}^T \mathbf{x})$
+- **Ativação ReLU:** $\max(0, z)$
+:::
+
+::: {.column width="50%"}
+**A Falha do Gradiente Clássico:**
+
+- Em $w = 0$, a derivada de $|w|$ não existe:
+  $$\lim_{h \to 0^+} \frac{|h|}{h} = +1 \neq -1 = \lim_{h \to 0^-} \frac{|h|}{h}$$
+
+- **A Pergunta Central:**
+  Como definir "inclinações" e conduzir otimização rigorosa onde não há plano tangente único?
+:::
+:::
+
+::: {.fragment .callout-warning}
+## A Solução da Análise Convexa
+Substituir o plano tangente único por uma **família de hiperplanos de suporte**: os **Subgradientes** e o **Subdiferencial**!
+:::
+
+## Pausa 1: A Falha do Gradiente em Bicos e o Subdiferencial
+
+::: {.callout-tip}
+## O Dilema do Valor Absoluto
+Por que a derivada clássica de $f(w) = |w|$ não existe em $w = 0$?
+Pela definição formal de hiperplano suporte, quais são todos os valores possíveis de subgradientes em $w = 0$? Como a condição de Fermat generalizada $\mathbf{0} \in \partial f(w^\star)$ certifica que $0$ é o mínimo global?
+:::
+
+::: {.callout-tip}
+## Diagnóstico de Subgradientes
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ A reta afim $h(u) = f(w) + g(u - w)$ associada a um subgradiente $g$ situa-se sempre abaixo ou sobre o gráfico de uma função convexa $f$.
+- □ Se uma função convexa for diferenciável em um ponto $w$, seu subdiferencial $\partial f(w)$ reduz-se a um conjunto unitário contendo apenas o gradiente usual.
+- □ O subdiferencial da norma $L_1$ em $\mathbf{w} = \mathbf{0} \in \mathbb{R}^d$ é uma esfera euclidiana sólida de raio unitário.
+- □ A inclusão $\mathbf{0} \in \partial f(\mathbf{w}^\star)$ é condição necessária e suficiente para o minimizador global de qualquer função convexa irrestrita.
+:::
+
+## Pausa 1: A Falha do Gradiente em Bicos e o Subdiferencial — Resposta
+
+::: {.callout-tip}
+## Diagnóstico de Subgradientes — Resposta
+
+- ✔ **Verdadeiro.** Essa é exatamente a desigualdade fundamental de suporte global de funções convexas.
+- ✔ **Verdadeiro.** Quando a função é suave, o plano tangente é o único hiperplano de suporte: $\partial f(\mathbf{w}) = \{\nabla f(\mathbf{w})\}$.
+- ✗ **Falso.** É o hipercubo compacto $[-1, 1]^d$, produto cartesiano dos intervalos de cada coordenada.
+- ✔ **Verdadeiro.** Condição de Fermat generalizada: o vetor nulo pertence ao conjunto de inclinações suportadas.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Os limites laterais em zero são $+1$ e $-1$. Todo número $g \in [-1, 1]$ satisfaz $|u| \ge g \cdot u$ para qualquer $u \in \mathbb{R}$, de modo que $\partial |0| = [-1, 1]$. Como $0 \in [-1, 1]$, a condição de Fermat confirma que $w = 0$ é o mínimo global estrito!
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 1: A Falha do Gradiente em Bicos e o Subdiferencial
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 1
+Considere a função convexa 1D $f(w) = |w|$ em $w = 0$.
+1. Por que a derivada clássica não existe nesse ponto?
+2. Pela definição formal de subgradiente, quais são todos os subgradientes válidos em zero?
+3. Como a condição de Fermat generalizada $\mathbf{0} \in \partial f(w^\star)$ certifica que $w = 0$ é o mínimo global?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- □ A reta afim $h(u) = f(w) + g(u - w)$ associada a um subgradiente $g$ situa-se sempre abaixo ou sobre o gráfico de uma função convexa $f$.
+- □ Se uma função convexa for diferenciável em um ponto $w$, seu subdiferencial $\partial f(w)$ reduz-se a um conjunto unitário contendo apenas o gradiente usual.
+- □ O subdiferencial da norma $L_1$ em $\mathbf{w} = \mathbf{0} \in \mathbb{R}^d$ é uma esfera euclidiana sólida de raio unitário.
+- □ A inclusão $\mathbf{0} \in \partial f(\mathbf{w}^\star)$ é condição necessária e suficiente para o minimizador global de qualquer função convexa irrestrita.
+:::
+:::
+
+# Bloco 1: Subgradientes, Subdiferenciais e Otimalidade de Fermat
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Geometria dos Hiperplanos de Suporte
+
+Para estender o cálculo diferencial a funções não-suaves, a análise convexa introduziu o conceito de **subgradiente**.
+
+Seja $f: \mathbb{R}^d \to \mathbb{R}$ uma função convexa. Um vetor $\mathbf{g} \in \mathbb{R}^d$ é chamado de **subgradiente** de $f$ em $\mathbf{w}$ se ele define a inclinação de um hiperplano afim que passa por $(\mathbf{w}, f(\mathbf{w}))$ e permanece **globalmente abaixo ou igual** ao gráfico de $f$:
+$$f(\mathbf{u}) \ge f(\mathbf{w}) + \mathbf{g}^T (\mathbf{u} - \mathbf{w}) \quad \forall \mathbf{u} \in \mathbb{R}^d$$
+
+O conjunto de todos os subgradientes de $f$ em $\mathbf{w}$ é denominado o **Subdiferencial** de $f$ em $\mathbf{w}$, denotado por $\partial f(\mathbf{w})$:
+$$\partial f(\mathbf{w}) \triangleq \left\{ \mathbf{g} \in \mathbb{R}^d \mid f(\mathbf{u}) \ge f(\mathbf{w}) + \mathbf{g}^T (\mathbf{u} - \mathbf{w}), \quad \forall \mathbf{u} \in \mathbb{R}^d \right\}$$
+
+::: {.fig-resize style="width: 80%; margin: 1.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{vermelho}{RGB}{224,60,49}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{cinza}{RGB}{93,109,126}
+
+\begin{tikzpicture}[>=latex, font=\small, thick, scale=1.1]
+  % Eixos
+  \draw[->, cinza] (-3.0, 0) -- (3.0, 0) node[right] {$w$};
+  \draw[->, cinza] (0, -0.5) -- (0, 3.2) node[above] {$f(w)$};
+
+  % Função |w|
+  \draw[line width=2.0pt, azul] (-2.8, 2.8) -- (0, 0) -- (2.8, 2.8) node[right, font=\bfseries] {$f(w) = |w|$};
+
+  % Retas de suporte no bico (0,0)
+  \draw[dashed, line width=1.1pt, laranja] (-2.5, -1.25) -- (2.5, 1.25) node[right, font=\scriptsize] {$g = +0{,}5$};
+  \draw[dashed, line width=1.1pt, verde] (-2.5, 0) -- (2.5, 0) node[right, font=\scriptsize] {$g = 0{,}0$ (Fermat)};
+  \draw[dashed, line width=1.1pt, vermelho] (-2.5, 1.25) -- (2.5, -1.25) node[right, font=\scriptsize] {$g = -0{,}5$};
+
+  \filldraw[black] (0, 0) circle (2.5pt) node[below=4pt, font=\scriptsize\bfseries] {Bico: $\partial |0| = [-1, 1]$};
+\end{tikzpicture}
+```
+:::
+
+### Subdiferenciais Clássicos em Machine Learning
+
+1. **Valor Absoluto 1D ($f(w) = |w|$):**
+   $$\partial |w| = \begin{cases} \{+1\}, & w > 0 \\ [-1, 1], & w = 0 \\ \{-1\}, & w < 0 \end{cases}$$
+2. **Norma $L_1$ Multivariada ($f(\mathbf{w}) = \|\mathbf{w}\|_1 = \sum_{i=1}^d |w_i|$):**
+   Como a norma $L_1$ é separável por coordenadas, seu subdiferencial é o produto cartesiano dos subdiferenciais escalares:
+   $$\partial \|\mathbf{w}\|_1 = \partial |w_1| \times \partial |w_2| \times \dots \times \partial |w_d|$$
+   Na origem $\mathbf{w} = \mathbf{0}$, $\partial \|\mathbf{0}\|_1 = [-1, 1]^d$ (o hipercubo unitário centrado na origem).
+3. **Hinge Loss ($f(w) = \max(0, 1 - w)$):**
+   $$\partial f(w) = \begin{cases} \{0\}, & w > 1 \\ [-1, 0], & w = 1 \\ \{-1\}, & w < 1 \end{cases}$$
+
+### A Regra de Fermat Generalizada
+
+Para uma função diferenciável, a condição necessária e suficiente para um ponto ser mínimo global é $\nabla f(\mathbf{w}^\star) = \mathbf{0}$. Em funções convexas não-suaves, essa regra generaliza-se elegantemente:
+
+$$\mathbf{w}^\star \text{ é minimizador global de } f \iff \mathbf{0} \in \partial f(\mathbf{w}^\star)$$
+
+**Demonstração Direta:** Pela definição de subgradiente, $\mathbf{0} \in \partial f(\mathbf{w}^\star)$ significa que para todo $\mathbf{u} \in \mathbb{R}^d$:
+$$f(\mathbf{u}) \ge f(\mathbf{w}^\star) + \mathbf{0}^T (\mathbf{u} - \mathbf{w}^\star) = f(\mathbf{w}^\star)$$
+o que expressa textualmente a definição de que nenhum ponto $\mathbf{u}$ pode ter valor menor que $\mathbf{w}^\star$!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Subgradientes e a Regra de Fermat
+
+::: {.columns}
+::: {.column width="50%"}
+**Definição Formal:**
+
+$\mathbf{g} \in \mathbb{R}^d$ é subgradiente de $f$ em $\mathbf{w}$ se:
+$$f(\mathbf{u}) \ge f(\mathbf{w}) + \mathbf{g}^T (\mathbf{u} - \mathbf{w}) \quad \forall \mathbf{u}$$
+
+- O **Subdiferencial** $\partial f(\mathbf{w})$ é o conjunto de todos os subgradientes.
+- Se $f$ for diferenciável: $\partial f(\mathbf{w}) = \{\nabla f(\mathbf{w})\}$.
+:::
+
+::: {.column width="50%"}
+**O Subdiferencial de $|w|$:**
+
+$$\partial |w| = \begin{cases} \{+1\}, & w > 0 \\ [-1, 1], & w = 0 \\ \{-1\}, & w < 0 \end{cases}$$
+
+**Regra de Fermat Generalizada:**
+$$\mathbf{w}^\star \text{ é mínimo global} \iff \mathbf{0} \in \partial f(\mathbf{w}^\star)$$
+:::
+:::
+
+::: {.fragment .callout-tip}
+## O Sentido Geométrico
+Em um ponto suave, há apenas um hiperplano tangente. Em um bico, há um leque infinito de hiperplanos de suporte válidos.
+:::
+:::
+
+# Bloco 2: O Método do Subgradiente e o Preço da Não-Suavidade
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Ilusão da Descida Local
+
+Diante da existência de subgradientes, a tentativa mais imediata consiste em substituir o gradiente usual na fórmula do Gradiente Descendente:
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha_k \mathbf{g}_k, \quad \text{onde } \mathbf{g}_k \in \partial f(\mathbf{w}_k)$$
+Este é o clássico **Método do Subgradiente**.
+
+Contudo, ao contrário de funções suaves com gradiente Lipschitz, o método do subgradiente possui propriedades geométricas muito mais frágeis:
+
+1. **Subgradientes NÃO são direções de descida local:**
+   Em funções suaves, $-\nabla f(\mathbf{w})$ é sempre uma direção de descida estrita se $\nabla f \neq \mathbf{0}$. Em funções não-suaves, mover-se na direção $-\mathbf{g}_k$ pode **aumentar** o valor da função no passo seguinte ($f(\mathbf{w}_{k+1}) > f(\mathbf{w}_k)$)!
+2. **Passos constantes entram em ciclo limite:**
+   Considere $f(w) = |w|$ sob passo fixo $\alpha = 0{,}1$. Se começarmos em $w_0 = 0{,}05 > 0$, o subgradiente é $g = +1$, dando $w_1 = 0{,}05 - 0{,}1 = -0{,}05$. No passo seguinte, o subgradiente é $g = -1$, dando $w_2 = -0{,}05 + 0{,}1 = +0{,}05$. O algoritmo oscila eternamente sem convergir!
+3. **Passos decrescentes são estritamente obrigatórios:**
+   Para garantir convergência, a taxa $\alpha_k$ deve satisfazer as condições de Robbins-Monro:
+   $$\sum_{k=1}^\infty \alpha_k = \infty \quad \text{(capacidade de explorar o espaço)} \quad \text{e} \quad \sum_{k=1}^\infty \alpha_k^2 < \infty \quad \text{(extinção do ruído de oscilação)}$$
+   A escolha canônica é $\alpha_k = \frac{c}{\sqrt{k}}$.
+
+### A Cota Lenta de Convergência: $\mathcal{O}(1/\sqrt{k})$
+
+Ao analisar a distância ao ótimo $\mathbf{w}^\star$:
+$$\|\mathbf{w}_{k+1} - \mathbf{w}^\star\|^2 = \|\mathbf{w}_k - \alpha_k \mathbf{g}_k - \mathbf{w}^\star\|^2 = \|\mathbf{w}_k - \mathbf{w}^\star\|^2 - 2\alpha_k \mathbf{g}_k^T(\mathbf{w}_k - \mathbf{w}^\star) + \alpha_k^2 \|\mathbf{g}_k\|^2$$
+
+Pela definição de subgradiente, $\mathbf{g}_k^T(\mathbf{w}_k - \mathbf{w}^\star) \ge f(\mathbf{w}_k) - f^\star$. Portanto:
+$$\|\mathbf{w}_{k+1} - \mathbf{w}^\star\|^2 \le \|\mathbf{w}_k - \mathbf{w}^\star\|^2 - 2\alpha_k (f(\mathbf{w}_k) - f^\star) + \alpha_k^2 \|\mathbf{g}_k\|^2$$
+
+Telescopando a soma ao longo de $k$ iterações, prova-se que o melhor valor encontrado $f_{\text{best}}^{(k)} - f^\star$ é limitado por:
+$$f_{\text{best}}^{(k)} - f^\star \le \mathcal{O}\left(\frac{1}{\sqrt{k}}\right)$$
+
+**O Preço da Não-Suavidade:**
+Para obter precisão $\epsilon = 10^{-4}$:
+
+- Gradiente Descendente Suave: $\mathcal{O}(1/\epsilon) = 10.000$ passos;
+- Nesterov Suave: $\mathcal{O}(1/\sqrt{\epsilon}) = 100$ passos;
+- Método do Subgradiente: $\mathcal{O}(1/\epsilon^2) = (10^4)^2 = \mathbf{100.000.000}$ passos!
+
+Além dessa lentidão dramática, o método do subgradiente **raramente zera exatamente os coeficientes** em problemas Lasso, falhando em produzir a esparsidade pretendida!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Método do Subgradiente
+
+::: {.columns}
+::: {.column width="50%"}
+**A Regra do Subgradiente:**
+
+$$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha_k \mathbf{g}_k, \quad \mathbf{g}_k \in \partial f(\mathbf{w}_k)$$
+
+**Três Patologias Graves:**
+
+1. $-\mathbf{g}_k$ **não** garante descida local ($f$ pode subir!).
+2. Passo fixo $\alpha$ oscila eternamente em torno do bico.
+3. Não zera coordenadas exatamente!
+:::
+
+::: {.column width="50%"}
+**Convergência e Cota Lenta:**
+
+Requer passos decrescentes $\alpha_k = \frac{c}{\sqrt{k}}$:
+$$f_{\text{best}}^{(k)} - f^\star \le \mathcal{O}\left(\frac{1}{\sqrt{k}}\right)$$
+
+- Para erro $\epsilon = 10^{-4}$:
+  Exige **$100.000.000$ iterações**!
+
+- Inviável para aprendizado de máquina em larga escala.
+:::
+:::
+
+::: {.fragment .callout-warning}
+## A Necessidade de um Novo Paradigma
+Como contornar a lentidão do subgradiente e produzir esparsidade exata a taxas rápidas? $\to$ **Operadores Proximais!**
+:::
+
+## Pausa 2: As Limitações do Método do Subgradiente
+
+::: {.callout-tip}
+## O Ciclo Limite em Torno do Bico
+Considere a minimização de $f(w) = |w|$ pelo Método do Subgradiente com passo constante $\alpha = 0{,}1$, partindo de $w_0 = 0{,}05$.
+O que ocorre com as iterações subsequentes $w_1, w_2, w_3$? Por que o algoritmo nunca atinge o mínimo exato $w^\star = 0$?
+:::
+
+::: {.callout-tip}
+## Diagnóstico do Subgradiente
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Em qualquer função convexa não-suave, o vetor oposto a um subgradiente $-\mathbf{g}_k$ garante que $f(\mathbf{w}_{k+1}) < f(\mathbf{w}_k)$ para passos suficientemente pequenos.
+- □ Sob taxa de aprendizado constante $\alpha$, o método do subgradiente não converge para a solução ótima, mas oscila indefinidamente em uma bola de erro.
+- □ A taxa teórica de convergência do valor de função do método do subgradiente é limitada assintoticamente por $\mathcal{O}(1/\sqrt{k})$.
+- □ Adicionar momento clássico de Polyak sobre subgradientes elimina completamente as oscilações transversais em torno de bicos.
+:::
+
+## Pausa 2: As Limitações do Método do Subgradiente — Resposta
+
+::: {.callout-tip}
+## Diagnóstico do Subgradiente — Resposta
+
+- ✗ **Falso.** $-\mathbf{g}_k$ não é necessariamente direção de descida; a função pode aumentar em passos curtos.
+- ✔ **Verdadeiro.** Como a magnitude do subgradiente não tende a zero perto do bico, o passo fixo entra em ciclo limite.
+- ✔ **Verdadeiro.** Taxa comprovada por Nesterov: exige $\mathcal{O}(1/\epsilon^2)$ passos para atingir tolerância $\epsilon$.
+- ✗ **Falso.** O momento acumula inércia sobre o subgradiente de magnitude constante, amplificando o *overshoot* sobre o bico.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Em $w_0 = 0{,}05$, o subgradiente é $+1 \implies w_1 = -0{,}05$. Lá, o subgradiente é $-1 \implies w_2 = +0{,}05$. O algoritmo fica eternamente preso no ciclo limite $\pm 0{,}05$, sem nunca alcançar $0$. Passos decrescentes $\mathcal{O}(1/\sqrt{k})$ evitam isso, mas pagam o preço de $\mathcal{O}(1/\epsilon^2)$ passos de convergência.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 2: As Limitações do Método do Subgradiente
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 2
+Considere a minimização de $f(w) = |w|$ pelo Método do Subgradiente com passo constante $\alpha = 0{,}1$, partindo de $w_0 = 0{,}05$.
+1. O que acontece com a sequência de pontos gerada pelo algoritmo?
+2. Por que o método do subgradiente exige taxas decrescentes $\mathcal{O}(1/\sqrt{k})$ e qual é o custo computacional disso para atingir erro $\epsilon$?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- □ Em qualquer função convexa não-suave, o vetor oposto a um subgradiente $-\mathbf{g}_k$ garante que $f(\mathbf{w}_{k+1}) < f(\mathbf{w}_k)$ para passos suficientemente pequenos.
+- □ Sob taxa de aprendizado constante $\alpha$, o método do subgradiente não converge para a solução ótima, mas oscila indefinidamente em uma bola de erro.
+- □ A taxa teórica de convergência do valor de função do método do subgradiente é limitada assintoticamente por $\mathcal{O}(1/\sqrt{k})$.
+- □ Adicionar momento clássico de Polyak sobre subgradientes elimina completamente as oscilações transversais em torno de bicos.
+:::
+:::
+
+# Bloco 3: Operadores Proximais e o Soft-Thresholding ($L_1$)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Ideia Revolucionária de Moreau
+
+Em 1965, o matemático francês Jean-Jacques Moreau propôs uma transformação profunda que redefiniu a otimização não-suave: em vez de aproximar a função por um hiperplano linear (que quebra nos bicos), devemos regularizá-la através de uma **penalidade quadrática euclidiana auxiliar**.
+
+Dada uma função convexa fechada $h: \mathbb{R}^d \to \mathbb{R}$ e um parâmetro de escala $\gamma > 0$, o **Operador Proximal** é definido como a solução do problema de otimização estritamente convexo:
+$$\text{prox}_{\gamma h}(\mathbf{w}) \triangleq \arg\min_{\mathbf{z} \in \mathbb{R}^d} \left\{ h(\mathbf{z}) + \frac{1}{2\gamma} \|\mathbf{z} - \mathbf{w}\|_2^2 \right\}$$
+
+Observe a genialidade da formulação:
+1. O termo $\frac{1}{2\gamma}\|\mathbf{z} - \mathbf{w}\|_2^2$ ancora o ponto $\mathbf{z}$ próximo à estimativa presente $\mathbf{w}$ (força de proximidade);
+2. O termo $h(\mathbf{z})$ puxa o ponto em direção a valores menores da função não-suave (força de minimização);
+3. Como o termo de proximidade é estritamente convexo e quadrático, a função objetivo conjunta é estritamente convexa e coerciva: o operador proximal possui **solução estritamente única para qualquer ponto $\mathbf{w}$**!
+
+### Dedução Analítica do Soft-Thresholding para a Norma $L_1$
+
+Vejamos a dedução passo a passo para a função $h(z) = \lambda |z|$ em uma única dimensão:
+$$\text{prox}_{\gamma \lambda |\cdot|}(w) = \arg\min_{z \in \mathbb{R}} \left\{ \lambda |z| + \frac{1}{2\gamma} (z - w)^2 \right\}$$
+
+Pela condição de Fermat generalizada, o minimizador ótimo $z^\star$ satisfaz:
+$$0 \in \partial \left( \lambda |z^\star| + \frac{1}{2\gamma}(z^\star - w)^2 \right) \iff 0 \in \lambda \partial |z^\star| + \frac{1}{\gamma}(z^\star - w) \iff w - z^\star \in \gamma \lambda \partial |z^\star|$$
+
+Separamos rigorosamente em três casos de acordo com o sinal de $z^\star$:
+
+- **Caso 1 ($z^\star > 0$):** Então $\partial |z^\star| = \{+1\}$. A equação torna-se:
+  $$w - z^\star = \gamma \lambda \implies z^\star = w - \gamma \lambda$$
+  Para satisfazer a condição $z^\star > 0$, devemos ter $w - \gamma \lambda > 0 \iff w > \gamma \lambda$.
+
+- **Caso 2 ($z^\star < 0$):** Então $\partial |z^\star| = \{-1\}$. A equação torna-se:
+  $$w - z^\star = -\gamma \lambda \implies z^\star = w + \gamma \lambda$$
+  Para satisfazer a condição $z^\star < 0$, devemos ter $w + \gamma \lambda < 0 \iff w < -\gamma \lambda$.
+
+- **Caso 3 ($z^\star = 0$):** Então $\partial |z^\star| = [-1, 1]$. A equação torna-se:
+  $$w - 0 \in \gamma \lambda [-1, 1] \implies w \in [-\gamma \lambda, \gamma \lambda] \iff |w| \le \gamma \lambda$$
+
+Unindo os três casos em uma única expressão vetorial compacta, obtemos a consagrada fórmula do **Encolhimento Suave (*Soft-Thresholding*)**:
+$$\mathcal{S}_{\gamma \lambda}(w) \triangleq \text{sign}(w) \max(|w| - \gamma \lambda, 0)$$
+
+::: {.fig-resize style="width: 80%; margin: 1.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{cinza}{RGB}{93,109,126}
+
+\begin{tikzpicture}[>=latex, font=\small, thick, scale=1.1]
+  \draw[->, cinza] (-3.2, 0) -- (3.2, 0) node[right] {$w$};
+  \draw[->, cinza] (0, -2.5) -- (0, 2.5) node[above] {$\mathcal{S}_{\gamma \lambda}(w)$};
+
+  % Identidade tracejada
+  \draw[dotted, cinza] (-2.5, -2.5) -- (2.5, 2.5) node[above right, font=\tiny] {$z = w$};
+
+  % Zona morta
+  \draw[line width=2.5pt, verde] (-1.2, 0) -- (1.2, 0);
+  % Ramos inclinados
+  \draw[line width=2.0pt, azul] (1.2, 0) -- (2.8, 1.6);
+  \draw[line width=2.0pt, azul] (-1.2, 0) -- (-2.8, -1.6);
+
+  % Limiares
+  \draw[dashed, cinza] (1.2, 0) -- (1.2, -0.6) node[below, font=\scriptsize] {$+\gamma \lambda$};
+  \draw[dashed, cinza] (-1.2, 0) -- (-1.2, 0.6) node[above, font=\scriptsize] {$-\gamma \lambda$};
+
+  \node[verde!80!black, font=\scriptsize\bfseries] at (0, 0.4) {Zona Morta (Zeros Exatos)};
+\end{tikzpicture}
+```
+:::
+
+### Por que o $L_1$ Zera Parâmetros e o $L_2$ Não?
+
+Compare a resposta proximal de cada regularizador:
+
+- **No $L_2$ (Ridge):** $\text{prox}_{\gamma \frac{\lambda}{2} (\cdot)^2}(w) = \frac{1}{1 + \gamma \lambda} w$. É uma contração linear contínua: se $w = 0{,}01 \neq 0$, o resultado é $z \approx 0{,}0099 \neq 0$. O peso nunca se torna zero!
+- **No $L_1$ (Lasso):** O *Soft-Thresholding* possui uma **zona morta não-linear** $[-\gamma \lambda, \gamma \lambda]$. Qualquer parâmetro com magnitude inferior ao limiar é projetado **exatamente em zero** ($z = 0$), induzindo esparsidade estrita!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Operadores Proximais e Soft-Thresholding
+
+::: {.columns}
+::: {.column width="50%"}
+**Definição do Operador Proximal:**
+
+$$\text{prox}_{\gamma h}(\mathbf{w}) \triangleq \arg\min_{\mathbf{z}} \left\{ h(\mathbf{z}) + \frac{1}{2\gamma} \|\mathbf{z} - \mathbf{w}\|_2^2 \right\}$$
+
+- Substitui planos tangentes por minimização quadrática regularizada.
+- Solução **estritamente única** e não-expansiva.
+:::
+
+::: {.column width="50%"}
+**Para a Norma $L_1$ ($h(z) = \lambda |z|$):**
+
+$$\mathcal{S}_{\gamma \lambda}(w) = \text{sign}(w) \max(|w| - \gamma \lambda, 0)$$
+
+- Se $|w| \le \gamma \lambda \implies \mathbf{z} = 0$!
+- **A Zona Morta de Moreau:**
+  Projeta coeficientes ruidosos exatamente em zero, induzindo esparsidade estrutural!
+:::
+:::
+
+::: {.fragment .callout-tip}
+## O Segredo do Lasso
+O Ridge ($L_2$) contrai os pesos suavemente sem nunca zerá-los ($\frac{1}{1+\gamma\lambda}w$); o Lasso ($L_1$) possui uma zona morta proximal que extingue variáveis irrelevantes.
+:::
+
+## Pausa 3: Operadores Proximais e o Soft-Thresholding ($L_1$)
+
+::: {.callout-tip}
+## A Zona Morta de Moreau
+Dada a equação analítica do operador de *Soft-Thresholding* $\mathcal{S}_{\gamma \lambda}(w) = \text{sign}(w) \max(|w| - \gamma \lambda, 0)$, o que acontece quando a entrada satisfaz $|w| \le \gamma \lambda$?
+Por que o operador proximal da regularização $L_2$ ($\frac{1}{1+\gamma\lambda}w$) é incapaz de produzir esparsidade exata de atributos?
+:::
+
+::: {.callout-tip}
+## Diagnóstico Proximal
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O operador proximal é formulado adicionando uma regularização quadrática euclidiana estritamente convexa à função original.
+- □ A condição $|w| \le \gamma\lambda$ mapeia todas as magnitudes inferiores ao limiar exatamente para o zero absoluto.
+- □ O operador proximal da penalidade quadrática $L_2$ possui uma zona morta que zera pesos pequenos.
+- □ O operador proximal é uma contração não-expansiva, satisfazendo $\|\text{prox}(x) - \text{prox}(y)\| \le \|x - y\|$.
+:::
+
+## Pausa 3: Operadores Proximais e o Soft-Thresholding ($L_1$) — Resposta
+
+::: {.callout-tip}
+## Diagnóstico Proximal — Resposta
+
+- ✔ **Verdadeiro.** A adição do termo $\frac{1}{2\gamma}\|\mathbf{z}-\mathbf{w}\|^2$ garante estrita convexidade e solução única.
+- ✔ **Verdadeiro.** É o mecanismo formal que fundamenta a indução de esparsidade no Lasso.
+- ✗ **Falso.** O operador proximal do $L_2$ é a fração linear $\frac{1}{1+\gamma\lambda}w$, que apenas encolhe sem nunca anular entradas não-nulas.
+- ✔ **Verdadeiro.** Propriedade fundamental de operadores resolventes na análise convexa.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Quando $|w| \le \gamma\lambda$, o termo $\max(|w|-\gamma\lambda, 0)$ zera a expressão, forçando $z = 0$ exato! Já o $L_2$ gera apenas uma contração proporcional linear contínua $\frac{1}{1+\gamma\lambda}w$, de modo que um peso $w \neq 0$ permanece sempre estritamente não-nulo.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 3: Operadores Proximais e o Soft-Thresholding ($L_1$)
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 3
+1. Dada a fórmula do *Soft-Thresholding* $\mathcal{S}_{\gamma \lambda}(w) = \text{sign}(w) \max(|w| - \gamma \lambda, 0)$, qual é o destino de coordenadas com $|w| \le \gamma \lambda$?
+2. Por que o operador proximal do $L_2$ ($\frac{1}{1+\gamma\lambda}w$) é incapaz de selecionar atributos zerando variáveis?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- □ O operador proximal é formulado adicionando uma regularização quadrática euclidiana estritamente convexa à função original.
+- □ A condição $|w| \le \gamma\lambda$ mapeia todas as magnitudes inferiores ao limiar exatamente para o zero absoluto.
+- □ O operador proximal da penalidade quadrática $L_2$ possui uma zona morta que zera pesos pequenos.
+- □ O operador proximal é uma contração não-expansiva, satisfazendo $\|\text{prox}(x) - \text{prox}(y)\| \le \|x - y\|$.
+:::
+:::
+
+# Bloco 4: Otimização Composta: ISTA e FISTA
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Formulação Composta
+
+A maioria dos problemas práticos de Machine Learning combina dois termos de natureza distinta:
+$$\min_{\mathbf{w}} F(\mathbf{w}) = g(\mathbf{w}) + h(\mathbf{w})$$
+onde:
+
+- $g(\mathbf{w})$ é uma **função de perda de dados suave e diferenciável** com gradiente $L$-Lipschitz (e.g., Mínimos Quadrados $\frac{1}{2}\|X\mathbf{w} - \mathbf{y}\|_2^2$ ou Entropia Cruzada);
+- $h(\mathbf{w})$ é um **regularizador convexo não-suave simples** (e.g., a norma $L_1$ $\lambda \|\mathbf{w}\|_1$).
+
+### O Algoritmo ISTA (Iterative Shrinkage-Thresholding Algorithm)
+
+Em vez de aplicar subgradiente em toda a função ou tentar diferenciar o $L_1$, o algoritmo **ISTA** divide cada iteração em duas etapas elegantes:
+
+1. **Passo de Descida de Gradiente na Parte Suave:**
+   Dá um passo na direção $-\nabla g(\mathbf{w}_k)$ usando a taxa $\alpha = 1/L$:
+   $$\mathbf{u}_k = \mathbf{w}_k - \alpha \nabla g(\mathbf{w}_k)$$
+2. **Passo Proximal na Parte Não-Suave:**
+   Aplica o operador proximal de $h$ sobre o ponto intermediário:
+   $$\mathbf{w}_{k+1} = \text{prox}_{\alpha h}(\mathbf{u}_k) = \mathcal{S}_{\alpha \lambda}\left( \mathbf{w}_k - \alpha \nabla g(\mathbf{w}_k) \right)$$
+
+No problema Lasso, a atualização por coordenada é imediata:
+$$w_{k+1, j} = \text{sign}\left(w_{k, j} - \alpha \nabla_j g(\mathbf{w}_k)\right) \max\left( \left|w_{k, j} - \alpha \nabla_j g(\mathbf{w}_k)\right| - \alpha \lambda, \, 0 \right)$$
+
+**Taxa de Convergência do ISTA:** O algoritmo atinge convergência global com taxa:
+$$F(\mathbf{w}_k) - F^\star \le \mathcal{O}\left(\frac{1}{k}\right)$$
+recuperando integralmente a taxa de convergência do Gradiente Descendente clássico em problemas puramente suaves!
+
+### O Algoritmo FISTA (Fast ISTA, Beck & Teboulle, 2009)
+
+Como acelerar o ISTA para a fronteira matemática inultrapassável de primeira ordem $\mathcal{O}(1/k^2)$?
+
+Em 2009, Amir Beck e Marc Teboulle publicaram um dos artigos mais influentes da história da otimização contemporânea: o **FISTA** (*Fast Iterative Shrinkage-Thresholding Algorithm*).
+
+A ideia mestra consiste em integrar o **Momentum de Nesterov** (estudado na Aula 12) ao esquema proximal de duas etapas:
+1. **Passo de Antecipação por Inércia (Nesterov):**
+   Com sequência dinâmica $\beta_k = \frac{k-1}{k+2}$:
+   $$\mathbf{y}_k = \mathbf{w}_k + \beta_k (\mathbf{w}_k - \mathbf{w}_{k-1})$$
+2. **Passo Proximal Composto no Ponto Adiantado:**
+   $$\mathbf{w}_{k+1} = \mathcal{S}_{\alpha \lambda}\left( \mathbf{y}_k - \alpha \nabla g(\mathbf{y}_k) \right)$$
+
+::: {.fig-resize style="width: 85%; margin: 1.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{cinza}{RGB}{93,109,126}
+
+\begin{tikzpicture}[>=latex, font=\small, thick]
+  \node[draw=azul, fill=azul!10, rounded corners=6pt, inner sep=6pt, align=center] 
+    (W) at (0, 2.8) {\textbf{Ponto Atual $\mathbf{w}_k$}\\\footnotesize(com memória de $\mathbf{w}_{k-1}$)};
+
+  \node[draw=laranja, fill=laranja!10, rounded corners=6pt, inner sep=6pt, align=center, text width=5.2cm] 
+    (Y) at (0, 1.1) {\textbf{1. Salto de Nesterov}\\\footnotesize$\mathbf{y}_k = \mathbf{w}_k + \frac{k-1}{k+2}(\mathbf{w}_k - \mathbf{w}_{k-1})$\\\scriptsize Antecipação inercial no terreno};
+
+  \node[draw=verde, fill=verde!10, rounded corners=6pt, inner sep=6pt, align=center, text width=6.2cm] 
+    (GRAD) at (0, -0.6) {\textbf{2. Descida de Gradiente Suave}\\\footnotesize$\mathbf{u}_k = \mathbf{y}_k - \alpha \nabla g(\mathbf{y}_k)$\\\scriptsize Otimiza os Mínimos Quadrados / Perda};
+
+  \node[draw=verde!80!black, fill=verde!25, rounded corners=6pt, inner sep=6pt, align=center, text width=6.8cm, line width=1.4pt] 
+    (PROX) at (0, -2.4) {\textbf{3. Operador Proximal (Soft-Thresholding)}\\\Large$\mathbf{w}_{k+1} = \mathcal{S}_{\alpha \lambda}(\mathbf{u}_k)$\\\scriptsize Induz esparsidade exata e zera ruídos};
+
+  \draw[->, line width=1.4pt, azul] (W) -- (Y);
+  \draw[->, line width=1.4pt, laranja] (Y) -- (GRAD);
+  \draw[->, line width=1.6pt, verde!80!black] (GRAD) -- (PROX);
+\end{tikzpicture}
+```
+:::
+
+**Aceleração Ótima do FISTA:**
+$$F(\mathbf{w}_k) - F^\star \le \frac{2L \|\mathbf{w}_0 - \mathbf{w}^\star\|_2^2}{(k + 1)^2} = \mathcal{O}\left(\frac{1}{k^2}\right)$$
+
+O FISTA atinge a cota de complexidade teórica absoluta de Nesterov sem adicionar praticamente nenhum custo computacional: exige rigorosamente uma única avaliação de gradiente e uma aplicação de *Soft-Thresholding* por iteração!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## ISTA e FISTA: Aceleração Proximal
+
+::: {.columns}
+::: {.column width="50%"}
+**Algoritmo ISTA ($\mathcal{O}(1/k)$):**
+
+$$\mathbf{w}_{k+1} = \mathcal{S}_{\alpha \lambda}\left( \mathbf{w}_k - \alpha \nabla g(\mathbf{w}_k) \right)$$
+
+1. Passo de gradiente na perda de dados suave.
+2. *Soft-Thresholding* para zerar coordenadas.
+3. Converge à taxa clássica $\mathcal{O}(1/k)$.
+:::
+
+::: {.column width="50%"}
+**Algoritmo FISTA ($\mathcal{O}(1/k^2)$):**
+
+$$\mathbf{y}_k = \mathbf{w}_k + \frac{k-1}{k+2}(\mathbf{w}_k - \mathbf{w}_{k-1})$$
+$$\mathbf{w}_{k+1} = \mathcal{S}_{\alpha \lambda}\left( \mathbf{y}_k - \alpha \nabla g(\mathbf{y}_k) \right)$$
+
+- Une **Nesterov + Proximal**.
+- Atinge a cota ótima $\mathcal{O}(1/k^2)$!
+- $100\times$ mais rápido para $\epsilon = 10^{-4}$.
+:::
+:::
+
+::: {.fragment .callout-tip}
+## O Triunfo da Otimização Composta
+O FISTA resolve o dilema entre não-suavidade e velocidade, permitindo ajustar modelos esparsos massivos em tempo computacional idêntico a problemas suaves.
+:::
+
+## Pausa 4: Otimização Composta com ISTA e FISTA
+
+::: {.callout-tip}
+## O Salto do FISTA
+Em uma regressão Lasso para tolerância de erro $\epsilon = 10^{-4}$, quantas iterações são teoricamente necessárias para o Método do Subgradiente ($\mathcal{O}(1/\sqrt{k})$), o ISTA ($\mathcal{O}(1/k)$) e o FISTA ($\mathcal{O}(1/k^2)$)?
+Como o FISTA incorpora a aceleração de Nesterov sem aumentar o custo computacional por passo?
+:::
+
+::: {.callout-tip}
+## Diagnóstico Composto
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O algoritmo ISTA decompõe o problema composto executando um passo de gradiente na perda suave seguido por um operador proximal no regularizador não-suave.
+- □ A taxa de convergência do ISTA em funções convexas com gradiente Lipschitz é $\mathcal{O}(1/k)$.
+- □ O FISTA atinge a cota ótima de Nesterov $\mathcal{O}(1/k^2)$ avaliando o gradiente no ponto antecipado pela inércia $\mathbf{y}_k$.
+- □ O FISTA exige calcular a matriz Hessiana de $g$ e resolver sistemas lineares a cada passo para acelerar o processo.
+:::
+
+## Pausa 4: Otimização Composta com ISTA e FISTA — Resposta
+
+::: {.callout-tip}
+## Diagnóstico Composto — Resposta
+
+- ✔ **Verdadeiro.** É a definição canônica do método de gradiente proximal.
+- ✔ **Verdadeiro.** Recupera a mesma taxa assintótica do Gradiente Descendente clássico em problemas suaves.
+- ✔ **Verdadeiro.** Combina a prova de Lyapunov de Nesterov com a não-expansividade do operador proximal.
+- ✗ **Falso.** Utiliza apenas um gradiente de 1ª ordem $\nabla g(\mathbf{y}_k)$ e operações vetoriais $\mathcal{O}(d)$ de *Soft-Thresholding*.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Para erro $\epsilon = 10^{-4}$, o Subgradiente requer $(10^4)^2 = \mathbf{100.000.000}$ iterações; o ISTA requer $10^4 = \mathbf{10.000}$ iterações; o FISTA requer apenas $\sqrt{10^4} = \mathbf{100}$ iterações! Ele adiciona apenas duas somas vetoriais de dimensão $d$ por passo, acelerando em 1 milhão de vezes em relação ao subgradiente ingênuo.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 4: Otimização Composta com ISTA e FISTA
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 4
+Considere um problema de regressão Lasso em larga escala para atingir erro $\epsilon = 10^{-4}$.
+1. Quantas iterações teóricas são necessárias para o Método do Subgradiente ($\mathcal{O}(1/\sqrt{k})$), para o ISTA ($\mathcal{O}(1/k)$) e para o FISTA ($\mathcal{O}(1/k^2)$)?
+2. Como o FISTA incorpora a aceleração de Nesterov sem aumentar o custo assintótico por iteração?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- □ O algoritmo ISTA decompõe o problema composto executando um passo de gradiente na perda suave seguido por um operador proximal no regularizador não-suave.
+- □ A taxa de convergência do ISTA em funções convexas com gradiente Lipschitz é $\mathcal{O}(1/k)$.
+- □ O FISTA atinge a cota ótima de Nesterov $\mathcal{O}(1/k^2)$ avaliando o gradiente no ponto antecipado pela inércia $\mathbf{y}_k$.
+- □ O FISTA exige calcular a matriz Hessiana de $g$ e resolver sistemas lineares a cada passo para acelerar o processo.
+:::
+:::
+
+# Fechamento: A Grande Síntese da Disciplina
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Retrospectiva do Curso: A Jornada de 14 Aulas
+
+Chegamos ao término de **Fundamentos de Álgebra Linear e Otimização para Aprendizado de Máquina**. Ao longo deste semestre, construímos uma ponte contínua entre a geometria dos espaços vetoriais e a computação em larga escala da inteligência artificial:
+
+1. **Parte 1 — Álgebra Linear Guiada por Dados:**
+   - Vetores, normas euclidianas e distâncias espaciais em $k$-NN (Aula 1);
+   - Matrizes de design, independência linear e sistemas sobredeterminados (Aula 2);
+   - Subespaços, projeções ortogonais e a dedução fechada de Mínimos Quadrados OLS (Aula 3);
+   - Autovalores, Teorema Espectral e o número de condição $\kappa$ (Aula 4);
+   - Decomposição em Valores Singulares (SVD), aproximações de baixo posto e PCA (Aula 5).
+2. **Parte 2 — O Cálculo da Otimização Diferenciável:**
+   - Derivadas direcionais, gradiente e matrizes Jacobianas (Aula 6);
+   - Convexidade, Hessianas e a fronteira do mínimo global (Aula 7);
+   - Gradiente Descendente, Lema da Descida e o ziguezague do mau condicionamento (Aula 8);
+   - Regra da cadeia multivariada, backpropagation e diferenciação automática reversa (Aula 9).
+3. **Parte 3 — Dinâmica Avançada e Escala:**
+   - Estocasticidade, mini-batches e a variância do SGD (Aula 10);
+   - Método de Newton e o precondicionamento diagonal (AdaGrad e RMSProp) (Aula 11);
+   - Inércia de Polyak, antecipação de Nesterov e a síntese adaptativa do Adam/AdamW (Aula 12);
+   - Precondicionamento estruturado de Kronecker (Shampoo) e ortogonalização polar via Newton-Schulz (Muon) (Aula 13);
+   - Subgradientes, operadores proximais e a aceleração esparsa do ISTA/FISTA (Aula 14).
+
+**A Mensagem Central:** A Álgebra Linear e a Otimização não são ramos separados da matemática teórica: elas constituem a própria linguagem estrutural e o motor computacional da inteligência artificial moderna!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## A Grande Síntese da Disciplina
+
+::: {.columns}
+::: {.column width="50%"}
+**Álgebra Linear (A Geometria):**
+
+- Dados como pontos em variedades ($\mathbb{R}^d$).
+- Projeções ortogonais e Mínimos Quadrados.
+- Decomposições Espectrais e SVD.
+- Operadores e Decomposição Polar.
+:::
+
+::: {.column width="50%"}
+**Otimização (A Dinâmica):**
+
+- Descida em superfícies de custo.
+- Inércia mecânica e aceleração ótima.
+- Precondicionadores estruturados (Shampoo/Muon).
+- Operadores proximais e esparsidade (FISTA).
+:::
+:::
+
+::: {.fragment .callout-tip}
+## Conclusão do Curso
+Parabéns pela jornada! Vocês agora dominam a base matemática e algorítmica rigorosa sobre a qual toda a inteligência artificial contemporânea é construída.
+:::
+:::

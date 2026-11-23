@@ -1,0 +1,1039 @@
+---
+title: "Aula 12: Fundamentos do Aprendizado de Representação Contrastivo (InfoNCE)"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-11-18"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: homepage
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all .slides-link aria-label="Ver slides da aula" title="Ver slides da aula"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Voltar à lista de aulas" title="Voltar à lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+# =====================================================================
+# SETUP GLOBAL — executado uma vez, estado compartilhado pelos chunks
+# =====================================================================
+import warnings
+
+import matplotlib.patches as patches
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from sklearn.datasets import load_digits
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+
+warnings.filterwarnings("ignore")
+torch.set_num_threads(1)
+plt.style.use("seaborn-v0_8-whitegrid")
+plt.rcParams.update({
+    "figure.dpi": 125,
+    "font.size": 11,
+    "axes.titlesize": 12,
+    "axes.titleweight": "bold",
+    "legend.frameon": True,
+    "legend.framealpha": 0.9,
+})
+
+COR_A = "#2b5c8f"
+COR_B = "#d95f02"
+COR_NEU = "#7570b3"
+COR_CINZA = "#7f7f7f"
+COR_VERDE = "#1b9e77"
+COR_ALERTA = "#e7298a"
+CORES_CLASSE = [COR_A, COR_B, COR_VERDE]
+
+
+def brl(val, dec=2):
+    return f"{val:.{dec}f}".replace(".", ",")
+
+
+def pct(val, dec=1):
+    return f"{100 * val:.{dec}f}".replace(".", ",") + "%"
+
+
+def milhar(val):
+    return f"{int(val):,}".replace(",", ".")
+
+
+# =====================================================================
+# 1. EXPERIMENTO SINTÉTICO: SINAL 2D + RUÍDO 18D DE ALTA VARIÂNCIA
+# =====================================================================
+torch.manual_seed(42)
+rng = np.random.default_rng(42)
+N_SINT = 1200
+centros = np.array([[2.5, 0.0], [-1.25, 2.165], [-1.25, -2.165]])
+y_sint = np.repeat(np.arange(3), N_SINT // 3)
+X_sinal = centros[y_sint] + rng.normal(0, 0.35, size=(N_SINT, 2))
+X_nuis = rng.normal(0, 3.0, size=(N_SINT, 18))
+X_sint = np.hstack([X_sinal, X_nuis]).astype(np.float32)
+
+Xs_tr, Xs_te, ys_tr, ys_te = train_test_split(
+    X_sint, y_sint, test_size=0.3, stratify=y_sint, random_state=42
+)
+Xt_tr, Xt_te = torch.from_numpy(Xs_tr), torch.from_numpy(Xs_te)
+
+# PCA 2D
+pca_s = PCA(n_components=2).fit(Xs_tr)
+Z_pca_s_tr, Z_pca_s_te = pca_s.transform(Xs_tr), pca_s.transform(Xs_te)
+acc_pca_s = LogisticRegression(max_iter=1000).fit(Z_pca_s_tr, ys_tr).score(Z_pca_s_te, ys_te)
+
+
+# Autoencoder 2D
+class SimpleAE(nn.Module):
+    def __init__(self, d_in, d_lat):
+        super().__init__()
+        self.enc = nn.Sequential(nn.Linear(d_in, 32), nn.ReLU(), nn.Linear(32, d_lat))
+        self.dec = nn.Sequential(nn.Linear(d_lat, 32), nn.ReLU(), nn.Linear(32, d_in))
+
+    def forward(self, x):
+        h = self.enc(x)
+        return self.dec(h), h
+
+
+ae_s = SimpleAE(20, 2)
+opt = torch.optim.Adam(ae_s.parameters(), lr=1e-2)
+for _ in range(120):
+    rec, _ = ae_s(Xt_tr)
+    loss = F.mse_loss(rec, Xt_tr)
+    opt.zero_grad()
+    loss.backward()
+    opt.step()
+with torch.no_grad():
+    _, Z_ae_s_tr = ae_s(Xt_tr)
+    _, Z_ae_s_te = ae_s(Xt_te)
+Z_ae_s_tr, Z_ae_s_te = Z_ae_s_tr.numpy(), Z_ae_s_te.numpy()
+acc_ae_s = LogisticRegression(max_iter=1000).fit(Z_ae_s_tr, ys_tr).score(Z_ae_s_te, ys_te)
+
+
+def aug_sint(x):
+    """Perturba fortemente o fundo (colunas 2..19) e levemente o sinal (0..1)."""
+    v = x.clone()
+    v[:, :2] += 0.15 * torch.randn_like(v[:, :2])
+    v[:, 2:] = 0.5 * v[:, 2:] + 2.5 * torch.randn_like(v[:, 2:])
+    return v
+
+
+def infonce_loss(z1, z2, tau=0.2):
+    B = z1.shape[0]
+    z = torch.cat([z1, z2], dim=0)
+    sim = (z @ z.T) / tau
+    mask = torch.eye(2 * B, dtype=torch.bool)
+    sim = sim.masked_fill(mask, -1e9)
+    pos_idx = torch.cat([torch.arange(B, 2 * B), torch.arange(0, B)])
+    return F.cross_entropy(sim, pos_idx)
+
+
+class ContrastiveSint(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(20, 32), nn.ReLU(), nn.Linear(32, 2))
+
+    def forward(self, x):
+        return F.normalize(self.net(x), dim=-1)
+
+
+# Sem negativos (colapso)
+col_s = ContrastiveSint()
+opt = torch.optim.Adam(col_s.parameters(), lr=2e-2)
+for _ in range(150):
+    z1, z2 = col_s(aug_sint(Xt_tr)), col_s(aug_sint(Xt_tr))
+    loss = ((z1 - z2) ** 2).sum(-1).mean()
+    opt.zero_grad()
+    loss.backward()
+    opt.step()
+with torch.no_grad():
+    Z_col_s_tr, Z_col_s_te = col_s(Xt_tr).numpy(), col_s(Xt_te).numpy()
+std_col_s = float(Z_col_s_te.std(0).mean())
+acc_col_s = LogisticRegression(max_iter=1000).fit(Z_col_s_tr, ys_tr).score(Z_col_s_te, ys_te)
+
+# Com InfoNCE
+con_s = ContrastiveSint()
+opt = torch.optim.Adam(con_s.parameters(), lr=1e-2)
+for _ in range(180):
+    idx = torch.randperm(len(Xt_tr))[:128]
+    xb = Xt_tr[idx]
+    z1, z2 = con_s(aug_sint(xb)), con_s(aug_sint(xb))
+    loss = infonce_loss(z1, z2, tau=0.2)
+    opt.zero_grad()
+    loss.backward()
+    opt.step()
+with torch.no_grad():
+    Z_con_s_tr, Z_con_s_te = con_s(Xt_tr).numpy(), con_s(Xt_te).numpy()
+acc_con_s = LogisticRegression(max_iter=1000).fit(Z_con_s_tr, ys_tr).score(Z_con_s_te, ys_te)
+
+
+# =====================================================================
+# 2. EXPERIMENTO REAL: DIGITOS COM FUNDO VARIÁVEL (8x8 = 64D, 10 CLASSES)
+# =====================================================================
+digits = load_digits()
+Xd_limpo = (digits.data / 16.0).astype(np.float32)
+yd = digits.target
+rng_bg = np.random.default_rng(42)
+_xx, _yy = np.meshgrid(np.linspace(0, 1, 8), np.linspace(0, 1, 8))
+_bg = np.array([
+    1.2 * np.sin(2 * np.pi * (rng_bg.uniform(0.5, 2.0) * _xx + rng_bg.uniform(0.5, 2.0) * _yy + rng_bg.uniform()))
+    for _ in range(len(Xd_limpo))
+])
+Xd = (Xd_limpo + _bg.reshape(-1, 64)).astype(np.float32)
+
+Xd_tr, Xd_te, yd_tr, yd_te = train_test_split(
+    Xd, yd, test_size=0.3, stratify=yd, random_state=42
+)
+n_dig_tr, n_dig_te = len(Xd_tr), len(Xd_te)
+
+acc_raw = LogisticRegression(max_iter=500).fit(Xd_tr, yd_tr).score(Xd_te, yd_te)
+pca_d = PCA(n_components=16).fit(Xd_tr)
+acc_pca_d = LogisticRegression(max_iter=500).fit(pca_d.transform(Xd_tr), yd_tr).score(pca_d.transform(Xd_te), yd_te)
+
+# Autoencoder 16D
+ae_d = SimpleAE(64, 16)
+opt = torch.optim.Adam(ae_d.parameters(), lr=5e-3)
+Xdt_tr, Xdt_te = torch.from_numpy(Xd_tr), torch.from_numpy(Xd_te)
+for _ in range(80):
+    perm = torch.randperm(len(Xdt_tr))
+    for i in range(0, len(Xdt_tr) - 128 + 1, 128):
+        xb = Xdt_tr[perm[i:i + 128]]
+        rec, _ = ae_d(xb)
+        loss = F.mse_loss(rec, xb)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+with torch.no_grad():
+    _, hd_tr = ae_d(Xdt_tr)
+    _, hd_te = ae_d(Xdt_te)
+acc_ae_d = LogisticRegression(max_iter=500).fit(hd_tr.numpy(), yd_tr).score(hd_te.numpy(), yd_te)
+
+_xx_t = torch.from_numpy(_xx.astype(np.float32)).view(1, 8, 8)
+_yy_t = torch.from_numpy(_yy.astype(np.float32)).view(1, 8, 8)
+
+
+def aug_digits(x):
+    """Aumentacao estocastica vetorizada em 8x8: fundo/iluminacao, dropout (15%) e ruido."""
+    B = x.shape[0]
+    fx = 0.5 + 1.5 * torch.rand(B, 1, 1)
+    fy = 0.5 + 1.5 * torch.rand(B, 1, 1)
+    ph = 2 * np.pi * torch.rand(B, 1, 1)
+    b = 1.2 * torch.sin(2 * np.pi * (fx * _xx_t + fy * _yy_t) + ph).view(B, 64)
+    mask = (torch.rand_like(x) > 0.15).float()
+    return x * mask + b + 0.05 * torch.randn_like(x)
+
+
+class DigitsEncoder(nn.Module):
+    def __init__(self, d_h=16, d_z=8):
+        super().__init__()
+        self.enc = nn.Sequential(nn.Linear(64, 128), nn.ReLU(), nn.Linear(128, d_h))
+        self.proj = nn.Sequential(nn.Linear(d_h, 32), nn.ReLU(), nn.Linear(32, d_z))
+
+    def forward(self, x):
+        h = self.enc(x)
+        z = F.normalize(self.proj(h), dim=-1)
+        return h, z
+
+
+def train_digits_simclr(tau=0.2, batch_size=128, epochs=40, seed=0):
+    torch.manual_seed(seed)
+    model = DigitsEncoder()
+    opt = torch.optim.Adam(model.parameters(), lr=4e-3, weight_decay=1e-4)
+    N = len(Xdt_tr)
+    for _ in range(epochs):
+        perm = torch.randperm(N)
+        for i in range(0, N - batch_size + 1, batch_size):
+            xb = Xdt_tr[perm[i:i + batch_size]]
+            _, z1 = model(aug_digits(xb))
+            _, z2 = model(aug_digits(xb))
+            loss = infonce_loss(z1, z2, tau=tau)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+    model.eval()
+    with torch.no_grad():
+        h_tr, z_tr = model(Xdt_tr)
+        h_te, z_te = model(Xdt_te)
+        v1 = model(aug_digits(Xdt_te))[1]
+        v2 = model(aug_digits(Xdt_te))[1]
+        align = float(((v1 - v2) ** 2).sum(-1).mean())
+        sq_pdist = torch.cdist(z_te, z_te, p=2) ** 2
+        mask = ~torch.eye(len(z_te), dtype=torch.bool)
+        unif = float(torch.log(torch.exp(-2.0 * sq_pdist[mask]).mean()))
+    acc_h = LogisticRegression(max_iter=300).fit(h_tr.numpy(), yd_tr).score(h_te.numpy(), yd_te)
+    acc_z = LogisticRegression(max_iter=300).fit(z_tr.numpy(), yd_tr).score(z_te.numpy(), yd_te)
+    return acc_h, acc_z, align, unif
+
+
+# Ablacao de temperatura (tau=0.2 serve tambem como modelo base)
+TAUS = [0.02, 0.05, 0.2, 0.5, 2.0]
+ab_tau = [train_digits_simclr(tau=t, batch_size=128, epochs=40) for t in TAUS]
+acc_h_base, acc_z_base, align_base, unif_base = ab_tau[2]
+
+# Ablacao de tamanho do lote (numero de negativos K = 2B - 2)
+BATCHES = [16, 32, 64, 128]
+ab_bs = [train_digits_simclr(tau=0.2, batch_size=b, epochs=40) for b in BATCHES[:-1]] + [ab_tau[2]]
+```
+
+# Revisão e Introdução
+
+## O problema: quando reconstruir pixels falha
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Nas Aulas 6 e 7, aprendemos representações latentes contínuas comprimindo os dados em um código de baixa dimensão e minimizando o erro quadrático de reconstrução, $\|\mathbf{x} - \hat{\mathbf{x}}\|_2^2$. A PCA encontra o subespaço linear de maior variância; o autoencoder não linear curva esse subespaço para reduzir ainda mais o erro médio quadrático; o VAE acrescenta uma priori gaussiana para permitir geração. Todos eles compartilham uma premissa implícita: **as direções que variam muito nos dados são as que carregam informação semântica**.
+
+Em muitos cenários reais — fotografias com variação de fundo e iluminação, medições de sensores sujeitas a deriva térmica, gravações de áudio com ruído ambiente — essa premissa falha. A maior parte da variância numérica está concentrada em fatores irrelevantes para o significado do objeto, chamados de *nuisance*.
+
+Para tornar esse fracasso explícito, construímos um experimento controlado com `{python} milhar(N_SINT)` pontos em $\mathbb{R}^{20}$ divididos em 3 classes:
+
+- **2 coordenadas de sinal:** três agrupamentos bem separados dispostos em torno de um círculo de raio $2{,}5$, com desvio padrão interno $\sigma_{\text{sinal}} = 0{,}35$ (variância $\approx 0{,}12$ por eixo);
+- **18 coordenadas de ruído (*nuisance*):** ruído gaussiano isotrópico de desvio padrão $\sigma_{\text{nuis}} = 3{,}0$ (variância $9{,}0$ por eixo — cerca de 75 vezes maior que a variância interna do sinal).
+
+Avaliamos a qualidade de cada representação 2D por **sondagem linear (*linear probe*)**: congelamos o codificador treinado **sem rótulos** e ajustamos uma regressão logística linear sobre o espaço latente resultante para prever as 3 classes no conjunto de teste. A PCA 2D acerta apenas `{python} pct(acc_pca_s)` (indistinguível do acaso de 33,3%) e o Autoencoder 2D acerta `{python} pct(acc_ae_s)`: ambos desperdiçaram seus 2 graus de liberdade tentando reconstruir as 18 dimensões de ruído de alta energia.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Aulas 6 e 7 (PCA, AE, VAE):** aprendem representações minimizando $\|\mathbf{x}-\hat{\mathbf{x}}\|_2^2$. Premissa implícita: **variância alta = semântica**.
+- **Experimento sintético ($\mathbb{R}^{20}$, 3 classes):** 2 coordenadas de sinal ($\sigma=0{,}35$) + 18 coordenadas de ruído de fundo ($\sigma=3{,}0$, variância $9{,}0$).
+
+::: {.fragment}
+- **Avaliação por *linear probe* (regressão logística sobre o latente congelado):**
+  - **PCA (2D):** `{python} pct(acc_pca_s)` (acaso = 33,3%).
+  - **Autoencoder (2D):** `{python} pct(acc_ae_s)` — gasta toda a capacidade reconstruindo o ruído!
+:::
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, axes = plt.subplots(1, 4, figsize=(14, 3.3))
+titulos = [
+    f"PCA 2D\n(linear probe: {pct(acc_pca_s)})",
+    f"Autoencoder 2D\n(linear probe: {pct(acc_ae_s)})",
+    f"Só positivos (colapso)\n(linear probe: {pct(acc_col_s)})",
+    f"InfoNCE na esfera S¹\n(linear probe: {pct(acc_con_s)})",
+]
+paineis = [Z_pca_s_te, Z_ae_s_te, Z_col_s_te, Z_con_s_te]
+for ax, Zp, tit in zip(axes, paineis, titulos):
+    for c in range(3):
+        m = ys_te == c
+        ax.scatter(Zp[m, 0], Zp[m, 1], s=14, alpha=0.65, color=CORES_CLASSE[c], label=f"Classe {c}")
+    ax.set_title(tit, fontsize=10.5)
+    ax.set_xlabel("$z_1$")
+axes[0].set_ylabel("$z_2$")
+for ax in axes[2:]:
+    ang = np.linspace(0, 2 * np.pi, 200)
+    ax.plot(np.cos(ang), np.sin(ang), ls="--", lw=1.0, color=COR_CINZA, alpha=0.6)
+    ax.set_xlim(-1.25, 1.25); ax.set_ylim(-1.25, 1.25)
+    ax.set_aspect("equal")
+axes[0].legend(fontsize=8, loc="upper right")
+plt.tight_layout(); plt.show()
+```
+:::
+
+## A ideia central e as 4 perguntas da aula
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Na Aula 11, vimos que o teste de duas amostras por classificador aprende uma função discriminativa sem precisar de rótulos de classe: basta saber de qual amostra veio cada ponto. O **aprendizado contrastivo** leva exatamente essa ideia para a extração de representações: definimos o que é *nuisance* por meio de **aumentações de dados estocásticas** $\mathcal{T}$ (perturbações de fundo, recorte, variação de brilho) e treinamos uma rede neural para distinguir quando duas visões pertencem ao **mesmo objeto** (par positivo) ou a **objetos distintos** (pares negativos).
+
+No quarto painel da figura acima, o codificador em $\mathbb{S}^1$ treinado com a perda **InfoNCE** ignora as 18 dimensões de ruído e separa perfeitamente as 3 classes (`{python} pct(acc_con_s)` no *linear probe*). Já o terceiro painel ilustra o risco central dessa abordagem: se tentarmos apenas aproximar visões do mesmo ponto sem empurrar os negativos para longe, todas as representações colapsam para um único ponto na esfera (desvio padrão `{python} brl(std_col_s, 4)`).
+
+Ao longo desta aula, responderemos a quatro perguntas:
+
+1. **Arquitetura e Objetivo:** Como se organiza uma rede contrastiva (codificador, cabeça de projeção, normalização), por que a invariância pura colapsa e como a perda InfoNCE evita o colapso?
+2. **Teoria da Informação:** Que função exata o crítico ótimo de Bayes da InfoNCE estima, e como deduzir passo a passo a cota inferior para a Informação Mútua $I(\mathbf{x}; \mathbf{x}^+)$?
+3. **Geometria:** Por que normalizar na hiperesfera $\mathbb{S}^{M_z-1}$, como a InfoNCE se decompõe em *alignment* e *uniformity* e como a temperatura $\tau$ controla o gradiente sobre negativos difíceis?
+4. **Prática:** Por que descartamos a cabeça de projeção ao avaliar $\mathbf{h}$, como escolher aumentações (InfoMin) e o que fazer quando não há negativos explícitos?
+:::
+
+::: {.content-visible when-format="revealjs"}
+1. **Arquitetura e Objetivo:** Como se estrutura a rede contrastiva, por que alinhar sem negativos colapsa e como a InfoNCE resolve isso?
+2. **Teoria da Informação:** Como derivar o crítico ótimo (razão de densidades) e a cota inferior da Informação Mútua $I(\mathbf{x}; \mathbf{x}^+)$?
+3. **Geometria:** O que são *alignment* e *uniformity* na hiperesfera $\mathbb{S}^{M_z-1}$ e como $\tau$ age no gradiente?
+4. **Prática:** Qual o papel da cabeça de projeção $\mathbf{g}_{\boldsymbol\psi}$, das aumentações e das alternativas sem negativos?
+:::
+
+# Arquitetura, Invariância e a Perda InfoNCE
+
+## Arquitetura da rede neural contrastiva
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Antes de escrever a função de perda, precisamos deixar claro **que objeto matemático é treinado** e como os tensores fluem da entrada $\mathbf{x}$ até a perda. Em um modelo contrastivo moderno (tomando o SimCLR como arquitetura canônica), há quatro componentes sequenciais:
+
+1. **Geração de duas visões ($\mathcal{T}$):** para cada exemplo $\mathbf{x}_i$ de um minilote de tamanho $B$, sorteamos duas transformações aleatórias independentes $t_1, t_2 \sim \mathcal{T}$ e construímos o par positivo $(\tilde{\mathbf{x}}_i^{(1)}, \tilde{\mathbf{x}}_i^{(2)}) = (t_1(\mathbf{x}_i), t_2(\mathbf{x}_i))$. O lote passa a ter $2B$ entradas.
+2. **Codificador compartilhado (*Backbone*) $\mathbf{f}_{\boldsymbol\phi}: \mathbb{R}^D \to \mathbb{R}^M$:** é uma rede neural cujos pesos $\boldsymbol\phi$ são **idênticos nos dois ramos** (*weight sharing* / rede siamesa). A escolha da arquitetura de $\mathbf{f}_{\boldsymbol\phi}$ depende do domínio dos dados:
+   - para **imagens**, tipicamente uma rede convolucional (como uma ResNet sem a camada final de classificação) ou um *Vision Transformer*;
+   - para **texto ou séries temporais**, um Transformer ou rede recorrente/1D-CNN;
+   - para **dados tabulares ou vetoriais** (como os dígitos $8\times 8$ em 64D desta aula), uma **MLP** com camadas lineares, normalização e não linearidades ReLU: $\text{Linear}(64\to 64)\to \text{ReLU}\to \text{Linear}(64\to 32)$.
+   A saída do codificador é a representação $\mathbf{h}_i = \mathbf{f}_{\boldsymbol\phi}(\tilde{\mathbf{x}}_i) \in \mathbb{R}^M$.
+3. **Cabeça de Projeção (*Projection Head*) $\mathbf{g}_{\boldsymbol\psi}: \mathbb{R}^M \to \mathbb{R}^{M_z}$:** uma pequena MLP (no nosso experimento, $\text{Linear}(32\to 32)\to \text{ReLU}\to \text{Linear}(32\to 16)$; no SimCLR original, duas camadas lineares com ReLU entre elas) que mapeia $\mathbf{h}_i$ para um espaço de menor dimensão onde a perda contrastiva será aplicada.
+4. **Normalização $\ell_2$ na hiperesfera:** projetamos a saída da cabeça para a hiperesfera unitária $\mathbb{S}^{M_z-1}$:
+   $$\mathbf{z}_i = \frac{\mathbf{g}_{\boldsymbol\psi}(\mathbf{h}_i)}{\|\mathbf{g}_{\boldsymbol\psi}(\mathbf{h}_i)\|_2}, \qquad \|\mathbf{z}_i\|_2 = 1.$$
+
+**Passo crucial no uso prático:** durante o treinamento, o gradiente da perda InfoNCE atualiza **conjuntamente** $\boldsymbol\phi$ e $\boldsymbol\psi$. Terminado o treino, **descartamos $\mathbf{g}_{\boldsymbol\psi}$** e usamos apenas $\mathbf{h} = \mathbf{f}_{\boldsymbol\phi}(\mathbf{x})$ como vetor de atributos para tarefas subsequentes (*linear probe*, agrupamento, busca por vizinhos). Veremos no Bloco 4 o porquê teórico e empírico dessa escolha.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Pipeline em 4 estágios (arquitetura siamesa com pesos compartilhados):**
+  1. **Aumentação $\mathcal{T}$:** $\mathbf{x}_i \mapsto \tilde{\mathbf{x}}_i^{(1)}, \tilde{\mathbf{x}}_i^{(2)}$ ($B$ objetos $\Rightarrow 2B$ visões).
+  2. **Codificador $\mathbf{f}_{\boldsymbol\phi}$ (CNN/ResNet, Transformer ou MLP):** $\mathbf{h}_i = \mathbf{f}_{\boldsymbol\phi}(\tilde{\mathbf{x}}_i) \in \mathbb{R}^M$.
+  3. **Cabeça de projeção $\mathbf{g}_{\boldsymbol\psi}$ (MLP pequena):** $\mathbb{R}^M \to \mathbb{R}^{M_z}$.
+  4. **Normalização $\ell_2$:** $\mathbf{z}_i = \mathbf{g}_{\boldsymbol\psi}(\mathbf{h}_i)/\|\mathbf{g}_{\boldsymbol\psi}(\mathbf{h}_i)\|_2 \in \mathbb{S}^{M_z-1}$.
+- **No uso final:** descartamos $\mathbf{g}_{\boldsymbol\psi}$, congelamos $\mathbf{f}_{\boldsymbol\phi}$ e avaliamos $\mathbf{h}$!
+:::
+
+::: {.fig-resize style="width: 95%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, ax = plt.subplots(figsize=(12.5, 3.4))
+ax.set_xlim(0, 12.5); ax.set_ylim(0, 3.6); ax.axis("off")
+
+def caixa(x, y, w, h, txt, cor, fc="#f7f9fc", lw=1.8):
+    box = patches.FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.08,rounding_size=0.12",
+                                 linewidth=lw, edgecolor=cor, facecolor=fc)
+    ax.add_patch(box)
+    ax.text(x + w/2, y + h/2, txt, ha="center", va="center", fontsize=9.5, fontweight="bold", color="#1f2933")
+
+def seta(x1, y1, x2, y2, txt="", dy=0.18, cor="#444"):
+    ax.annotate("", xy=(x2, y2), xytext=(x1, y1),
+                arrowprops=dict(arrowstyle="-|>,head_width=0.22,head_length=0.35", lw=1.6, color=cor))
+    if txt:
+        ax.text((x1+x2)/2, (y1+y2)/2 + dy, txt, ha="center", va="center", fontsize=8.5, color=cor)
+
+# Entrada
+caixa(0.2, 1.35, 1.1, 0.9, "Entrada\n$\\mathbf{x}_i \\in \\mathbb{R}^D$", COR_CINZA, "#f3f4f6")
+# Duas visoes
+caixa(2.1, 2.35, 1.45, 0.8, "Visão 1\n$\\tilde{\\mathbf{x}}_i^{(1)} = t_1(\\mathbf{x}_i)$", COR_A, "#eef4fb")
+caixa(2.1, 0.45, 1.45, 0.8, "Visão 2\n$\\tilde{\\mathbf{x}}_i^{(2)} = t_2(\\mathbf{x}_i)$", COR_A, "#eef4fb")
+seta(1.38, 1.95, 2.02, 2.7, "$t_1 \\sim \\mathcal{T}$", dy=0.22)
+seta(1.38, 1.65, 2.02, 0.9, "$t_2 \\sim \\mathcal{T}$", dy=-0.24)
+
+# Backbone f_phi
+caixa(4.3, 2.35, 1.85, 0.8, "Codificador $\\mathbf{f}_{\\boldsymbol{\\phi}}$\n(pesos compartilhados)", COR_VERDE, "#edf8f4")
+caixa(4.3, 0.45, 1.85, 0.8, "Codificador $\\mathbf{f}_{\\boldsymbol{\\phi}}$\n(mesmo $\\boldsymbol{\\phi}$)", COR_VERDE, "#edf8f4")
+seta(3.63, 2.75, 4.22, 2.75)
+seta(3.63, 0.85, 4.22, 0.85)
+
+# h_i
+ax.text(6.65, 2.98, "$\\mathbf{h}_i^{(1)} \\in \\mathbb{R}^M$", ha="center", fontsize=9.5, color=COR_VERDE, fontweight="bold")
+ax.text(6.65, 0.55, "$\\mathbf{h}_i^{(2)} \\in \\mathbb{R}^M$", ha="center", fontsize=9.5, color=COR_VERDE, fontweight="bold")
+ax.text(6.65, 1.8, "Usado no\nLinear Probe\n(após o treino)", ha="center", va="center", fontsize=8.5,
+        color=COR_VERDE, bbox=dict(boxstyle="round,pad=0.25", fc="#edf8f4", ec=COR_VERDE, ls="--", lw=1.1))
+
+# Projection head g_psi + norm
+caixa(7.2, 2.35, 1.95, 0.8, "Projeção $\\mathbf{g}_{\\boldsymbol{\\psi}}$\n+ norm. $\\ell_2$", COR_B, "#fdf3ec")
+caixa(7.2, 0.45, 1.95, 0.8, "Projeção $\\mathbf{g}_{\\boldsymbol{\\psi}}$\n+ norm. $\\ell_2$", COR_B, "#fdf3ec")
+seta(6.23, 2.75, 7.12, 2.75)
+seta(6.23, 0.85, 7.12, 0.85)
+
+# z_i e Loss
+caixa(10.0, 1.15, 2.25, 1.3, "Perda InfoNCE\n$\\mathbf{z}_i^{(1)}, \\mathbf{z}_i^{(2)} \\in \\mathbb{S}^{M_z-1}$\n(aproxima par positivo;\nrepele $2B-2$ negativos)", COR_NEU, "#f3f2fa", lw=2.0)
+seta(9.23, 2.75, 9.93, 2.05, "$\\mathbf{z}_i^{(1)}$", dy=0.2)
+seta(9.23, 0.85, 9.93, 1.55, "$\\mathbf{z}_i^{(2)}$", dy=-0.22)
+
+plt.tight_layout(); plt.show()
+```
+:::
+
+## Invariância pura, colapso e a perda InfoNCE
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Com a arquitetura definida, precisamos escolher a função de perda. Se queremos que a representação seja invariante às perturbações em $\mathcal{T}$, a tentativa mais direta é minimizar a distância quadrática média entre as duas visões do mesmo objeto:
+$$\mathcal{L}_{\text{align}}(\boldsymbol\phi, \boldsymbol\psi) = \mathbb{E}_{\mathbf{x} \sim p,\, t_1, t_2 \sim \mathcal{T}}\!\left[\big\|\mathbf{z}(t_1(\mathbf{x})) - \mathbf{z}(t_2(\mathbf{x}))\big\|_2^2\right].$$
+
+Essa função tem um defeito fatal: **qualquer função constante** $\mathbf{z}(\mathbf{x}) \equiv \mathbf{c}$ (com $\|\mathbf{c}\|_2 = 1$) atinge $\mathcal{L}_{\text{align}} = 0$, o mínimo global absoluto (já que uma norma ao quadrado nunca é negativa). A rede encontra esse atalho rapidamente — como vimos no terceiro painel da figura de abertura, onde o desvio padrão colapsou para `{python} brl(std_col_s, 4)` — e perde toda a informação sobre os dados.
+
+Para impedir o colapso, transformamos o aprendizado em uma **tarefa discriminativa sem rótulos** (*Noise Contrastive Estimation*, NCE). Dado um ponto âncora $\mathbf{x}$ e sua visão positiva $\mathbf{x}^+ \sim p(\cdot \mid \mathbf{x})$, sorteamos $K$ amostras **negativas** $\{\mathbf{x}_1^-, \dots, \mathbf{x}_K^-\}$ de forma independente da distribuição marginal $p(\mathbf{x})$. Formamos o conjunto candidato $\mathcal{C} = \{\mathbf{x}_0, \mathbf{x}_1, \dots, \mathbf{x}_K\}$, no qual exatamente um elemento é o par positivo $\mathbf{x}^+$ (por convenção no índice $0$) e os outros $K$ são os negativos.
+
+Introduzimos uma função de pontuação escalar (*critic*) $u(\mathbf{x}, \mathbf{x}') \in \mathbb{R}$, que mede a compatibilidade entre duas observações. A perda **InfoNCE** (Oord et al., 2018) é a entropia cruzada categórica $(K+1)$-ária para apontar qual candidato veio da conjunta $p(\mathbf{x}, \mathbf{x}^+)$:
+$$\mathcal{L}_{\text{InfoNCE}}(u; K) = -\mathbb{E}_{p(\mathbf{x}, \mathbf{x}^+)\prod_{j=1}^K p(\mathbf{x}_j^-)}\!\left[\ln \frac{\exp\big(u(\mathbf{x}, \mathbf{x}^+)\big)}{\exp\big(u(\mathbf{x}, \mathbf{x}^+)\big) + \sum_{j=1}^K \exp\big(u(\mathbf{x}, \mathbf{x}_j^-)\big)}\right].$$
+
+**Que forma assume o *critic* $u(\mathbf{x}, \mathbf{x}')$?** A teoria geral da InfoNCE vale para *qualquer* função $u$:
+- no **CPC original** (Oord et al., 2018), $u$ é bilinear entre um vetor de contexto e um vetor futuro ($\mathbf{z}_{t+k}^T \mathbf{W}_k \mathbf{c}_t$);
+- em **estimação geral de MI** (Poole et al., 2019), $u$ pode ser até uma MLP conjunta sobre o par $[\mathbf{x}, \mathbf{x}']$;
+- no **SimCLR** (Chen et al., 2020), escolhemos o *critic* separável baseado na **similaridade cosseno escalonada por uma temperatura $\tau > 0$** sobre as saídas normalizadas da nossa arquitetura:
+$$u(\tilde{\mathbf{x}}_i, \tilde{\mathbf{x}}_j) = \frac{\text{sim}(\mathbf{z}_i, \mathbf{z}_j)}{\tau} = \frac{\mathbf{z}_i^T \mathbf{z}_j}{\tau}, \qquad \|\mathbf{z}_i\|_2 = \|\mathbf{z}_j\|_2 = 1.$$
+
+No minilote de $B$ objetos ($2B$ visões), cada visão $\mathbf{z}_i$ tem $1$ par positivo ($\mathbf{z}_{i^+}$) e $K = 2B - 2$ negativos (as outras $2B-2$ visões). Se a rede colapsar para $\mathbf{z}(\mathbf{x}) \equiv \mathbf{c}$, todos os produtos internos valem $1$, a razão na *softmax* vale $1/(K+1)$ e a perda trava em $\ln(K+1)$ — equivalente ao chute aleatório uniforme. O colapso deixa de ser ótimo!
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Só alinhamento colapsa:** $\mathbf{z}(\mathbf{x}) \equiv \mathbf{c} \implies \mathbb{E}[\|\mathbf{z}(t_1(\mathbf{x}))-\mathbf{z}(t_2(\mathbf{x}))\|_2^2] = 0$.
+- **Perda InfoNCE (Oord et al., 2018):** para um *critic* $u(\mathbf{x}, \mathbf{x}') \in \mathbb{R}$, distinguir 1 positivo de $K$ negativos:
+$$\mathcal{L}_{\text{InfoNCE}}(u; K) = -\mathbb{E}\!\left[\ln \frac{\exp(u(\mathbf{x}, \mathbf{x}^+))}{\exp(u(\mathbf{x}, \mathbf{x}^+)) + \sum_{j=1}^K \exp(u(\mathbf{x}, \mathbf{x}_j^-))}\right].$$
+
+::: {.fragment}
+- **Formas do *critic* $u$:** bilinear no CPC ($\mathbf{z}_{t+k}^T\mathbf{W}_k\mathbf{c}_t$), MLP conjunta, ou no **SimCLR** (Chen et al., 2020):
+$$u(\tilde{\mathbf{x}}_i, \tilde{\mathbf{x}}_j) = \frac{\mathbf{z}_i^T \mathbf{z}_j}{\tau}, \qquad \|\mathbf{z}_i\|_2 = 1, \qquad K = 2B - 2.$$
+- No colapso constante ($\mathbf{z} \equiv \mathbf{c}$, $\|\mathbf{c}\|_2=1$), todo par tem $\mathbf{z}_i^T\mathbf{z}_j = 1$, logo a razão é $\frac{\exp(1/\tau)}{(K+1)\exp(1/\tau)} = \frac{1}{K+1}$ e $\mathcal{L}_{\text{InfoNCE}} = -\ln\frac{1}{K+1} = \ln(K+1)$ (perda de chute aleatório uniforme!).
+:::
+:::
+
+## Pausa 1: Arquitetura, Colapso e InfoNCE {.unnumbered}
+
+::: {.callout-note}
+## Um minilote do SimCLR tem $B = 64$ imagens. Quantos negativos $K$ existem para cada visão âncora, e quanto vale $\mathcal{L}_{\text{InfoNCE}}$ se o codificador colapsar para um vetor constante unitário $\mathbf{c}$?
+
+Lembre que cada imagem gera duas visões no minilote.
+:::
+
+::: {.callout-tip}
+## Colapso e Formulação Contrastiva
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Se um conjunto de dados tem alta variância em atributos irrelevantes (*nuisance*), minimizar o erro quadrático de reconstrução (PCA ou Autoencoder) garante que a semântica principal será preservada.
+- □ Minimizar apenas a distância média entre pares positivos $\|\mathbf{z}(\mathbf{x}) - \mathbf{z}(\mathbf{x}^+)\|_2^2$ admite o mapa constante $\mathbf{z}(\mathbf{x}) \equiv \mathbf{c}$ como mínimo global exato.
+- □ No SimCLR, todos os $2B-2$ negativos de um minilote pertencem garantidamente a classes semânticas diferentes da âncora.
+- □ A perda InfoNCE pode ser lida como a entropia cruzada de um classificador $(K+1)$-ário que distingue a visão oriunda da conjunta $p(\mathbf{x}^+\mid\mathbf{x})$ das $K$ visões vindas da marginal $p(\mathbf{x})$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 1: Arquitetura, Colapso e InfoNCE — Resposta
+
+::: {.callout-tip}
+## Colapso e Formulação Contrastiva — Resposta
+
+- ✗ PCA e AE priorizam direções de maior variância, mesmo que sejam ruído irrelevante.
+- ✔ Mapa constante zera a distância entre positivos.
+- ✗ Sem rótulos, o lote pode conter falsos negativos da mesma classe.
+- ✔ Forma exata de entropia cruzada $(K+1)$-ária.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** com $B = 64$, há $2B = 128$ visões e $K = 2B - 2 = 126$ negativos por âncora. No colapso constante, $\text{sim} = 1$ para todos os pares, logo $\mathcal{L}_{\text{InfoNCE}} = \ln(127) \approx 4{,}84$.
+:::
+:::
+
+# Razão de Densidades e Informação Mútua
+
+## Revisão: Informação Mútua como divergência KL
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Nas Aulas 5, 7 e 8 usamos a divergência de Kullback-Leibler entre duas distribuições $p$ e $q$:
+$$\mathrm{KL}(p \| q) = \int p(x) \ln \frac{p(x)}{q(x)}\,\mathrm{d}x \ge 0,$$
+com igualdade se e somente se $p = q$ quase certamente. A **Informação Mútua** $I(X; Y)$ entre duas variáveis aleatórias $X$ e $Y$ é definida como a divergência KL entre a distribuição conjunta $p(x,y)$ e o produto das marginais $p(x)p(y)$:
+$$\begin{aligned}
+I(X; Y) &= \mathrm{KL}\big(p(x, y) \,\|\, p(x)p(y)\big) \\
+&= \iint p(x, y) \ln \frac{p(x, y)}{p(x)p(y)}\,\mathrm{d}x\,\mathrm{d}y \\
+&= \mathbb{E}_{p(x,y)}\!\left[\ln \frac{p(y \mid x)}{p(y)}\right] = \mathbb{E}_{p(x,y)}[-\ln p(y)] - \mathbb{E}_{p(x,y)}[-\ln p(y \mid x)] = H(Y) - H(Y \mid X).
+\end{aligned}$$
+
+Dessa identidade decorrem três propriedades fundamentais:
+1. **Independência:** $I(X; Y) \ge 0$, com $I(X; Y) = 0 \iff p(x,y) = p(x)p(y)$ (pela propriedade da divergência KL), ou seja, $X$ e $Y$ são estatisticamente independentes ($X \perp\!\!\!\perp Y$).
+2. **Redução de incerteza:** $I(X; Y) = H(Y) - H(Y\mid X)$ mede quanto a incerteza média sobre $Y$ cai ao observarmos $X$ (em *nats*, usando logaritmo natural).
+3. **Captura de dependências não lineares arbitrárias:** a covariância e a correlação de Pearson olham apenas para momentos de segunda ordem ($\mathbb{E}[(X-\mu_X)(Y-\mu_Y)]$) e podem ser nulas mesmo quando $Y$ é função exata de $X$ (por exemplo, $X \sim \mathcal{U}[-1,1]$ e $Y = X^2$ têm correlação zero). Já a Informação Mútua compara **toda a distribuição conjunta** $p(x,y)$ contra $p(x)p(y)$: qualquer relação determinística ou estocástica faz $p(x,y) \ne p(x)p(y)$, produzindo $I(X;Y) > 0$, além de ser invariante a transformações bijetoras suaves.
+
+O obstáculo em aprendizado profundo é que $p(y\mid x)$ e $p(y)$ são desconhecidas em alta dimensão — e, como vimos na Aula 2, estimá-las diretamente por KDE sofre severamente com a maldição da dimensionalidade. A seguir, provaremos passo a passo que minimizar $\mathcal{L}_{\text{InfoNCE}}$ contorna essa barreira estimando a **razão** $\frac{p(\mathbf{x}'\mid \mathbf{x})}{p(\mathbf{x}')}$ e maximizando uma cota inferior exata de $I(\mathbf{x}; \mathbf{x}^+)$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Informação Mútua (MI):** divergência KL entre a conjunta e o produto das marginais:
+$$I(X; Y) = \mathrm{KL}\big(p(x, y) \,\|\, p(x)p(y)\big) = \mathbb{E}_{p(x,y)}\!\left[\ln \frac{p(y \mid x)}{p(y)}\right] = H(Y) - H(Y \mid X) \ge 0.$$
+- **Independência:** como $\mathrm{KL}=0 \iff p=q$, temos $I(X;Y)=0 \iff p(x,y)=p(x)p(y)$ ($X \perp\!\!\!\perp Y$).
+- **Dependências não lineares:** a correlação linear mede só covariância ($\mathrm{Corr}(X, X^2) = 0$ se $X\sim\mathcal{U}[-1,1]$). Como a Informação Mútua compara **toda a conjunta** $p(x,y)$ com $p(x)p(y)$, qualquer relação não linear faz $I(X;Y) > 0$.
+- **Problema:** em alta dimensão não conhecemos $p(y\mid x)$ nem $p(y)$.
+
+::: {.fragment .callout-important}
+## O que minimizar $\mathcal{L}_{\text{InfoNCE}}$ resolve?
+1. Estima diretamente a **razão de densidades** $\frac{p(\mathbf{x}'\mid\mathbf{x})}{p(\mathbf{x}')}$ (sem precisar estimar $p(\mathbf{x})$);
+2. Maximiza uma **cota inferior exata** da Informação Mútua: $I(\mathbf{x}; \mathbf{x}^+) \ge \ln(K+1) - \mathcal{L}_{\text{InfoNCE}}$.
+:::
+:::
+
+## Derivação passo a passo 1: O crítico ótimo de Bayes
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Queremos descobrir qual função $u^\star(\mathbf{x}, \mathbf{x}')$ minimiza $\mathcal{L}_{\text{InfoNCE}}(u; K)$ quando $u$ tem capacidade irrestrita. Antes da álgebra, precisamos deixar cristalino o significado probabilístico da **marginal** e da **condicional** no aprendizado contrastivo:
+
+- **Distribuição marginal $p(\mathbf{x}')$:** é a distribuição de uma visão gerada por um **objeto qualquer** do conjunto de dados, sorteado independentemente da âncora $\mathbf{x}$ (sorteia-se um objeto $\mathbf{x}_{\text{obj}} \sim p_{\text{dados}}$ e aplica-se $t \sim \mathcal{T}$). É daqui que vêm os $K$ **negativos** $\mathbf{x}_1^-, \dots, \mathbf{x}_K^-$.
+- **Distribuição condicional $p(\mathbf{x}' \mid \mathbf{x})$:** fixada a visão âncora $\mathbf{x} = t_1(\mathbf{x}_{\text{obj}})$, é a distribuição das possíveis segundas visões $\mathbf{x}^+ = t_2(\mathbf{x}_{\text{obj}})$ geradas a partir do **mesmo objeto** subjacente $\mathbf{x}_{\text{obj}}$. É daqui que vem o **par positivo** $\mathbf{x}^+$.
+
+Portanto, a razão $\frac{p(\mathbf{x}' \mid \mathbf{x})}{p(\mathbf{x}')}$ responde: *"quão mais provável é observar $\mathbf{x}'$ como outra visão do mesmo objeto de $\mathbf{x}$, em comparação a observar $\mathbf{x}'$ por acaso em qualquer objeto do dataset?"* Vamos deduzir em quatro passos que o crítico ótimo estima exatamente o logaritmo dessa razão.
+
+**Passo 1 — Modelo gerador do conjunto candidato $\mathcal{C}$.**
+Fixada a âncora $\mathbf{x}$, considere o conjunto de $K+1$ candidatos $\mathcal{C} = \{\mathbf{x}_0, \mathbf{x}_1, \dots, \mathbf{x}_K\}$. Um índice aleatório $y^\star \in \{0, \dots, K\}$ é sorteado uniformemente, $P(y^\star = i) = \frac{1}{K+1}$. O candidato $\mathbf{x}_{y^\star}$ é amostrado da distribuição condicional $p(\cdot \mid \mathbf{x})$, enquanto os outros $K$ candidatos $\{\mathbf{x}_j\}_{j \ne y^\star}$ são amostrados i.i.d. da marginal $p(\cdot)$.
+
+**Passo 2 — Verossimilhança conjunta dado $y^\star = i$.**
+Sob a hipótese de que o índice $i$ é o positivo, a densidade conjunta de $\mathcal{C}$ dado $\mathbf{x}$ e $y^\star = i$ é o produto da condicional no índice $i$ pelas $K$ marginais nos demais índices:
+$$p(\mathcal{C} \mid \mathbf{x}, y^\star = i) = p(\mathbf{x}_i \mid \mathbf{x}) \prod_{j \ne i} p(\mathbf{x}_j).$$
+Multiplicando e dividindo pelo fator $p(\mathbf{x}_i)$, completamos o produto sobre todos os $K+1$ elementos:
+$$p(\mathcal{C} \mid \mathbf{x}, y^\star = i) = \frac{p(\mathbf{x}_i \mid \mathbf{x})}{p(\mathbf{x}_i)} \prod_{j=0}^K p(\mathbf{x}_j).$$
+
+**Passo 3 — Probabilidade posterior exata via Teorema de Bayes.**
+Aplicando a Regra de Bayes, a probabilidade posterior de o candidato $i$ ser o par positivo é:
+$$P(y^\star = i \mid \mathbf{x}, \mathcal{C}) = \frac{p(\mathcal{C} \mid \mathbf{x}, y^\star = i)\, P(y^\star = i)}{\sum_{k=0}^K p(\mathcal{C} \mid \mathbf{x}, y^\star = k)\, P(y^\star = k)} = \frac{\frac{1}{K+1}\frac{p(\mathbf{x}_i \mid \mathbf{x})}{p(\mathbf{x}_i)} \prod_{j=0}^K p(\mathbf{x}_j)}{\sum_{k=0}^K \frac{1}{K+1}\frac{p(\mathbf{x}_k \mid \mathbf{x})}{p(\mathbf{x}_k)} \prod_{j=0}^K p(\mathbf{x}_j)}.$$
+Como o fator $\frac{1}{K+1}\prod_{j=0}^K p(\mathbf{x}_j)$ é idêntico no numerador e em todos os termos do denominador, ele cancela exatamente:
+$$P(y^\star = i \mid \mathbf{x}, \mathcal{C}) = \frac{\frac{p(\mathbf{x}_i \mid \mathbf{x})}{p(\mathbf{x}_i)}}{\sum_{k=0}^K \frac{p(\mathbf{x}_k \mid \mathbf{x})}{p(\mathbf{x}_k)}}.$$
+
+**Passo 4 — Igualando a *softmax* à posterior exata.**
+Escreva $q_u(i \mid \mathbf{x}, \mathcal{C}) = \frac{\exp(u(\mathbf{x}, \mathbf{x}_i))}{\sum_{k=0}^K \exp(u(\mathbf{x}, \mathbf{x}_k))}$ para a distribuição predita pelo modelo, e abrevie $P_i = P(y^\star = i \mid \mathbf{x}, \mathcal{C})$ e $q_i = q_u(i \mid \mathbf{x}, \mathcal{C})$. A perda InfoNCE é a entropia cruzada esperada entre $P$ e $q_u$; somando e subtraindo $-\ln P_i$ dentro do somatório:
+$$\begin{aligned}
+\mathcal{L}_{\text{InfoNCE}}(u; K) &= \mathbb{E}_{\mathbf{x}, \mathcal{C}}\!\left[\sum_{i=0}^K P_i(-\ln q_i)\right] \\
+&= \mathbb{E}_{\mathbf{x}, \mathcal{C}}\!\left[\sum_{i=0}^K P_i\!\left(-\ln P_i + \ln \frac{P_i}{q_i}\right)\right] \\
+&= \underbrace{\mathbb{E}_{\mathbf{x}, \mathcal{C}}\big[H(y^\star \mid \mathbf{x}, \mathcal{C})\big]}_{\text{não depende de } u} + \mathbb{E}_{\mathbf{x}, \mathcal{C}}\!\left[\mathrm{KL}\big(P(\cdot \mid \mathbf{x}, \mathcal{C}) \,\|\, q_u(\cdot \mid \mathbf{x}, \mathcal{C})\big)\right].
+\end{aligned}$$
+Como o primeiro termo depende apenas dos dados e não de $u$, minimizar $\mathcal{L}_{\text{InfoNCE}}$ equivale a minimizar a divergência $\mathrm{KL}(P \| q_u)$. Como $\mathrm{KL} \ge 0$ com igualdade se e somente se $q_u = P$, o mínimo global ocorre exatamente quando:
+$$\frac{\exp\big(u^\star(\mathbf{x}, \mathbf{x}_i)\big)}{\sum_{k=0}^K \exp\big(u^\star(\mathbf{x}, \mathbf{x}_k)\big)} = \frac{\frac{p(\mathbf{x}_i \mid \mathbf{x})}{p(\mathbf{x}_i)}}{\sum_{k=0}^K \frac{p(\mathbf{x}_k \mid \mathbf{x})}{p(\mathbf{x}_k)}}.$$
+Portanto, o **crítico ótimo** satisfaz, a menos de um fator multiplicativo $c(\mathbf{x}) > 0$ que depende apenas da âncora $\mathbf{x}$ (e cancela na razão da *softmax*):
+$$\exp\big(u^\star(\mathbf{x}, \mathbf{x}')\big) = c(\mathbf{x})\,\frac{p(\mathbf{x}' \mid \mathbf{x})}{p(\mathbf{x}')} = c(\mathbf{x})\,\frac{p(\mathbf{x}, \mathbf{x}')}{p(\mathbf{x})p(\mathbf{x}')} \iff u^\star(\mathbf{x}, \mathbf{x}') = \ln \frac{p(\mathbf{x}' \mid \mathbf{x})}{p(\mathbf{x}')} + \ln c(\mathbf{x}).$$
+
+Sem jamais estimar $p(\mathbf{x})$ ou $p(\mathbf{x}'\mid \mathbf{x})$ separadamente, a InfoNCE estima diretamente o logaritmo da **razão de densidades**!
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **O que são a marginal e a condicional aqui?**
+  - **Marginal $p(\mathbf{x}')$ (negativos):** distribuição de uma visão de **qualquer objeto** do dataset, independente de $\mathbf{x}$.
+  - **Condicional $p(\mathbf{x}'\mid\mathbf{x})$ (positivo):** distribuição de outra visão do **mesmo objeto** que gerou $\mathbf{x}$.
+- **Conjunto candidato $\mathcal{C} = \{\mathbf{x}_0, \dots, \mathbf{x}_K\}$:** $K+1$ amostras dadas à rede junto com $\mathbf{x}$ (1 índice uniforme $y^\star$ veio de $p(\cdot\mid\mathbf{x})$; os outros $K$ vieram i.i.d. de $p(\cdot)$).
+
+1. **Verossimilhança de $\mathcal{C}$ dado $y^\star = i$:** $p(\mathcal{C} \mid \mathbf{x}, y^\star = i) = p(\mathbf{x}_i \mid \mathbf{x}) \prod_{j\ne i} p(\mathbf{x}_j) = \frac{p(\mathbf{x}_i\mid\mathbf{x})}{p(\mathbf{x}_i)}\prod_{j=0}^K p(\mathbf{x}_j)$.
+2. **Bayes (posterior verdadeira $P_i$):** cancelando o produto comum,
+$$P_i \equiv P(y^\star = i \mid \mathbf{x}, \mathcal{C}) = \frac{p(\mathbf{x}_i \mid \mathbf{x}) / p(\mathbf{x}_i)}{\sum_{k=0}^K p(\mathbf{x}_k \mid \mathbf{x}) / p(\mathbf{x}_k)}.$$
+3. **Distribuição do modelo ($q_{u,i}$, *softmax*):** $q_{u,i} \equiv q_u(i \mid \mathbf{x}, \mathcal{C}) = \dfrac{\exp(u(\mathbf{x}, \mathbf{x}_i))}{\sum_{k=0}^K \exp(u(\mathbf{x}, \mathbf{x}_k))}$.
+
+::: {.fragment}
+4. **Entropia cruzada:** como $-\ln q_{u,i} = -\ln P_i + \ln(P_i / q_{u,i})$,
+$$\mathcal{L}_{\text{InfoNCE}} = \mathbb{E}\!\left[\sum_{i=0}^K P_i (-\ln q_{u,i})\right] = \underbrace{\mathbb{E}[H(y^\star\mid\mathbf{x},\mathcal{C})]}_{\text{const. em }u} + \mathbb{E}[\mathrm{KL}(P \| q_u)].$$
+   - Mínimo em $\mathrm{KL}=0 \iff q_{u,i} = P_i$: $\exp\big(u^\star(\mathbf{x}, \mathbf{x}')\big) = c(\mathbf{x})\,\dfrac{p(\mathbf{x}' \mid \mathbf{x})}{p(\mathbf{x}')}$.
+:::
+:::
+
+## Passo 2: A cota inferior da Informação Mútua
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Uma vez que o crítico ótimo estima a razão de densidades $\frac{p(\mathbf{x}'\mid\mathbf{x})}{p(\mathbf{x}')}$ — justamente o argumento do logaritmo dentro de $I(\mathbf{x};\mathbf{x}^+) = \mathbb{E}\!\left[\ln\frac{p(\mathbf{x}^+\mid\mathbf{x})}{p(\mathbf{x}^+)}\right]$ —, Oord et al. (2018) e Poole et al. (2019) mostraram que a perda InfoNCE fornece diretamente uma cota inferior para a Informação Mútua:
+
+**Teorema (Cota InfoNCE da Informação Mútua).** *Para qualquer função de pontuação $u(\mathbf{x}, \mathbf{x}')$ e qualquer número de negativos $K \ge 1$ amostrados i.i.d. de $p(\mathbf{x})$:*
+$$I(\mathbf{x}; \mathbf{x}^+) \ge I(\mathbf{z}(\mathbf{x}); \mathbf{z}(\mathbf{x}^+)) \ge \ln(K + 1) - \mathcal{L}_{\text{InfoNCE}}(u; K).$$
+
+A demonstração completa (via razão de densidades no ótimo e desigualdade de Jensen sobre uma mudança de medida) pode ser consultada em Poole et al. (2019). O essencial aqui é entender **o que esse teorema significa** na prática:
+
+1. **Minimizar $\mathcal{L}_{\text{InfoNCE}}$ maximiza informação compartilhada:** como a primeira desigualdade decorre da Desigualdade de Processamento de Dados ($\mathbf{x} \to \mathbf{z}(\mathbf{x})$ não pode criar informação), reduzir a perda InfoNCE empurra para cima a cota inferior de $I(\mathbf{z}(\mathbf{x}); \mathbf{z}(\mathbf{x}^+))$, obrigando o codificador a preservar o que as duas visões têm em comum.
+2. **Ganho sobre o chute aleatório:** lembre do Bloco 1 que $\ln(K+1)$ é a perda do chute aleatório uniforme entre $K+1$ candidatos. Portanto, a diferença $\ln(K+1) - \mathcal{L}_{\text{InfoNCE}}$ mede exatamente **quanto o modelo supera o acaso**, em *nats*. No colapso constante ($\mathcal{L}_{\text{InfoNCE}} = \ln(K+1)$), a cota cai para $0$ nats.
+3. **O gargalo de $\ln(K+1)$:** como $\mathcal{L}_{\text{InfoNCE}} \ge 0$ sempre, a cota **nunca ultrapassa $\ln(K+1)$ nats**. Se a Informação Mútua real entre as visões for $10$ nats mas usarmos apenas $K = 15$ negativos ($\ln 16 \approx 2{,}77$ nats), a cota satura: basta capturar $2{,}77$ nats para distinguir $1$ positivo entre $16$ candidatos, e o modelo não é pressionado a extrair mais informação. Por isso, métodos contrastivos precisam de $K$ grande (lotes grandes ou filas de memória).
+:::
+
+::: {.content-visible when-format="revealjs"}
+**Teorema (Oord et al., 2018; Poole et al., 2019):** para **todo** $u$ e **todo** $K \ge 1$:
+$$I(\mathbf{x}; \mathbf{x}^+) \ge I(\mathbf{z}(\mathbf{x}); \mathbf{z}(\mathbf{x}^+)) \ge \ln(K + 1) - \mathcal{L}_{\text{InfoNCE}}(u; K).$$
+
+::: {.fragment}
+**O que o teorema significa:**
+
+1. **Treino = maximizar MI:** reduzir $\mathcal{L}_{\text{InfoNCE}}$ eleva a cota inferior de $I(\mathbf{z}(\mathbf{x}); \mathbf{z}(\mathbf{x}^+))$.
+2. **Medida em *nats* acima do acaso:** $\ln(K+1) - \mathcal{L}_{\text{InfoNCE}}$ é quanto o modelo supera o chute aleatório ($\ln(K+1)$). No colapso, a cota vale $0$.
+:::
+
+::: {.fragment .callout-important}
+## Saturação em $\ln(K+1)$
+Como $\mathcal{L}_{\text{InfoNCE}} \ge 0$, a cota **nunca passa de $\ln(K+1)$**! Com $K$ pequeno, basta pouca informação para acertar o positivo; para extrair alta informação mútua, é preciso **$K$ grande**.
+:::
+:::
+
+## Pausa 2: Razão de Densidades e Informação Mútua {.unnumbered}
+
+::: {.callout-note}
+## Um modelo contrastivo é treinado com $K = 15$ negativos por âncora e atinge $\mathcal{L}_{\text{InfoNCE}} = 0{,}01$. Podemos concluir que a Informação Mútua verdadeira entre as visões é próxima de $\ln(16) \approx 2{,}77$ nats? Por quê?
+:::
+
+::: {.callout-tip}
+## Razão de Densidades e Cota de MI
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Se duas variáveis aleatórias $X$ e $Y$ são independentes, então $I(X; Y) = 0$.
+- □ O crítico ótimo da perda InfoNCE estima diretamente a densidade marginal $p(\mathbf{x})$ das amostras.
+- □ Mesmo com capacidade infinita do codificador, a estimativa $\ln(K+1) - \mathcal{L}_{\text{InfoNCE}}$ é uma cota frouxa sempre que $I(\mathbf{x};\mathbf{x}^+) > \ln(K+1)$.
+- □ Aumentar o número de negativos $K$ altera o valor verdadeiro de $I(\mathbf{x}; \mathbf{x}^+)$ entre duas visões.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 2: Razão de Densidades e Informação Mútua — Resposta
+
+::: {.callout-tip}
+## Razão de Densidades e Cota de MI — Resposta
+
+- ✔ Independência $\implies p(x,y)=p(x)p(y) \implies \mathrm{KL}=0$.
+- ✗ Estima a razão de densidades $\frac{p(\mathbf{x}'\mid\mathbf{x})}{p(\mathbf{x}')}$, não $p(\mathbf{x})$ isolada.
+- ✔ Como $\mathcal{L}_{\text{InfoNCE}}\ge 0$, a cota nunca passa de $\ln(K+1)$.
+- ✗ $I(\mathbf{x};\mathbf{x}^+)$ depende apenas da conjunta das visões, não de $K$.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** **não.** A cota garante apenas $I(\mathbf{x};\mathbf{x}^+) \ge \ln(16) - 0{,}01 \approx 2{,}76$ nats. Se $I$ real for $10$ nats, a cota saturou pelo $K=15$ pequeno.
+:::
+:::
+
+# Geometria na Hiperesfera: Alinhamento e Uniformidade
+
+## Derivação passo a passo: Alinhamento, Uniformidade e o Gradiente em $\tau$
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+A teoria da Informação Mútua explica *o que* a InfoNCE otimiza, mas não explica sozinha por que a escolha da normalização $\ell_2$ na hiperesfera $\mathbb{S}^{M_z-1}$ e da temperatura $\tau$ têm tanto impacto prático. Vamos deduzir passo a passo a geometria dessa otimização (Wang & Isola, 2020).
+
+**Passo 1 — Por que normalizar $\|\mathbf{z}\|_2 = 1$?**
+Se usássemos o produto interno sem normalização, $u(\mathbf{x}, \mathbf{x}') = \mathbf{z}(\mathbf{x})^T\mathbf{z}(\mathbf{x}')/\tau$, bastaria que a rede acertasse o sinal relativo ($\mathbf{z}^T\mathbf{z}^+ > \mathbf{z}^T\mathbf{z}_j^-$) e então multiplicasse todos os vetores por um escalar $\alpha \to \infty$: os expoentes cresceriam como $\alpha^2$, levando a perda a zero sem melhorar a separação angular entre classes. Ao restringir $\mathbf{z} \in \mathbb{S}^{M_z-1}$, vale a identidade exata:
+$$\|\mathbf{z}_1 - \mathbf{z}_2\|_2^2 = \|\mathbf{z}_1\|_2^2 + \|\mathbf{z}_2\|_2^2 - 2\mathbf{z}_1^T\mathbf{z}_2 = 2 - 2\mathbf{z}_1^T\mathbf{z}_2,$$
+ligando diretamente a similaridade cosseno à distância euclidiana na esfera.
+
+**Passo 2 — Decomposição assintótica quando $K \to \infty$.**
+Separando o numerador do denominador na InfoNCE do SimCLR, temos:
+$$\mathcal{L}_{\text{InfoNCE}} = -\frac{1}{\tau}\,\mathbb{E}_{p(\mathbf{x},\mathbf{x}^+)}\!\left[\mathbf{z}(\mathbf{x})^T\mathbf{z}(\mathbf{x}^+)\right] + \mathbb{E}\!\left[\ln\!\left(\exp\!\left(\frac{\mathbf{z}(\mathbf{x})^T\mathbf{z}(\mathbf{x}^+)}{\tau}\right) + \sum_{j=1}^K \exp\!\left(\frac{\mathbf{z}(\mathbf{x})^T\mathbf{z}(\mathbf{x}_j^-)}{\tau}\right)\right)\right].$$
+Subtraindo $\ln K$ (que é constante em relação aos parâmetros da rede) e colocando $K$ em evidência dentro do segundo logaritmo:
+$$\mathcal{L}_{\text{InfoNCE}} - \ln K = -\frac{1}{\tau}\,\mathbb{E}\!\left[\mathbf{z}(\mathbf{x})^T\mathbf{z}(\mathbf{x}^+)\right] + \mathbb{E}\!\left[\ln\!\left(\frac{1}{K}\exp\!\left(\frac{\mathbf{z}(\mathbf{x})^T\mathbf{z}(\mathbf{x}^+)}{\tau}\right) + \frac{1}{K}\sum_{j=1}^K \exp\!\left(\frac{\mathbf{z}(\mathbf{x})^T\mathbf{z}(\mathbf{x}_j^-)}{\tau}\right)\right)\right].$$
+Quando $K \to \infty$, o primeiro termo dentro do logaritmo ($O(1/K)$) desaparece, e pela Lei dos Grandes Números a média sobre os $K$ negativos converge para a esperança sob $p(\mathbf{x}^-)$:
+$$\lim_{K\to\infty} \big(\mathcal{L}_{\text{InfoNCE}} - \ln K\big) = \underbrace{-\frac{1}{\tau}\,\mathbb{E}_{p(\mathbf{x},\mathbf{x}^+)}\!\left[\mathbf{z}(\mathbf{x})^T\mathbf{z}(\mathbf{x}^+)\right]}_{\text{Alinhamento}} + \underbrace{\mathbb{E}_{\mathbf{x}\sim p}\!\left[\ln \mathbb{E}_{\mathbf{x}^-\sim p}\!\left[\exp\!\left(\frac{\mathbf{z}(\mathbf{x})^T\mathbf{z}(\mathbf{x}^-)}{\tau}\right)\right]\right]}_{\text{Uniformidade}}.$$
+
+**Passo 3 — Conexão com o kernel Gaussiano da Aula 11.**
+Substituindo $\mathbf{z}_1^T\mathbf{z}_2 = 1 - \frac{1}{2}\|\mathbf{z}_1 - \mathbf{z}_2\|_2^2$ (as constantes $1/\tau$ somam-se a $0$ entre os dois termos!):
+$$\lim_{K\to\infty} \big(\mathcal{L}_{\text{InfoNCE}} - \ln K\big) = \frac{1}{2\tau}\underbrace{\mathbb{E}_{p(\mathbf{x},\mathbf{x}^+)}\!\left[\|\mathbf{z}(\mathbf{x}) - \mathbf{z}(\mathbf{x}^+)\|_2^2\right]}_{\mathcal{L}_{\text{align}}} + \mathbb{E}_{\mathbf{x}\sim p}\!\left[\ln \mathbb{E}_{\mathbf{x}^-\sim p}\!\left[\exp\!\left(-\frac{1}{2\tau}\|\mathbf{z}(\mathbf{x}) - \mathbf{z}(\mathbf{x}^-)\|_2^2\right)\right]\right].$$
+Olhe para a exponencial do segundo termo: é exatamente o **kernel Gaussiano** da Aula 11 com largura $\sigma^2 = \tau$! Na hiperesfera compacta $\mathbb{S}^{M_z-1}$, a única distribuição que minimiza essa energia potencial média (definida por Wang & Isola como $\mathcal{L}_{\text{uniform}} = \ln \mathbb{E}_{\mathbf{x},\mathbf{x}'}[\exp(-2\|\mathbf{z}(\mathbf{x})-\mathbf{z}(\mathbf{x}')\|_2^2)]$) é a **distribuição uniforme** — ou seja, máxima entropia na esfera.
+
+**Passo 4 — O gradiente e o dilema uniformidade-tolerância de $\tau$.**
+Para entender o papel de $\tau$, calculemos o gradiente da perda $\ell(\mathbf{z})$ de uma âncora $\mathbf{z}$ em relação a $\mathbf{z}$ (antes da projeção na esfera):
+$$\ell(\mathbf{z}) = -\frac{\mathbf{z}^T\mathbf{z}^+}{\tau} + \ln\!\left(\exp\!\left(\frac{\mathbf{z}^T\mathbf{z}^+}{\tau}\right) + \sum_{j=1}^K \exp\!\left(\frac{\mathbf{z}^T\mathbf{z}_j^-}{\tau}\right)\right).$$
+Denotando as probabilidades *softmax* $p_+ = \frac{\exp(\mathbf{z}^T\mathbf{z}^+/\tau)}{Z}$ e $p_j = \frac{\exp(\mathbf{z}^T\mathbf{z}_j^-/\tau)}{Z}$ (com $p_+ + \sum_{j=1}^K p_j = 1$), derivamos diretamente:
+$$\frac{\partial \ell}{\partial \mathbf{z}} = -\frac{\mathbf{z}^+}{\tau} + p_+\frac{\mathbf{z}^+}{\tau} + \sum_{j=1}^K p_j\frac{\mathbf{z}_j^-}{\tau} = \frac{1}{\tau}\sum_{j=1}^K p_j\,(\mathbf{z}_j^- - \mathbf{z}^+),$$
+pois $p_+ - 1 = -\sum_{j=1}^K p_j$. O passo de descida do gradiente ($-\eta\frac{\partial \ell}{\partial \mathbf{z}}$) puxa $\mathbf{z}$ na direção de $\mathbf{z}^+$ e o afasta de cada negativo $\mathbf{z}_j^-$ com peso proporcional a $p_j \propto \exp(\mathbf{z}^T\mathbf{z}_j^-/\tau)$:
+
+- Se $\tau$ é **muito pequeno**, a exponencial amplifica apenas os negativos mais próximos de $\mathbf{z}$ (*hard negatives*). Porém, sem rótulos, muitos *hard negatives* pertencem à **mesma classe semântica** (falsos negativos) — empurrá-los com força excessiva fragmenta as classes (**dilema uniformidade-tolerância**, Wang & Liu, 2021).
+- Se $\tau$ é **muito grande**, todos os $p_j$ ficam próximos de $1/(K+1)$ e o fator $1/\tau$ atenua o gradiente, perdendo poder de separação.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Na hiperesfera $\mathbb{S}^{M_z-1}$ ($\|\mathbf{z}\|_2=1$):** $\|\mathbf{z}_1 - \mathbf{z}_2\|_2^2 = 2 - 2\mathbf{z}_1^T\mathbf{z}_2$.
+- **Decomposição ($K\to\infty$, Wang & Isola, 2020):**
+$$\mathcal{L}_{\text{InfoNCE}} - \ln K \longrightarrow \frac{1}{2\tau}\underbrace{\mathbb{E}[\|\mathbf{z}(\mathbf{x}) - \mathbf{z}(\mathbf{x}^+)\|_2^2]}_{\mathcal{L}_{\text{align}}} + \mathbb{E}_{\mathbf{x}}\!\left[\ln\mathbb{E}_{\mathbf{x}^-}\!\left[\exp\!\left(-\frac{1}{2\tau}\|\mathbf{z}(\mathbf{x}) - \mathbf{z}(\mathbf{x}^-)\|_2^2\right)\right]\right].$$
+  - O termo repulsivo é o **kernel Gaussiano** (Aula 11) com $\sigma^2 = \tau$, minimizado pela distribuição **uniforme** na esfera!
+
+::: {.fragment}
+- **Gradiente em relação a $\mathbf{z}$:** $\dfrac{\partial \ell}{\partial \mathbf{z}} = \dfrac{1}{\tau}\displaystyle\sum_{j=1}^K p_j (\mathbf{z}_j^- - \mathbf{z}^+)$, onde $p_j \propto \exp(\mathbf{z}^T\mathbf{z}_j^-/\tau)$.
+  - $\tau$ muito pequeno: foca em *hard negatives* $\Rightarrow$ risco de quebrar classes por falsos negativos!
+  - $\tau$ muito grande: gradientes achatados e fracos.
+:::
+:::
+
+## Experimento em dados reais: dígitos manuscritos (`load_digits`)
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Para verificar a teoria em dados reais, treinamos nossa arquitetura SimCLR em PyTorch sobre o conjunto `load_digits` (`{python} milhar(n_dig_tr)` imagens $8\times 8$ de treino e `{python} milhar(n_dig_te)` de teste, 10 classes), **adicionando um fundo espacial suave aleatório** a cada imagem (simulando variação realista de iluminação/fundo em imagens naturais). As aumentações estocásticas são perturbação de fundo/iluminação, apagamento aleatório (*dropout* de 15% dos pixels) e ruído gaussiano leve. O codificador MLP comprime os 64 pixels para $\mathbf{h} \in \mathbb{R}^{16}$ e a cabeça de projeção produz $\mathbf{z} \in \mathbb{S}^{7}$.
+
+Com $\tau = 0{,}2$ e $B = 128$ ($K = 254$), avaliamos um classificador linear congelado (*linear probe*) sobre o conjunto de teste:
+
+- **PCA (16D):** `{python} pct(acc_pca_d)`; **Autoencoder (16D):** `{python} pct(acc_ae_d)` — ambos gastam a maior parte dos 16 graus de liberdade reconstruindo o fundo de alta energia.
+- **InfoNCE ($\mathbf{h} \in \mathbb{R}^{16}$, sem nenhum rótulo no treino):** **`{python} pct(acc_h_base)`** (e `{python} pct(acc_z_base)` usando $\mathbf{z} \in \mathbb{S}^{7}$) — superando PCA e Autoencoder em mais de 30 pontos percentuais (como referência, usar todos os 64 pixels brutos sem compressão dá `{python} pct(acc_raw)`).
+
+Os gráficos abaixo mostram as duas ablações previstas pela teoria:
+1. **Esquerda e Centro (Temperatura $\tau$):** $\tau$ muito pequeno ($0{,}02$) prejudica a separação semântica em $\mathbf{z}$ (`{python} pct(ab_tau[0][1])`); valores intermediários ($\tau \in [0{,}05;\, 0{,}2]$) atingem melhor equilíbrio entre alinhamento e uniformidade (`{python} brl(ab_tau[2][3], 2)` em $\tau=0{,}2$) e alto desempenho (`{python} pct(ab_tau[2][0])` em $\mathbf{h}$); $\tau$ muito alto ($2{,}0$) degrada a separação (`{python} pct(ab_tau[-1][1])`).
+2. **Direita (Número de negativos $K = 2B - 2$):** variar $B$ de $16$ ($K=30$, teto $\ln 31 \approx 3{,}43$) até $128$ ($K=254$, teto $\ln 255 \approx 5{,}54$) mostra o ganho consistente ao ampliar o número de negativos disponíveis no lote.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Dataset `load_digits` + fundo variável:** `{python} milhar(n_dig_tr)` treino / `{python} milhar(n_dig_te)` teste ($8\times 8 = 64$D, 10 classes), compressão para 16D.
+- **Linear probe (sem rótulos no treino):** PCA(16) `{python} pct(acc_pca_d)` | AE(16) `{python} pct(acc_ae_d)` | **InfoNCE $\mathbf{h}$(16) `{python} pct(acc_h_base)`** ($\mathbf{z}$(8): `{python} pct(acc_z_base)`).
+:::
+
+::: {.fig-resize style="width: 100%; margin: 0 auto;"}
+```{python}
+#| echo: false
+fig, axes = plt.subplots(1, 3, figsize=(13.5, 3.6))
+
+# Painel 1: Acuracia vs tau
+ax = axes[0]
+ax.semilogx(TAUS, [100 * r[0] for r in ab_tau], "o-", color=COR_A, lw=2, label="h (antes da projeção)")
+ax.semilogx(TAUS, [100 * r[1] for r in ab_tau], "s--", color=COR_B, lw=2, label="z (após projeção)")
+ax.set_xlabel("Temperatura $\\tau$ (escala log)")
+ax.set_ylabel("Acurácia linear probe (%)")
+ax.set_title("Efeito da temperatura $\\tau$")
+ax.legend(fontsize=8.5, loc="lower left")
+
+# Painel 2: Alignment vs Uniformity ao variar tau
+ax = axes[1]
+als = [r[2] for r in ab_tau]
+uns = [r[3] for r in ab_tau]
+ax.plot(uns, als, "o-", color=COR_NEU, lw=1.8)
+for t_val, u_val, a_val in zip(TAUS, uns, als):
+    ax.annotate(f"{t_val}", (u_val, a_val), textcoords="offset points", xytext=(5, 4), fontsize=8.5)
+ax.set_xlabel("Uniformidade $\\mathcal{L}_{\\mathrm{uniform}}$ (menor = mais uniforme)")
+ax.set_ylabel("Alinhamento $\\mathcal{L}_{\\mathrm{align}}$ (menor = mais próximo)")
+ax.set_title("Plano Alinhamento × Uniformidade")
+
+# Painel 3: Acuracia vs tamanho do lote (K = 2B - 2)
+ax = axes[2]
+Ks = [2 * b - 2 for b in BATCHES]
+ax.semilogx(Ks, [100 * r[0] for r in ab_bs], "o-", color=COR_A, lw=2, label="h (16D)")
+ax.semilogx(Ks, [100 * r[1] for r in ab_bs], "s--", color=COR_B, lw=2, label="z (8D)")
+ax.set_xlabel("Número de negativos $K = 2B - 2$ (escala log)")
+ax.set_ylabel("Acurácia linear probe (%)")
+ax.set_title("Efeito de $K$ (cota $\\ln(K+1)$)")
+ax.legend(fontsize=8.5, loc="lower right")
+
+plt.tight_layout(); plt.show()
+```
+:::
+
+## Pausa 3: Geometria na Hiperesfera e Temperatura {.unnumbered}
+
+::: {.callout-note}
+## No experimento acima, por que $\tau = 0{,}02$ degrada a acurácia de $\mathbf{z}$ em comparação a $\tau = 0{,}05$–$0{,}2$, apesar de a *softmax* ficar mais confiante?
+:::
+
+::: {.callout-tip}
+## Alinhamento, Uniformidade e Temperatura
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Se não normalizarmos $\mathbf{z}$ para a hiperesfera unitária, minimizar a InfoNCE com produto interno $\mathbf{z}_1^T\mathbf{z}_2/\tau$ impede o modelo de inflar a norma $\|\mathbf{z}\|_2$.
+- □ O termo de uniformidade $\mathcal{L}_{\text{uniform}}$ mede o logaritmo da média de um kernel Gaussiano entre pares independentes na hiperesfera, sendo minimizado pela distribuição uniforme em $\mathbb{S}^{M_z-1}$.
+- □ Aumentar a temperatura $\tau$ concentra o gradiente nos negativos mais difíceis (*hard negatives*) próximos da âncora.
+- □ Para vetores unitários $\mathbf{z}_1, \mathbf{z}_2 \in \mathbb{S}^{M_z-1}$, vale a relação exata $\|\mathbf{z}_1 - \mathbf{z}_2\|_2^2 = 2 - 2\mathbf{z}_1^T\mathbf{z}_2$.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 3: Geometria na Hiperesfera e Temperatura — Resposta
+
+::: {.callout-tip}
+## Alinhamento, Uniformidade e Temperatura — Resposta
+
+- ✗ Sem normalização $\ell_2$, o modelo escala $\|\mathbf{z}\|_2\to\infty$ para reduzir a perda sem melhorar a separação angular.
+- ✔ Energia do kernel Gaussiano na esfera é minimizada pela distribuição uniforme.
+- ✗ Quem concentra nos *hard negatives* é $\tau$ **pequeno**; $\tau$ grande achata os pesos.
+- ✔ Identidade exata na esfera unitária.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** $\tau = 0{,}02$ concentra quase todo o gradiente nos negativos mais próximos da âncora, que muitas vezes são **falsos negativos da mesma classe**, fragmentando os agrupamentos semânticos (*dilema uniformidade-tolerância*).
+:::
+:::
+
+# Arquitetura, Armadilhas Práticas e Panorama Moderno
+
+## A cabeça de projeção $\mathbf{g}_{\boldsymbol\psi}$ e a escolha de aumentações
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Dois resultados empíricos do experimento em `load_digits` merecem explicação cuidadosa.
+
+**1. Por que $\mathbf{h}$ supera $\mathbf{z}$ em todas as configurações?**
+Em toda a nossa ablação de temperatura, a representação intermediária $\mathbf{h} = \mathbf{f}_{\boldsymbol\phi}(\mathbf{x})$ atingiu `{python} pct(acc_h_base)` de acurácia no *linear probe* ($\tau=0{,}2$), superando consistentemente a projeção final $\mathbf{z} = \mathbf{g}_{\boldsymbol\psi}(\mathbf{h})/\|\mathbf{g}_{\boldsymbol\psi}(\mathbf{h})\|_2$ (`{python} pct(acc_z_base)` em $\tau=0{,}2$, com diferença ainda maior em $\tau=2{,}0$).
+
+O motivo é estrutural (Chen et al., 2020): a perda InfoNCE exige que $\mathbf{z}$ seja **estritamente invariante** às aumentações $\mathcal{T}$. Se $\mathcal{T}$ perturba brilho, contraste ou posição, $\mathbf{z}$ precisa jogar fora qualquer informação sobre esses fatores. Porém, em tarefas *downstream*, atributos como brilho, espessura de traço ou orientação frequentemente carregam pistas úteis para distinguir classes. A cabeça não linear $\mathbf{g}_{\boldsymbol\psi}$ atua como uma camada de sacrifício: ela absorve a projeção invariante exigida pela perda contrastiva, permitindo que o *backbone* $\mathbf{h}$ retenha uma representação mais rica. Após o treino, descartamos $\mathbf{g}_{\boldsymbol\psi}$ e usamos $\mathbf{h}$.
+
+**2. Como escolher as aumentações? O princípio InfoMin**
+Se $\mathcal{T}$ for fraca demais (por exemplo, ruído quase nulo), o codificador encontra **atalhos** (*shortcuts*): basta comparar pixels de borda ou estatísticas de fundo para identificar o par positivo, sem aprender a estrutura do objeto. Se $\mathcal{T}$ for forte demais (por exemplo, apagar 95% dos pixels), as duas visões não compartilham mais o objeto: $I(\mathbf{v}_1; \mathbf{v}_2) \to 0$. Pelo princípio **InfoMin** (Tian et al., 2020), o conjunto ideal de aumentações minimiza a informação mútua entre as visões *sujeita à restrição de preservar toda a informação relevante para a tarefa alvo*.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Cabeça de projeção $\mathbf{g}_{\boldsymbol\psi}$ (Chen et al., 2020):** no `load_digits`, $\mathbf{h}$ (`{python} pct(acc_h_base)`) supera $\mathbf{z}$ (`{python} pct(acc_z_base)`) em todas as temperaturas!
+  - A InfoNCE força $\mathbf{z}$ a descartar tudo que varia sob as aumentações $\mathcal{T}$ (fundo, brilho, rotação).
+  - $\mathbf{g}_{\boldsymbol\psi}$ absorve essa invariância estrita; descartamos $\mathbf{g}_{\boldsymbol\psi}$ após o treino e avaliamos $\mathbf{h}$.
+
+::: {.fragment}
+- **Aumentações — Princípio InfoMin (Tian et al., 2020):**
+  - Fracas demais $\Rightarrow$ atalhos superficiais (*shortcuts*).
+  - Fortes demais $\Rightarrow$ destroem a semântica ($I(\mathbf{v}_1;\mathbf{v}_2)\to 0$).
+  - Ideal: minimizar $I(\mathbf{v}_1;\mathbf{v}_2)$ mantendo a informação relevante para a tarefa.
+:::
+:::
+
+## Pausa 4: Arquitetura, Aumentações e Prática {.unnumbered}
+
+::: {.callout-note}
+## Ao projetar um sistema contrastivo para dígitos manuscritos, compare o efeito de usar como única aumentação (a) ruído gaussiano mínimo ($\sigma = 0{,}01$) ou (b) apagamento aleatório de 95% dos pixels ($p = 0{,}95$).
+:::
+
+::: {.callout-tip}
+## Cabeça de Projeção, Aumentações e *Linear Probe*
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Descartar a cabeça de projeção $\mathbf{g}_{\boldsymbol\psi}$ após o treino e usar $\mathbf{h}$ costuma melhorar o desempenho em tarefas *downstream* porque $\mathbf{g}_{\boldsymbol\psi}$ absorve a invariância estrita às aumentações.
+- □ Na avaliação por *linear probe*, ajustam-se todos os pesos do codificador $\mathbf{f}_{\boldsymbol\phi}$ junto com o classificador linear usando os rótulos de validação.
+- □ Aumentar a força das aumentações $\mathcal{T}$ sem limite sempre melhora a representação, pois maximiza a invariância do codificador.
+- □ Quando as aumentações são fracas demais, o modelo pode atingir perda InfoNCE baixa usando atalhos superficiais (*shortcuts*) sem aprender a semântica dos dados.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Pausa 4: Arquitetura, Aumentações e Prática — Resposta
+
+::: {.callout-tip}
+## Cabeça de Projeção, Aumentações e *Linear Probe* — Resposta
+
+- ✔ $\mathbf{g}_{\boldsymbol\psi}$ protege $\mathbf{h}$ de perder informação útil.
+- ✗ O *linear probe* **congela** $\mathbf{f}_{\boldsymbol\phi}$ e treina apenas o classificador linear sobre $\mathbf{h}$.
+- ✗ Aumentações extremas destroem o conteúdo compartilhado entre as visões ($I(\mathbf{v}_1;\mathbf{v}_2)\to 0$).
+- ✔ Com visões quase idênticas, estatísticas triviais já bastam para identificar o par positivo.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** em (a), as visões são quase idênticas e o modelo aprende atalhos triviais; em (b), a informação do dígito é destruída e $I(\mathbf{v}_1;\mathbf{v}_2)\to 0$.
+:::
+:::
+
+# Outras Modelagens Contrastivas e de Informação Mútua
+
+## Triplet Loss: contraste por margem
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Antes da consolidação da InfoNCE, uma das formulações mais influentes de aprendizado métrico e contrastivo foi a **Triplet Loss** (Schroff et al., 2015, *FaceNet*). Em vez de comparar uma âncora contra $K$ negativos simultaneamente via *softmax*, formamos **tripletos** $(\mathbf{z}, \mathbf{z}^+, \mathbf{z}^-)$ com apenas $1$ positivo e $1$ negativo, e impomos que o positivo fique mais próximo da âncora do que o negativo por pelo menos uma **margem** $m > 0$:
+$$\mathcal{L}_{\text{triplet}} = \mathbb{E}\!\left[\max\!\Big(0,\; \|\mathbf{z} - \mathbf{z}^+\|_2^2 - \|\mathbf{z} - \mathbf{z}^-\|_2^2 + m\Big)\right].$$
+
+- **Vantagem:** formulação geométrica simples e intuitiva para verificação de identidade (ex.: reconhecimento facial).
+- **Por que a InfoNCE a superou no aprendizado auto-supervisionado?**
+  1. Se o negativo escolhido for "fácil" ($\|\mathbf{z}-\mathbf{z}^-\|_2^2 \ge \|\mathbf{z}-\mathbf{z}^+\|_2^2 + m$), a perda e o gradiente valem **exatamente zero** — a rede não aprende nada com esse tripleto.
+  2. Por comparar só $1$ negativo por vez, exige heurísticas custosas de seleção (*hard negative mining*), enquanto a InfoNCE pondera automaticamente todos os $K$ negativos do lote de forma suave via *softmax*.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Formulação (Schroff et al., 2015 — *FaceNet*):** dado um tripleto $(\mathbf{z}, \mathbf{z}^+, \mathbf{z}^-)$ e uma margem $m > 0$:
+$$\mathcal{L}_{\text{triplet}} = \mathbb{E}\!\left[\max\!\Big(0,\; \|\mathbf{z} - \mathbf{z}^+\|_2^2 - \|\mathbf{z} - \mathbf{z}^-\|_2^2 + m\Big)\right].$$
+
+::: {.fragment}
+- **Limitações frente à InfoNCE:**
+  - Negativos fáceis ($\|\mathbf{z}-\mathbf{z}^-\|^2 \ge \|\mathbf{z}-\mathbf{z}^+\|^2 + m$) produzem **gradiente zero**.
+  - Compara apenas $K=1$ negativo por vez $\Rightarrow$ depende de *hard negative mining*, enquanto a InfoNCE pondera todos os $K$ negativos suavemente pela *softmax*.
+:::
+:::
+
+## Barlow Twins: invariância sem pares negativos
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+O **Barlow Twins** (Zbontar et al., 2021) elimina completamente a necessidade de pares negativos (e de assimetria ou *stop-gradient*), evitando o colapso por meio de uma restrição estatística inspirada na redução de redundância de Horace Barlow (1961).
+
+Dadas duas visões de um lote de $B$ objetos, centralizamos cada coordenada da projeção (média $0$ no lote) e calculamos a **matriz de correlação cruzada** $\mathbf{C} \in \mathbb{R}^{M_z \times M_z}$ entre as dimensões $a, b \in \{1,\dots,M_z\}$ das duas visões:
+$$C_{ab} = \frac{\sum_{i=1}^B z_{i,a}^{(1)}\, z_{i,b}^{(2)}}{\sqrt{\sum_{i=1}^B \big(z_{i,a}^{(1)}\big)^2}\sqrt{\sum_{i=1}^B \big(z_{i,b}^{(2)}\big)^2}} \in [-1, 1].$$
+
+A perda força $\mathbf{C}$ a ficar o mais próxima possível da **matriz identidade** $\mathbf{I}$:
+$$\mathcal{L}_{\text{BT}} = \underbrace{\sum_{a=1}^{M_z} (1 - C_{aa})^2}_{\text{Invariância (diagonal} = 1\text{)}} + \lambda \underbrace{\sum_{a=1}^{M_z}\sum_{b \ne a} C_{ab}^2}_{\text{Redução de redundância (fora} = 0\text{)}}.$$
+
+- **Como evita o colapso sem negativos?** No colapso constante, a variância no lote é zero e $C_{aa} \ne 1$, sendo penalizado pelo primeiro termo.
+- **Conexão com a Aula 6 (PCA):** forçar $C_{aa} = 1$ e $C_{ab} = 0$ ($a \ne b$) é uma versão não linear e auto-supervisionada do **branqueamento (*whitening*)** de representações.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Ideia (Zbontar et al., 2021):** sem negativos explícitos! Mede a **matriz de correlação cruzada** $\mathbf{C} \in \mathbb{R}^{M_z \times M_z}$ entre as coordenadas das duas visões no lote:
+$$C_{ab} = \frac{\sum_{i=1}^B z_{i,a}^{(1)} z_{i,b}^{(2)}}{\sqrt{\sum_i (z_{i,a}^{(1)})^2}\sqrt{\sum_i (z_{i,b}^{(2)})^2}}.$$
+- **Perda (força $\mathbf{C} \approx \mathbf{I}$):**
+$$\mathcal{L}_{\text{BT}} = \underbrace{\sum_{a=1}^{M_z} (1 - C_{aa})^2}_{\text{Invariância}} + \lambda \underbrace{\sum_{a=1}^{M_z}\sum_{b \ne a} C_{ab}^2}_{\text{Descorrelação / sem redundância}}.$$
+
+::: {.fragment}
+- **Por que não colapsa?** O colapso constante viola $C_{aa}=1$; descorrelacionar coordenadas evita que todas codifiquem o mesmo atributo (parentesco com o branqueamento da PCA, Aula 6).
+:::
+:::
+
+## MINE: estimação variacional direta de Informação Mútua
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+Como vimos no Bloco 2, a InfoNCE estima $I(\mathbf{x}; \mathbf{x}^+)$ por meio de uma cota inferior limitada por $\ln(K+1)$. O **MINE** (*Mutual Information Neural Estimation*, Belghazi et al., 2018) contorna esse teto usando diretamente a representação variacional de **Donsker-Varadhan** para a divergência KL:
+$$I(X; Y) = \mathrm{KL}\big(p(x,y) \,\|\, p(x)p(y)\big) = \sup_{T_{\boldsymbol\theta}} \Big(\mathbb{E}_{p(x,y)}[T_{\boldsymbol\theta}(x, y)] - \ln \mathbb{E}_{p(x)p(y)}\big[\exp(T_{\boldsymbol\theta}(x, y))\big]\Big),$$
+onde $T_{\boldsymbol\theta}$ é uma rede neural (*critic*) que recebe pares conjuntos $(x, y) \sim p(x,y)$ (positivos) e pares independentes $(x, y') \sim p(x)p(y)$ (obtidos embaralhando $y$ no lote, como no teste de permutação da Aula 11!).
+
+- **Vantagem teórica:** não possui o teto $\ln(K+1)$, podendo em princípio estimar valores arbitrariamente altos de $I(X; Y)$.
+- **Limitação prática (por que a InfoNCE domina em representação):** o termo $\ln \mathbb{E}_{p(x)p(y)}[\exp(T_{\boldsymbol\theta})]$ dentro do logaritmo gera **viés** em minilotes finitos e **variância exponencial** nos gradientes (um único par negativo com $T_{\boldsymbol\theta}$ grande domina $\exp(T_{\boldsymbol\theta})$). A InfoNCE sacrifica a ausência de teto em troca de gradientes limitados e muito mais estáveis.
+:::
+
+::: {.content-visible when-format="revealjs"}
+- **Representação de Donsker-Varadhan (Belghazi et al., 2018):** estima $I(X;Y)$ sem o teto $\ln(K+1)$:
+$$I(X; Y) \ge \sup_{T_{\boldsymbol\theta}} \Big(\mathbb{E}_{p(x,y)}[T_{\boldsymbol\theta}(x, y)] - \ln \mathbb{E}_{p(x)p(y)}\big[\exp(T_{\boldsymbol\theta}(x, y))\big]\Big).$$
+- Pares da marginal $p(x)p(y)$ são obtidos embaralhando $y$ no lote.
+
+::: {.fragment}
+- **Troca prática (MINE vs. InfoNCE):**
+  - **MINE:** sem teto $\ln(K+1)$, mas o termo $\ln\mathbb{E}[\exp(T_{\boldsymbol\theta})]$ causa **viés de lote** e **alta variância** nos gradientes.
+  - **InfoNCE:** limitada por $\ln(K+1)$, porém com gradientes suaves e muito mais estáveis para treinar representações.
+:::
+:::
+
+# Fechamento da Disciplina
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Retomando as 4 perguntas da Aula 12
+
+1. **Arquitetura e Objetivo:** Uma rede contrastiva encadeia um codificador compartilhado $\mathbf{f}_{\boldsymbol\phi}$, uma cabeça de projeção $\mathbf{g}_{\boldsymbol\psi}$ e normalização $\ell_2$ em $\mathbb{S}^{M_z-1}$. Aproximar apenas pares positivos leva ao colapso constante ($\mathbf{z} \equiv \mathbf{c}$); a perda InfoNCE evita o colapso formulando uma tarefa de classificação $(K+1)$-ária entre 1 par positivo e $K$ negativos.
+2. **Teoria da Informação:** O crítico ótimo de Bayes estima $\ln\frac{p(\mathbf{x}'\mid\mathbf{x})}{p(\mathbf{x}')}$ (razão de densidades), e minimizar a perda maximiza a cota inferior exata $I(\mathbf{x};\mathbf{x}^+) \ge \ln(K+1) - \mathcal{L}_{\text{InfoNCE}}$, limitada superiormente por $\ln(K+1)$.
+3. **Geometria:** Na hiperesfera $\mathbb{S}^{M_z-1}$, a InfoNCE equilibra **alinhamento** de positivos e **uniformidade** (energia mínima do kernel Gaussiano). O gradiente $\frac{1}{\tau}\sum_j p_j(\mathbf{z}_j^- - \mathbf{z}^+)$ mostra como $\tau$ pequeno foca nos *hard negatives*, gerando o dilema uniformidade-tolerância.
+4. **Prática:** Avaliamos $\mathbf{h}$ antes da cabeça de projeção $\mathbf{g}_{\boldsymbol\psi}$ (que absorve a invariância estrita) e escolhemos aumentações pelo princípio InfoMin para evitar tanto atalhos superficiais quanto destruição semântica.
+
+### Os paradigmas de representação lado a lado
+
+| | PCA / Autoencoder (Aulas 6–7) | VAE (Aula 7) | Contrastivo / InfoNCE (Aula 12) |
+| :--- | :---: | :---: | :---: |
+| **Objetivo** | Minimizar erro de reconstrução | Maximizar ELBO (verossimilhança marginal) | Maximizar cota da Informação Mútua $I(\mathbf{x};\mathbf{x}^+)$ |
+| **O que define o que importa** | Direções de maior variância | Modelo generativo + priori $p(\mathbf{z})$ | Invariância às aumentações $\mathcal{T}$ |
+| **Gera dados novos?** | Não (AE padrão) / Sim (PPCA) | Sim ($\mathbf{z}\sim p(\mathbf{z}) \to \mathbf{x}$) | Não (foco discriminativo em $\mathbf{h}$) |
+| **Vulnerabilidade principal** | *Nuisance* de alta variância | Colapso posterior / reconstrução borrada | Atalhos em $\mathcal{T}$ / falsos negativos |
+
+### Síntese do curso
+
+Percorremos três grandes camadas do Aprendizado Não Supervisionado:
+- **Parte 1 (Aulas 1–5):** modelagem de densidades ($p(\mathbf{x})$ paramétrica, $k$-NN, KDE, HDBSCAN, GMM/EM e Inferência Variacional), culminando na seleção de modelos e validação preditiva.
+- **Parte 2 (Aulas 6–8):** espaços latentes contínuos por reconstrução e preservação de vizinhança (PCA, PPCA, Autoencoders, VAE, MDS e t-SNE).
+- **Parte 3 (Aulas 9–12):** estruturas discretas e relacionais (PGMs e fatoração de matrizes esparsas), monitoramento de distribuições sem rótulos (MMD) e aprendizado auto-supervisionado de representações (InfoNCE).
+
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Retomando as 4 perguntas
+
+1. **Arquitetura e Objetivo:** $\mathbf{f}_{\boldsymbol\phi} \to \mathbf{g}_{\boldsymbol\psi} \to$ norm. $\ell_2$; invariância pura colapsa; InfoNCE evita o colapso como classificação $(K+1)$-ária.
+2. **Teoria da Informação:** crítico ótimo estima $\ln\frac{p(\mathbf{x}'\mid\mathbf{x})}{p(\mathbf{x}')}$; $I(\mathbf{x};\mathbf{x}^+)\ge\ln(K+1)-\mathcal{L}_{\text{InfoNCE}}$.
+3. **Geometria:** alinhamento + uniformidade (kernel Gaussiano na hiperesfera $\mathbb{S}^{M_z-1}$); $\tau$ regula *hard negatives*.
+4. **Prática:** $\mathbf{g}_{\boldsymbol\psi}$ protege $\mathbf{h}$; aumentações definem o que é *nuisance* (InfoMin).
+
+::: {.fragment}
+| | PCA / AE (Aulas 6–7) | VAE (Aula 7) | Contrastivo / InfoNCE (Aula 12) |
+| :--- | :---: | :---: | :---: |
+| **Objetivo** | Reconstrução ($\|\mathbf{x}-\hat{\mathbf{x}}\|^2$) | ELBO generativo | Cota da Info. Mútua |
+| **Critério de relevância** | Variância | Priori + verossimilhança | Aumentações $\mathcal{T}$ |
+| **Gera amostras?** | Não / PPCA | Sim | Não |
+:::
+
+::: {.fragment}
+[Exercícios](exercicios.qmd){.see-all .exercicios-link aria-label="Ver exercícios" title="Ver exercícios"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+:::
+:::
