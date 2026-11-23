@@ -1,0 +1,132 @@
+---
+title: "Exercícios — Aula 12: Fundamentos do Aprendizado de Representação Contrastivo (InfoNCE)"
+subtitle: "Aprendizado Não Supervisionado"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "today"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado das questões de Verdadeiro/Falso está em
+[`soluções.qmd`](soluções.qmd). Encontrou um erro numa questão? Corrija
+diretamente neste arquivo e abra um *pull request*.
+:::
+
+## Contexto e notação
+
+As questões usam as definições abaixo. Todas as questões são originais.
+
+- **Pares positivos e negativos.** Dada uma família de aumentações estocásticas $\mathcal{T}$, para cada objeto $\mathbf{x}\sim p(\mathbf{x})$ geramos um par positivo $(\mathbf{x}, \mathbf{x}^+)$ (ou duas visões independentes $\tilde{\mathbf{x}}^{(1)} = t_1(\mathbf{x}), \tilde{\mathbf{x}}^{(2)} = t_2(\mathbf{x})$ com $t_1,t_2\sim\mathcal{T}$) e $K$ negativos $\{\mathbf{x}_1^-,\dots,\mathbf{x}_K^-\}$ amostrados i.i.d. da marginal $p(\mathbf{x})$.
+- **Codificador e projeção.** O codificador (*backbone*) produz $\mathbf{h} = \mathbf{f}_{\boldsymbol\phi}(\mathbf{x}) \in \mathbb{R}^M$ e a cabeça de projeção produz o vetor normalizado $\mathbf{z} = \mathbf{g}_{\boldsymbol\psi}(\mathbf{h})/\|\mathbf{g}_{\boldsymbol\psi}(\mathbf{h})\|_2 \in \mathbb{S}^{M_z-1}$.
+- **Perda InfoNCE.** Com função de pontuação (*critic*) $u(\mathbf{x}, \mathbf{x}') \in \mathbb{R}$,
+$$\mathcal{L}_{\text{InfoNCE}}(u; K) = -\mathbb{E}_{p(\mathbf{x}, \mathbf{x}^+)\prod_{j=1}^K p(\mathbf{x}_j^-)}\!\left[\ln \frac{\exp(u(\mathbf{x}, \mathbf{x}^+))}{\exp(u(\mathbf{x}, \mathbf{x}^+)) + \sum_{j=1}^K \exp(u(\mathbf{x}, \mathbf{x}_j^-))}\right].$$
+No SimCLR, com lote de $B$ objetos ($2B$ visões), cada visão tem $K = 2B - 2$ negativos e $u(\tilde{\mathbf{x}}_i, \tilde{\mathbf{x}}_j) = \mathbf{z}_i^T\mathbf{z}_j / \tau$, com temperatura $\tau > 0$.
+- **Informação Mútua e cota.** $I(X; Y) = \mathrm{KL}\big(p(x,y)\,\|\,p(x)p(y)\big)$, e vale a cota $I(\mathbf{x};\mathbf{x}^+) \ge \ln(K+1) - \mathcal{L}_{\text{InfoNCE}}(u; K)$.
+- **Alinhamento e uniformidade.** $\mathcal{L}_{\text{align}} = \mathbb{E}_{p(\mathbf{x},\mathbf{x}^+)}\big[\|\mathbf{z}(\mathbf{x})-\mathbf{z}(\mathbf{x}^+)\|_2^2\big]$ e $\mathcal{L}_{\text{uniform}} = \ln \mathbb{E}_{\mathbf{x},\mathbf{x}'\stackrel{\text{i.i.d.}}{\sim}p}\big[\exp(-2\|\mathbf{z}(\mathbf{x})-\mathbf{z}(\mathbf{x}')\|_2^2)\big]$.
+
+## Questões discursivas
+
+1. **Colapso e normalização.**
+   (a) Mostre que minimizar $\mathcal{L}_{\text{align}}(\boldsymbol\phi)$ sem nenhum termo repulsivo admite $\mathbf{z}(\mathbf{x}) \equiv \mathbf{c}$ (com $\|\mathbf{c}\|_2=1$) como mínimo global. Calcule quanto vale $\mathcal{L}_{\text{InfoNCE}}$ nessa mesma solução constante para um lote de $B$ objetos no SimCLR.
+   (b) Suponha que removamos a normalização $\ell_2$ de $\mathbf{z}$ e usemos o produto interno $u(\mathbf{x}, \mathbf{x}') = \mathbf{z}(\mathbf{x})^T \mathbf{z}(\mathbf{x}') / \tau$. Se o codificador já acerta o sinal dos produtos internos ($\mathbf{z}(\mathbf{x})^T\mathbf{z}(\mathbf{x}^+) > \mathbf{z}(\mathbf{x})^T\mathbf{z}(\mathbf{x}_j^-)$ para todo $j$), o que acontece com $\mathcal{L}_{\text{InfoNCE}}$ quando multiplicamos $\mathbf{z}$ por um escalar $\alpha \to \infty$? Por que isso torna a otimização sem normalização mal condicionada?
+
+2. **Crítico ótimo de Bayes e razão de densidades.**
+   Considere a tarefa de apontar qual dentre $K+1$ candidatos $\mathcal{C} = \{\mathbf{x}_0, \dots, \mathbf{x}_K\}$ foi gerado por $p(\cdot\mid\mathbf{x})$, sabendo que os outros $K$ foram gerados i.i.d. por $p(\cdot)$ e que a priori sobre o índice positivo $y^\star \in \{0,\dots,K\}$ é uniforme.
+   (a) Deduza a probabilidade posterior exata $P(y^\star = i \mid \mathbf{x}, \mathcal{C})$.
+   (b) Conclua que o crítico ótimo $u^\star(\mathbf{x}, \mathbf{x}')$ satisfaz $\exp(u^\star(\mathbf{x}, \mathbf{x}')) = c(\mathbf{x})\,\frac{p(\mathbf{x}'\mid \mathbf{x})}{p(\mathbf{x}')}$ para alguma função $c(\mathbf{x}) > 0$. Por que o fator $c(\mathbf{x})$ pode depender de $\mathbf{x}$ mas não de $\mathbf{x}'$?
+
+3. **Saturação da cota de Informação Mútua.**
+   Um conjunto de dados tem $C = 1.000$ classes equiprováveis e as aumentações $\mathcal{T}$ preservam perfeitamente a classe semântica, de modo que $I(\mathbf{x}; \mathbf{x}^+) \ge \ln(1.000) \approx 6{,}91$ nats.
+   (a) Qual é o menor número de negativos $K$ necessário para que a cota inferior $\ln(K+1) - \mathcal{L}_{\text{InfoNCE}}$ possa, em princípio, atingir $6{,}91$ nats?
+   (b) No SimCLR, qual tamanho de lote $B$ corresponde a esse valor mínimo de $K$? Explique por que o MoCo resolve esse gargalo sem aumentar $B$.
+
+4. **Temperatura e gradiente na hiperesfera.**
+   Para uma âncora $\mathbf{z}$, um positivo $\mathbf{z}^+$ e $K$ negativos $\{\mathbf{z}_j^-\}_{j=1}^K$ em $\mathbb{S}^{M_z-1}$, seja $p_j = \frac{\exp(\mathbf{z}^T\mathbf{z}_j^-/\tau)}{\exp(\mathbf{z}^T\mathbf{z}^+/\tau) + \sum_{k=1}^K \exp(\mathbf{z}^T\mathbf{z}_k^-/\tau)}$ a probabilidade *softmax* atribuída ao negativo $j$.
+   (a) Calcule $\frac{\partial \mathcal{L}_{\text{InfoNCE}}}{\partial \mathbf{z}}$ para um único exemplo e mostre que o gradiente é uma combinação ponderada das direções dos negativos menos a direção do positivo, com pesos proporcionais a $p_j$.
+   (b) Analise o comportamento dos pesos $p_j$ nos limites $\tau \to 0^+$ e $\tau \to \infty$, relacionando com *hard negatives* e falsos negativos.
+
+## Questões de Verdadeiro/Falso
+
+Em cada teste, julgue os quatro itens como verdadeiros ou falsos.
+
+::: {.callout-note icon=false}
+## Teste 1 — Reconstrução vs. Contraste
+
+- □ Se as 18 últimas coordenadas de um conjunto de dados em $\mathbb{R}^{20}$ são ruído gaussiano de variância $9$ e as 2 primeiras contêm 3 classes com variância $0{,}1$, a PCA 2D recupera as 2 primeiras coordenadas.
+- □ Um Autoencoder treinado com erro quadrático médio (MSE) sofre do mesmo viés de variância que a PCA quando o *nuisance* domina a energia do sinal.
+- □ O aprendizado contrastivo depende da escolha da família de aumentações $\mathcal{T}$ para definir quais variações devem ser descartadas na representação.
+- □ Minimizar apenas $\|\mathbf{z}(\mathbf{x}) - \mathbf{z}(\mathbf{x}^+)\|_2^2$ sobre vetores unitários $\|\mathbf{z}\|_2 = 1$ já é suficiente para evitar o colapso constante.
+:::
+
+::: {.callout-note icon=false}
+## Teste 2 — Formulação da InfoNCE
+
+- □ No SimCLR com minilote de $B = 32$ imagens, existem $64$ visões no total e $K = 62$ negativos para cada visão âncora.
+- □ Se um codificador mapeia todos os pontos para o mesmo vetor unitário $\mathbf{c}$, a perda InfoNCE com $K$ negativos vale $\ln(K+1)$.
+- □ A perda InfoNCE pode assumir valores negativos quando a similaridade do par positivo é próxima de $1$ e $\tau$ é pequeno.
+- □ No SimCLR, todos os negativos do minilote são garantidamente de classes semânticas diferentes da âncora.
+:::
+
+::: {.callout-note icon=false}
+## Teste 3 — Informação Mútua e Razão de Densidades
+
+- □ A Informação Mútua $I(X; Y)$ é sempre não negativa e igual a zero se e somente se $X$ e $Y$ são independentes.
+- □ O crítico ótimo da InfoNCE exige estimar separadamente a densidade marginal $p(\mathbf{x})$ via KDE antes de calcular a razão $p(\mathbf{x}'\mid\mathbf{x})/p(\mathbf{x}')$.
+- □ Para qualquer função $u$ e qualquer $K \ge 1$, vale $I(\mathbf{x}; \mathbf{x}^+) \ge \ln(K+1) - \mathcal{L}_{\text{InfoNCE}}(u; K)$.
+- □ Se $\mathcal{L}_{\text{InfoNCE}} = 0{,}05$ com $K = 7$, podemos afirmar que $I(\mathbf{x}; \mathbf{x}^+) \le \ln 8$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 4 — Saturação e Papel de $K$
+
+- □ A cota $\ln(K+1) - \mathcal{L}_{\text{InfoNCE}}$ nunca pode ultrapassar $\ln(K+1)$ nats, independentemente da arquitetura da rede.
+- □ Aumentar o número de negativos $K$ muda o valor real de $I(\mathbf{x}; \mathbf{x}^+)$ entre duas visões do mesmo dado.
+- □ Quando $I(\mathbf{x}; \mathbf{x}^+)$ é muito maior que $\ln(K+1)$, a InfoNCE pode atingir perda próxima de zero mesmo que a rede capture apenas parte da informação compartilhada.
+- □ Pela Desigualdade de Processamento de Dados, $I(\mathbf{z}(\mathbf{x}); \mathbf{z}(\mathbf{x}^+)) \le I(\mathbf{x}; \mathbf{x}^+)$.
+:::
+
+::: {.callout-note icon=false}
+## Teste 5 — Geometria na Hiperesfera
+
+- □ Na hiperesfera unitária $\mathbb{S}^{M_z-1}$, maximizar $\mathbf{z}_1^T\mathbf{z}_2$ equivale exatamente a minimizar $\|\mathbf{z}_1 - \mathbf{z}_2\|_2^2$.
+- □ No limite $K \to \infty$, o termo repulsivo da InfoNCE converge para um termo proporcional à energia média do kernel Gaussiano na esfera, que é minimizada pela distribuição uniforme.
+- □ A decomposição de Wang & Isola (2020) mostra que a InfoNCE busca simultaneamente invariância local (alinhamento) e máxima entropia global na esfera (uniformidade).
+- □ Uma representação perfeitamente uniforme na hiperesfera, mas com $\mathcal{L}_{\text{align}}$ alto, é útil para classificação porque separa bem todas as amostras.
+:::
+
+::: {.callout-note icon=false}
+## Teste 6 — Temperatura $\tau$
+
+- □ Valores muito pequenos de $\tau$ fazem o gradiente concentrar-se nos negativos mais próximos da âncora (*hard negatives*).
+- □ No dilema uniformidade-tolerância, $\tau$ pequeno demais pode prejudicar a acurácia *downstream* porque empurra com força excessiva falsos negativos da mesma classe.
+- □ Aumentar $\tau$ para $\tau = 100$ melhora a separação de *hard negatives* porque amplifica diferenças pequenas de cosseno.
+- □ A temperatura $\tau$ pode ser interpretada como um inverso da escala de norma efetiva na *softmax*.
+:::
+
+::: {.callout-note icon=false}
+## Teste 7 — Cabeça de Projeção e Aumentações
+
+- □ Após o treinamento contrastivo, descartamos a cabeça de projeção $g_{\boldsymbol\psi}$ e usamos $\mathbf{h} = f_{\boldsymbol\phi}(\mathbf{x})$ no *linear probe* porque $\mathbf{h}$ retém informações úteis que $\mathbf{z}$ descarta para satisfazer a invariância estrita.
+- □ O *linear probe* ajusta todo o *backbone* $f_{\boldsymbol\phi}$ com uma taxa de aprendizado pequena nos dados rotulados.
+- □ Se as aumentações $\mathcal{T}$ forem fracas demais, o modelo pode resolver a tarefa contrastiva usando atalhos superficiais (*shortcuts*) sem aprender semântica.
+- □ Pelo princípio InfoMin, quanto maior for $I(\tilde{\mathbf{x}}^{(1)}; \tilde{\mathbf{x}}^{(2)})$, melhor será sempre a representação para qualquer tarefa *downstream*.
+:::
+
+::: {.callout-note icon=false}
+## Teste 8 — Alternativas Sem Negativos Explícitos
+
+- □ O MoCo usa uma fila de representações de um codificador *momentum* para obter $K$ grande sem precisar de minilotes gigantes em GPU.
+- □ Métodos como Barlow Twins substituem os pares negativos por uma penalização que aproxima a matriz de correlação cruzada entre as visões da matriz identidade.
+- □ No SimSiam e no BYOL, remover o *stop-gradient* não altera o ponto fixo do treinamento.
+- □ A descorrelação entre coordenadas no Barlow Twins guarda parentesco conceitual com o branqueamento (*whitening*) visto na PCA (Aula 6).
+:::

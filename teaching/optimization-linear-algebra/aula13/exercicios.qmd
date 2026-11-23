@@ -1,0 +1,89 @@
+---
+title: "Exercícios — Aula 13: Precondicionamento Estruturado e Ortogonalização Matricial"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+date: "today"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+lang: pt-BR
+toc: true
+toc-depth: 2
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    number-sections: false
+---
+
+[Aula](index.qmd){.see-all .aula-link aria-label="Ver aula" title="Ver aula"}
+[Soluções](soluções.qmd){.see-all .solucoes-link aria-label="Ver soluções" title="Ver soluções"}
+
+::: {.callout-tip icon=false}
+O gabarito comentado das questões de Verdadeiro/Falso e as resoluções analíticas estão em [`soluções.qmd`](soluções.qmd). Encontrou um erro numa questão? Abra um *pull request*.
+:::
+
+## Contexto e notação
+
+Considere uma camada densa ou bloco de projeção linear de uma rede neural com parâmetros representados pela matriz de pesos $W \in \mathbb{R}^{m \times n}$. Denotamos por $G = \nabla_W \mathcal{L} \in \mathbb{R}^{m \times n}$ o gradiente da função de perda $\mathcal{L}$ em relação a $W$.
+
+O **Precondicionamento Diagonal Clássico (AdamW)** achata $W$ no vetor $\text{vec}(W) \in \mathbb{R}^{mn}$ e atualiza cada entrada por:
+$$W_{t+1, ij} = W_{t, ij} - \alpha \lambda W_{t, ij} - \frac{\alpha}{\sqrt{\hat{v}_{t, ij}} + \epsilon} \hat{m}_{t, ij}$$
+onde $v_{t, ij}$ é a média móvel exponencial de $(G_{t, ij})^2$.
+
+O **Precondicionador Estruturado de Kronecker (Shampoo)** aproxima a covariância do Hessiano completo através do produto de Kronecker $H \approx L \otimes R$, onde:
+$$L = \mathbb{E}[G G^T] \in \mathbb{R}^{m \times m} \quad \text{e} \quad R = \mathbb{E}[G^T G] \in \mathbb{R}^{n \times n}$$
+com a regra de atualização bilinear:
+$$\Delta W_t = -\alpha L_t^{-1/4} G_t R_t^{-1/4}$$
+
+A **Decomposição Polar** de uma matriz retangular $G \in \mathbb{R}^{m \times n}$ ($m \ge n$) fatora o operador linear como:
+$$G = U P, \quad U^T U = I_n, \quad P = (G^T G)^{1/2} \succeq 0$$
+onde $U = G(G^T G)^{-1/2}$ é o fator polar ortogonal que resolve o problema de Procrustes $\min_{U \in \mathcal{O}(m, n)} \|U - G\|_F$.
+
+A **Iteração de Newton-Schulz** calcula o fator polar $U$ iterativamente sem autovalores ou SVD, via produtos matriciais puros (GEMM):
+$$X_0 = \frac{G}{\|G\|_F}, \quad X_{k+1} = \frac{1}{2} X_k (3I - X_k^T X_k)$$
+
+O otimizador **Muon (Momentum Orthogonalized by Newton-Schulz)** combina momento matricial de Nesterov com projeção polar rápida:
+$$M_t = \beta M_{t-1} + G_t, \quad O_t = \text{NewtonSchulz}(M_t), \quad W_{t+1} = W_t - \alpha \cdot \text{scale} \cdot O_t$$
+
+---
+
+## Questões discursivas
+
+1. **Explosão Combinatória do Hessiano Completo vs. Fatoração de Kronecker.**
+   Considere uma camada de atenção linear com $W \in \mathbb{R}^{m \times n}$, onde $m = 2.048$ e $n = 4.096$.
+   a) Determine a dimensão do vetor achatado $\text{vec}(W)$ e calcule o número total de elementos na matriz Hessiana completa $H \in \mathbb{R}^{(mn) \times (mn)}$.
+   b) Quantos gigabytes de memória são necessários para armazenar o Hessiano completo em precisão simples FP32 (4 bytes por elemento)?
+   c) Calcule o número de FLOPs necessários para inverter o Hessiano completo ($\mathcal{O}((mn)^3)$) e compare com o número de FLOPs necessários para calcular as raízes quartas inversas das matrizes $L$ e $R$ do algoritmo Shampoo ($\mathcal{O}(m^3 + n^3)$).
+   d) Explique algebricamente por que a identidade $(L \otimes R)^{-1/2} \text{vec}(G) = \text{vec}(L^{-1/4} G R^{-1/4})$ justifica o expoente $-1/4$ na formulação do Shampoo.
+
+2. **Dedução da Decomposição Polar e o Problema de Procrustes Ortogonal.**
+   Seja $G \in \mathbb{R}^{m \times n}$ com $m \ge n$ uma matriz com decomposição em valores singulares $G = V_1 \Sigma V_2^T$, onde $V_1 \in \mathbb{R}^{m \times n}$ possui colunas ortonormais, $V_2 \in \mathbb{R}^{n \times n}$ é ortogonal e $\Sigma = \text{diag}(\sigma_1, \dots, \sigma_n)$ com $\sigma_i > 0$.
+   a) Mostre que definindo $U = V_1 V_2^T$ e $P = V_2 \Sigma V_2^T$, temos $G = U P$ com $U^T U = I_n$ e $P \succ 0$ simétrica definida positiva.
+   b) Prove que $U = G(G^T G)^{-1/2}$.
+   c) Considere o Problema de Procrustes Ortogonal:
+      $$\min_{Q \in \mathbb{R}^{m \times n}, \, Q^T Q = I_n} \|Q - G\|_F^2$$
+      Expanda o quadrado da norma de Frobenius em termos do traço e prove que minimizar a distância equivale a maximizar $\operatorname{tr}(Q^T G)$. Use a SVD de $G$ para demonstrar que o maximizador ótimo é exatamente o fator polar $U = V_1 V_2^T$.
+   d) Quais são os valores singulares de $U$? Explique por que atualizar pesos com matrizes ortogonais impede a explosão da norma espectral $\|W_{t+1}\|_2$ em redes profundas.
+
+3. **Análise de Convergência da Iteração Polinomial de Newton-Schulz.**
+   Considere a iteração $X_{k+1} = \frac{1}{2} X_k (3I - X_k^T X_k)$ aplicada a uma matriz $X_0 \in \mathbb{R}^{m \times n}$ com valores singulares $\sigma_i^{(0)}$.
+   a) Mostre que se a SVD de $X_k$ é $X_k = V_1 \Sigma_k V_2^T$, então $X_{k+1} = V_1 \Sigma_{k+1} V_2^T$, onde os valores singulares evoluem desacoplados pela função escalar:
+      $$\sigma_{k+1} = f(\sigma_k) = \frac{1}{2}\sigma_k (3 - \sigma_k^2)$$
+   b) Encontre os pontos fixos da equação $\sigma = f(\sigma)$ para $\sigma \ge 0$.
+   c) Calcule as derivadas $f'(1)$ e $f''(1)$ e prove que a convergência para o ponto fixo $\sigma = 1$ é cúbica, mostrando que para o erro $e_k = 1 - \sigma_k$, tem-se $e_{k+1} \approx \frac{3}{2} e_k^2$ para pequenos desvios.
+   d) Determine o intervalo de valores iniciais $\sigma_0$ para o qual a sequência $\sigma_k$ converge para $1$. O que acontece se $\sigma_0 \ge \sqrt{3}$? Como a normalização $X_0 = \frac{G}{\|G\|_F}$ garante que a condição de convergência seja satisfeita?
+
+---
+
+## Questões conceituais (Verdadeiro ou Falso)
+
+Julgue V ou F para cada uma das afirmações a seguir:
+
+1. - □ O precondicionamento diagonal do AdamW descarta toda a informação de curvatura cruzada entre as linhas e colunas de matrizes de pesos bidimensionais.
+2. - □ A inversão da matriz Hessiana completa de uma matriz de parâmetros $W \in \mathbb{R}^{m \times n}$ possui custo computacional $\mathcal{O}((mn)^3) = \mathcal{O}(m^3 n^3)$.
+3. - □ O algoritmo Shampoo decompõe o espaço de curvatura em duas matrizes de covariância independentes $L = \mathbb{E}[GG^T]$ e $R = \mathbb{E}[G^T G]$, reduzindo a memória necessária de $\mathcal{O}(m^2 n^2)$ para $\mathcal{O}(m^2 + n^2)$.
+4. - □ Na regra de atualização do Shampoo ($\Delta W = -\alpha L^{-1/4} G R^{-1/4}$), a raiz quarta decorre diretamente da raiz quadrada do produto de Kronecker $(L \otimes R)^{-1/2}$.
+5. - □ A Decomposição Polar de uma matriz de gradientes $G = U P$ produz um fator ortogonal $U$ cujos valores singulares são rigorosamente todos iguais a $1$.
+6. - □ O fator ortogonal $U$ da decomposição polar é o operador de norma unitária que maximiza a correlação com a matriz de gradiente original $G$ no espaço de Frobenius.
+7. - □ O cálculo do fator polar $U$ via SVD é uma operação nativamente eficiente para execução em Tensor Cores de GPUs modernas.
+8. - □ A iteração polinomial de Newton-Schulz requer apenas multiplicações de matrizes densas (GEMM), permitindo calcular o fator polar a velocidades de centenas de teraflops em hardware moderno.
+9. - □ Para que a iteração cúbica de Newton-Schulz convirja para a matriz ortogonal, o maior valor singular de $X_0$ deve ser estritamente menor que $\sqrt{3}$.
+10. - □ O otimizador Muon substitui o AdamW em todas as camadas de uma rede neural profunda, incluindo parâmetros de normalização (LayerNorm), vetores de bias e tabelas de embedding 1D.

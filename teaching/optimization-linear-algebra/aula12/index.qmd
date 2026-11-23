@@ -481,6 +481,7 @@ $$\mathbf{w}_{k+1} = \mathbf{w}_k - \alpha \nabla f(\mathbf{w}_k) + \beta \mathb
 :::
 :::
 
+::: {.content-visible when-format="html" unless-format="revealjs"}
 ## Análise Espectral e a Aceleração de Chebyshev
 
 Por que o termo de inércia $\beta(\mathbf{w}_k - \mathbf{w}_{k-1})$ acelera dramaticamente a convergência? A resposta está na álgebra linear do sistema dinâmico gerado em uma forma quadrática.
@@ -494,8 +495,16 @@ A matriz $T_{\text{GD}} = (I - \alpha H) \in \mathbb{R}^{d \times d}$ era a **ma
 
 Pelo Teorema Espectral (Aula 4), projetando o erro na base ortonormal de autovetores $\{\mathbf{u}_i\}$ da Hessiana ($H \mathbf{u}_i = \lambda_i \mathbf{u}_i$), o sistema desacoplava em $d$ dinâmicas escalares 1D independentes:
 $$e_{k+1, i} = (1 - \alpha \lambda_i) e_{k, i}$$
-Cada modo espectral contraía com taxa escalar $(1 - \alpha \lambda_i)$. A necessidade de garantir estabilidade no pior caso ($\lambda_{\max}$) e convergência no modo mais lento ($\lambda_{\min}$) impunha o gargalo assintótico ditado pelo número de condição $\kappa = \lambda_{\max}/\lambda_{\min}$:
-$$\rho_{\text{GD}} = \frac{\kappa - 1}{\kappa + 1} \approx 1 - \frac{2}{\kappa}$$
+
+Cada modo espectral contrai por um fator escalar $|1 - \alpha \lambda_i|$. Para garantir convergência assintótica em todas as direções ($|1 - \alpha \lambda_i| < 1$), o passo é estritamente limitado por $\alpha < \frac{2}{\lambda_{\max}}$. A taxa global de contração no pior caso é governada pelo raio espectral da matriz de transição $T_{\text{GD}}$:
+$$\rho(\alpha) = \max_{i=1,\dots,d} |1 - \alpha \lambda_i| = \max\left\{ |1 - \alpha \lambda_{\min}|, \, |1 - \alpha \lambda_{\max}| \right\}$$
+
+Como o termo $|1 - \alpha \lambda_{\min}|$ decresce com $\alpha$ enquanto o termo $|1 - \alpha \lambda_{\max}| = \alpha \lambda_{\max} - 1$ cresce, o passo ótimo $\alpha^\star_{\text{GD}}$ resolve o problema minimax $\min_\alpha \rho(\alpha)$ equilibrando exatamente os dois modos extremos ($1 - \alpha \lambda_{\min} = \alpha \lambda_{\max} - 1$):
+$$\alpha^\star_{\text{GD}} = \frac{2}{\lambda_{\max} + \lambda_{\min}}$$
+
+Substituindo $\alpha^\star_{\text{GD}}$, obtemos a taxa de contração assintótica ótima do Gradiente Descendente:
+$$\rho_{\text{GD}} = 1 - \alpha^\star \lambda_{\min} = 1 - \frac{2 \lambda_{\min}}{\lambda_{\max} + \lambda_{\min}} = \frac{\lambda_{\max} - \lambda_{\min}}{\lambda_{\max} + \lambda_{\min}} = \frac{\kappa - 1}{\kappa + 1} \approx 1 - \frac{2}{\kappa}$$
+onde $\kappa = \frac{\lambda_{\max}}{\lambda_{\min}}$ é o número de condição da Hessiana. Em problemas mal-condicionados ($\kappa \gg 1$), a contração aproxima-se de $1$, exigindo $\mathcal{O}(\kappa)$ iterações.
 
 ### Do GD ao Momento: A Recorrência de 2ª Ordem e a Matriz $2 \times 2$
 
@@ -545,6 +554,8 @@ $$\rho_{\text{GD}} = \frac{\kappa - 1}{\kappa + 1} \approx 1 - \frac{2}{\kappa}$
 ::: {.content-visible when-format="revealjs"}
 ## Da Aula 8 ao Momento: A Matriz de Transição
 
+*Definição:* $\mathbf{e}_k \triangleq \mathbf{w}_k - \mathbf{w}^\star$ é o **vetor de erro** até o ótimo ($\mathbf{w}^\star = \mathbf{0}$), e $e_{k, i} \triangleq \mathbf{u}_i^T \mathbf{e}_k$ é sua coordenada no $i$-ésimo autovetor $\mathbf{u}_i$ da Hessiana.
+
 ::: {.columns}
 ::: {.column width="50%"}
 **Relembrando a Aula 8 (GD Puro):**
@@ -555,8 +566,11 @@ $$\rho_{\text{GD}} = \frac{\kappa - 1}{\kappa + 1} \approx 1 - \frac{2}{\kappa}$
 - Na base de autovetores $\mathbf{u}_i$ ($H\mathbf{u}_i = \lambda_i \mathbf{u}_i$):
   $$e_{k+1, i} = \underbrace{(1 - \alpha \lambda_i)}_{T_{\text{GD}, i} \, (1 \times 1)} e_{k, i}$$
 
-- Cada modo espectral decai a taxas diferentes:
-  $$\rho_{\text{GD}} = \frac{\kappa - 1}{\kappa + 1} \approx 1 - \frac{2}{\kappa}$$
+- Pior caso entre os extremos $\lambda_{\min}$ e $\lambda_{\max}$:
+  $$\rho(\alpha) = \max\{|1 - \alpha \lambda_{\min}|, \, |1 - \alpha \lambda_{\max}|\}$$
+
+- Passo ótimo $\alpha^\star = \frac{2}{\lambda_{\max} + \lambda_{\min}}$ iguala os extremos:
+  $$\rho_{\text{GD}} = \frac{\lambda_{\max} - \lambda_{\min}}{\lambda_{\max} + \lambda_{\min}} = \frac{\kappa - 1}{\kappa + 1} \approx 1 - \frac{2}{\kappa}$$
 :::
 
 ::: {.column width="50%"}
@@ -613,32 +627,49 @@ Uma partícula está em uma ravina elíptica $f(w_1, w_2) = \frac{1}{2}(100 w_1^
 ::: {.callout-note icon=false}
 ### Julgue V ou F para cada afirmação:
 
-- ( ) Na presença de gradientes oscilatórios transversais, a soma ponderada por $\beta$ cancela as amplitudes de sinais opostos, enquanto componentes consistentes somam-se até o fator $\frac{1}{1-\beta}$.
-- ( ) O momento clássico de Polyak modifica a geometria da função de perda ao alterar a matriz Hessiana local para $H^{1/2}$.
-- ( ) Aumentar o coeficiente de momento $\beta$ sem reduzir a taxa de aprendizado $\alpha$ pode desestabilizar o sistema dinâmico e induzir oscilações caóticas.
-- ( ) Em superfícies de custo estocásticas (SGD com mini-batches), o vetor momento atua como uma média móvel suave que atenua as flutuações amostrais.
+- □ Na presença de gradientes oscilatórios transversais, a soma ponderada por $\beta$ cancela as amplitudes de sinais opostos, enquanto componentes consistentes somam-se até o fator $\frac{1}{1-\beta}$.
+- □ O momento clássico de Polyak modifica a geometria da função de perda ao alterar a matriz Hessiana local para $H^{1/2}$.
+- □ Aumentar o coeficiente de momento $\beta$ sem reduzir a taxa de aprendizado $\alpha$ pode desestabilizar o sistema dinâmico e induzir oscilações caóticas.
+- □ Em superfícies de custo estocásticas (SGD com mini-batches), o vetor momento atua como uma média móvel suave que atenua as flutuações amostrais.
 :::
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Pausa 1: Dinâmica de Inércia
+## Pausa 1: O Dilema das Oscilações Transversais e a Inércia
 
 ::: {.callout-tip}
-## Pergunta de Fixação
+## O Dilema do Vale Estreito
 Em uma ravina elíptica ($\kappa = 100$), o gradiente transversal oscila de sinal ($\pm 10$), enquanto o longitudinal é constante ($+1$).
+Qual é o passo máximo $\alpha$ do GD clássico para evitar divergência? Como a inércia com $\beta = 0{,}9$ cancela o ziguezague e amplifica a velocidade longitudinal em $10\times$?
+:::
 
-- Por que o GD clássico é obrigado a adotar um passo minúsculo ($\alpha < 0{,}02$)?
-- Por que o momento com $\beta = 0{,}9$ cancela o ziguezague e amplifica a velocidade longitudinal em $10\times$?
+::: {.callout-tip}
+## Dinâmica de Inércia
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ Na presença de gradientes oscilatórios transversais, a soma ponderada por $\beta$ cancela as amplitudes de sinais opostos, enquanto componentes consistentes somam-se até o fator $\frac{1}{1-\beta}$.
+- □ O momento clássico de Polyak modifica a geometria da função de perda ao alterar a matriz Hessiana local para $H^{1/2}$.
+- □ Aumentar o coeficiente de momento $\beta$ sem reduzir a taxa de aprendizado $\alpha$ pode desestabilizar o sistema dinâmico e induzir oscilações caóticas.
+- □ Em superfícies de custo estocásticas (SGD com mini-batches), o vetor momento atua como uma média móvel suave que atenua as flutuações amostrais.
+:::
+
+## Pausa 1: O Dilema das Oscilações Transversais e a Inércia — Resposta
+
+::: {.callout-tip}
+## Dinâmica de Inércia — Resposta
+
+- ✔ **Verdadeiro.** A soma geométrica acumula passos consistentes até $\frac{1}{1-\beta} = 10\times$ e cancela flutuações alternadas.
+- ✗ **Falso.** O momento não altera a Hessiana; altera a dinâmica de 1ª para 2ª ordem, modificando o raio espectral da matriz de transição.
+- ✔ **Verdadeiro.** Se o raio espectral de $T_i$ ultrapassar $1$, o sistema dinâmico linear torna-se instável e diverge.
+- ✔ **Verdadeiro.** Como média móvel exponencial (EMA), o momento amortece o ruído de alta variância dos mini-batches.
 :::
 
 ::: {.fragment}
+**Voltando à pergunta:** Para estabilidade transversal, o GD requer $\alpha < 2/100 = 0{,}02$, avançando apenas $0{,}02$ por passo no vale. Com $\beta = 0{,}9$, o momento cancela as oscilações transversais e constrói velocidade longitudinal terminal $v_{\text{long}} = \frac{\alpha}{1-\beta} = 10\alpha$, acelerando $10\times$!
+:::
+:::
 
-- [x] O momento atua como um **filtro passa-baixas**: gradientes opostos cancelam-se na soma temporal.
-- [ ] O momento altera a Hessiana original da função de perda.
-- [x] Elevações excessivas de $\beta$ podem levar o raio espectral de $T_i$ para fora do círculo unitário ($|\mu| > 1$).
-- [x] No SGD com mini-batches, o momento amortece o ruído amostral de alta variância.
-:::
-:::
 
 # Bloco 2: O Gradiente Acelerado de Nesterov (NAG)
 
@@ -890,13 +921,116 @@ O impacto do método de Nesterov transcende a intuição geométrica da física:
 Em seu célebre teorema de 1983, Yurii Nesterov investigou a classe de problemas convexos com gradiente Lipschitz-contínuo ($L$-suaves), onde:
 $$\|\nabla f(\mathbf{x}) - \nabla f(\mathbf{y})\| \le L \|\mathbf{x} - \mathbf{y}\|$$
 
-Ele provou duas proposições históricas:
+Ele provou três proposições históricas:
+
 1. **Cota Inferior de Complexidade:** Nenhum algoritmo de primeira ordem (que gere iterações via combinações lineares de gradientes passados) pode garantir uma convergência mais rápida que $\Omega(1/k^2)$ no pior caso:
    $$f(\mathbf{w}_k) - f^\star \ge \frac{3L \|\mathbf{w}_0 - \mathbf{w}^\star\|^2}{32 (k + 1)^2}$$
 2. **Subotimalidade do Gradiente Descendente:** O GD clássico converge com taxa de apenas $\mathcal{O}(1/k)$.
 3. **Otimalidade do NAG:** Ao adotar uma sequência dinâmica de coeficientes de momento $\beta_k = \frac{k-1}{k+2}$, o Gradiente Acelerado de Nesterov atinge rigorosamente a taxa:
-   $$f(\mathbf{w}_k) - f^\star \le \frac{2L \|\mathbf{w}_0 - \mathbf{w}^\star\|^2}{(k + 1)^2} = \mathcal{O}\left(\frac{1}{k^2}\right)$$
+   $$f(\mathbf{w}_k) - f^\star \le \frac{4L \|\mathbf{w}_0 - \mathbf{w}^\star\|^2}{(k + 1)^2} = \mathcal{O}\left(\frac{1}{k^2}\right)$$
    atingindo a fronteira física inultrapassável de eficiência matemática para métodos de primeira ordem!
+
+### Dedução Analítica 1: Regime Quadrático e a Matriz de Transição do NAG ($2 \times 2$)
+
+Similarmente à dedução que fizemos para o Momento de Polyak, vamos primeiro analisar analiticamente o comportamento do NAG em uma forma quadrática $f(\mathbf{w}) = \frac{1}{2}\mathbf{w}^T H \mathbf{w}$ com $H \succ 0$ e ótimo em $\mathbf{w}^\star = \mathbf{0}$.
+
+A iteração do NAG consiste em:
+$$\mathbf{y}_k = \mathbf{w}_k + \beta (\mathbf{w}_k - \mathbf{w}_{k-1})$$
+$$\mathbf{w}_{k+1} = \mathbf{y}_k - \alpha \nabla f(\mathbf{y}_k) = \mathbf{y}_k - \alpha H \mathbf{y}_k = (I - \alpha H)\mathbf{y}_k$$
+
+Substituindo $\mathbf{y}_k$ na equação de atualização e expressando em termos do erro $\mathbf{e}_k = \mathbf{w}_k - \mathbf{w}^\star = \mathbf{w}_k$:
+$$\mathbf{e}_{k+1} = (I - \alpha H) \left[ (1 + \beta)\mathbf{e}_k - \beta \mathbf{e}_{k-1} \right]$$
+
+Projetando sobre a base ortonormal de autovetores $\{\mathbf{u}_i\}$ da Hessiana ($H \mathbf{u}_i = \lambda_i \mathbf{u}_i$), obtemos a equação de diferenças escalar para cada modo espectral $e_{k, i} = \mathbf{u}_i^T \mathbf{e}_k$:
+$$e_{k+1, i} = (1 - \alpha \lambda_i) \left[ (1 + \beta) e_{k, i} - \beta e_{k-1, i} \right]$$
+
+Construindo o vetor de estado aumentado $\begin{bmatrix} e_{k+1, i} \\ e_{k, i} \end{bmatrix} \in \mathbb{R}^2$:
+$$\begin{bmatrix} e_{k+1, i} \\ e_{k, i} \end{bmatrix} = \underbrace{\begin{bmatrix} (1 + \beta)(1 - \alpha \lambda_i) & -\beta(1 - \alpha \lambda_i) \\ 1 & 0 \end{bmatrix}}_{T_{\text{NAG}, i}} \begin{bmatrix} e_{k, i} \\ e_{k-1, i} \end{bmatrix}$$
+
+Compare esta matriz com a matriz de transição do Momento de Polyak que derivamos anteriormente:
+$$T_{\text{Polyak}, i} = \begin{bmatrix} 1 + \beta - \alpha \lambda_i & -\beta \\ 1 & 0 \end{bmatrix}$$
+
+**A Diferença Algébrica Crucial:**
+
+- Em **Polyak**, o operador de contração do gradiente $(-\alpha \lambda_i)$ atua **apenas** sobre a posição atual $e_{k, i}$. A inércia passada $-\beta e_{k-1, i}$ entra pura no sistema, sem ser amortecida pela Hessiana local.
+- Em **Nesterov**, o operador $(1 - \alpha \lambda_i)$ multiplica **ambos** os termos: tanto a posição $(1+\beta)e_{k, i}$ quanto a inércia passada $-\beta e_{k-1, i}$.
+- Nas direções de alta curvatura (onde $\lambda_i \approx \lambda_{\max}$ e $\alpha \approx 1/\lambda_{\max}$), temos $(1 - \alpha \lambda_i) \approx 0$. Portanto, o NAG **zera simultaneamente a oscilação de posição e a velocidade inercial residual**, agindo como um freio dinâmico que impede o *overshoot* descontrolado!
+
+Para funções fortemente convexas ($\mu I \preceq H \preceq L I$), sob $\alpha = 1/L$ e $\beta = \frac{\sqrt{\kappa} - 1}{\sqrt{\kappa} + 1}$, o raio espectral de $T_{\text{NAG}, i}$ satisfaz $\rho(T_{\text{NAG}, i}) \le 1 - \frac{1}{\sqrt{\kappa}}$, recuperando a taxa acelerada similar a Polyak com estabilidade superior.
+
+### Dedução Analítica 2: Regime Convexo Geral ($L$-suave) e a Função de Lyapunov Discreta
+
+Por que o método de Polyak com $\beta$ constante não garante aceleração em funções convexas gerais sem forte convexidade (onde $\mu = 0$)? Porque sem uma curvatura mínima estrita para restaurar a partícula, o momento constante acumula energia cinética excessiva e pode orbitar indefinidamente sem convergir.
+
+Para resolver isso, Nesterov introduziu uma sequência dinâmica de momento $\beta_k = \frac{k-1}{k+2}$, acompanhada por uma taxa de aprendizado $\alpha = \frac{1}{L}$.
+
+Para deduzir analiticamente como essa escolha resulta rigorosamente em $\mathcal{O}(1/k^2)$, formulamos o algoritmo na forma de três sequências acopladas equivalentes:
+$$\mathbf{w}_{k+1} = \mathbf{y}_k - \frac{1}{L} \nabla f(\mathbf{y}_k)$$
+$$\mathbf{z}_{k+1} = \mathbf{z}_k - \frac{k+1}{2L} \nabla f(\mathbf{y}_k)$$
+$$\mathbf{y}_{k+1} = \left(1 - \frac{2}{k+3}\right)\mathbf{w}_{k+1} + \frac{2}{k+3}\mathbf{z}_{k+1}$$
+iniciando com $\mathbf{z}_0 = \mathbf{w}_0$ e $\mathbf{y}_0 = \mathbf{w}_0$.
+
+**A Função de Lyapunov / Energia Discreta:**
+
+Definimos a energia total do sistema no passo $k$ como a soma do erro na função ponderado no tempo (energia potencial) mais a distância ao ótimo acumulada pela sequência auxiliar $\mathbf{z}_k$ (energia de controle):
+$$\mathcal{E}_k \triangleq \frac{(k+1)^2}{2} \left( f(\mathbf{w}_k) - f^\star \right) + L \|\mathbf{z}_k - \mathbf{w}^\star\|^2$$
+
+**Passo 1: Desigualdade de Descida ($L$-suavidade).**
+Pela suavidade do gradiente, a função decresce a partir de $\mathbf{y}_k$ segundo:
+$$f(\mathbf{w}_{k+1}) \le f(\mathbf{y}_k) + \langle \nabla f(\mathbf{y}_k), \mathbf{w}_{k+1} - \mathbf{y}_k \rangle + \frac{L}{2}\|\mathbf{w}_{k+1} - \mathbf{y}_k\|^2 = f(\mathbf{y}_k) - \frac{1}{2L}\|\nabla f(\mathbf{y}_k)\|^2$$
+
+**Passo 2: Desigualdades de Convexidade.**
+Pela convexidade global de $f(\mathbf{w})$, para quaisquer pontos $\mathbf{w}^\star$ e $\mathbf{w}_k$:
+$$f^\star \ge f(\mathbf{y}_k) + \langle \nabla f(\mathbf{y}_k), \mathbf{w}^\star - \mathbf{y}_k \rangle \implies f(\mathbf{y}_k) - f^\star \le \langle \nabla f(\mathbf{y}_k), \mathbf{y}_k - \mathbf{w}^\star \rangle$$
+$$f(\mathbf{w}_k) \ge f(\mathbf{y}_k) + \langle \nabla f(\mathbf{y}_k), \mathbf{w}_k - \mathbf{y}_k \rangle \implies f(\mathbf{y}_k) - f(\mathbf{w}_k) \le \langle \nabla f(\mathbf{y}_k), \mathbf{y}_k - \mathbf{w}_k \rangle$$
+
+**Passo 3: Expansão da Energia e Cancelamento Perfeito.**
+Expandindo a norma $\|\mathbf{z}_{k+1} - \mathbf{w}^\star\|^2$:
+$$\|\mathbf{z}_{k+1} - \mathbf{w}^\star\|^2 = \left\| \mathbf{z}_k - \mathbf{w}^\star - \frac{k+1}{2L} \nabla f(\mathbf{y}_k) \right\|^2 = \|\mathbf{z}_k - \mathbf{w}^\star\|^2 - \frac{k+1}{L}\langle \nabla f(\mathbf{y}_k), \mathbf{z}_k - \mathbf{w}^\star \rangle + \frac{(k+1)^2}{4L^2}\|\nabla f(\mathbf{y}_k)\|^2$$
+
+Multiplicando por $L$ e combinando com a desigualdade de $f(\mathbf{w}_{k+1}) - f^\star$, a escolha geométrica da combinação convexa de $\mathbf{y}_k$ faz com que os produtos internos $\langle \nabla f(\mathbf{y}_k), \cdot \rangle$ e os termos quadráticos do gradiente se cancelem algebricamente de forma exata, resultando na **dissipação monótona da energia de Lyapunov**:
+$$\mathcal{E}_{k+1} \le \mathcal{E}_k \quad \forall k \ge 0$$
+
+**Passo 4: Encadeamento Telescópico e Obtenção da Cota.**
+Aplicando sucessivamente a dissipação monótona a partir do passo inicial $k=0$:
+$$\mathcal{E}_k \le \mathcal{E}_{k-1} \le \dots \le \mathcal{E}_0 = \frac{1}{2}(f(\mathbf{w}_0) - f^\star) + L \|\mathbf{w}_0 - \mathbf{w}^\star\|^2 \le 2L \|\mathbf{w}_0 - \mathbf{w}^\star\|^2$$
+
+Como a distância euclidiana é sempre não-negativa ($L\|\mathbf{z}_k - \mathbf{w}^\star\|^2 \ge 0$), podemos descartá-la:
+$$\frac{(k+1)^2}{2} \left( f(\mathbf{w}_k) - f^\star \right) \le \mathcal{E}_k \le 2L \|\mathbf{w}_0 - \mathbf{w}^\star\|^2$$
+
+Dividindo ambos os membros por $\frac{(k+1)^2}{2}$, chegamos diretamente à célebre **Cota Teórica Ótima de Nesterov**:
+$$f(\mathbf{w}_k) - f^\star \le \frac{4L \|\mathbf{w}_0 - \mathbf{w}^\star\|^2}{(k + 1)^2} = \mathcal{O}\left(\frac{1}{k^2}\right)$$
+provando analiticamente por que o algoritmo acelera de $\mathcal{O}(1/k)$ para $\mathcal{O}(1/k^2)$!
+
+### Dedução Analítica 3: O Limite Contínuo e a Física do Amortecimento (Su, Boyd & Candès, 2016)
+
+Em um trabalho pioneiro publicado em 2016, Weijie Su, Stephen Boyd e Emmanuel Candès demonstraram que o Gradiente Acelerado de Nesterov pode ser compreendido como a discretização precisa de uma **Equação Diferencial Ordinária (EDO) de 2ª ordem**.
+
+Tomando o tamanho do passo temporal como $\delta = \sqrt{\alpha} \to 0$ e o tempo contínuo como $t = k \delta$, o termo de momento $\beta_k = \frac{k-1}{k+2} = 1 - \frac{3}{k} + \mathcal{O}(1/k^2)$ faz com que a dinâmica discreta convirja exatamente para:
+$$\ddot{\mathbf{w}}(t) + \frac{3}{t} \dot{\mathbf{w}}(t) + \nabla f(\mathbf{w}(t)) = \mathbf{0}$$
+
+**Significado Físico dos Três Componentes:**
+
+- $\ddot{\mathbf{w}}(t)$: Aceleração inercial de uma partícula de massa unitária ($m = 1$).
+- $\nabla f(\mathbf{w}(t))$: Força exercida pelo campo de potenciais conservativo gerado pela função $f$.
+- $\frac{3}{t} \dot{\mathbf{w}}(t)$: Força de **amortecimento viscoso (fricção) inversamente proporcional ao tempo $t$**.
+
+**A Função de Energia Contínua:**
+
+No domínio contínuo, a função de energia de Lyapunov assume a forma elegante:
+$$\mathcal{E}(t) \triangleq t^2 \left( f(\mathbf{w}(t)) - f^\star \right) + 2 \left\| \mathbf{w}(t) + \frac{t}{2}\dot{\mathbf{w}}(t) - \mathbf{w}^\star \right\|^2$$
+
+Calculando a derivada temporal $\frac{d\mathcal{E}}{dt}$ ao longo das trajetórias da EDO e substituindo $\ddot{\mathbf{w}}(t) = -\frac{3}{t}\dot{\mathbf{w}}(t) - \nabla f(\mathbf{w}(t))$, verifica-se que:
+$$\frac{d\mathcal{E}(t)}{dt} \le 0 \implies \mathcal{E}(t) \le \mathcal{E}(0) \quad \forall t \ge 0$$
+
+Isolando o erro de função $f(\mathbf{w}(t)) - f^\star$:
+$$f(\mathbf{w}(t)) - f^\star \le \frac{\mathcal{E}(0)}{t^2} = \mathcal{O}\left(\frac{1}{t^2}\right)$$
+
+**Por que o Coeficiente $3/t$ é Mágico?**
+
+- Quando $t \to 0$ (fase inicial): O coeficiente $\frac{3}{t} \to \infty$ gera um atrito fortíssimo. Isso impede que a partícula atinja velocidades perigosas ao descer gradientes íngremes, eliminando o *overshoot* caótico.
+- Quando $t \to \infty$ (fase assintótica): O coeficiente $\frac{3}{t} \to 0$ desvanece suavemente. O atrito desaparece, permitindo que a inércia acumulada empurre a partícula ao longo de vales de inclinação quase nula sem perder velocidade.
+- **Teorema Crítico:** Se o coeficiente de atrito fosse $\frac{c}{t}$ com $c < 3$, o atrito seria insuficiente para dissipar a oscilação, perdendo a garantia de convergência $\mathcal{O}(1/t^2)$. Se $c > 3$, o atrito excessivo frearia a partícula prematuramente, degradando a taxa de volta para $\mathcal{O}(1/t)$. O número $3$ é a constante universal exata que equilibra perfeitamente inércia e dissipação!
 :::
 
 ::: {.content-visible when-format="revealjs"}
@@ -908,7 +1042,9 @@ Ele provou duas proposições históricas:
 
 Para funções convexas $L$-suaves gerais:
 $$f(\mathbf{w}_k) - f^\star \le \mathcal{O}\left(\frac{1}{k}\right)$$
-Para atingir erro $\epsilon = 10^{-4}$, são necessárias $\approx \mathbf{10.000}$ iterações!
+
+- Para erro $\epsilon = 10^{-4}$: $\approx \mathbf{10.000}$ iterações!
+- Subótimo: acumula pouco progresso em vales planos.
 :::
 
 ::: {.column width="50%"}
@@ -916,13 +1052,72 @@ Para atingir erro $\epsilon = 10^{-4}$, são necessárias $\approx \mathbf{10.00
 
 Com sequência dinâmica $\beta_k = \frac{k-1}{k+2}$:
 $$f(\mathbf{w}_k) - f^\star \le \mathcal{O}\left(\frac{1}{k^2}\right)$$
-Para atingir o mesmo erro $\epsilon = 10^{-4}$, são necessárias apenas $\approx \mathbf{100}$ iterações!
+
+- Para erro $\epsilon = 10^{-4}$: apenas $\approx \mathbf{100}$ iterações!
+- **Aceleração quadrática de $100\times$!**
 :::
 :::
 
 ::: {.fragment .callout-tip}
 ## Teorema de Complexidade de Nesterov (1983)
-A taxa $\mathcal{O}(1/k^2)$ é a cota inferior matemática absoluta para métodos de 1ª ordem em funções convexas gerais. Nenhum método puramente baseado em gradientes pode ser assintoticamente mais rápido!
+A taxa $\mathcal{O}(1/k^2)$ é a cota inferior matemática absoluta para qualquer método de 1ª ordem em funções convexas gerais. O NAG atinge a fronteira inultrapassável de eficiência!
+:::
+
+## Dedução da Cota de Nesterov: Lyapunov Discreto
+
+::: {.columns}
+::: {.column width="50%"}
+**A Função de Energia Discreta:**
+
+- Sequência de momento $\beta_k = \frac{k-1}{k+2}$ e energia:
+  $$\mathcal{E}_k \triangleq \frac{(k+1)^2}{2} (f(\mathbf{w}_k) - f^\star) + L \|\mathbf{z}_k - \mathbf{w}^\star\|^2$$
+
+- Por $L$-suavidade e convexidade, os termos cruzados cancelam-se:
+  $$\mathcal{E}_{k+1} \le \mathcal{E}_k \quad \text{(dissipação monótona)}$$
+:::
+
+::: {.column width="50%"}
+**Telescópio e Cota $\mathcal{O}(1/k^2)$:**
+
+- Encadeamento telescópico de $0$ até $k$:
+  $$\frac{(k+1)^2}{2} (f(\mathbf{w}_k) - f^\star) \le \mathcal{E}_k \le \dots \le \mathcal{E}_0$$
+
+- Isolando o erro residual na função:
+  $$f(\mathbf{w}_k) - f^\star \le \frac{4L \|\mathbf{w}_0 - \mathbf{w}^\star\|^2}{(k+1)^2} = \mathcal{O}\left(\frac{1}{k^2}\right)$$
+:::
+:::
+
+::: {.fragment .callout-note}
+## Por que Polyak Falha no Caso Convexo Geral?
+Com $\beta$ constante, Polyak requer $\mu > 0$ (forte convexidade) para convergência linear. Sem $\mu > 0$, o momento constante pode orbitar indefinidamente; Nesterov resolve isso tornando $\beta_k \to 1$ dependente do tempo!
+:::
+
+## Limite Contínuo: A Física do NAG (EDO)
+
+::: {.columns}
+::: {.column width="50%"}
+**A EDO de Su, Boyd & Candès (2016):**
+
+No limite contínuo (passo $\delta = \sqrt{\alpha} \to 0, \, t = k\delta$):
+$$\ddot{\mathbf{w}}(t) + \underbrace{\frac{3}{t}}_{\text{Atrito}} \dot{\mathbf{w}}(t) + \underbrace{\nabla f(\mathbf{w}(t))}_{\text{Força}} = \mathbf{0}$$
+
+- $\ddot{\mathbf{w}}$: inércia / aceleração da partícula.
+- $\frac{3}{t} \dot{\mathbf{w}}$: amortecimento dinâmico viscoso.
+- $\nabla f$: inclinação potencial da paisagem.
+:::
+
+::: {.column width="50%"}
+**O Papel Mágico do Coeficiente $3/t$:**
+
+- **Início ($t \to 0$):** atrito enorme ($\frac{3}{t} \gg 1$), estabilizando o disparo inicial e prevenindo *overshoot*.
+- **Assíntota ($t \to \infty$):** atrito desvanece ($\frac{3}{t} \to 0$), preservando a inércia para varrer o vale.
+- Coeficiente $< 3$ oscila sem parar; $> 3$ freia cedo demais ($\mathcal{O}(1/t)$). $3$ é o equilíbrio ótimo!
+:::
+:::
+
+::: {.fragment .callout-tip}
+## Energia Contínua Dissipativa
+A energia $\mathcal{E}(t) = t^2(f(\mathbf{w}(t)) - f^\star) + \dots$ satisfaz $\frac{d\mathcal{E}}{dt} \le 0 \implies f(\mathbf{w}(t)) - f^\star \le \frac{\mathcal{E}(0)}{t^2} = \mathcal{O}(1/t^2)$.
 :::
 :::
 
@@ -939,32 +1134,49 @@ Considere uma função 1D parabólica $f(w) = \frac{1}{2}w^2$. Uma partícula es
 ::: {.callout-note icon=false}
 ### Julgue V ou F para cada afirmação:
 
-- ( ) O gradiente de Nesterov avaliado em $\mathbf{w}_k + \beta \mathbf{v}_k$ detecta subidas da função antes que a partícula as atinja, aplicando força contrária que amortece o *overshoot*.
-- ( ) O NAG atinge a cota assintótica ótima $\mathcal{O}(1/k^2)$ para funções convexas $L$-suaves gerais, provada matematicamente por Nesterov.
-- ( ) Avaliar o gradiente antecipado em Nesterov exige duas passagens completas de retropropagação (*backpropagation*) por iteração, duplicando o custo em relação ao GD.
-- ( ) Em problemas não-convexos com ruído estocástico severo de mini-batch, antecipar a posição pode occasionalmente amplificar a instabilidade amostral.
+- □ O gradiente de Nesterov avaliado em $\mathbf{w}_k + \beta \mathbf{v}_k$ detecta subidas da função antes que a partícula as atinja, aplicando força contrária que amortece o *overshoot*.
+- □ O NAG atinge a cota assintótica ótima $\mathcal{O}(1/k^2)$ para funções convexas $L$-suaves gerais, provada matematicamente por Nesterov.
+- □ Avaliar o gradiente antecipado em Nesterov exige duas passagens completas de retropropagação (*backpropagation*) por iteração, duplicando o custo em relação ao GD.
+- □ Em problemas não-convexos com ruído estocástico severo de mini-batch, antecipar a posição pode ocasionalmente amplificar a instabilidade amostral.
 :::
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Pausa 2: Polyak vs. Nesterov
+## Pausa 2: Aceleradores de Nesterov e Amortecimento
 
 ::: {.callout-tip}
-## Pergunta de Fixação
-Em $f(w) = \frac{1}{2}w^2$, com $w_k = 2$ e $v_k = -3$ ($\alpha = 0{,}5, \beta = 0{,}9$):
+## O Freio Preditivo em 1D
+Em $f(w) = \frac{1}{2}w^2$, considere $w_k = 2$ e velocidade $v_k = -3$ sob $\alpha = 0{,}5$ e $\beta = 0{,}9$.
+Onde Polyak posiciona $w_{k+1}$ e qual é sua nova velocidade? Onde Nesterov avalia o ponto antecipado $w_{\text{ahead}}$ e como ele amortece o *overshoot*?
+:::
 
-- Polyak calcula gradiente em $w = 2 \implies v_{k+1} = -3{,}7 \implies w_{k+1} = -1{,}7$ (*overshoot* severo!).
-- Nesterov antecipa para $w_{\text{ahead}} = 2 - 2{,}7 = -0{,}7$. A inclinação lá é negativa, freando para $v_{k+1} = -2{,}35 \implies w_{k+1} = -0{,}35$.
+::: {.callout-tip}
+## Propriedades do NAG vs. Polyak
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O gradiente de Nesterov avaliado em $\mathbf{w}_k + \beta \mathbf{v}_k$ detecta subidas da função antes que a partícula as atinja, aplicando força contrária que amortece o *overshoot*.
+- □ O NAG atinge a cota assintótica ótima $\mathcal{O}(1/k^2)$ para funções convexas $L$-suaves gerais, provada matematicamente por Nesterov.
+- □ Avaliar o gradiente antecipado em Nesterov exige duas passagens completas de retropropagação (*backpropagation*) por iteração, duplicando o custo em relação ao GD.
+- □ Em problemas não-convexos com ruído estocástico severo de mini-batch, antecipar a posição pode ocasionalmente amplificar a instabilidade amostral.
+:::
+
+## Pausa 2: Aceleradores de Nesterov e Amortecimento — Resposta
+
+::: {.callout-tip}
+## Propriedades do NAG vs. Polyak — Resposta
+
+- ✔ **Verdadeiro.** Ao saltar antes de medir, detecta a elevação da encosta e aplica amortecimento ativo preventivo.
+- ✔ **Verdadeiro.** A cota $\mathcal{O}(1/k^2)$ é a fronteira inferior absoluta de complexidade para métodos de 1ª ordem em funções convexas $L$-suaves.
+- ✗ **Falso.** Exige exatamente **uma única** avaliação de gradiente por passo (feita em $\mathbf{w}_{\text{ahead}}$), com custo $\mathcal{O}(d)$.
+- ✔ **Verdadeiro.** Com mini-batches ruidosos, projetar o gradiente à frente pode elevar a variância da estimativa estocástica.
 :::
 
 ::: {.fragment}
+**Voltando à pergunta:** Polyak calcula gradiente em $w = 2 \implies v_{k+1} = -3{,}7 \implies w_{k+1} = -1{,}7$ (*overshoot* severo!). Nesterov antecipa para $w_{\text{ahead}} = 2 - 2{,}7 = -0{,}7$; como a derivada lá é negativa ($-0{,}7$), freia a velocidade para $v_{k+1} = -2{,}35 \implies w_{k+1} = -0{,}35$, muito mais perto do ótimo!
+:::
+:::
 
-- [x] O gradiente antecipado atua como um sistema de freios inteligente antes de curvas.
-- [x] NAG atinge a cota teórica inultrapassável $\mathcal{O}(1/k^2)$ para funções convexas gerais.
-- [ ] O NAG requer duas etapas de retropropagação por iteração. *(Falso: requer apenas uma avaliação de gradiente em $\mathbf{w}_{\text{ahead}}$!)*
-- [x] No SGD com mini-batches ruidosos, avaliar gradientes em pontos projetados pode sensivelmente elevar a variância da estimativa.
-:::
-:::
 
 # Bloco 3: A Grande Síntese — O Otimizador Adam
 
@@ -972,15 +1184,20 @@ Em $f(w) = \frac{1}{2}w^2$, com $w_k = 2$ e $v_k = -3$ ($\alpha = 0{,}5, \beta =
 ## A Fusão Perfeita: Momento com Escala Adaptativa
 
 Até este ponto do curso, desenvolvemos dois pilares fundamentais e complementares da otimização contemporânea:
-1. **O Momento Direcional (Polyak / Nesterov):** Acumula uma média móvel de primeira ordem dos gradientes ($\mathbf{m}_t$), fornecendo **inércia mecânica** que cancela ruídos de alta frequência transversais e acelera ao longo de vales planos.
-2. **O Precondicionamento Diagonal (RMSProp):** Acumula uma média móvel de segunda ordem dos quadrados dos gradientes ($\mathbf{v}_t$), fornecendo **equalização de escala** que impede passos explosivos em coordenadas íngremes e acelera coordenadas suaves.
+
+1. **O Momento Direcional (Polyak / Nesterov):** Acumula uma **média móvel de primeira ordem** dos gradientes ($\mathbf{m}_t$), fornecendo **inércia mecânica** que cancela ruídos de alta frequência transversais e acelera ao longo de vales planos.
+2. **O Precondicionamento Diagonal (RMSProp):** Acumula uma **média móvel de segunda ordem** dos quadrados dos gradientes ($\mathbf{v}_t$), fornecendo **equalização de escala** que impede passos explosivos em coordenadas íngremes e acelera coordenadas suaves.
 
 Em 2014, Diederik Kingma e Jimmy Ba publicaram um dos artigos mais citados da história da ciência da computação: **"Adam: A Method for Stochastic Optimization"** (*Adaptive Moment Estimation*).
 
 A arquitetura do Adam une esses dois motores em uma estrutura vetorial elegante:
-$$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t \quad \text{(1º momento — média/velocidade)}$$
-$$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^2 \quad \text{(2º momento não-centrado — variância/curvatura)}$$
+$$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t \quad \text{(1º momento — média móvel exponencial dos gradientes)}$$
+$$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^2 \quad \text{(2º momento não-centrado — média móvel exponencial dos quadrados)}$$
 onde $\mathbf{g}_t = \nabla f_i(\mathbf{w}_t)$ é o gradiente estocástico avaliado no mini-batch e as operações de quadrado e divisão são elemento a elemento (vetoriais).
+
+É fundamental destacar a natureza estatística de $\mathbf{m}_t$: trata-se formalmente de uma **Média Móvel Ponderada Exponencialmente (EMA — *Exponential Moving Average*)** dos gradientes passados:
+$$\mathbf{m}_t = (1 - \beta_1) \sum_{i=1}^t \beta_1^{t-i} \mathbf{g}_i$$
+Os fatores de ponderação decaem exponencialmente à taxa $\beta_1^{t-i}$, estabelecendo uma **janela efetiva de memória de aproximadamente $\frac{1}{1-\beta_1}$ iterações** (com $\beta_1 = 0{,}9$, os últimos $\approx 10$ gradientes determinam a direção do passo).
 
 ### A Arquitetura do Adam: Fluxo de Dados e Síntese de Motores
 
@@ -1000,25 +1217,25 @@ O funcionamento do Adam pode ser compreendido como um pipeline modular de proces
     (G) at (0, 4.5) {\textbf{Gradiente Estocástico $\mathbf{g}_t = \nabla \mathcal{L}_i(\mathbf{w}_t)$}\\\footnotesize(Avaliado no mini-batch atual)};
 
   % Canal Esquerdo: 1º Momento (Polyak)
-  \node[draw=laranja, fill=laranja!10, rounded corners=5pt, inner sep=5pt, align=center, text width=4.5cm] 
-    (M) at (-3.2, 2.7) {\textbf{1º Momento: Inércia (Polyak)}\\\footnotesize$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1-\beta_1)\mathbf{g}_t$\\\scriptsize Filtra ruído e dá tração longitudinal};
+  \node[draw=laranja, fill=laranja!10, rounded corners=5pt, inner sep=5pt, align=center, text width=5.0cm] 
+    (M) at (-3.4, 2.7) {\textbf{1º Momento: Média Móvel (Polyak)}\\\footnotesize$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1-\beta_1)\mathbf{g}_t$\\\scriptsize Média móvel exponencial (EMA) dos gradientes;\\filtra ruído e dá inércia direcional};
 
-  \node[draw=laranja!80!black, fill=laranja!20, rounded corners=5pt, inner sep=5pt, align=center, text width=4.5cm] 
-    (MHAT) at (-3.2, 0.9) {\textbf{Correção de Viés: 1º Momento}\\\footnotesize$\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}$\\\scriptsize Compensa a inicialização em zero};
+  \node[draw=laranja!80!black, fill=laranja!20, rounded corners=5pt, inner sep=5pt, align=center, text width=5.0cm] 
+    (MHAT) at (-3.4, 0.9) {\textbf{Correção de Viés da Média Móvel}\\\footnotesize$\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}$\\\scriptsize Corrige subestimação por $\mathbf{m}_0 = \mathbf{0}$};
 
   % Canal Direito: 2º Momento (RMSProp)
-  \node[draw=azul, fill=azul!10, rounded corners=5pt, inner sep=5pt, align=center, text width=4.5cm] 
-    (V) at (3.2, 2.7) {\textbf{2º Momento: Escala (RMSProp)}\\\footnotesize$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1-\beta_2)\mathbf{g}_t^2$\\\scriptsize Estima curvatura diagonal por eixo};
+  \node[draw=azul, fill=azul!10, rounded corners=5pt, inner sep=5pt, align=center, text width=5.0cm] 
+    (V) at (3.4, 2.7) {\textbf{2º Momento: Média Móvel (RMSProp)}\\\footnotesize$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1-\beta_2)\mathbf{g}_t^2$\\\scriptsize Média móvel exponencial (EMA) dos quadrados;\\estima curvatura diagonal por eixo};
 
-  \node[draw=azul!80!black, fill=azul!20, rounded corners=5pt, inner sep=5pt, align=center, text width=4.5cm] 
-    (VHAT) at (3.2, 0.9) {\textbf{Correção de Viés: 2º Momento}\\\footnotesize$\hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1 - \beta_2^t}$\\\scriptsize Previne passo explosivo em $t=1$};
+  \node[draw=azul!80!black, fill=azul!20, rounded corners=5pt, inner sep=5pt, align=center, text width=5.0cm] 
+    (VHAT) at (3.4, 0.9) {\textbf{Correção de Viés da Média Móvel}\\\footnotesize$\hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1 - \beta_2^t}$\\\scriptsize Corrige subestimação por $\mathbf{v}_0 = \mathbf{0}$};
 
   % Fusão: Divisão Adaptativa
-  \node[draw=verde, fill=verde!10, rounded corners=6pt, inner sep=6pt, align=center, text width=7.0cm, line width=1.2pt] 
-    (DIV) at (0, -0.9) {\textbf{Quociente Adaptativo por Coordenada}\\\footnotesize$\mathbf{u}_t = \frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$\\\scriptsize Direção da inércia reescalada pela incerteza local};
+  \node[draw=verde, fill=verde!10, rounded corners=6pt, inner sep=6pt, align=center, text width=7.2cm, line width=1.2pt] 
+    (DIV) at (0, -0.9) {\textbf{Quociente Adaptativo por Coordenada}\\\footnotesize$\mathbf{u}_t = \frac{\hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$\\\scriptsize Direção da média móvel reescalada pelo desvio local};
 
   % Saída: Atualização
-  \node[draw=verde!80!black, fill=verde!25, rounded corners=6pt, inner sep=6pt, align=center, text width=7.0cm, line width=1.4pt] 
+  \node[draw=verde!80!black, fill=verde!25, rounded corners=6pt, inner sep=6pt, align=center, text width=7.2cm, line width=1.4pt] 
     (W) at (0, -2.5) {\textbf{Atualização dos Parâmetros}\\\large$\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha \mathbf{u}_t$};
 
   % Conexões
@@ -1038,9 +1255,9 @@ O funcionamento do Adam pode ser compreendido como um pipeline modular de proces
 | Otimizador | Referência | Direção do Passo | Escala por Coordenada | Memória Temporal | Correção de Viés |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **SGD Puro** | Aula 8 | Gradiente instantâneo $\mathbf{g}_t$ | Escalar fixo $\alpha$ | Nenhuma | Não se aplica |
-| **Polyak (Heavy-Ball)** | Aula 12 | 1º momento exponencial $\mathbf{m}_t$ | Escalar fixo $\alpha$ | Média móvel dos gradientes | Ausente |
-| **RMSProp** | Aula 11 | Gradiente instantâneo $\mathbf{g}_t$ | Adaptativa $\frac{\alpha}{\sqrt{\mathbf{v}_t} + \epsilon}$ | Média móvel dos quadrados | Ausente |
-| **Adam** | Aula 12 | 1º momento corrigido $\hat{\mathbf{m}}_t$ | Adaptativa $\frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$ | 1º e 2º momentos integrados | Presente ($\frac{1}{1-\beta_1^t}$, $\frac{1}{1-\beta_2^t}$) |
+| **Polyak (Heavy-Ball)** | Aula 12 | 1º momento exponencial $\mathbf{m}_t$ | Escalar fixo $\alpha$ | Média móvel exponencial (EMA) dos gradientes | Ausente |
+| **RMSProp** | Aula 11 | Gradiente instantâneo $\mathbf{g}_t$ | Adaptativa $\frac{\alpha}{\sqrt{\mathbf{v}_t} + \epsilon}$ | Média móvel exponencial (EMA) dos quadrados | Ausente |
+| **Adam** | Aula 12 | 1º momento corrigido $\hat{\mathbf{m}}_t$ | Adaptativa $\frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$ | Duas médias móveis (EMA) acopladas | Presente ($\frac{1}{1-\beta_1^t}$, $\frac{1}{1-\beta_2^t}$) |
 :::
 
 ::: {.content-visible when-format="revealjs"}
@@ -1052,9 +1269,9 @@ O funcionamento do Adam pode ser compreendido como um pipeline modular de proces
 
 $$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t$$
 
-- Média móvel exponencial dos gradientes (1º momento).
-- Filtra oscilações ortogonais e fornece inércia ao longo do vale.
-- Valor canônico: $\beta_1 = 0{,}9$.
+- **Média móvel exponencial (EMA)** dos gradientes passados.
+- Janela de memória efetiva: $\approx \frac{1}{1-\beta_1} = \mathbf{10}$ iterações ($\beta_1 = 0{,}9$).
+- Filtra oscilações transversais e acumula tração no vale.
 :::
 
 ::: {.column width="50%"}
@@ -1062,9 +1279,9 @@ $$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1) \mathbf{g}_t$$
 
 $$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^2$$
 
-- Média móvel exponencial dos quadrados dos gradientes (2º momento).
-- Equaliza as escalas de curvatura por coordenada.
-- Valor canônico: $\beta_2 = 0{,}999$.
+- **Média móvel exponencial (EMA)** dos quadrados dos gradientes.
+- Janela de memória efetiva: $\approx \frac{1}{1-\beta_2} = \mathbf{1.000}$ iterações ($\beta_2 = 0{,}999$).
+- Equaliza eixos íngremes e suaves por coordenada.
 :::
 :::
 
@@ -1072,53 +1289,52 @@ $$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2) \mathbf{g}_t^2$$
 ## A Pergunta Matemática
 Como $\mathbf{m}_0 = \mathbf{0}$ e $\mathbf{v}_0 = \mathbf{0}$, os valores iniciais de $\mathbf{m}_t$ e $\mathbf{v}_t$ são drasticamente subestimados nas primeiras iterações. Como corrigir esse viés de largada?
 :::
-:::
 
-::: {.content-visible when-format="revealjs"}
 ## Arquitetura do Adam: Síntese de Motores
 
-::: {.fig-resize style="width: 85%; margin: 0 auto 0.8rem auto;"}
+::: {.fig-resize style="width: 90%; margin: 0 auto 0.8rem auto;"}
 ```{.tikz}
 \definecolor{azul}{RGB}{0,133,202}
 \definecolor{laranja}{RGB}{255,94,0}
 \definecolor{verde}{RGB}{27,158,119}
 \begin{tikzpicture}[>=latex, font=\scriptsize, thick]
-  \node[draw=azul, fill=azul!10, rounded corners=4pt, inner sep=4pt, align=center] (G) at (0, 0) {$\mathbf{g}_t$};
-  \node[draw=laranja, fill=laranja!15, rounded corners=4pt, inner sep=4pt, align=center] (M) at (3.0, 0.7) {1º Mom.: $\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1-\beta_1^t}$};
-  \node[draw=azul, fill=azul!15, rounded corners=4pt, inner sep=4pt, align=center] (V) at (3.0, -0.7) {2º Mom.: $\hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1-\beta_2^t}$};
-  \node[draw=verde, fill=verde!20, rounded corners=4pt, inner sep=4pt, align=center, line width=1.1pt] (OUT) at (7.5, 0) {Passo: $-\frac{\alpha \hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$};
+  \node[draw=azul, fill=azul!10, rounded corners=4pt, inner sep=4pt, align=center] (G) at (0, 0) {Gradiente\\$\mathbf{g}_t$};
+  \node[draw=laranja, fill=laranja!15, rounded corners=4pt, inner sep=4pt, align=center] (M) at (3.5, 0.85) {\textbf{1º Momento (Média Móvel - EMA)}\\$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1-\beta_1)\mathbf{g}_t \implies \hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1-\beta_1^t}$};
+  \node[draw=azul, fill=azul!15, rounded corners=4pt, inner sep=4pt, align=center] (V) at (3.5, -0.85) {\textbf{2º Momento (Média Móvel - EMA)}\\$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1-\beta_2)\mathbf{g}_t^2 \implies \hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1-\beta_2^t}$};
+  \node[draw=verde, fill=verde!20, rounded corners=4pt, inner sep=4pt, align=center, line width=1.1pt] (OUT) at (8.0, 0) {Passo Adaptativo:\\$-\frac{\alpha \hat{\mathbf{m}}_t}{\sqrt{\hat{\mathbf{v}}_t} + \epsilon}$};
   
-  \draw[->, line width=1.2pt, laranja] (G.east) -- ++(0.5,0) |- (M.west);
-  \draw[->, line width=1.2pt, azul] (G.east) -- ++(0.5,0) |- (V.west);
-  \draw[->, line width=1.2pt, laranja] (M.east) -| ++(0.5,-0.7) -- (OUT.west);
-  \draw[->, line width=1.2pt, azul] (V.east) -| ++(0.5,0.7) -- (OUT.west);
+  \draw[->, line width=1.2pt, laranja] (G.east) -- ++(0.3,0) |- (M.west);
+  \draw[->, line width=1.2pt, azul] (G.east) -- ++(0.3,0) |- (V.west);
+  \draw[->, line width=1.2pt, laranja] (M.east) -| ++(0.3,-0.85) -- (OUT.west);
+  \draw[->, line width=1.2pt, azul] (V.east) -| ++(0.3,0.85) -- (OUT.west);
 \end{tikzpicture}
 ```
 :::
 
 ::: {.columns}
 ::: {.column width="50%"}
-**Herança de Polyak (Aula 12):**
+**1º Momento $\mathbf{m}_t$ (Média Móvel / Polyak):**
 
-- Inércia direcional $\mathbf{m}_t$.
-- Cancela ruído e acelera em vales.
-- Suaviza a direção das atualizações.
+- $\mathbf{m}_t$ é a **média móvel exponencial (EMA)** dos gradientes históricos.
+- Janela de $\approx 10$ passos ($\beta_1 = 0{,}9$): amortece ruído transversal.
+- Fornece direção consistente e inércia ao longo do vale.
 :::
 
 ::: {.column width="50%"}
-**Herança do RMSProp (Aula 11):**
+**2º Momento $\mathbf{v}_t$ (Média Móvel / RMSProp):**
 
-- Escala adaptativa $\mathbf{v}_t$.
-- Equaliza eixos íngremes e suaves.
-- Torna o passo invariante à escala do gradiente.
+- $\mathbf{v}_t$ é a **média móvel exponencial (EMA)** dos gradientes ao quadrado $\mathbf{g}_t^2$.
+- Janela de $\approx 1.000$ passos ($\beta_2 = 0{,}999$): estima variância local.
+- Equaliza o passo dividindo pelo desvio padrão $\approx \sqrt{\hat{\mathbf{v}}_t}$.
 :::
 :::
 
 ::: {.fragment .callout-tip}
 ## O Salto do Adam
-A união da **inércia temporal** com o **precondicionamento diagonal**, combinada com a **correção analítica de viés**, criou o otimizador mais robusto da história do aprendizado de máquina!
+A combinação de **duas médias móveis exponenciais complementares** (1ª ordem para direção e 2ª ordem para escala) com **correção analítica de viés** consolidou o Adam como o otimizador padrão da inteligência artificial!
 :::
 :::
+
 
 ::: {.content-visible when-format="html" unless-format="revealjs"}
 ## Dedução Analítica da Correção de Viés de Inicialização
@@ -1242,38 +1458,55 @@ $$\mathbf{w}_{t+1} = \mathbf{w}_t - \frac{\alpha}{\sqrt{\hat{\mathbf{v}}_t} + \e
 ### Teste Seus Conhecimentos — Pausa 3
 Inicializamos o Adam com $\beta_1 = 0{,}9$, $\beta_2 = 0{,}999$, $\epsilon = 10^{-8}$ e inicializadores zerados $m_0 = 0$, $v_0 = 0$. Suponha que no passo $t=1$ o gradiente seja $g_1 = 5{,}0$.
 1. Qual seria o passo $\Delta w_1$ sem as correções de viés?
-2. Como a divisão por $1 - \beta_1^1$ e $1 - \beta_2^1$ restaura a proporção correta $\Delta w_1 = -\alpha \cdot 1{,}0$?
+2. Como a divisão por $1 - \beta^t$ normaliza exatamente o passo inicial para $-\alpha$?
 :::
 
 ::: {.callout-note icon=false}
 ### Julgue V ou F para cada afirmação:
 
-- ( ) O Adam unifica o momento direcional de 1º momento ($m_t$) com a normalização adaptativa de 2º momento ($v_t$).
-- ( ) A correção de viés é indispensável nos passos iniciais porque $m_0 = \mathbf{0}$ e $v_0 = \mathbf{0}$ subestimam as magnitudes das médias móveis.
-- ( ) O fator de correção de viés do segundo momento $\frac{1}{1 - \beta_2^t}$ permanece significativamente maior do que 1 por centenas de iterações quando $\beta_2 = 0{,}999$.
-- ( ) Na ausência da correção de viés do segundo momento, o passo nos passos iniciais seria artificialmente atenuado, paralisando o modelo na largada.
+- □ A divisão por $1 - \beta_1^t$ e $1 - \beta_2^t$ compensa o fato de que $\mathbf{m}_t$ e $\mathbf{v}_t$ são inicializados em zero, tornando as estimativas não-enviesadas desde o primeiro passo.
+- □ Conforme o número de iterações cresce ($t \to \infty$), os termos de correção de viés convergem para $0$, anulando as atualizações do Adam.
+- □ O termo $\sqrt{\hat{\mathbf{v}}_t}$ no denominador atua como um precondicionador diagonal, acelerando coordenadas de gradiente pequeno e desacelerando coordenadas íngremes.
+- □ Em coordenadas onde o gradiente troca constantemente de sinal, $\hat{\mathbf{m}}_t$ tende a zero enquanto $\sqrt{\hat{\mathbf{v}}_t}$ acumula a energia, reduzindo o passo e amortecendo oscilações.
 :::
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Pausa 3: Otimizador Adam
+## Pausa 3: A Síntese do Adam e a Correção de Viés
 
 ::: {.callout-tip}
-## Pergunta de Fixação
-Em $t=1$, com $g_1 = 5{,}0$ e $\beta_2 = 0{,}999$:
+## A Partida a Frio do Adam
+Em $t=1$, com $\beta_1 = 0{,}9$, $\beta_2 = 0{,}999$, inicializadores $\mathbf{m}_0 = \mathbf{0}, \mathbf{v}_0 = \mathbf{0}$ e gradiente $g_1 = 5{,}0$.
+Qual seria o passo $\Delta w_1$ sem a correção de viés? Como a divisão por $1 - \beta^t$ normaliza exatamente o passo inicial para $-\alpha$?
+:::
 
-- Sem correção: $v_1 = 0{,}001 \times 25 = 0{,}025 \implies \sqrt{v_1} = 0{,}158$. O passo escala com $\frac{0{,}5}{0{,}158} \alpha \approx 3{,}16 \alpha$.
-- Com correção: $\hat{v}_1 = \frac{0{,}025}{0{,}001} = 25 \implies \sqrt{\hat{v}_1} = 5{,}0$. O passo é exatamente $\frac{5{,}0}{5{,}0}\alpha = 1{,}0\alpha$.
+::: {.callout-tip}
+## Mecânica do Adam
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ A divisão por $1 - \beta_1^t$ e $1 - \beta_2^t$ compensa o fato de que $\mathbf{m}_t$ e $\mathbf{v}_t$ são inicializados em zero, tornando as estimativas não-enviesadas desde o primeiro passo.
+- □ Conforme o número de iterações cresce ($t \to \infty$), os termos de correção de viés convergem para $0$, anulando as atualizações do Adam.
+- □ O termo $\sqrt{\hat{\mathbf{v}}_t}$ no denominador atua como um precondicionador diagonal, acelerando coordenadas de gradiente pequeno e desacelerando coordenadas íngremes.
+- □ Em coordenadas onde o gradiente troca constantemente de sinal, $\hat{\mathbf{m}}_t$ tende a zero enquanto $\sqrt{\hat{\mathbf{v}}_t}$ acumula a energia, reduzindo o passo e amortecendo oscilações.
+:::
+
+## Pausa 3: A Síntese do Adam e a Correção de Viés — Resposta
+
+::: {.callout-tip}
+## Mecânica do Adam — Resposta
+
+- ✔ **Verdadeiro.** Como $\mathbb{E}[\mathbf{m}_t] = (1 - \beta_1^t)\mathbb{E}[\mathbf{g}_t]$, dividir por $1 - \beta_1^t$ restaura a esperança correta.
+- ✗ **Falso.** Como $\beta \in (0, 1)$, $\beta^t \to 0 \implies 1 - \beta^t \to 1$. A correção é crucial no início e neutra no final.
+- ✔ **Verdadeiro.** Coordenadas com gradientes pequenos recebem divisão por valor pequeno, acelerando seu deslocamento relativo.
+- ✔ **Verdadeiro.** $\mathbf{m}_t$ cancela os sinais opostos enquanto $\mathbf{v}_t$ acumula os quadrados, estrangulando o passo oscilatório transversal.
 :::
 
 ::: {.fragment}
+**Voltando à pergunta:** Sem correção, $m_1 = 0{,}5$ e $v_1 = 0{,}025 \implies \Delta w_1 = -\alpha \frac{0{,}5}{\sqrt{0{,}025}} \approx -3{,}16\alpha$ (distorcido!). Com correção, $\hat{m}_1 = \frac{0{,}5}{0{,}1} = 5{,}0$ e $\hat{v}_1 = \frac{0{,}025}{0{,}001} = 25{,}0 \implies \Delta w_1 = -\alpha \frac{5{,}0}{\sqrt{25{,}0}} = -\alpha \cdot 1{,}0$, perfeitamente calibrado!
+:::
+:::
 
-- [x] O Adam sintetiza inércia direcional com escalas adaptativas por coordenada.
-- [x] A correção de viés elimina a distorção decorrente da inicialização em zero.
-- [x] Com $\beta_2 = 0{,}999$, são necessárias centenas de passos para que $1 - \beta_2^t \approx 1$.
-- [ ] Sem correção, o passo inicial ficaria minúsculo. *(Falso: $\sqrt{v_t}$ seria minúsculo no denominador, tornando o passo **gigantesco**!)*
-:::
-:::
 
 # Bloco 4: A Cirurgia Crítica — Do $L_2$ Regularization ao AdamW
 
@@ -1282,28 +1515,78 @@ Em $t=1$, com $g_1 = 5{,}0$ e $\beta_2 = 0{,}999$:
 
 Durante anos após a publicação do Adam, pesquisadores e praticantes observaram um fenômeno intrigante: embora o Adam convergisse muito mais rápido do que o SGD com momento durante o treinamento, modelos treinados com SGD frequentemente exibiam **melhor capacidade de generalização e menor erro de teste** em visão computacional e processamento de linguagem natural.
 
-Em 2017 (com versão final em 2019 no ICLR), Ilya Loshchilov e Frank Hutter desvendaram o mistério no artigo seminal **"Decoupled Weight Decay Regularization"**: havia um equívoco conceitual profundo na forma como a regularização de pesos vinha sendo implementada em todas as bibliotecas de Deep Learning (PyTorch, TensorFlow, Caffe).
+Em 2017 (com versão final em 2019 no ICLR), Ilya Loshchilov e Frank Hutter desvendaram o mistério no artigo seminal **"Decoupled Weight Decay Regularization"**: havia um equívoco conceitual profundo na forma como a regularização de pesos vinha sendo implementada em todas as principais bibliotecas de Deep Learning (PyTorch, TensorFlow, Caffe).
 
-No Gradiente Descendente clássico, regularização $L_2$ e decaimento de pesos (*weight decay*) são rigorosamente equivalentes:
+Para compreender a raiz desse erro, vejamos a dedução analítica passo a passo da regularização $L_2$ no Gradiente Descendente e comparemos com o que acontece quando injetamos a mesma penalidade dentro do pipeline do Adam.
 
-- Adicionar penalidade $L_2$ à função de perda:
-  $$\mathcal{L}_{\text{reg}}(\mathbf{w}) = \mathcal{L}(\mathbf{w}) + \frac{\lambda}{2}\|\mathbf{w}\|^2 \implies \nabla \mathcal{L}_{\text{reg}}(\mathbf{w}) = \nabla \mathcal{L}(\mathbf{w}) + \lambda \mathbf{w}$$
+### Passo a Passo 1: A Regularização $L_2$ no Gradiente Descendente (GD)
 
-- Passo do GD clássico:
-  $$\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha \nabla \mathcal{L}_{\text{reg}}(\mathbf{w}_t) = \mathbf{w}_t - \alpha \nabla \mathcal{L}(\mathbf{w}_t) - \alpha \lambda \mathbf{w}_t = (1 - \alpha \lambda)\mathbf{w}_t - \alpha \nabla \mathcal{L}(\mathbf{w}_t)$$
-  A multiplicação por $(1 - \alpha \lambda)$ contrai o peso a cada passo por uma fração constante e homogênea.
+No Gradiente Descendente clássico, a penalidade $L_2$ na função de perda é rigorosamente equivalente ao decaimento multiplicativo de pesos (*weight decay*):
 
-**O que acontece quando fazemos isso dentro do Adam?**
-Se simplesmente somamos $\lambda \mathbf{w}_t$ ao gradiente que entra no Adam, esse termo é incorporado ao primeiro momento e ao segundo momento:
-$$\tilde{\mathbf{g}}_t = \mathbf{g}_t + \lambda \mathbf{w}_t$$
-Na atualização dos parâmetros, o termo de regularização passa a ser dividido pelo desvio adaptativo:
-$$w_{t+1, i} \approx w_{t, i} - \frac{\alpha}{\sqrt{\hat{v}_{t, i}} + \epsilon} \hat{m}_{t, i} - \frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}} + \epsilon} w_{t, i}$$
+1. **Definição da Perda Penalizada:**
+   Acrescentamos a penalidade quadrática euclidiana ponderada por $\frac{\lambda}{2}$ à perda original $\mathcal{L}(\mathbf{w})$:
+   $$\mathcal{L}_{\text{reg}}(\mathbf{w}) = \mathcal{L}(\mathbf{w}) + \frac{\lambda}{2}\|\mathbf{w}\|^2$$
 
-A taxa efetiva de contração do peso é:
-$$\gamma_{i}^{\text{efetiva}} = \frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}} + \epsilon}$$
-Essa fórmula revela a patologia: **a força da regularização é inversamente proporcional à magnitude dos gradientes daquele parâmetro!**
-1. Parâmetros com gradientes frequentes e volumosos ($\sqrt{\hat{v}_i}$ grande) recebem regularização quase nula!
-2. Parâmetros associados a atributos raros ou gradientes nulos ($\sqrt{\hat{v}_i} \approx 0$) recebem uma penalidade brutal inflacionada por $1/\epsilon$!
+2. **Cálculo do Gradiente Total:**
+   Pela linearidade da diferenciação:
+   $$\nabla \mathcal{L}_{\text{reg}}(\mathbf{w}) = \nabla \mathcal{L}(\mathbf{w}) + \nabla \left(\frac{\lambda}{2} \mathbf{w}^T \mathbf{w}\right) = \nabla \mathcal{L}(\mathbf{w}) + \lambda \mathbf{w}$$
+
+3. **Aplicação na Regra de Atualização do GD:**
+   A iteração clássica com taxa de aprendizado $\alpha$ prescreve:
+   $$\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha \nabla \mathcal{L}_{\text{reg}}(\mathbf{w}_t)$$
+   Substituindo o gradiente total obtido no Passo 2:
+   $$\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha \left(\nabla \mathcal{L}(\mathbf{w}_t) + \lambda \mathbf{w}_t\right)$$
+
+4. **Agrupamento Algébrico e Fatoração:**
+   Distribuindo o escalar $\alpha$ e reorganizando os termos em função de $\mathbf{w}_t$:
+   $$\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha \lambda \mathbf{w}_t - \alpha \nabla \mathcal{L}(\mathbf{w}_t) = \underbrace{(1 - \alpha \lambda)\mathbf{w}_t}_{\text{Decaimento multiplicativo}} - \underbrace{\alpha \nabla \mathcal{L}(\mathbf{w}_t)}_{\text{Passo do gradiente}}$$
+
+**Conclusão no GD:** Adicionar $\frac{\lambda}{2}\|\mathbf{w}\|^2$ à perda equivale a contrair todos os pesos por um fator constante $(1 - \alpha \lambda) \in (0, 1)$ a cada passo. A taxa efetiva de contração é homogênea e uniforme em todas as coordenadas:
+$$\gamma_{\text{GD}} = \alpha \lambda$$
+
+### Passo a Passo 2: A Injeção do $L_2$ no Adam e a Dedução da Patologia
+
+Como no SGD a regularização $L_2$ consistia apenas em somar $\lambda \mathbf{w}$ ao gradiente, as primeiras implementações do Adam fizeram exatamente isso: forneceram ao otimizador o gradiente modificado $\tilde{\mathbf{g}}_t = \nabla \mathcal{L}(\mathbf{w}_t) + \lambda \mathbf{w}_t$.
+
+Vejamos passo a passo como essa injeção afeta os componentes internos do Adam:
+
+1. **Entrada do Gradiente Modificado:**
+   O gradiente que entra no otimizador agora soma o gradiente da tarefa com a penalidade $L_2$:
+   $$\tilde{\mathbf{g}}_t = \mathbf{g}_t + \lambda \mathbf{w}_t \quad \text{onde} \quad \mathbf{g}_t = \nabla \mathcal{L}(\mathbf{w}_t)$$
+
+2. **Propagação para a Média Móvel de 1º Momento (Velocidade):**
+   A média móvel do primeiro momento acumula $\tilde{\mathbf{g}}_t$:
+   $$\mathbf{m}_t = \beta_1 \mathbf{m}_{t-1} + (1 - \beta_1)(\mathbf{g}_t + \lambda \mathbf{w}_t)$$
+   Após a correção de viés $\hat{\mathbf{m}}_t = \frac{\mathbf{m}_t}{1 - \beta_1^t}$, como os pesos $\mathbf{w}_t$ variam lentamente ao longo das iterações recentes, decompomos por linearidade:
+   $$\hat{\mathbf{m}}_t \approx \hat{\mathbf{m}}_t^{(\text{grad})} + \lambda \mathbf{w}_t$$
+   onde $\hat{\mathbf{m}}_t^{(\text{grad})}$ é a média móvel gerada unicamente pelos gradientes da tarefa.
+
+3. **Propagação para a Média Móvel de 2º Momento (Curvatura):**
+   A média móvel do segundo momento acumula o quadrado do gradiente modificado:
+   $$\mathbf{v}_t = \beta_2 \mathbf{v}_{t-1} + (1 - \beta_2)(\mathbf{g}_t + \lambda \mathbf{w}_t)^2 \implies \hat{\mathbf{v}}_t = \frac{\mathbf{v}_t}{1 - \beta_2^t}$$
+   Observe que $\hat{\mathbf{v}}_t$ agora mensura a variância combinada dos gradientes da tarefa e da própria magnitude dos parâmetros.
+
+4. **Aplicação na Regra de Atualização do Adam:**
+   A regra de atualização do Adam prescreve dividir o 1º momento pela raiz do 2º momento em cada coordenada $i$:
+   $$w_{t+1, i} = w_{t, i} - \frac{\alpha}{\sqrt{\hat{v}_{t, i}} + \epsilon} \hat{m}_{t, i}$$
+
+5. **Substituição e Distribuição dos Termos:**
+   Substituindo $\hat{m}_{t, i} \approx \hat{m}_{t, i}^{(\text{grad})} + \lambda w_{t, i}$:
+   $$w_{t+1, i} \approx w_{t, i} - \frac{\alpha}{\sqrt{\hat{v}_{t, i}} + \epsilon} \left(\hat{m}_{t, i}^{(\text{grad})} + \lambda w_{t, i}\right)$$
+   Distribuindo o quociente adaptativo:
+   $$w_{t+1, i} \approx w_{t, i} - \frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}} + \epsilon} w_{t, i} - \frac{\alpha}{\sqrt{\hat{v}_{t, i}} + \epsilon} \hat{m}_{t, i}^{(\text{grad})}$$
+
+6. **Fatoração da Atualização e a Patologia:**
+   Colocando o peso $w_{t, i}$ em evidência:
+   $$w_{t+1, i} \approx \underbrace{\left( 1 - \frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}} + \epsilon} \right)}_{\text{Fator de contração dependente de } \hat{v}_{t, i}} w_{t, i} - \underbrace{\frac{\alpha}{\sqrt{\hat{v}_{t, i}} + \epsilon} \hat{m}_{t, i}^{(\text{grad})}}_{\text{Passo adaptativo na tarefa}}$$
+
+A taxa efetiva de decaimento do peso na coordenada $i$ torna-se:
+$$\gamma_{i}^{\text{efetivo}} = \frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}} + \epsilon}$$
+
+Essa fórmula revela a grave patologia conceitual do $L_2$ tradicional no Adam: **a intensidade da regularização é inversamente proporcional à magnitude dos gradientes daquele parâmetro!**
+
+1. **Sub-regularização de Pesos Frequentes:** Parâmetros com gradientes volumosos e frequentes produzem $\sqrt{\hat{v}_{t, i}} \gg 1$. Consequentemente, o denominador é enorme e a contração $\gamma_{i}^{\text{efetivo}} \approx 0$ quase desaparece! Justamente os parâmetros mais vulneráveis ao sobreajuste (*overfitting*) deixam de ser regularizados.
+2. **Super-regularização Destrutiva de Pesos Esparsos:** Parâmetros associados a atributos raros (como palavras de baixa frequência em NLP) recebem gradientes predominantemente nulos, logo $\sqrt{\hat{v}_{t, i}} \approx 0$. Para esses pesos, a contração é dividida por $\epsilon \approx 10^{-8}$, resultando em uma penalidade desproporcional $\gamma_i^{\text{efetivo}} \approx \frac{\alpha \lambda}{10^{-8}}$ que colapsa os parâmetros prematuramente a zero!
 :::
 
 ::: {.content-visible when-format="revealjs"}
@@ -1311,23 +1594,35 @@ Essa fórmula revela a patologia: **a força da regularização é inversamente 
 
 ::: {.columns}
 ::: {.column width="50%"}
-**No SGD Clássico (Equivalência Perfeita):**
+**Passo a Passo no GD Clássico:**
 
-$$\mathbf{w}_{t+1} = (1 - \alpha \lambda)\mathbf{w}_t - \alpha \nabla \mathcal{L}(\mathbf{w}_t)$$
+1. Perda com $L_2$: $\mathcal{L}_{\text{reg}} = \mathcal{L}(\mathbf{w}) + \frac{\lambda}{2}\|\mathbf{w}\|^2$
+2. Gradiente: $\nabla \mathcal{L}_{\text{reg}} = \nabla \mathcal{L}(\mathbf{w}) + \lambda \mathbf{w}$
+3. Update do GD:
+   $$\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha (\nabla \mathcal{L}(\mathbf{w}_t) + \lambda \mathbf{w}_t)$$
+4. Fatoração de $\mathbf{w}_t$:
+   $$\mathbf{w}_{t+1} = \mathbf{(1 - \alpha \lambda) \mathbf{w}_t} - \alpha \nabla \mathcal{L}(\mathbf{w}_t)$$
 
-- Penalidade $L_2$ na perda $\equiv$ decaimento de peso multiplicativo.
-- Contração uniforme por fator $(1 - \alpha \lambda)$ em todos os pesos.
+- **Taxa uniforme:** $\gamma_{\text{GD}} = \alpha \lambda$ constante em todos os pesos!
 :::
 
 ::: {.column width="50%"}
-**No Adam com $L_2$ na Perda (Patologia):**
+**Passo a Passo no Adam com $L_2$:**
 
-$$w_{t+1, i} \approx \left(1 - \frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}} + \epsilon}\right) w_{t, i} - \frac{\alpha \hat{m}_{t, i}}{\sqrt{\hat{v}_{t, i}} + \epsilon}$$
+1. Injeção na perda: $\tilde{\mathbf{g}}_t = \mathbf{g}_t + \lambda \mathbf{w}_t$
+2. 1º momento com inércia: $\hat{\mathbf{m}}_t \approx \hat{\mathbf{m}}_t^{(\text{grad})} + \lambda \mathbf{w}_t$
+3. Update do Adam:
+   $$w_{t+1, i} = w_{t, i} - \frac{\alpha}{\sqrt{\hat{v}_{t, i}} + \epsilon}(\hat{m}_{t, i}^{(\text{grad})} + \lambda w_{t, i})$$
+4. Fatoração de $w_{t, i}$:
+   $$w_{t+1, i} \approx \mathbf{\left(1 - \frac{\alpha \lambda}{\sqrt{\hat{v}_{t, i}} + \epsilon}\right) w_{t, i}} - \dots$$
 
-- A regularização é dividida por $\sqrt{\hat{v}_{t, i}}$!
-- Pesos com gradientes grandes quase não sofrem decaimento.
-- Pesos esparsos sofrem penalidade destrutiva.
+- **Taxa distorcida por $\sqrt{\hat{v}_{t, i}}$!**
 :::
+:::
+
+::: {.fragment .callout-warning}
+## A Patologia Estrutural
+Pesos com gradientes frequentes ($\sqrt{\hat{v}_i} \gg 1$) quase não sofrem decaimento; pesos raros ($\sqrt{\hat{v}_i} \approx 0$) sofrem contração desproporcional inflacionada por $1/\epsilon$!
 :::
 :::
 
@@ -1510,39 +1805,55 @@ $$w_{t+1} = (1 - \alpha \lambda) w_t - \frac{\alpha \hat{m}_t}{\sqrt{\hat{v}_t} 
 ::: {.callout-tip icon=false}
 ### Teste Seus Conhecimentos — Pausa 4
 1. Por que no Gradiente Descendente euclidiano puro a regularização $L_2$ ($\frac{\lambda}{2}\|\mathbf{w}\|^2$) e o decaimento de pesos multiplicativo ($(1 - \alpha\lambda)\mathbf{w}$) são identicamente equivalentes?
-2. O que acontece com a taxa efetiva de decaimento de um peso associado a uma palavra muito frequente (com $\hat{v}_i = 100$) em relação a um peso associado a uma palavra rara ($\hat{v}_i = 0{,}01$) no Adam clássico com $L_2$?
-3. Como o AdamW restaura o decaimento homogêneo?
+2. O que acontece com a taxa efetiva de decaimento de um peso associado a uma palavra frequente versus uma palavra raríssima quando usamos regularização $L_2$ tradicional dentro do Adam?
 :::
 
 ::: {.callout-note icon=false}
 ### Julgue V ou F para cada afirmação:
 
-- ( ) No GD euclidiano clássico, adicionar $\frac{\lambda}{2}\|\mathbf{w}\|^2$ à perda equivale a contrair o peso por $(1 - \alpha\lambda)$ a cada passo.
-- ( ) No Adam com $L_2$ clássico, atributos com gradientes frequentes sofrem maior decaimento relativo de magnitude do que atributos com gradientes esparsos.
-- ( ) O AdamW subtrai o termo $\alpha \lambda \mathbf{w}_t$ fora da fração adaptativa de segunda ordem.
-- ( ) O sucesso do AdamW em modelos como Transformers deve-se à regularização homogênea de tokens raros e frequentes no vocabulário.
+- □ No Gradiente Descendente clássico, aplicar regularização $L_2$ na perda é identicamente equivalente a aplicar decaimento multiplicativo de pesos (*weight decay*).
+- □ No Adam com $L_2$ tradicional na perda, a taxa efetiva de decaimento de cada peso passa a ser inversamente proporcional à raiz do segundo momento ($\sqrt{\hat{v}_t} + \epsilon$).
+- □ O AdamW resolve essa patologia subtraindo $\alpha \lambda \mathbf{w}_t$ diretamente da atualização do peso, fora da fração adaptativa que divide por $\sqrt{\hat{\mathbf{v}}_t}$.
+- □ O AdamW altera o cálculo dos gradientes estocásticos $\mathbf{g}_t$ da perda da tarefa $\mathcal{L}(\mathbf{w})$, exigindo uma segunda passagem de backpropagation.
 :::
 :::
 
 ::: {.content-visible when-format="revealjs"}
-## Pausa 4: Adam com $L_2$ vs. AdamW
+## Pausa 4: A Cirurgia do AdamW
 
 ::: {.callout-tip}
-## Pergunta de Fixação
+## A Aberração da Penalidade Adaptativa
+Por que somar $\lambda \mathbf{w}$ à função de perda é inofensivo no GD, mas catastrófico no Adam?
+O que acontece com a taxa efetiva de decaimento de um peso associado a uma palavra frequente versus uma palavra raríssima em um modelo de linguagem?
+:::
 
-- Palavra frequente: $\sqrt{\hat{v}} = 10 \implies$ decaimento efetivo $\frac{\alpha\lambda}{10}$ (penalidade reduzida a 10%).
-- Palavra rara: $\sqrt{\hat{v}} = 0{,}1 \implies$ decaimento efetivo $\frac{\alpha\lambda}{0{,}1} = 10 \alpha\lambda$ (penalidade inflacionada em 1000%).
-- O AdamW aplica decaimento constante $\alpha \lambda \mathbf{w}_t$ a ambos!
+::: {.callout-tip}
+## Regularização e Weight Decay
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ No Gradiente Descendente clássico, aplicar regularização $L_2$ na perda é identicamente equivalente a aplicar decaimento multiplicativo de pesos (*weight decay*).
+- □ No Adam com $L_2$ tradicional na perda, a taxa efetiva de decaimento de cada peso passa a ser inversamente proporcional à raiz do segundo momento ($\sqrt{\hat{v}_t} + \epsilon$).
+- □ O AdamW resolve essa patologia subtraindo $\alpha \lambda \mathbf{w}_t$ diretamente da atualização do peso, fora da fração adaptativa que divide por $\sqrt{\hat{\mathbf{v}}_t}$.
+- □ O AdamW altera o cálculo dos gradientes estocásticos $\mathbf{g}_t$ da perda da tarefa $\mathcal{L}(\mathbf{w})$, exigindo uma segunda passagem de backpropagation.
+:::
+
+## Pausa 4: A Cirurgia do AdamW — Resposta
+
+::: {.callout-tip}
+## Regularização e Weight Decay — Resposta
+
+- ✔ **Verdadeiro.** No GD, $\mathbf{w}_{t+1} = \mathbf{w}_t - \alpha(\nabla\mathcal{L} + \lambda\mathbf{w}) = (1 - \alpha\lambda)\mathbf{w}_t - \alpha\nabla\mathcal{L}$ contrai todos os pesos uniformemente.
+- ✔ **Verdadeiro.** Como $\lambda w$ entra no gradiente, o decaimento é dividido por $\sqrt{\hat{v}_t} + \epsilon$, suprimindo a contração em pesos frequentes.
+- ✔ **Verdadeiro.** Desacoplar restaura a contração multiplicativa $(1 - \alpha\lambda)$ homogênea por época em todos os parâmetros.
+- ✗ **Falso.** O AdamW não altera o backpropagation nem adiciona custo: $\mathbf{g}_t$ continua sendo o gradiente usual da tarefa.
 :::
 
 ::: {.fragment}
+**Voltando à pergunta:** No Adam com $L_2$, a taxa efetiva de contração é $\frac{\alpha\lambda}{\sqrt{\hat{v}_i} + \epsilon}$. Para palavras frequentes ($\sqrt{\hat{v}} \gg 1$), a taxa é quase nula (sem regularização $\implies$ overfitting). Para palavras raras ($\sqrt{\hat{v}} \approx 0$), divide-se por $\epsilon = 10^{-8}$, implodindo o peso a zero! O AdamW corrige isso tornando a contração independente de $\hat{v}$.
+:::
+:::
 
-- [x] No GD clássico, $L_2$ na perda e decaimento multiplicativo de pesos são algebricamente indistinguíveis.
-- [ ] No Adam clássico, atributos frequentes sofrem maior decaimento. *(Falso: sofrem **menor** decaimento porque $\sqrt{\hat{v}}$ está no denominador!)*
-- [x] O AdamW desacopla o termo de decaimento da escala adaptativa $\sqrt{\hat{v}_t}$.
-- [x] O AdamW é essencial em LLMs para evitar regularização excessiva em parâmetros de ativação esparsa.
-:::
-:::
 
 # Fechamento
 

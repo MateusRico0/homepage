@@ -1,0 +1,901 @@
+import re
+
+content = r'''---
+title: "Aula 13: Precondicionamento Estruturado e Ortogonalização Matricial"
+subtitle: "Otimização e Álgebra Linear para Machine Learning"
+author: "Marcos M. Raimundo — Instituto de Computação, UNICAMP"
+date: "2026-10-30"
+lang: pt-BR
+format:
+  html:
+    include-after-body: ../../lesson-toc-accordion.html
+    output-file: notas.html
+    theme: [flatly, ../../../custom.scss, ../../lesson-theme.scss]
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    fig-width: 6
+    fig-height: 3.8
+  revealjs:
+    transition: slide
+    width: 1280
+    height: 800
+    margin: 0.02
+    fig-responsive: true
+    fig-format: "svg"
+    footer: "UNICAMP — Instituto de Computação"
+    chalkboard:
+      boardmarker-width: 3
+      chalk-width: 3
+    include-in-header: ../../bootstrap-icons-header.html
+    include-after-body: ../../logos-footer.html
+    title-slide-attributes:
+      data-background-image: "../../UNICAMP.png, ../../IC.png"
+      data-background-size: "140px, 140px"
+      data-background-position: "5% 8%, 95% 8%"
+    output-file: slides.html
+    slide-number: true
+    smaller: true
+    scrollable: true
+    theme: [simple, ../../lesson-theme.scss]
+    fig-width: 6
+    fig-height: 3.8
+jupyter: python3
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+[Slides](slides.html){.see-all .slides-link aria-label="Ver slides da aula" title="Ver slides da aula"}
+[Lista de aulas](../index.qmd){.see-all .lesson-list-link aria-label="Voltar à lista de aulas" title="Voltar à lista de aulas"}
+:::
+
+```{python}
+#| echo: false
+#| fig-align: center
+
+# =====================================================================
+# SIMULAÇÃO COMPARATIVA — OTIMIZAÇÃO MATRICIAL COM ANISOTROPIA
+# Comparação entre SGD, AdamW, Shampoo e Muon na recuperação de matriz
+# =====================================================================
+import numpy as np
+import matplotlib.pyplot as plt
+
+np.random.seed(42)
+
+m, n = 32, 32
+# Matriz alvo com condicionamento severo (valores singulares heterogêneos)
+U_true, _ = np.linalg.qr(np.random.randn(m, m))
+V_true, _ = np.linalg.qr(np.random.randn(n, n))
+# Singular values decaindo exponencialmente: kappa = 100
+s_true = np.logspace(0, -2, min(m, n))
+W_star = U_true[:, :min(m, n)] @ np.diag(s_true) @ V_true[:min(m, n), :]
+
+# Função de perda: f(W) = 1/2 || A W B - Y ||_F^2
+A = np.diag(np.linspace(10.0, 1.0, m))
+B = np.diag(np.linspace(5.0, 0.5, n))
+Y = A @ W_star @ B
+
+def compute_loss_grad(W):
+    R = A @ W @ B - Y
+    loss = 0.5 * np.sum(R**2)
+    grad = A.T @ R @ B.T
+    return loss, grad
+
+# Iteração de Newton-Schulz de ordem 3
+def newton_schulz(G, steps=5):
+    norm_G = np.linalg.norm(G, 'fro') + 1e-12
+    X = G / norm_G
+    for _ in range(steps):
+        A_mat = X.T @ X
+        X = 0.5 * X @ (3.0 * np.eye(n) - A_mat)
+    return X
+
+iters = 40
+loss_sgd, loss_adamw, loss_shampoo, loss_muon = [], [], [], []
+
+# 1. SGD
+W = np.zeros((m, n))
+lr_sgd = 0.0008
+for _ in range(iters):
+    l, g = compute_loss_grad(W)
+    loss_sgd.append(l)
+    W -= lr_sgd * g
+
+# 2. AdamW
+W = np.zeros((m, n))
+m_w = np.zeros((m, n))
+v_w = np.zeros((m, n))
+lr_adam = 0.04
+beta1, beta2, eps = 0.9, 0.99, 1e-8
+for t in range(1, iters + 1):
+    l, g = compute_loss_grad(W)
+    loss_adamw.append(l)
+    m_w = beta1 * m_w + (1 - beta1) * g
+    v_w = beta2 * v_w + (1 - beta2) * (g**2)
+    m_hat = m_w / (1 - beta1**t)
+    v_hat = v_w / (1 - beta2**t)
+    W -= lr_adam * (m_hat / (np.sqrt(v_hat) + eps))
+
+# 3. Shampoo (simplificado com atualização a cada passo)
+W = np.zeros((m, n))
+L_cov = np.eye(m) * 1e-4
+R_cov = np.eye(n) * 1e-4
+lr_shampoo = 0.05
+for _ in range(iters):
+    l, g = compute_loss_grad(W)
+    loss_shampoo.append(l)
+    L_cov = 0.9 * L_cov + 0.1 * (g @ g.T)
+    R_cov = 0.9 * R_cov + 0.1 * (g.T @ g)
+    
+    # Raízes quartas inversas
+    u_l, s_l, _ = np.linalg.svd(L_cov)
+    L_inv4 = u_l @ np.diag((s_l + 1e-6)**(-0.25)) @ u_l.T
+    u_r, s_r, _ = np.linalg.svd(R_cov)
+    R_inv4 = u_r @ np.diag((s_r + 1e-6)**(-0.25)) @ u_r.T
+    
+    W -= lr_shampoo * (L_inv4 @ g @ R_inv4)
+
+# 4. Muon (Nesterov momentum + Newton-Schulz polar orthogonalization)
+W = np.zeros((m, n))
+M_muon = np.zeros((m, n))
+lr_muon = 0.03
+momentum = 0.95
+for _ in range(iters):
+    l, g = compute_loss_grad(W)
+    loss_muon.append(l)
+    M_muon = momentum * M_muon + g
+    # Lookahead momentum update
+    G_ahead = g + momentum * M_muon
+    U_ortho = newton_schulz(G_ahead, steps=5)
+    # Escala dimensional compatível com Frobenius
+    scale = max(1.0, np.sqrt(m / n))
+    W -= lr_muon * scale * U_ortho
+
+plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+fig, ax = plt.subplots(figsize=(6.5, 3.6), dpi=130)
+
+ax.semilogy(loss_sgd, label='SGD (sem precondicionador)', color='#e03c31', linewidth=1.8, linestyle='--')
+ax.semilogy(loss_adamw, label='AdamW (diagonal escalar)', color='#ff5e00', linewidth=2.0)
+ax.semilogy(loss_shampoo, label='Shampoo (Kronecker $L^{-1/4} G R^{-1/4}$)', color='#0085ca', linewidth=2.2)
+ax.semilogy(loss_muon, label='Muon (Ortogonalização Newton-Schulz)', color='#1b9e77', linewidth=2.4)
+
+ax.set_title('Convergência em Otimização Matricial com Acoplamento Cruzado', fontsize=11, fontweight='bold', pad=10)
+ax.set_xlabel('Iteração', fontsize=9)
+ax.set_ylabel('Perda $\\mathcal{L}(W)$ (escala log)', fontsize=9)
+ax.grid(True, which='both', linestyle=':', alpha=0.6)
+ax.legend(frameon=True, facecolor='white', framealpha=0.9, fontsize=8.5, loc='upper right')
+
+plt.tight_layout()
+plt.show()
+```
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+# Introdução: Além da Diagonalização Escalar
+
+Nas Aulas 11 e 12, consolidamos a teoria dos métodos adaptativos e acelerados. Vimos que o **AdamW** unifica o primeiro momento direcional com o segundo momento adaptativo e um decaimento de pesos estritamente desacoplado.
+
+No entanto, examine atentamente como o AdamW lida com uma camada linear de uma rede neural moderna:
+$$W \in \mathbb{R}^{m \times n}$$
+Para aplicar o AdamW, o algoritmo transforma a matriz em um vetor unidimensional achatado:
+$$\mathbf{w} = \text{vec}(W) \in \mathbb{R}^{mn}$$
+e calcula um escalar de velocidade $m_{ij}$ e um escalar de curvatura $v_{ij}$ para cada entrada individual:
+$$W_{t+1, ij} = W_{t, ij} - \frac{\alpha}{\sqrt{v_{t, ij}} + \epsilon} m_{t, ij}$$
+
+Esta abordagem trata cada parâmetro $W_{ij}$ como se existisse em isolamento, ignorando que os pesos de uma camada atuam em conjunto como um **operador linear**. Em modelos de linguagem (Transformers), onde matrizes de atenção e projeções lineares possuem dimensões como $4.096 \times 4.096$, a correlação cruzada entre as linhas e colunas é imensa.
+
+Nesta aula, investigaremos como superar a barreira da diagonalização escalar através de:
+
+1. **Precondicionamento Estruturado de Kronecker (Shampoo):** Fatorar o Hessiano em covariâncias esquerdas e direitas;
+2. **Decomposição Polar e Projeção Ortogonal:** Compreender por que projetar atualizações no grupo ortogonal $\mathcal{O}(n)$ controla a norma espectral;
+3. **Iterações de Newton-Schulz:** Calcular a decomposição polar em tempo recorde utilizando apenas multiplicações matriciais puras (GEMM);
+4. **Otimizador Muon:** A arquitetura moderna que treina Transformers com velocidade sem precedentes.
+:::
+
+::: {.content-visible when-format="revealjs"}
+# Introdução: A Fronteira Matricial
+
+## A Ilusão do Vetor Achatado
+
+::: {.columns}
+::: {.column width="50%"}
+**Como o AdamW enxerga a rede:**
+
+$$W \in \mathbb{R}^{m \times n} \implies \mathbf{w} = \text{vec}(W) \in \mathbb{R}^{mn}$$
+
+- Trata cada peso $W_{ij}$ como um escalar independente.
+- Precondicionamento puramente **diagonal**:
+  $$W_{ij} \leftarrow W_{ij} - \frac{\alpha}{\sqrt{v_{ij}}+\epsilon} m_{ij}$$
+- Descarta 100% da correlação entre linhas e colunas!
+:::
+
+::: {.column width="50%"}
+**Como a matemática enxerga a rede:**
+
+$$W: \mathbb{R}^n \to \mathbb{R}^m \quad (\mathbf{y} = W \mathbf{x})$$
+
+- $W$ é um **operador linear estruturado**.
+- Linhas compartilham as ativações de entrada $\mathbf{x}$.
+- Colunas compartilham os erros de saída $\boldsymbol{\delta}$.
+- O Hessiano verdadeiro $H \in \mathbb{R}^{(mn) \times (mn)}$ possui blocos densos acoplados!
+:::
+:::
+
+::: {.fragment .callout-warning}
+## O Dilema da Complexidade
+Inverter o Hessiano completo de uma camada $4096 \times 4096$ exigiria **1 Petabyte de memória** e $\mathcal{O}((mn)^3) \approx 10^{21}$ FLOPs. Como capturar curvatura matricial sem explodir o custo computacional?
+:::
+
+## Pausa 1: A Limitação da Diagonalização e o Custo do Hessiano Completo
+
+::: {.callout-tip}
+## O Dilema do Hessiano Matricial
+Considere uma camada de atenção linear $W \in \mathbb{R}^{4096 \times 4096}$ (16,8 milhões de parâmetros).
+Qual é o tamanho e a memória necessária para armazenar a matriz Hessiana completa em FP32? Por que a inversão de Newton clássica é impossível e qual simplificação radical o AdamW assume?
+:::
+
+::: {.callout-tip}
+## Diagnóstico da Diagonalização
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ O precondicionamento diagonal do AdamW assume implicitamente que a matriz Hessiana de perda é estritamente diagonal.
+- □ A inversão da matriz Hessiana completa de uma camada densa $W \in \mathbb{R}^{m \times n}$ tem complexidade temporal $\mathcal{O}(m^3 + n^3)$.
+- □ Em um modelo de linguagem, os pesos de uma mesma linha de $W$ operam sobre ativações de entrada correlacionadas, gerando covariâncias cruzadas não-nulas.
+- □ Achatar uma matriz de pesos $W$ em um vetor unidimensional preserva todas as propriedades de simetria e posto do operador linear original.
+:::
+
+## Pausa 1: A Limitação da Diagonalização e o Custo do Hessiano Completo — Resposta
+
+::: {.callout-tip}
+## Diagnóstico da Diagonalização — Resposta
+
+- ✔ **Verdadeiro.** Ao dividir por $\sqrt{v_{ij}}$, o AdamW descarta qualquer elemento fora da diagonal principal do operador de segunda ordem.
+- ✗ **Falso.** O vetor tem dimensão $mn$; o Hessiano tem dimensão $(mn) \times (mn)$ e sua inversão custa $\mathcal{O}((mn)^3) = \mathcal{O}(m^3 n^3)$.
+- ✔ **Verdadeiro.** As derivadas parciais compartilham o mesmo sinal de erro $\delta_i$ e os sinais de entrada $x_j$, gerando forte correlação espacial.
+- ✗ **Falso.** A estrutura de posto, produtos internos de linha e propriedades de operador linear são eliminadas no vetor achatado.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** O Hessiano possui dimensão $(16{,}8 \times 10^6) \times (16{,}8 \times 10^6) \approx 2{,}8 \times 10^{14}$ entradas, exigindo mais de **1.120 Terabytes** de VRAM e $\approx 10^{21}$ FLOPs de inversão! O AdamW armazena apenas a diagonal ($\approx 67 \text{ MB}$), mas perde $99{,}9999\%$ da geometria de curvatura cruzada.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 1: A Limitação da Diagonalização e o Custo do Hessiano Completo
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 1
+Considere uma camada de atenção linear $W \in \mathbb{R}^{4096 \times 4096}$ (16,8 milhões de parâmetros).
+1. Qual é o tamanho e a memória necessária para armazenar a matriz Hessiana completa em FP32?
+2. Por que a inversão de Newton clássica é impossível e qual simplificação radical o AdamW assume?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- □ O precondicionamento diagonal do AdamW assume implicitamente que a matriz Hessiana de perda é estritamente diagonal.
+- □ A inversão da matriz Hessiana completa de uma camada densa $W \in \mathbb{R}^{m \times n}$ tem complexidade temporal $\mathcal{O}(m^3 + n^3)$.
+- □ Em um modelo de linguagem, os pesos de uma mesma linha de $W$ operam sobre ativações de entrada correlacionadas, gerando covariâncias cruzadas não-nulas.
+- □ Achatar uma matriz de pesos $W$ em um vetor unidimensional preserva todas as propriedades de simetria e posto do operador linear original.
+:::
+:::
+
+# Bloco 1: Precondicionamento Estruturado de Kronecker e o Algoritmo Shampoo
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Fatoração de Kronecker da Curvatura
+
+Para resgatar a correlação entre neurônios sem incorrer na explosão de $\mathcal{O}((mn)^3)$, pesquisadores do Google Brain e Princeton propuseram em 2018 o algoritmo **Shampoo** (Gupta, Shamir & Srebro, 2018; ampliado para LLMs por Anil et al., 2020).
+
+Considere a perda $\mathcal{L}(W)$ de uma camada densa cuja passagem direta calcula:
+$$\mathbf{y} = W \mathbf{x}$$
+O gradiente da perda em relação a $W$ é dado pelo produto diádico entre o vetor de sensibilidade pré-sináptica da saída $\boldsymbol{\delta} \in \mathbb{R}^m$ e a ativação de entrada $\mathbf{x} \in \mathbb{R}^n$ (como deduzido na Aula 9):
+$$G = \nabla_W \mathcal{L} = \boldsymbol{\delta} \mathbf{x}^T \in \mathbb{R}^{m \times n}$$
+
+A matriz Hessiana completa mede a covariância de $\text{vec}(G) = \mathbf{x} \otimes \boldsymbol{\delta}$. A hipótese estrutural do Shampoo é aproximar a expectativa conjunta pelo produto de Kronecker das covariâncias marginais:
+$$\mathbb{E}\left[ \text{vec}(G)\text{vec}(G)^T \right] = \mathbb{E}\left[ (\mathbf{x} \mathbf{x}^T) \otimes (\boldsymbol{\delta} \boldsymbol{\delta}^T) \right] \approx \underbrace{\mathbb{E}[\boldsymbol{\delta} \boldsymbol{\delta}^T]}_{L} \otimes \underbrace{\mathbb{E}[\mathbf{x} \mathbf{x}^T]}_{R}$$
+
+onde definimos:
+
+1. **Matriz de Covariância Esquerda ($L \in \mathbb{R}^{m \times m}$):** Acumula as correlações entre as linhas do gradiente (espaço das ativações de saída):
+   $$L_t = \beta L_{t-1} + (1 - \beta) G_t G_t^T$$
+2. **Matriz de Covariância Direita ($R \in \mathbb{R}^{n \times n}$):** Acumula as correlações entre as colunas do gradiente (espaço das ativações de entrada):
+   $$R_t = \beta R_{t-1} + (1 - \beta) G_t^T G_t$$
+
+::: {.fig-resize style="width: 80%; margin: 1.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{cinza}{RGB}{93,109,126}
+
+\begin{tikzpicture}[>=latex, font=\small, thick]
+  % Gradiente Central G
+  \node[draw=azul, fill=azul!10, rounded corners=6pt, inner sep=8pt, align=center, line width=1.3pt] 
+    (G) at (0, 0) {\textbf{Gradiente Matricial $G_t \in \mathbb{R}^{m \times n}$}\\\footnotesize($m$ linhas $\times$ $n$ colunas)};
+
+  % Covariância Esquerda L
+  \node[draw=laranja, fill=laranja!10, rounded corners=6pt, inner sep=6pt, align=center, text width=4.0cm] 
+    (L) at (-4.2, 0) {\textbf{Covariância Esquerda $L$}\\\footnotesize$L = \mathbb{E}[G G^T] \in \mathbb{R}^{m \times m}$\\\scriptsize Correlações entre neurônios de saída};
+
+  % Covariância Direita R
+  \node[draw=verde, fill=verde!10, rounded corners=6pt, inner sep=6pt, align=center, text width=4.0cm] 
+    (R) at (4.2, 0) {\textbf{Covariância Direita $R$}\\\footnotesize$R = \mathbb{E}[G^T G] \in \mathbb{R}^{n \times n}$\\\scriptsize Correlações entre canais de entrada};
+
+  % Inversas com raiz quarta
+  \node[draw=laranja!80!black, fill=laranja!20, rounded corners=5pt, inner sep=5pt, align=center] 
+    (LINV) at (-4.2, -2.2) {\textbf{Precondicionador Linhas}\\\large$L^{-1/4}$};
+
+  \node[draw=verde!80!black, fill=verde!20, rounded corners=5pt, inner sep=5pt, align=center] 
+    (RINV) at (4.2, -2.2) {\textbf{Precondicionador Colunas}\\\large$R^{-1/4}$};
+
+  % Atualização Final
+  \node[draw=azul!80!black, fill=azul!20, rounded corners=6pt, inner sep=8pt, align=center, line width=1.4pt] 
+    (OUT) at (0, -2.2) {\textbf{Atualização Estruturada do Shampoo}\\\Large$\Delta W = -\alpha L^{-1/4} G R^{-1/4}$};
+
+  % Conexões
+  \draw[->, line width=1.4pt, laranja] (G.west) -- (L.east);
+  \draw[->, line width=1.4pt, verde] (G.east) -- (R.west);
+  \draw[->, line width=1.4pt, laranja] (L.south) -- (LINV.north);
+  \draw[->, line width=1.4pt, verde] (R.south) -- (RINV.north);
+  \draw[->, line width=1.4pt, laranja] (LINV.east) -- (OUT.west);
+  \draw[->, line width=1.4pt, verde] (RINV.west) -- (OUT.east);
+\end{tikzpicture}
+```
+:::
+
+### A Regra de Atualização do Shampoo e a Raiz Quarta
+
+Na otimização de segunda ordem convencional (Aula 11), a direção de Newton requer a raiz quadrada inversa da matriz de covariância: $\Delta \mathbf{w} \propto H^{-1/2} \mathbf{g}$.
+
+Sob a aproximação de Kronecker $H \approx L \otimes R$, a inversa da raiz quadrada distribui-se como:
+$$H^{-1/2} \approx (L \otimes R)^{-1/2} = L^{-1/2} \otimes R^{-1/2}$$
+
+Utilizando a propriedade clássica da álgebra linear para vetorização de matrizes $\text{vec}(A X B) = (B^T \otimes A)\text{vec}(X)$, aplicar esse operador de segunda ordem simetricamente à esquerda e à direita da matriz de gradiente $G$ requer dividir a potência por 2 em cada lado:
+$$(L^{-1/2} \otimes R^{-1/2})\text{vec}(G) = \text{vec}\left( L^{-1/4} G R^{-1/4} \right)$$
+
+Chegamos assim à célebre fórmula do Shampoo:
+$$W_{t+1} = W_t - \alpha L_t^{-1/4} G_t R_t^{-1/4}$$
+
+**A Economia Computacional Revolucionária:**
+Para $m = n = 4.096$:
+
+- Inversão clássica do Hessiano completo: $\mathcal{O}((mn)^3) \approx 4{,}7 \times 10^{21}$ FLOPs;
+- Inversão do Shampoo: $\mathcal{O}(m^3 + n^3) = 2 \times (4.096)^3 \approx 1{,}37 \times 10^{11}$ FLOPs.
+- **Redução de mais de 10 bilhões de vezes no custo computacional**, viabilizando o precondicionamento estruturado em grande escala!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Shampoo: Precondicionamento de Kronecker
+
+::: {.columns}
+::: {.column width="50%"}
+**Covariâncias Marginais de $G \in \mathbb{R}^{m \times n}$:**
+
+- **Linhas (saídas):** $L = \mathbb{E}[G G^T] \in \mathbb{R}^{m \times m}$
+- **Colunas (entradas):** $R = \mathbb{E}[G^T G] \in \mathbb{R}^{n \times n}$
+- **Aproximação de Kronecker:**
+  $$H \approx L \otimes R$$
+
+**Por que raízes quartas?**
+$$(L \otimes R)^{-1/2}\text{vec}(G) = \text{vec}\left( L^{-1/4} G R^{-1/4} \right)$$
+:::
+
+::: {.column width="50%"}
+**Atualização do Shampoo:**
+
+$$W_{t+1} = W_t - \alpha L_t^{-1/4} G_t R_t^{-1/4}$$
+
+- **Memória:** Cai de $(mn)^2$ para $m^2 + n^2$ ($\approx 134 \text{ MB}$).
+- **FLOPs:** Cai de $(mn)^3$ para $m^3 + n^3$ ($10^{10}\times$ mais rápido!).
+- **Amortização:** As raízes quartas são recalculadas a cada 50 ou 100 passos.
+:::
+:::
+
+::: {.fragment .callout-tip}
+## O Salto Estrutural do Shampoo
+O Shampoo captura a curvatura cruzada que o AdamW ignora, preservando a semântica da transformação linear sem explodir a memória da GPU.
+:::
+
+## Pausa 2: Precondicionamento de Kronecker (Shampoo)
+
+::: {.callout-tip}
+## O Precondicionamento Bilinear
+Por que a atualização do Shampoo aplica $L^{-1/4}$ à esquerda e $R^{-1/4}$ à direita em vez de $L^{-1/2}$ e $R^{-1/2}$?
+Como o Shampoo lida com o custo de calcular autovalores e raízes quartas para não desacelerar o treinamento a cada iteração?
+:::
+
+::: {.callout-tip}
+## Diagnóstico de Kronecker
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ A aproximação de Kronecker assume que o Hessiano completo pode ser fatorado como $H \approx L \otimes R$.
+- □ O cálculo de $L^{-1/4} G R^{-1/4}$ exige calcular a raiz quarta dos autovalores das matrizes de covariância esquerda e direita.
+- □ O Shampoo requer recalcular as matrizes de covariância e suas raízes quartas a cada mini-batch para garantir estabilidade.
+- □ A matriz $L$ mede a covariância das ativações de saída, enquanto $R$ mede a covariância das ativações de entrada.
+:::
+
+## Pausa 2: Precondicionamento de Kronecker (Shampoo) — Resposta
+
+::: {.callout-tip}
+## Diagnóstico de Kronecker — Resposta
+
+- ✔ **Verdadeiro.** Essa fatoração desacopla as correlações entre canais de entrada daquelas entre neurônios de saída.
+- ✔ **Verdadeiro.** Para matriz simétrica $L = V \Lambda V^T$, calcula-se $L^{-1/4} = V \Lambda^{-1/4} V^T$.
+- ✗ **Falso.** Recalcular a cada passo seria lento; as raízes quartas são congeladas e atualizadas apenas a cada 50–100 iterações.
+- ✔ **Verdadeiro.** Como $G = \boldsymbol{\delta} \mathbf{x}^T$, $G G^T \propto \boldsymbol{\delta}\boldsymbol{\delta}^T$ (saídas) e $G^T G \propto \mathbf{x}\mathbf{x}^T$ (entradas).
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** A raiz quadrada total $(L \otimes R)^{-1/2}$ reparte-se simetricamente em potências de $-1/4$ em cada lado pelo produto bilinear $\text{vec}(L^{-1/4} G R^{-1/4})$. Para evitar gargalos, as raízes quartas são amortizadas a cada $\approx 100$ passos, consumindo menos de 1% do tempo total de execução.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 2: Precondicionamento Estruturado via Fatoração de Kronecker (Shampoo)
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 2
+1. Por que a atualização do Shampoo aplica $L^{-1/4}$ à esquerda e $R^{-1/4}$ à direita em vez de $L^{-1/2}$ e $R^{-1/2}$?
+2. Como o Shampoo lida com o custo de calcular autovalores e raízes quartas para não desacelerar o treinamento a cada iteração?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- □ A aproximação de Kronecker assume que o Hessiano completo pode ser fatorado como $H \approx L \otimes R$.
+- □ O cálculo de $L^{-1/4} G R^{-1/4}$ exige calcular a raiz quarta dos autovalores das matrizes de covariância esquerda e direita.
+- □ O Shampoo requer recalcular as matrizes de covariância e suas raízes quartas a cada mini-batch para garantir estabilidade.
+- □ A matriz $L$ mede a covariância das ativações de saída, enquanto $R$ mede a covariância das ativações de entrada.
+:::
+:::
+
+# Bloco 2: Ortogonalização Matricial e a Decomposição Polar
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Revisitando a Aula 5: A Decomposição Polar de Operadores
+
+Apesar do salto de eficiência do Shampoo em relação ao Newton completo, calcular raízes quartas de matrizes de dimensão $4.096 \times 4.096$ via decomposição espectral ainda exige rotinas seriais de autovalores com custo relativamente elevado para iterações ultrarrápidas de modelos de linguagem.
+
+Isso nos leva a uma questão geométrica mais fundamental: **qual é o papel ideal de uma matriz de atualização de pesos $\Delta W$?**
+
+Na **Aula 5**, provamos o **Teorema da Decomposição Polar**: qualquer matriz retangular $G \in \mathbb{R}^{m \times n}$ ($m \ge n$) pode ser fatorada de maneira única como o produto de uma matriz com colunas ortonormais $U$ e uma matriz simétrica semidefinida positiva $P$:
+$$G = U P, \quad U^T U = I_n, \quad P = (G^T G)^{1/2} \succeq 0$$
+
+onde a matriz ortogonal $U$ é expressa analiticamente por:
+$$U = G (G^T G)^{-1/2}$$
+
+### O Problema de Procrustes Ortogonal
+
+Qual é o significado geométrico do fator polar $U$? Considere o célebre **Problema de Procrustes Ortogonal**: dada uma matriz de gradientes arbitrária $G$, desejamos encontrar a matriz ortogonal $Q \in \mathcal{O}(m, n)$ que mais se aproxima de $G$ na norma de Frobenius:
+$$\min_{Q \in \mathbb{R}^{m \times n}, \, Q^T Q = I_n} \|Q - G\|_F^2$$
+
+Expandindo a norma de Frobenius $\|A\|_F^2 = \operatorname{tr}(A^T A)$:
+$$\|Q - G\|_F^2 = \operatorname{tr}(Q^T Q) - 2\operatorname{tr}(Q^T G) + \operatorname{tr}(G^T G) = n - 2\operatorname{tr}(Q^T G) + \|G\|_F^2$$
+
+Minimizar a distância quadrática equivale estritamente a maximizar o produto interno matricial $\operatorname{tr}(Q^T G)$. Pela Decomposição em Valores Singulares de $G = V_1 \Sigma V_2^T$:
+$$\operatorname{tr}(Q^T G) = \operatorname{tr}(Q^T V_1 \Sigma V_2^T) = \operatorname{tr}(V_2^T Q^T V_1 \Sigma)$$
+
+Como $Z = V_2^T Q^T V_1$ é uma matriz ortogonal, suas entradas diagonais satisfazem $|Z_{ii}| \le 1$. Portanto:
+$$\operatorname{tr}(Z \Sigma) = \sum_{i=1}^n Z_{ii} \sigma_i \le \sum_{i=1}^n \sigma_i$$
+A igualdade ocorre se e somente se $Z = I_n \implies Q = V_1 V_2^T = U$.
+
+**Teorema Fundamental de Procrustes:** O fator polar $U = G(G^T G)^{-1/2}$ é a **projeção ortogonal exata da matriz de gradiente $G$ sobre a variedade das matrizes ortogonais**.
+
+### Por que Atualizações Ortogonais Estabilizam Redes Profundas?
+
+Em redes profundas e Transformers, os gradientes sofrem de uma patologia espectral severa: alguns valores singulares de $G$ podem ser de ordem $10^2$, enquanto outros são de ordem $10^{-3}$. Atualizar $W$ diretamente com $G$ superaquece certas direções espaciais e ignora outras.
+
+Ao substituir o gradiente $G$ pelo seu fator polar ortogonal $U$:
+$$\boldsymbol{\sigma}(U) = [1, 1, \dots, 1]^T \implies \|U\|_2 = \sigma_{\max}(U) = 1$$
+Todos os valores singulares da atualização tornam-se rigorosamente unitários! O passo distribui energia de forma homogênea em todas as dimensões do espaço vetorial, impedindo o crescimento descontrolado da norma espectral da camada e eliminando instabilidades numéricas.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Decomposição Polar e Procrustes
+
+::: {.columns}
+::: {.column width="50%"}
+**A Decomposição Polar (Aula 5):**
+
+$$G = U P \quad (m \ge n)$$
+
+- $U \in \mathbb{R}^{m \times n}$: Matriz ortogonal ($U^T U = I$).
+- $P = (G^T G)^{1/2} \succeq 0$: Deformação/Escala.
+- **Forma Analítica:**
+  $$U = G(G^T G)^{-1/2}$$
+
+**Problema de Procrustes:**
+$$U = \arg\min_{Q^T Q = I} \|Q - G\|_F$$
+$U$ é a matriz ortogonal **mais próxima** de $G$!
+:::
+
+::: {.column width="50%"}
+**Propriedades do Fator Polar $U$:**
+
+- **Valores singulares equalizados:**
+  $$\sigma_1(U) = \sigma_2(U) = \dots = \sigma_n(U) = 1$$
+- **Norma espectral controlada:**
+  $$\|U\|_2 = 1$$
+- **Prevenção de Colapso Espectral:**
+  Nenhuma direção é superaquecida; nenhuma direção é esquecida!
+:::
+:::
+
+::: {.fragment .callout-note}
+## O Gargalo do Hardware
+Calcular $U = V_1 V_2^T$ via SVD é extremamente custoso em GPUs modernas, pois algoritmos de SVD são seriais e mal paralelizados. Como contornar o SVD?
+:::
+
+## Pausa 3: Decomposição Polar e Projeção no Grupo Ortogonal
+
+::: {.callout-tip}
+## A Geometria de Procrustes
+Se uma matriz de gradientes $G$ possui valores singulares heterogêneos $\boldsymbol{\sigma} = [100{,}0; \, 10{,}0; \, 0{,}1]$, quais serão os valores singulares da matriz projetada $U = G(G^T G)^{-1/2}$?
+Como essa projeção neutraliza a explosão de norma espectral ao longo de dezenas de camadas residuais de Transformers?
+:::
+
+::: {.callout-tip}
+## Diagnóstico Polar
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ A Decomposição Polar de uma matriz retangular $G \in \mathbb{R}^{m \times n}$ com $m \ge n$ é dada por $G = U P$, onde $U^T U = I$ e $P \succeq 0$ é semidefinida positiva.
+- □ O fator ortogonal $U$ é formalmente idêntico a $U = G(G^T G)^{-1/2}$.
+- □ A projeção de um gradiente no grupo ortogonal força todos os valores singulares da atualização a serem estritamente iguais a $1$.
+- □ O cálculo exato do fator polar via decomposição em valores singulares (SVD) é altamente otimizado para execução massivamente paralela em Tensor Cores de GPUs.
+:::
+
+## Pausa 3: Decomposição Polar e Projeção no Grupo Ortogonal — Resposta
+
+::: {.callout-tip}
+## Diagnóstico Polar — Resposta
+
+- ✔ **Verdadeiro.** Teorema clássico da Álgebra Linear estabelecido na Aula 5.
+- ✔ **Verdadeiro.** Como $G = U P \implies U = G P^{-1} = G(G^T G)^{-1/2}$.
+- ✔ **Verdadeiro.** Como $U = V_1 V_2^T$, a multiplicação de bases ortonormais fixa todos os $\sigma_i = 1$.
+- ✗ **Falso.** SVD utiliza iterações de bidiagonalização seriais, incapazes de saturar a capacidade paralela de Tensor Cores.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** A projeção polar fixa todos os valores singulares em $\sigma_i(U) = 1{,}0$, de modo que $\|U\|_2 = 1$. Em um Transformer profundo, a perturbação máxima em qualquer sinal de ativação é limitada por $\|\Delta W \mathbf{x}\| \le \alpha \|\mathbf{x}\|$, eliminando o sobreaquecimento de direções dominantes sem necessitar de clipping manual.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 3: Decomposição Polar e Projeção no Grupo Ortogonal
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 3
+Considere uma matriz de gradiente com valores singulares heterogêneos $\boldsymbol{\sigma} = [100{,}0; \, 10{,}0; \, 0{,}1]$.
+1. Pelo Teorema de Procrustes, quais serão os valores singulares da matriz projetada $U = G(G^T G)^{-1/2}$?
+2. Como essa projeção impede a explosão ou colapso da norma espectral ao longo de blocos residuais profundos?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- □ A Decomposição Polar de uma matriz retangular $G \in \mathbb{R}^{m \times n}$ com $m \ge n$ é dada por $G = U P$, onde $U^T U = I$ e $P \succeq 0$ é semidefinida positiva.
+- □ O fator ortogonal $U$ é formalmente idêntico a $U = G(G^T G)^{-1/2}$.
+- □ A projeção de um gradiente no grupo ortogonal força todos os valores singulares da atualização a serem estritamente iguais a $1$.
+- □ O cálculo exato do fator polar via decomposição em valores singulares (SVD) é altamente otimizado para execução massivamente paralela em Tensor Cores de GPUs.
+:::
+:::
+
+# Bloco 3: Computação Hardware-Friendly — As Iterações de Newton-Schulz
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Ortogonalização Puramente por Multiplicações Matriciais
+
+Vimos que projetar o gradiente na variedade ortogonal resolve a anisotropia espectral. Porém, rodar uma SVD a cada passo em dezenas de matrizes $4.096 \times 4.096$ paralisaria o treinamento de qualquer modelo de linguagem. As Tensor Cores de GPUs modernas foram arquitetadas para fazer uma única coisa com eficiência extrema: **multiplicação densa de matrizes (GEMM — *General Matrix Multiply*)**.
+
+Como calcular $U = G(G^T G)^{-1/2}$ sem autovalores, sem inversões e sem divisões escalares, utilizando exclusivamente produtos matriciais?
+
+A resposta reside na **Iteração de Newton-Schulz**, uma extensão matricial do método de Newton-Raphson para inversão de operadores.
+
+### A Recorrência de Newton-Schulz de 3ª Ordem
+
+Seja $X_0$ uma aproximação inicial obtida por normalização da matriz de gradiente:
+$$X_0 = \frac{G}{\|G\|_F}$$
+A iteração de Newton-Schulz de terceira ordem atualiza a matriz através da recorrência:
+$$X_{k+1} = \frac{1}{2} X_k \left( 3 I_n - X_k^T X_k \right)$$
+
+Observe a estrutura elegante dessa equação:
+1. $A = X_k^T X_k \in \mathbb{R}^{n \times n}$ (um produto matricial GEMM);
+2. $B = 3 I_n - A$ (uma subtração trivial de diagonal);
+3. $X_{k+1} = \frac{1}{2} X_k B$ (outro produto matricial GEMM).
+
+**Zero SVD, zero cálculo de autovalores, zero inversão!** A GPU executa apenas duas multiplicações matriciais densas por passo de refinamento.
+
+### Análise Espectral da Convergência Cúbica
+
+Para provar por que essa iteração projeta a matriz no grupo ortogonal, façamos a decomposição em valores singulares de $X_k = V_1 \Sigma_k V_2^T$:
+$$X_k^T X_k = V_2 \Sigma_k^2 V_2^T \implies 3I - X_k^T X_k = V_2 (3I - \Sigma_k^2) V_2^T$$
+Multiplicando por $X_k$:
+$$X_{k+1} = \frac{1}{2} (V_1 \Sigma_k V_2^T) [V_2 (3I - \Sigma_k^2) V_2^T] = V_1 \left[ \frac{1}{2} \Sigma_k (3I - \Sigma_k^2) \right] V_2^T$$
+
+As bases singulares $V_1$ e $V_2$ permanecem **completamente congeladas**! Cada valor singular $\sigma$ evolui de forma desacoplada através da função polinomial escalar:
+$$\sigma_{k+1} = f(\sigma_k) = \frac{1}{2} \sigma_k (3 - \sigma_k^2)$$
+
+Analisando a função $f(\sigma)$:
+- Pontos fixos: $\sigma = \frac{1}{2}\sigma(3 - \sigma^2) \implies \sigma^3 - \sigma = 0 \implies \sigma \in \{0, 1\}$.
+- Derivada no ponto fixo $\sigma = 1$:
+  $$f'(\sigma) = \frac{3}{2} - \frac{3}{2}\sigma^2 \implies f'(1) = 0$$
+- Análise do erro $e_k = 1 - \sigma_k$:
+  $$e_{k+1} = 1 - \sigma_{k+1} \approx \frac{3}{2} e_k^2$$
+  A cada iteração, o erro é elevado ao quadrado!
+
+Se $\sigma_0 \in (0, \sqrt{3})$, o valor singular converge a velocidade estonteante para $1{,}0$. Como $\|G\|_F \ge \sigma_{\max}(G)$, normalizar por $\|G\|_F$ assegura que $\sigma_0 \le 1 < \sqrt{3}$, garantindo convergência incondicional para todas as direções singulares.
+
+Na prática de modelos de linguagem, **apenas 5 ou 6 iterações de Newton-Schulz** são suficientes para transformar uma matriz com condicionamento severo em uma matriz ortogonal perfeita com erro inferior a $10^{-5}$!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Iterações de Newton-Schulz
+
+::: {.columns}
+::: {.column width="50%"}
+**A Recorrência Cúbica:**
+
+Normalização inicial:
+$$X_0 = \frac{G}{\|G\|_F}$$
+Atualização (somente multiplicações GEMM!):
+$$X_{k+1} = \frac{1}{2} X_k \left( 3 I - X_k^T X_k \right)$$
+
+- 1ª operação: $A = X_k^T X_k$
+- 2ª operação: $X_{k+1} = \frac{1}{2} X_k (3I - A)$
+- **100% executado em Tensor Cores!**
+:::
+
+::: {.column width="50%"}
+**Dinâmica dos Valores Singulares:**
+
+$$\sigma_{k+1} = \frac{1}{2}\sigma_k (3 - \sigma_k^2)$$
+
+- Ponto fixo atrator: $\sigma^\star = 1$.
+- Derivada nula no ponto ótimo: $f'(1) = 0$.
+- **Convergência acelerada:**
+  - $k=0$: $\sigma_0 = 0{,}50$
+  - $k=1$: $\sigma_1 = 0{,}69$
+  - $k=2$: $\sigma_2 = 0{,}87$
+  - $k=3$: $\sigma_3 = 0{,}98$
+  - $k=5$: $\sigma_5 = \mathbf{0{,}999999}$!
+:::
+:::
+
+::: {.fragment .callout-tip}
+## A Máxima Hardware-Friendly
+Newton-Schulz converte um problema algébrico abstrato (projeção polar) em computação pura de alto rendimento para GPUs, viabilizando ortogonalização a cada mini-batch.
+:::
+:::
+
+# Bloco 4: A Arquitetura do Otimizador Muon
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Síntese do Muon: Momentum Orthogonalized by Newton-Schulz
+
+Em 2024, Keller Jordan, Yuchen Jin e colaboradores apresentaram o **Muon** (*Momentum Orthogonalized by Newton-Schulz*), um otimizador projetado para superar o AdamW no pré-treinamento de Transformers e Grandes Modelos de Linguagem.
+
+O Muon sintetiza três conceitos fundamentais desenvolvidos neste curso:
+1. **Inércia Matricial de Nesterov (Aula 12):** Acumula o gradiente em uma matriz de momento bidimensional;
+2. **Projeção Polar via Newton-Schulz (Aulas 5 e 13):** Projeta o vetor de momento no grupo ortogonal;
+3. **Escalonamento Dimensional:** Calibra a taxa efetiva proporcionalmente à raiz da razão de aspecto da matriz.
+
+### O Algoritmo Completo do Muon
+
+Para cada matriz de pesos de camada densa ou atenção $W_t \in \mathbb{R}^{m \times n}$ ($m \ge n$):
+
+1. **Acúmulo do Momento Matricial:**
+   $$M_t = \beta M_{t-1} + G_t$$
+2. **Combinação de Antecipação de Nesterov:**
+   $$G_{\text{ahead}} = G_t + \beta M_t$$
+3. **Ortogonalização por Newton-Schulz (5 iterações):**
+   $$O_t = \text{NewtonSchulz}(G_{\text{ahead}}, \, \text{steps}=5)$$
+4. **Atualização com Escalonamento de Aspecto:**
+   $$W_{t+1} = W_t - \alpha \cdot \max\left(1, \sqrt{\frac{m}{n}}\right) O_t$$
+
+::: {.fig-resize style="width: 85%; margin: 1.5rem auto;"}
+```{.tikz}
+\definecolor{azul}{RGB}{0,133,202}
+\definecolor{laranja}{RGB}{255,94,0}
+\definecolor{verde}{RGB}{27,158,119}
+\definecolor{cinza}{RGB}{93,109,126}
+
+\begin{tikzpicture}[>=latex, font=\small, thick]
+  \node[draw=azul, fill=azul!10, rounded corners=6pt, inner sep=6pt, align=center] 
+    (G) at (0, 3.0) {\textbf{Gradiente Matricial $G_t$}\\\footnotesize$\nabla_W \mathcal{L} \in \mathbb{R}^{m \times n}$};
+
+  \node[draw=laranja, fill=laranja!10, rounded corners=6pt, inner sep=6pt, align=center, text width=4.8cm] 
+    (M) at (0, 1.2) {\textbf{1. Momento de Nesterov}\\\footnotesize$M_t = \beta M_{t-1} + G_t$\\\scriptsize Combina inércia direcional em 2D};
+
+  \node[draw=verde, fill=verde!10, rounded corners=6pt, inner sep=6pt, align=center, text width=6.2cm, line width=1.3pt] 
+    (NS) at (0, -0.8) {\textbf{2. Ortogonalização Newton-Schulz (5 passos)}\\\footnotesize$X_{k+1} = \frac{1}{2} X_k (3I - X_k^T X_k) \implies O_t$\\\scriptsize Projeção polar hardware-friendly via GEMM};
+
+  \node[draw=verde!80!black, fill=verde!25, rounded corners=6pt, inner sep=6pt, align=center, text width=6.8cm, line width=1.4pt] 
+    (W) at (0, -2.6) {\textbf{3. Atualização Paramétrica do Muon}\\\Large$W_{t+1} = W_t - \alpha \max(1, \sqrt{m/n}) O_t$};
+
+  \draw[->, line width=1.4pt, azul] (G) -- (M);
+  \draw[->, line width=1.4pt, laranja] (M) -- (NS);
+  \draw[->, line width=1.6pt, verde!80!black] (NS) -- (W);
+\end{tikzpicture}
+```
+:::
+
+### Por que o Muon Supera o AdamW em Transformers?
+
+Em benchmarks de treinamento do NanoGPT e modelos estilo LLaMA:
+- **Redução de FLOPs de Treinamento:** O Muon atinge a mesma perda de validação com até **$1{,}5\times$ a $2\times$ menos passos de treino** que o AdamW calibrado.
+- **Isotropia de Atualização:** Ao forçar todas as direções singulares a terem norma unitária ($\sigma_i = 1$), os neurônios aprendem em taxas coordenadas, impedindo que algumas direções monopolizem a capacidade representacional da rede.
+- **Divisão de Trabalho Híbrida:** O Muon é empregado estritamente em matrizes bidimensionais densas ($W \in \mathbb{R}^{m \times n}$). Vetores unidimensionais (como parâmetros de LayerNorm, biases e tabelas de embedding 1D) não possuem estrutura de linha/coluna e continuam sendo otimizados com AdamW padrão.
+:::
+
+::: {.content-visible when-format="revealjs"}
+## O Otimizador Muon (2024)
+
+::: {.columns}
+::: {.column width="50%"}
+**Pipeline Algorítmico:**
+
+1. **Momento Matricial:**
+   $$M_t = \beta M_{t-1} + G_t$$
+2. **Lookahead Nesterov:**
+   $$G_{\text{ahead}} = G_t + \beta M_t$$
+3. **Projeção Newton-Schulz (5 iterações):**
+   $$O_t = \text{NewtonSchulz}(G_{\text{ahead}})$$
+4. **Atualização Escalonada:**
+   $$W_{t+1} = W_t - \alpha \sqrt{m/n} \, O_t$$
+:::
+
+::: {.column width="50%"}
+**Impacto Prático em LLMs:**
+
+- **$1{,}5\times$ a $2\times$ mais rápido** em convergência que o AdamW.
+- **Norma Espectral Unitária:** Atualizações perfeitamente condicionadas.
+- **Divisão Híbrida de Trabalho:**
+  - *Muon:* Camadas densas e projeções de atenção ($W \in \mathbb{R}^{m \times n}$).
+  - *AdamW:* Biases, LayerNorm e Embeddings (1D).
+:::
+:::
+
+::: {.fragment .callout-tip}
+## O Triunfo da Álgebra Linear
+O Muon demonstra que recuperar a geometria de operadores e matrizes ortogonais produz ganhos de otimização muito superiores a qualquer ajuste fino de taxas escalares.
+:::
+
+## Pausa 4: Iterações de Newton-Schulz e o Otimizador Muon
+
+::: {.callout-tip}
+## A Dinâmica de Newton-Schulz
+Dada a recorrência escalar de valores singulares $\sigma_{k+1} = \frac{1}{2}\sigma_k(3 - \sigma_k^2)$, o que acontece se o valor singular inicial for $\sigma_0 = 0{,}5$?
+Por que essa dinâmica elimina completamente a necessidade de SVD e roda na velocidade máxima nativa de Tensor Cores em GPUs?
+:::
+
+::: {.callout-tip}
+## Diagnóstico do Muon
+
+Julgue V ou F — a questão só conta se acertar os 4 itens:
+
+- □ A iteração de Newton-Schulz requer apenas multiplicações de matrizes densas ($X_k^T X_k$ e $X_k(\cdot)$), operações nativamente aceleradas por hardware moderno.
+- □ Para que a iteração convirja, a estimativa inicial $X_0$ deve ser normalizada de modo que seu maior valor singular seja estritamente menor que $\sqrt{3}$.
+- □ O otimizador Muon substitui o precondicionador diagonal do AdamW pela ortogonalização polar via Newton-Schulz em todas as camadas da rede, incluindo vetores de bias e tabelas de embedding 1D.
+- □ Em modelos de linguagem (Transformers), o Muon atinge a mesma perda de validação consumindo significativamente menos passos de treinamento que o AdamW.
+:::
+
+## Pausa 4: Iterações de Newton-Schulz e o Otimizador Muon — Resposta
+
+::: {.callout-tip}
+## Diagnóstico do Muon — Resposta
+
+- ✔ **Verdadeiro.** Utiliza estritamente operações GEMM, saturando a taxa de transferência de pico das GPUs.
+- ✔ **Verdadeiro.** Para $\sigma \ge \sqrt{3}$, temos $3 - \sigma^2 \le 0$, desestabilizando o ponto fixo e divergindo para $-\infty$.
+- ✗ **Falso.** O Muon opera apenas em matrizes 2D densas; vetores 1D (biases, normalizações) e embeddings continuam sob AdamW.
+- ✔ **Verdadeiro.** Acelera a convergência em até $2\times$ em termos de tokens/FLOPs processados para atingir a mesma perplexidade.
+:::
+
+::: {.fragment}
+**Voltando à pergunta:** Para $\sigma_0 = 0{,}5$, os passos subsequentes são $\sigma_1 = 0{,}6875 \to \sigma_2 \approx 0{,}869 \to \sigma_3 \approx 0{,}975 \to \sigma_5 \approx 0{,}999999$! Como a atualização é composta apenas por produtos matriciais puros sem branches nem divisões, ela roda a centenas de teraflops em Tensor Cores.
+:::
+:::
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## Pausa 4: Iterações de Newton-Schulz e o Otimizador Muon
+
+::: {.callout-tip icon=false}
+### Teste Seus Conhecimentos — Pausa 4
+1. Dada a recorrência escalar de valores singulares $\sigma_{k+1} = \frac{1}{2}\sigma_k(3 - \sigma_k^2)$, como ela evolui partindo de $\sigma_0 = 0{,}5$?
+2. Por que essa formulação elimina a necessidade de SVD e roda na velocidade nativa das Tensor Cores em GPUs?
+:::
+
+::: {.callout-note icon=false}
+### Julgue V ou F para cada afirmação:
+
+- □ A iteração de Newton-Schulz requer apenas multiplicações de matrizes densas ($X_k^T X_k$ e $X_k(\cdot)$), operações nativamente aceleradas por hardware moderno.
+- □ Para que a iteração convirja, a estimativa inicial $X_0$ deve ser normalizada de modo que seu maior valor singular seja estritamente menor que $\sqrt{3}$.
+- □ O otimizador Muon substitui o precondicionador diagonal do AdamW pela ortogonalização polar via Newton-Schulz em todas as camadas da rede, incluindo vetores de bias e tabelas de embedding 1D.
+- □ Em modelos de linguagem (Transformers), o Muon atinge a mesma perda de validação consumindo significativamente menos passos de treinamento que o AdamW.
+:::
+:::
+
+# Fechamento e Próximos Passos
+
+::: {.content-visible when-format="html" unless-format="revealjs"}
+## A Genealogia dos Precondicionadores
+
+Com as Aulas 11, 12 e 13, completamos a linhagem de como a Álgebra Linear trata a curvatura e a geometria do espaço de parâmetros em Aprendizado de Máquina:
+
+| Otimizador | Tipo de Precondicionador | Estrutura Algébrica | Custo de Memória | Custo de Inversão / Passo |
+| :--- | :--- | :--- | :---: | :---: |
+| **Newton Clássico** | Completo irrestrito | Hessiana $H \in \mathbb{R}^{d \times d}$ | $\mathcal{O}(d^2)$ | $\mathcal{O}(d^3)$ (intratável em ML) |
+| **Adam / AdamW** | Diagonal escalar | $\text{diag}(\mathbf{v}) \in \mathbb{R}^{d \times d}$ | $\mathcal{O}(d)$ | $\mathcal{O}(d)$ (ignora correlação cruzada) |
+| **Shampoo** | Estruturado de Kronecker | $L \otimes R \in \mathbb{R}^{mn \times mn}$ | $\mathcal{O}(m^2 + n^2)$ | $\mathcal{O}(m^3 + n^3)$ (amortizado a cada $K$ passos) |
+| **Muon** | Ortogonalização Polar | Projeção $U = \text{NS}(M) \in \mathcal{O}(m, n)$ | $\mathcal{O}(mn)$ | $\approx 10 \times \text{GEMM}$ (velocidade nativa de Tensor Cores) |
+
+## O Que Fica em Aberto
+
+Até este momento do curso, todas as funções de custo e regularizações que estudamos possuíam uma propriedade matemática compartilhada: **suavidade (diferenciabilidade)**. Assumimos sempre que o gradiente $\nabla f(\mathbf{w})$ existia em todos os pontos do domínio e era Lipschitz-contínuo ($L$-suave).
+
+No entanto, problemas centrais de Machine Learning exigem penalidades **não-suaves (não-diferenciáveis)**:
+- Como induzir esparsidade exata de parâmetros para seleção de atributos através da norma $L_1$ (Lasso: $\|\mathbf{w}\|_1 = \sum |w_i|$)? A função módulo possui um "bico" em zero onde a derivada não existe!
+- Como formular otimização quando a perda contém termos de margem não-diferenciáveis (como o *Hinge Loss* em Support Vector Machines)?
+
+Na **Aula 14: Otimização Não-Suave, Subgradientes e Operadores Proximais**, daremos o passo definitivo para o cálculo não-diferenciável:
+- O conceito de **Subgradiente** e **Subdiferencial** ($\partial f(\mathbf{w})$);
+- A regra de Fermat generalizada para mínimos não-suaves ($\mathbf{0} \in \partial f(\mathbf{w}^\star)$);
+- O **Operador Proximal** e o operador de *Soft-Thresholding*;
+- Os algoritmos **ISTA** e **FISTA**, que unem aceleração de Nesterov com operadores proximais para convergência acelerada em problemas esparsos!
+:::
+
+::: {.content-visible when-format="revealjs"}
+## Genealogia dos Precondicionadores
+
+| Otimizador | Estrutura | Custo Memória | Custo FLOPs | Vantagem Central |
+| :--- | :--- | :---: | :---: | :--- |
+| **Newton** | Hessiano Completo | $\mathcal{O}(d^2)$ | $\mathcal{O}(d^3)$ | Convergência quadrática (inviável) |
+| **AdamW** | Diagonal Escalar | $\mathcal{O}(d)$ | $\mathcal{O}(d)$ | Simples e robusto em 1D |
+| **Shampoo** | Kronecker $L \otimes R$ | $\mathcal{O}(m^2+n^2)$ | $\mathcal{O}(m^3+n^3)$ | Curvatura de entrada e saída |
+| **Muon** | Polar Ortogonal | $\mathcal{O}(mn)$ | GEMM puro | Valores singulares unitários ($\sigma=1$) |
+
+::: {.fragment .callout-important}
+## Próxima Aula: Otimização Não-Suave
+E quando a perda não é diferenciável? Como lidar com a norma $L_1$ (Lasso) para seleção esparsa de atributos?
+$\to$ **Aula 14: Subgradientes, Operadores Proximais e o Algoritmo ISTA/FISTA!**
+:::
+:::
+'''
+
+path = "teaching/optimization-linear-algebra/aula13/index.qmd"
+with open(path, "w", encoding="utf-8") as f:
+    f.write(content)
+
+print("Aula 13 written successfully!")
+
+# Validate div depth
+div_depth = 0
+for idx, line in enumerate(content.splitlines(), start=1):
+    opens = len(re.findall(r'^:::\s*\{', line))
+    closes = 1 if re.match(r'^:::\s*$', line) else 0
+    div_depth += (opens - closes)
+    if div_depth < 0:
+        print(f"Error: negative div depth at line {idx}: {line}")
+        break
+
+print(f"Final div depth: {div_depth}")
+
+# Validate dash lists
+dash_errors = []
+lines = content.splitlines()
+for i in range(1, len(lines)):
+    line = lines[i]
+    prev = lines[i-1]
+    is_dash = re.match(r'^\s*-\s+', line)
+    prev_is_dash = re.match(r'^\s*-\s+', prev)
+    if is_dash and not prev_is_dash and prev.strip() != "":
+        dash_errors.append((i+1, prev.rstrip(), line.rstrip()))
+
+print(f"Total dash list errors: {len(dash_errors)}")
+
